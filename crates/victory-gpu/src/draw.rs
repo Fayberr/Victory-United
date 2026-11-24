@@ -3786,11 +3786,14 @@ impl State {
             return None;
         }
         let vmem = crate::host::host().and_then(|h| h.video_memory());
-        // `VICTORY_TEXTURE_STAGE_MB` sets it: a backlog of tens of thousands of
+        // `VICTORY_TEXTURE_STAGE_MB` or `VICTORY_TEXTURE_QUEUE_MB` sets it: a backlog of tens of thousands of
         // textures (a scene's first minutes) then drains in fewer frames.
         static PER_FRAME_MB: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
         let asked = *PER_FRAME_MB.get_or_init(|| {
-            std::env::var("VICTORY_TEXTURE_STAGE_MB").ok().and_then(|v| v.trim().parse::<u64>().ok())
+            std::env::var("VICTORY_TEXTURE_STAGE_MB")
+                .or_else(|_| std::env::var("VICTORY_TEXTURE_QUEUE_MB"))
+                .ok()
+                .and_then(|v| v.trim().parse::<u64>().ok())
         });
         let per_frame = match asked {
             Some(mb) => mb << 20,
@@ -3936,7 +3939,11 @@ impl State {
         // The rest waits for the next frames, as it does past the bytes.
         static SPAN_MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
         let span = std::time::Duration::from_millis(*SPAN_MS.get_or_init(|| {
-            std::env::var("VICTORY_TEXTURE_STAGE_MS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(250)
+            std::env::var("VICTORY_TEXTURE_STAGE_MS")
+                .or_else(|_| std::env::var("VICTORY_TEXTURE_QUEUE_MS"))
+                .ok()
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(250)
         }));
         // A backlog (a scene's first minutes: 22,000 slots due, 2-3 minutes of black
         // surfaces at 192 MB a frame) gets three times the bytes and the time until it
@@ -3966,7 +3973,6 @@ impl State {
                 crate::texture::live_staging_bytes(),
             )
         };
-
         let began = std::time::Instant::now();
         // Bytes of textures uploaded in this pass so far: used to gate
         // giant textures under a budget (one alone is allowed when nothing
