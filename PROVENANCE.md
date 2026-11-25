@@ -12,7 +12,10 @@ of it we merged pull requests from other projects. Commits keep their original a
 (wave 6:) #294, #355, #277, #405, #592
 
 **fxceless/victory-fork main:** synced up to `9c184b3` (14 commits, including the frame-rate
-third session).
+third session). The five newer commits (up to `6d20eed`: the card compare with a group of 64 threads
+from fork #1014, a list of changed card copies, notes about unmapped blocks kept until told) are not
+taken yet: they collide with the card-compare and view-guard code we have reworked, and the new paths
+are off by default there.
 
 **Marvisak/VIctory:** #240, #443, #478, #1033, #1537, #1623, #1880, #1894, #1955, #1956, #2007,
 #2012, #2037, #2102
