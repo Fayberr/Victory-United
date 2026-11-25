@@ -177,11 +177,57 @@ pub(crate) fn references(object: &impl Interface) -> u32 {
     }
 }
 
+/// `VICTORY_RAM_RELIEF_MB=<n>`: when the PC has less than `n` MB of
+/// physical memory available, the process's working set is emptied into the
+/// page file, once every five seconds (`K32EmptyWorkingSet`).
+///
+/// Why: a title that commits more than the PC holds (19.5 GB against 15.8
+/// GB here) reaches an allocation that fails, and this title writes through
+/// the null pointer it got: `0xc0000005` at `victory-image+0x23cf683` at
+/// world entry, with the OOM report's `memory.load_percent` at 94 to 99.
+/// Faulting the working set out for a moment hands it the room to finish
+/// that allocation. It is a valve, not a fix: every page faulted out is
+/// faulted back in afterwards. Off by default.
+fn relieve() {
+    static LIMIT: OnceLock<Option<u64>> = OnceLock::new();
+    let Some(limit) = *LIMIT.get_or_init(|| {
+        std::env::var("VICTORY_RAM_RELIEF_MB")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|&mb| mb > 0)
+    }) else {
+        return;
+    };
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = now_ms();
+    if now.saturating_sub(LAST.load(Ordering::Relaxed)) < 15_000 {
+        return;
+    }
+    let Some(free) = available_physical_ram() else {
+        return;
+    };
+    if free >> 20 >= limit {
+        return;
+    }
+    LAST.store(now, Ordering::Relaxed);
+    use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+    // SAFETY: our own process and no out parameters.
+    let ok = unsafe { K32EmptyWorkingSet(GetCurrentProcess()) } != 0;
+    tracing::info!(
+        free_mb = free >> 20,
+        emptied = ok,
+        "memory relief: the working set was emptied into the page file"
+    );
+}
+
 /// Once a second, before a submission starts: lets go of what nothing
 /// names any more (copies of windows of title memory, staging buffers,
 /// host copies of textures the title fills).
 /// `VICTORY_SWEEP=0` keeps everything, as before.
 fn sweep() {
+    // The low-memory valve first, whatever the sweep is set to.
+    relieve();
     // The in-place probe and census, if asked for (`VICTORY_INPLACE_PROBE`).
     crate::inplace::tick();
     static ON: OnceLock<bool> = OnceLock::new();
