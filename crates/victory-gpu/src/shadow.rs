@@ -40,7 +40,6 @@ impl CopiedPages {
         }
     }
 
-    #[cfg(test)]
     fn get(&self, index: usize) -> Option<u64> {
         self.at.get(index).copied()
     }
@@ -450,7 +449,7 @@ static WINDOW_CARD_BYTES: AtomicU64 = AtomicU64::new(0);
 /// Whether windows that go to the card's memory are one buffer in a GPU
 /// upload heap, which the CPU fills directly (`VICTORY_WINDOW_UPLOAD=1`;
 /// off by default), where the device has such heaps
-/// (`Host::gpu_upload_buffer`).
+/// (`Host::window_upload_buffer`).
 ///
 /// A window on the card ([`window_card_most`]) is two buffers: the CPU's
 /// side in the PC's memory, which takes title memory as before, and the
@@ -481,7 +480,7 @@ fn window_upload_for(size: u64) -> Option<(ID3D12Resource, *mut u8)> {
     if !window_card_room(size, "in a GPU upload heap:") {
         return None;
     }
-    let made = host()?.gpu_upload_buffer(size);
+    let made = host()?.window_upload_buffer(size);
     if made.is_none() {
         WINDOW_CARD_BYTES.fetch_sub(size, Ordering::Relaxed);
     }
@@ -3264,11 +3263,11 @@ impl Shadow {
         let base = self.start as usize / PAGE;
         {
             let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(taken) = page.checked_sub(base).and_then(|i| copied.get_mut(i))
-                && *taken != 0
-                && *taken >= before
+            if let Some((index, taken)) = page.checked_sub(base).and_then(|i| copied.get(i).map(|taken| (i, taken)))
+                && taken != 0
+                && taken >= before
             {
-                *taken = (*taken).max(now);
+                copied.set(index, taken.max(now));
                 OWN_WRITES[2].fetch_add(1, Ordering::Relaxed);
                 // A copy in the card's memory only: its CPU side is never
                 // written by the card, so it must equal title memory now.

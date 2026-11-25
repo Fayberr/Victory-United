@@ -9481,7 +9481,7 @@ impl Host {
     /// nothing of ours does) and shaders read: for host copies the CPU
     /// fills and no shader writes. `None` where the device has no such
     /// heaps or turns the buffer down (then the caller's usual buffer).
-    pub(crate) fn gpu_upload_buffer(&self, size: u64) -> Option<(ID3D12Resource, *mut u8)> {
+    pub(crate) fn window_upload_buffer(&self, size: u64) -> Option<(ID3D12Resource, *mut u8)> {
         if !self.gpu_upload() {
             return None;
         }
