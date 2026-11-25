@@ -221,17 +221,16 @@ pub fn build(code: &[u8], wave64: bool, vgprs: u16) -> Result<Program, ShaderErr
         }
         if let Some((mut reads, writes)) = effects(&machine, &fields, name, lanes, vgprs)? {
             // Lanes disabled in EXEC keep the old value.
-            for w in writes.iter().filter(|w| matches!(w, Reg::V(_))) {
+            for w in writes.iter().filter(|(w, _)| matches!(w, Reg::V(_))) {
                 if !reads.contains(w) {
                     reads.push(*w);
                 }
             }
-            let unset = |regs: Vec<Reg>| regs.into_iter().map(|r| (r, NONE)).collect();
             blocks[b].insts.push(Inst {
                 machine,
                 fields,
-                reads: unset(reads),
-                writes: unset(writes),
+                reads,
+                writes,
             });
         }
     }
@@ -314,12 +313,12 @@ fn unspill(
         let mut codes = Vec::new();
         let mut from = Vec::new();
         if let Some((reads, writes)) = effects {
-            for &reg in &writes {
+            for &(reg, _) in &writes {
                 if let Reg::S(c) = reg {
                     codes.push(c);
                 }
             }
-            for &reg in &reads {
+            for &(reg, _) in &reads {
                 if let Reg::S(c) = reg {
                     from.push(c);
                 }
@@ -330,7 +329,7 @@ fn unspill(
             // ordinary ones. (Relative writes still do.)
             let relative = name == "v_movrels_b32";
             let n_reads = reads.len();
-            for (k, reg) in reads.into_iter().chain(writes).enumerate() {
+            for (k, (reg, _)) in reads.into_iter().chain(writes).enumerate() {
                 if relative && k < n_reads && matches!(reg, Reg::V(_)) {
                     continue;
                 }
@@ -462,12 +461,7 @@ fn unspill(
     }
     let code_of = |reg: u8, lane: u32| codes.iter().find(|c| c.0 == (reg, lane)).map(|c| c.1);
     let put = |list: &mut [gfx10::Instruction], i: usize, encoding, opcode: u16, word: u32| {
-        list[i] = gfx10::Instruction {
-            offset: list[i].offset,
-            encoding,
-            opcode,
-            words: vec![word],
-        };
+        list[i] = gfx10::Instruction::synthetic(list[i].offset, encoding, opcode, word);
     };
     // `s_mov_b32` / `s_mov_b64 dst, src` (SOP1, opcodes 3 and 4); `s_nop`. A code
     // from `PARKED` up does not fit the word: s0 stands in for it there.
@@ -1444,8 +1438,8 @@ const DROPPED: &[&str] = &[
     "v_clrexcp",
 ];
 
-/// Registers read, registers written.
-type Effects = (Vec<Reg>, Vec<Reg>);
+/// Registers read and written, each with a placeholder for the SSA pass.
+type Effects = (Vec<(Reg, Value)>, Vec<(Reg, Value)>);
 
 /// The registers `inst` of `p` reads as operands: its reads without the old
 /// value of a VGPR it only writes.
@@ -1454,7 +1448,7 @@ pub(crate) fn operand_reads(p: &Program, inst: &Inst) -> Vec<Reg> {
     effects(&inst.machine, &inst.fields, inst.name(), lanes, p.vgprs)
         .ok()
         .flatten()
-        .map_or_else(Vec::new, |e| e.0)
+        .map_or_else(Vec::new, |e| e.0.into_iter().map(|(reg, _)| reg).collect())
 }
 
 /// Registers an instruction reads and writes, one per dword, or `None` if
@@ -1473,9 +1467,9 @@ fn effects(
         offset: inst.offset,
         what: name,
     };
-    let mask = |code: u8| (0..lanes).map(move |i| Reg::S(code + i));
+    let mask = |code: u8| (0..lanes).map(move |i| (Reg::S(code + i), NONE));
     let (mut r, mut w) = (Vec::new(), Vec::new());
-    let regs = |op: &Operand, out: &mut Vec<Reg>| {
+    let regs = |op: &Operand, out: &mut Vec<(Reg, Value)>| {
         add_regs(op, lanes, out).map_err(|_| ShaderError::Isa {
             offset: inst.offset,
             reason: "register range out of bounds",
@@ -1510,21 +1504,21 @@ fn effects(
                 || name.starts_with("s_cselect_")
                 || name.starts_with("s_cmov_")
             {
-                r.push(Reg::Scc);
+                r.push((Reg::Scc, NONE));
             }
             if name.contains("saveexec") || name.contains("wrexec") {
                 r.extend(mask(EXEC));
                 w.extend(mask(EXEC));
             }
             if writes_scc(inst.encoding, name) {
-                w.push(Reg::Scc);
+                w.push((Reg::Scc, NONE));
             }
         }
         Fields::Sopp { .. } => match name {
-            "s_cbranch_scc0" | "s_cbranch_scc1" => r.push(Reg::Scc),
+            "s_cbranch_scc0" | "s_cbranch_scc1" => r.push((Reg::Scc, NONE)),
             "s_cbranch_vccz" | "s_cbranch_vccnz" => r.extend(mask(VCC)),
             "s_cbranch_execz" | "s_cbranch_execnz" => r.extend(mask(EXEC)),
-            "s_sendmsg" | "s_sendmsghalt" => r.push(Reg::S(M0)),
+            "s_sendmsg" | "s_sendmsghalt" => r.push((Reg::S(M0), NONE)),
             "s_endpgm"
             | "s_endpgm_saved"
             | "s_endpgm_ordered_ps_done"
@@ -1572,9 +1566,9 @@ fn effects(
                 _ => (false, false),
             };
             // v[reg + M0] for any M0 that stays inside the program's VGPRs.
-            let indexed = |op: &Operand, out: &mut Vec<Reg>| match *op {
+            let indexed = |op: &Operand, out: &mut Vec<(Reg, Value)>| match *op {
                 Operand::Vector { reg, .. } if u16::from(reg) < vgprs => {
-                    out.extend((u16::from(reg)..vgprs).map(|r| Reg::V(r as u8)));
+                    out.extend((u16::from(reg)..vgprs).map(|r| (Reg::V(r as u8), NONE)));
                     Ok(())
                 }
                 _ => Err(ShaderError::Isa {
@@ -1619,12 +1613,12 @@ fn effects(
                 _ => {}
             }
             if name.starts_with("v_interp_") || src_indexed || dst_indexed {
-                r.push(Reg::S(M0));
+                r.push((Reg::S(M0), NONE));
             }
         }
         Fields::Vintrp { dst, src, .. } => {
             regs(src, &mut r)?;
-            r.push(Reg::S(M0));
+            r.push((Reg::S(M0), NONE));
             regs(dst, &mut w)?;
         }
         Fields::Ds {
@@ -1645,7 +1639,7 @@ fn effects(
                 || name.contains("addtid")
                 || matches!(name, "ds_ordered_count" | "ds_append" | "ds_consume")
             {
-                r.push(Reg::S(M0));
+                r.push((Reg::S(M0), NONE));
             }
         }
         Fields::Buffer {
@@ -1665,7 +1659,7 @@ fn effects(
             regs(rsrc, &mut r)?;
             regs(soffset, &mut r)?;
             if *lds {
-                r.push(Reg::S(M0));
+                r.push((Reg::S(M0), NONE));
             }
             if let Some(d) = data {
                 if name.contains("_load_") {
@@ -1799,7 +1793,7 @@ fn atomic_result(data: &Operand, name: &str) -> Operand {
 
 /// Appends the register dwords an operand names; reading `vccz`, `execz`,
 /// `scc` or `lds_direct` reads the register behind it.
-fn add_regs(op: &Operand, lanes: u8, out: &mut Vec<Reg>) -> Result<(), ()> {
+fn add_regs(op: &Operand, lanes: u8, out: &mut Vec<(Reg, Value)>) -> Result<(), ()> {
     match *op {
         Operand::Scalar { code, .. } if code == gfx10::NULL => {}
         Operand::Scalar { code, dwords } => {
@@ -1810,18 +1804,18 @@ fn add_regs(op: &Operand, lanes: u8, out: &mut Vec<Reg>) -> Result<(), ()> {
             if end > limit {
                 return Err(());
             }
-            out.extend((u16::from(code)..end).map(|c| Reg::S(c as u8)));
+            out.extend((u16::from(code)..end).map(|c| (Reg::S(c as u8), NONE)));
         }
         Operand::Vector { reg, dwords } => {
             if u16::from(reg) + u16::from(dwords) > 256 {
                 return Err(());
             }
-            out.extend((0..dwords).map(|i| Reg::V(reg + i)));
+            out.extend((0..dwords).map(|i| (Reg::V(reg + i), NONE)));
         }
-        Operand::Const(251) => out.extend((0..lanes).map(|i| Reg::S(VCC + i))),
-        Operand::Const(252) => out.extend((0..lanes).map(|i| Reg::S(EXEC + i))),
-        Operand::Const(253) => out.push(Reg::Scc),
-        Operand::Const(254) => out.push(Reg::S(M0)),
+        Operand::Const(251) => out.extend((0..lanes).map(|i| (Reg::S(VCC + i), NONE))),
+        Operand::Const(252) => out.extend((0..lanes).map(|i| (Reg::S(EXEC + i), NONE))),
+        Operand::Const(253) => out.push((Reg::Scc, NONE)),
+        Operand::Const(254) => out.push((Reg::S(M0), NONE)),
         Operand::Const(_) | Operand::Literal(_) | Operand::Attr { .. } => {}
     }
     Ok(())

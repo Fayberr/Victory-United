@@ -96,7 +96,7 @@ mod tests {
             .find(|i| i.name() == Some("s_cbranch_execz"))
             .unwrap();
         let end = insts.last().unwrap();
-        let delta = (br.words[0] & 0xFFFF) as usize;
+        let delta = (br.words()[0] & 0xFFFF) as usize;
         assert_eq!(br.offset + 4 + 4 * delta, end.offset);
     }
 }

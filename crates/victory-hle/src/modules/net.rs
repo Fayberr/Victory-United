@@ -956,18 +956,26 @@ mod tests {
         assert_eq!(last_error(), WSAENETUNREACH);
         close(s);
 
-        // Datagram sends.
-        let u = socket(2, 2, 17);
+        // Explicitly bind both ends to loopback so the host does not
+        // select a different interface when implicitly binding the sender.
+        use std::os::windows::io::AsRawSocket;
+        let receiver = std::net::UdpSocket::bind(("127.0.0.1", 0)).unwrap();
+        receiver.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
+        let sender = std::net::UdpSocket::bind(("127.0.0.1", 0)).unwrap();
+        let u = sender.as_raw_socket() as Socket;
         assert_eq!(
             sendto(u, b"x".as_ptr(), 1, 0, v4(AWAY, 9).as_ptr(), 16),
             SOCKET_ERROR
         );
         assert_eq!(last_error(), WSAENETUNREACH);
+        let udp_port = receiver.local_addr().unwrap().port();
         assert_eq!(
-            sendto(u, b"x".as_ptr(), 1, 0, v4(HOME, port).as_ptr(), 16),
+            sendto(u, b"x".as_ptr(), 1, 0, v4(HOME, udp_port).as_ptr(), 16),
             1
         );
-        close(u);
+        let mut packet = [0];
+        let (bytes, from) = receiver.recv_from(&mut packet).unwrap();
+        assert_eq!((bytes, &packet, from), (1, b"x", sender.local_addr().unwrap()));
 
         // Forward and reverse lookups.
         let mut result = null;

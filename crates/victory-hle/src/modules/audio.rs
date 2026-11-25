@@ -19,6 +19,7 @@
 use std::alloc::Layout;
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, RwLock, RwLockReadGuard};
 use std::time::Instant;
 
@@ -28,6 +29,8 @@ use crate::{HleModule, hle_export};
 
 #[cfg(all(windows, feature = "diagnostics"))]
 pub mod capture;
+#[cfg(all(windows, test, not(feature = "diagnostics")))]
+mod capture;
 
 const E_FAIL: HRESULT = 0x8000_4005_u32 as i32;
 const E_OUTOFMEMORY: HRESULT = 0x8007_000E_u32 as i32;
@@ -325,11 +328,21 @@ const INPUT_INVALID: u32 = 4;
 
 struct Voice {
     decoder: Option<xma::Decoder>,
+    /// Decoded samples not yet in the ring: up to a reserve ahead of it, so
+    /// a block the title frees is refilled at once, on its own thread.
     pcm: VecDeque<i16>,
     /// Samples per channel still to drop (start or loop subframe skips).
     skip: usize,
-    ended: bool,
+    /// Both inputs ran out and the decoder's tail was flushed. New input
+    /// resumes the voice from a cold decoder.
+    drained: bool,
     trace: Trace,
+}
+
+/// Decoded samples (all channels) kept ahead of the ring: two frames,
+/// 21 ms, so the decoding thread may be that late without a gap.
+fn reserve(channels: usize) -> usize {
+    2 * xma::FRAME_SAMPLES * channels
 }
 
 /// What a voice did, for the debug log when it is disabled.
@@ -378,15 +391,18 @@ fn xma() -> RwLockReadGuard<'static, Xma> {
 struct Context(*mut u32);
 
 impl Context {
+    fn word(&self, word: usize) -> &AtomicU32 {
+        // SAFETY: inside the 64-byte aligned context array; the title reads
+        // and writes these words concurrently, like the hardware's.
+        unsafe { AtomicU32::from_ptr(self.0.add(word)) }
+    }
+
     fn get(self, word: usize) -> u32 {
-        // SAFETY: inside the context array; the title reads and writes it
-        // concurrently, like the hardware's.
-        unsafe { self.0.add(word).read_volatile() }
+        self.word(word).load(Ordering::Acquire)
     }
 
     fn set(self, word: usize, value: u32) {
-        // SAFETY: as above.
-        unsafe { self.0.add(word).write_volatile(value) }
+        self.word(word).store(value, Ordering::Release);
     }
 
     fn field(self, word: usize, shift: u32, bits: u32) -> u32 {
@@ -395,7 +411,12 @@ impl Context {
 
     fn set_field(self, word: usize, shift: u32, bits: u32, value: u32) {
         let mask = ((1u32 << bits) - 1) << shift;
-        self.set(word, (self.get(word) & !mask) | ((value << shift) & mask));
+        let bits = (value << shift) & mask;
+        let _ = self
+            .word(word)
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+                Some((old & !mask) | bits)
+            });
     }
 
     fn channels(self) -> usize {
@@ -426,7 +447,7 @@ impl Xma {
             decoder: None,
             pcm: VecDeque::new(),
             skip: context.field(1, 24, 3) as usize * xma::SUBFRAME_SAMPLES,
-            ended: false,
+            drained: false,
             trace: Trace {
                 since: Instant::now(),
                 produced: 0,
@@ -487,6 +508,9 @@ impl Xma {
             t.taken += blocks as usize;
             t.takes += 1;
             t.partial_takes += u32::from(blocks < size);
+            // Refill from the reserve now: a copy, no decoding, so the title's
+            // mixer never waits for the decoding thread to be scheduled.
+            fill(context, voice);
         }
         drop(slot);
         wake_decoder();
@@ -511,16 +535,33 @@ impl Xma {
     }
 }
 
+/// Refill output, then decode ahead so the mixer can take another block
+/// without waiting for the decoding thread.
 fn pump(context: Context, voice: &mut Voice) {
+    if context.field(0, 22, 5) == 0 {
+        return;
+    }
+    let reserve = reserve(context.channels());
+    loop {
+        fill(context, voice);
+        if voice.pcm.len() >= reserve || !decode(context, voice) {
+            return;
+        }
+    }
+}
+
+/// Refill available blocks. Pad the last partial block once both inputs
+/// and the decoder's overlap tail have been drained.
+fn fill(context: Context, voice: &mut Voice) {
     let size = context.field(0, 22, 5);
     if size == 0 {
         return;
     }
-    while context.field(1, 31, 1) == 1 {
-        if voice.pcm.len() < SAMPLES_PER_BLOCK && !decode(context, voice) {
-            return;
-        }
-        let write = context.field(0, 27, 5);
+    while context.field(1, 31, 1) == 1
+        && (voice.pcm.len() >= SAMPLES_PER_BLOCK || (voice.drained && !voice.pcm.is_empty()))
+    {
+        // Reduce the title's write index before using it to address the ring.
+        let write = context.field(0, 27, 5) % size;
         let address = context.get(7) as usize + write as usize * BLOCK_BYTES;
         let Some(out) = heap_bytes(address as u32, BLOCK_BYTES) else {
             return;
@@ -541,28 +582,38 @@ fn pump(context: Context, voice: &mut Voice) {
 }
 
 /// Decodes the next frame of the current input into `voice.pcm`; false
-/// when there is nothing left to decode.
+/// when there is nothing to decode until the title gives more input.
 fn decode(context: Context, voice: &mut Voice) -> bool {
-    if voice.ended {
-        return false;
-    }
     let channels = context.channels();
     let mut current = context.field(4, 31, 1);
     let valid = context.field(0, 20, 2);
-    if valid & (1 << current) == 0 {
-        if valid & (1 << (1 - current)) == 0 {
-            // Out of input: the overlap tail, then nothing.
-            if let Some(decoder) = &mut voice.decoder {
-                let mut tail = Vec::new();
-                decoder.flush(&mut tail);
-                voice.pcm.extend(tail);
-            }
-            voice.ended = true;
-            voice.trace.ended_ms = Some(voice.trace.since.elapsed().as_millis());
-            context.set_field(2, 26, 5, INPUT_INVALID);
-            context.set_field(2, 31, 1, 1);
-            return !voice.pcm.is_empty();
+    if valid == 0 {
+        if voice.drained {
+            return false;
         }
+        // Out of input: the overlap tail, then nothing until the title
+        // gives more (a streaming title that refilled late, or a sound
+        // that ended).
+        if let Some(decoder) = &mut voice.decoder {
+            let mut tail = Vec::new();
+            decoder.flush(&mut tail);
+            voice.pcm.extend(tail);
+        }
+        voice.drained = true;
+        voice.trace.ended_ms = Some(voice.trace.since.elapsed().as_millis());
+        context.set_field(2, 26, 5, INPUT_INVALID);
+        context.set_field(2, 31, 1, 1);
+        return true;
+    }
+    if voice.drained {
+        // New input after running out: the tail was played, so start over
+        // from a cold decoder at the start of the input, with the error
+        // cleared as enabling does.
+        voice.drained = false;
+        voice.decoder = None;
+        context.set(2, 0);
+    }
+    if valid & (1 << current) == 0 {
         current = 1 - current;
         context.set_field(4, 31, 1, current);
         context.set_field(2, 0, 26, 0);
@@ -579,10 +630,46 @@ fn decode(context: Context, voice: &mut Voice) -> bool {
     if at < 32 {
         at = 32 + xma::packet(data, 0).map_or(0, |p| p.first_frame_bit as usize);
     }
-    let Some(frame) = xma::read_frame(data, at) else {
-        // This input is used up.
-        context.set_field(0, 20 + current, 1, 0);
-        return true;
+    let bank_data = |bank: u32| {
+        let (address, packets) = if bank == 0 {
+            (context.get(5), context.field(0, 0, 12))
+        } else {
+            (context.get(6), context.field(1, 0, 12))
+        };
+        let len = packets as usize * xma::PACKET_BYTES;
+        heap_bytes(address & !0x7ff, len).map(|data| (data, len * 8))
+    };
+    // A frame may straddle the end of one rolling input and the start of
+    // the other: the console keeps the partial bits in the next packet's
+    // `first_frame_bit` span. Finish it before switching banks, instead of
+    // dropping it and restarting at the other bank's first new frame.
+    let (frame, bank, mut next) = match xma::read_frame(data, at) {
+        Some(frame) => {
+            let next = frame.next.unwrap_or(0);
+            (frame, current, next)
+        }
+        None => {
+            let other = 1 - current;
+            let spanning = if valid & (1 << other) != 0 {
+                bank_data(other).and_then(|(tail, _)| {
+                    xma::read_frame_spanning(data, data.len() * 8, tail, at)
+                })
+            } else {
+                None
+            };
+            match spanning {
+                Some((frame, next)) => {
+                    context.set_field(0, 20 + current, 1, 0);
+                    context.set_field(4, 31, 1, other);
+                    (frame, other, next)
+                }
+                None => {
+                    // This input is used up.
+                    context.set_field(0, 20 + current, 1, 0);
+                    return true;
+                }
+            }
+        }
     };
     let decoder = voice.decoder.get_or_insert_with(|| {
         const RATES: [u32; 4] = [24_000, 32_000, 44_100, 48_000];
@@ -602,7 +689,6 @@ fn decode(context: Context, voice: &mut Voice) -> bool {
             );
         }
     }
-    let mut next = frame.next.unwrap_or(0);
     let loops = context.field(0, 12, 8);
     let loop_end = context.field(4, 0, 26) as usize;
     let ends_loop = loop_end != 0
@@ -621,7 +707,7 @@ fn decode(context: Context, voice: &mut Voice) -> bool {
     voice.skip -= skip / channels;
     voice.pcm.extend(&pcm[skip..]);
     if next == 0 {
-        context.set_field(0, 20 + current, 1, 0);
+        context.set_field(0, 20 + bank, 1, 0);
     }
     context.set_field(2, 0, 26, next as u32);
     true
@@ -660,6 +746,18 @@ fn wake_decoder() {
             std::thread::Builder::new()
                 .name("victory XMA decoder".into())
                 .spawn(|| {
+                    // The title's mixer, which takes what this decodes, runs
+                    // time-critical; at normal priority this thread lost the
+                    // CPU to the title's workers and the rings ran dry. It
+                    // only works while a ring has room, so it cannot hog.
+                    #[cfg(windows)]
+                    // SAFETY: changes only this thread's priority.
+                    unsafe {
+                        use windows_sys::Win32::System::Threading::{
+                            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
+                        };
+                        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+                    }
                     loop {
                         xma().pump();
                         // A 256-byte output block lasts 2.7 ms at 48 kHz mono.
@@ -1068,6 +1166,28 @@ mod tests {
         assert_eq!(context.field(0, 20, 2), 0, "input used up");
         assert_eq!(context.field(2, 26, 5), INPUT_INVALID);
 
+        // New input after running out resumes the voice from its start,
+        // with the error cleared until it runs out again.
+        let before = produced(&xma()).unwrap();
+        context.set_field(0, 20, 2, 1);
+        xma().pump();
+        assert_eq!(context.field(2, 31, 1), 0, "resumed");
+        assert_eq!(context.field(1, 31, 1), 0, "ring full again");
+        // Freed blocks are refilled from the reserve by the command itself.
+        submit(ADVANCE_XMA_READ, &[1, 4]);
+        assert_eq!(context.field(1, 31, 1), 0, "refilled without a pass");
+        for _ in 0..20 {
+            submit(ADVANCE_XMA_READ, &[1, 4]);
+            xma().pump();
+            if context.field(2, 31, 1) == 1 && context.field(1, 31, 1) == 1 {
+                break;
+            }
+        }
+        assert_eq!(
+            produced(&xma()).unwrap() - before,
+            26 * SAMPLES_PER_BLOCK
+        );
+
         // A count near `u32::MAX` wraps the read block like any other
         // (3 + 0xffff_ffff blocks on a ring of four is block 2); the sum
         // used to overflow.
@@ -1079,6 +1199,83 @@ mod tests {
         assert_eq!(produced(&xma()), None);
         (m.release)(acp);
         ApuFree(input);
+        ApuFree(output);
+        assert_eq!(AcpHalReleaseShapeContexts(), S_OK);
+    }
+
+    /// One silent frame whose last eleven bits sit in the other rolling
+    /// input bank: a naive bank switch drops it, so the ring would get a
+    /// zero-padded block instead of the decoded frame.
+    #[test]
+    fn xma_frames_split_across_rolling_inputs_are_decoded() {
+        let _serial = lock(&CONTEXT_TESTS);
+        let mut request = ShapeContexts {
+            counts: [0, 0, 0, 0, 4, 0],
+            arrays: [std::ptr::null_mut(); 6],
+            apu: [0; 6],
+        };
+        assert_eq!(AcpHalAllocateShapeContexts(&mut request), S_OK);
+        let context = Context(request.arrays[4].cast::<u32>().wrapping_add(16));
+
+        let start = xma::PACKET_BYTES * 8 - 20;
+        let bits = 31usize;
+        let put = |data: &mut [u8], at: usize, value: u32, width: usize| {
+            for i in 0..width {
+                if value >> (width - 1 - i) & 1 == 1 {
+                    data[(at + i) / 8] |= 1 << (7 - (at + i) % 8);
+                }
+            }
+        };
+        let mut head = vec![0u8; xma::PACKET_BYTES];
+        put(&mut head, 0, 1 << 26, 32); // one frame, no interleaved streams
+        put(&mut head, start, bits as u32, 15);
+        put(&mut head, start + 15, 0b10, 2); // one 512-sample subframe
+        let mut tail = vec![0u8; xma::PACKET_BYTES];
+        put(&mut tail, 0, (1 << 26) | ((bits - 20) as u32) << 11, 32);
+
+        let (mut input0, mut apu0) = (std::ptr::null_mut(), 0);
+        assert_eq!(ApuAlloc(&mut input0, &mut apu0, 0x1000, 0x800, 1), S_OK);
+        let (mut input1, mut apu1) = (std::ptr::null_mut(), 0);
+        assert_eq!(ApuAlloc(&mut input1, &mut apu1, 0x1000, 0x800, 1), S_OK);
+        // SAFETY: both banks were allocated with a full packet's room.
+        unsafe {
+            std::ptr::copy_nonoverlapping(head.as_ptr(), input0.cast(), head.len());
+            std::ptr::copy_nonoverlapping(tail.as_ptr(), input1.cast(), tail.len());
+        }
+        let (mut output, mut output_apu) = (std::ptr::null_mut(), 0);
+        assert_eq!(ApuAlloc(&mut output, &mut output_apu, 0x400, 0x100, 2), S_OK);
+
+        context.set(0, 1 | 1 << 20 | 1 << 21 | 4 << 22); // bank 0: one packet, both valid
+        context.set(1, 1 | 1 << 31 | 3 << 27); // bank 1: one packet, writable
+        context.set(2, start as u32);
+        context.set(5, apu0);
+        context.set(6, apu1);
+        context.set(7, output_apu);
+
+        let mut acp = std::ptr::null_mut();
+        assert_eq!(AcpHalCreate(&mut acp), S_OK);
+        // SAFETY: just created.
+        let m = unsafe { (*acp).vtable };
+        assert_eq!((m.connect)(acp, 0x1000, 0x1000), S_OK);
+        let submit = |command: u32, words: &[u32]| {
+            assert_eq!(
+                (m.submit)(acp, command, 0xf1, u32::MAX, words.as_ptr().cast(), 0),
+                S_OK
+            );
+        };
+        submit(ENABLE_XMA, &[1]);
+        xma().pump();
+
+        let frames = |x: &Xma| lock(&x.voices[1]).as_ref().map(|v| v.trace.frames);
+        assert_eq!(frames(&xma()), Some(1), "the split frame was decoded");
+        // It continues in bank 1, not bank 0.
+        assert_eq!(context.field(4, 31, 1), 1);
+        assert_eq!(context.field(2, 0, 26), 43);
+
+        submit(DISABLE_XMA, &[1]);
+        (m.release)(acp);
+        ApuFree(input0);
+        ApuFree(input1);
         ApuFree(output);
         assert_eq!(AcpHalReleaseShapeContexts(), S_OK);
     }
@@ -1168,5 +1365,29 @@ mod tests {
         assert_eq!((m.message_count)(acp), 1, "disconnected");
         (m.release)(acp);
         assert_eq!(AcpHalReleaseShapeContexts(), S_OK);
+    }
+
+    #[test]
+    fn context_set_field_does_not_clobber_concurrent_bitfields() {
+        let words: [AtomicU32; 16] = std::array::from_fn(|_| AtomicU32::new(0));
+        let raw = words[0].as_ptr() as usize;
+        std::thread::scope(|s| {
+            // Decoder side: repeatedly updates word 0's write-block field (bits 27..31).
+            s.spawn(move || {
+                let ctx = Context(raw as *mut u32);
+                for i in 0..50_000u32 {
+                    ctx.set_field(0, 27, 5, i & 31);
+                }
+            });
+            // Title side: concurrently updates word 0's valid-input bits (bits 20..21).
+            const MASK: u32 = 3 << 20;
+            for i in 0..50_000u32 {
+                let expected = (i & 3) << 20;
+                let _ = words[0].fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+                    Some((old & !MASK) | expected)
+                });
+                assert_eq!(words[0].load(Ordering::Acquire) & MASK, expected);
+            }
+        });
     }
 }

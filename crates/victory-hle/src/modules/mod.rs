@@ -15,6 +15,8 @@ pub mod controls;
 pub mod d3d12x;
 pub mod display;
 pub mod dsp;
+/// Portable partitioned convolution for the Windows/Xbox audio DSP.
+pub(crate) mod dsp_convolve;
 #[cfg(windows)]
 pub mod dstorage;
 #[cfg(windows)]

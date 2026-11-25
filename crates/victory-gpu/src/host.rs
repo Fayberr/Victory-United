@@ -54,6 +54,7 @@ pub(crate) struct Host {
     messages: Option<ID3D12InfoQueue>,
     next_rtv: AtomicU32,
     presenter: Mutex<Option<Presenter>>,
+    spare_uploads: Mutex<Spare<MappedUpload>>,
     /// The adapter the device is on, for its memory budget
     /// ([`Host::video_memory`]); `None` if the system does not name it.
     adapter: Option<IDXGIAdapter3>,
@@ -768,6 +769,7 @@ fn create() -> windows::core::Result<Host> {
             messages,
             next_rtv: AtomicU32::new(0),
             presenter: Mutex::new(None),
+            spare_uploads: Mutex::new(Spare::new()),
             adapter,
         })
     }
@@ -2014,6 +2016,19 @@ enum Step {
     Texture(std::sync::Arc<crate::texture::Staging>),
 }
 
+struct MappedUpload {
+    buffer: ID3D12Resource,
+    data: usize,
+    size: u64,
+}
+
+impl Drop for MappedUpload {
+    fn drop(&mut self) {
+        ALIVE[6].fetch_sub(1, Ordering::Relaxed);
+        ALIVE[7].fetch_sub(self.size, Ordering::Relaxed);
+    }
+}
+
 /// What a list does on the CPU when it is submitted: copies between host
 /// memory regions (title buffers, upload buffers and buffer copies), and
 /// the upload buffers its GPU commands read, kept until the list is reset.
@@ -2022,6 +2037,7 @@ struct Deferred {
     /// Destination, source, bytes.
     copies: Vec<Step>,
     uploads: Vec<ID3D12Resource>,
+    pooled_uploads: Vec<MappedUpload>,
     /// The bytes of `uploads` (counted in [`ALIVE`] while they are held).
     upload_bytes: u64,
     /// Host objects the list's commands name (pipelines, root signatures,
@@ -2030,13 +2046,13 @@ struct Deferred {
     kept: Vec<windows::core::IUnknown>,
     /// Buffer ranges refreshed since the last title copy (host copy,
     /// address, bytes): refreshing them again would find the same bytes.
-    refreshed: std::collections::HashSet<(usize, usize, usize)>,
+    refreshed: crate::fx::Set<(usize, usize, usize)>,
     /// Shader-written ranges already recorded since the last copy or new
     /// refresh on the same host copy, avoiding thousands of duplicate
     /// `Step::GpuWrite` entries per frame.
-    gpu_written: std::collections::HashSet<(usize, usize, usize)>,
+    gpu_written: crate::fx::Set<(usize, usize, usize)>,
     /// Textures whose contents the list brings up to date.
-    textures: std::collections::HashSet<usize>,
+    textures: crate::fx::Set<usize>,
     /// Bottom-of-pipe writes, done once the list has run: address, what,
     /// bytes.
     writes: Vec<(usize, crate::queue::Written, usize)>,
@@ -6632,7 +6648,13 @@ impl HostList {
         #[cfg(feature = "diagnostics")]
         let started = std::time::Instant::now();
         self._alive.used();
-        *self.deferred() = Deferred::default();
+        let mut deferred = self.deferred();
+        let pooled = std::mem::take(&mut deferred.pooled_uploads);
+        *deferred = Deferred::default();
+        drop(deferred);
+        if !pooled.is_empty() && let Some(host) = host() {
+            host.return_uploads(pooled);
+        }
         self.states.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.twins.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.pipelines.lock().unwrap_or_else(|e| e.into_inner()).clear();
@@ -7031,6 +7053,7 @@ impl HostList {
             let deferred = self.deferred();
             if !(deferred.copies.is_empty()
                 && deferred.uploads.is_empty()
+                && deferred.pooled_uploads.is_empty()
                 && deferred.kept.is_empty()
                 && deferred.textures.is_empty()
                 && deferred.writes.is_empty()
@@ -7136,15 +7159,12 @@ impl HostList {
         self.deferred().writes.push((dst as usize, what, bytes));
     }
 
-    /// A mapped upload buffer of `size` bytes, alive until the list is
-    /// reset.
-    ///
-    /// shortcut: one buffer per copy; pool them once uploads are frequent.
+    /// A mapped upload buffer, kept until the list is safe to reset.
     pub(crate) fn upload(&self, host: &Host, size: u64) -> Option<(ID3D12Resource, *mut u8)> {
-        let (buffer, data) = host.upload_buffer(size)?;
-        name(&buffer, || format!("list upload {size:#x}"));
-        self.deferred().hold_upload(buffer.clone(), size);
-        Some((buffer, data))
+        let upload = host.take_upload(size.max(1))?;
+        let result = (upload.buffer.clone(), upload.data as *mut u8);
+        self.deferred().pooled_uploads.push(upload);
+        Some(result)
     }
 
     /// `len` bytes of upload memory (256-byte aligned) until the list is
@@ -7573,9 +7593,9 @@ struct Batch {
     /// the heap's buffers ready adds some 4,100 copies, and searching them
     /// for every refresh of a submission was tens of millions of
     /// comparisons a frame.
-    index: std::collections::HashMap<usize, usize>,
+    index: crate::fx::Map<usize, usize>,
     /// Staging buffers (by address) refreshed since the last title write.
-    textures: std::collections::HashSet<usize>,
+    textures: crate::fx::Set<usize>,
     /// Texture refreshes running beside the submitting thread
     /// ([`crate::memcopy::texture_overlap`]).
     textures_beside: crate::memcopy::Group,
@@ -8016,6 +8036,29 @@ impl Host {
             Err(e) => {
                 tracing::warn!(error = %e, size, "no read-back buffer");
                 None
+            }
+        }
+    }
+
+    fn take_upload(&self, size: u64) -> Option<MappedUpload> {
+        if let Some(upload) = self.spare_uploads.lock().unwrap_or_else(|e| e.into_inner()).take(size) {
+            return Some(upload);
+        }
+        let (buffer, data) = self.upload_buffer(size)?;
+        name(&buffer, || format!("list upload {size:#x}"));
+        ALIVE[6].fetch_add(1, Ordering::Relaxed);
+        ALIVE[7].fetch_add(size, Ordering::Relaxed);
+        Some(MappedUpload { buffer, data: data as usize, size })
+    }
+
+    fn return_uploads(&self, uploads: Vec<MappedUpload>) {
+        const MAX_BUFFERS: usize = 64;
+        const MAX_BYTES: u64 = 64 << 20;
+        let mut spare = self.spare_uploads.lock().unwrap_or_else(|e| e.into_inner());
+        for upload in uploads {
+            let size = upload.size;
+            if spare.kept.len() < MAX_BUFFERS && size <= MAX_BYTES {
+                spare.give(upload, size, MAX_BYTES);
             }
         }
     }
@@ -9155,6 +9198,30 @@ fn tile_segments(
 mod batch {   // Batch::texture_due lives here; `mod tests` is already taken at the top of this file
     use super::Batch;
     use std::sync::Arc;
+
+    #[test]
+    fn upload_buffers_are_pooled_across_list_resets() {
+        let Some(host) = super::host() else {
+            return; // no host GPU
+        };
+        let Ok(list) = host.new_list() else {
+            return;
+        };
+        let (first, first_ptr) = list.upload(host, 4096).expect("first upload");
+        assert!(!list.untouched());
+        let first_raw = windows::core::Interface::as_raw(&first);
+        // SAFETY: `list` is open from `new_list`; close it before `reset()`.
+        unsafe { list.list.Close().expect("close list") };
+        list.reset();
+        let (second, second_ptr) = list.upload(host, 4096).expect("second upload");
+        let second_raw = windows::core::Interface::as_raw(&second);
+        assert_eq!(first_raw, second_raw);
+        assert_eq!(first_ptr, second_ptr);
+        drop((first, second));
+        // SAFETY: `list` is open again after `reset()`; close it before the final `reset()`.
+        unsafe { list.list.Close().expect("close list") };
+        list.reset();
+    }
 
     #[test]
     fn a_texture_is_checked_once_per_submission() {

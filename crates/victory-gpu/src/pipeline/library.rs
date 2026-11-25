@@ -683,10 +683,18 @@ fn serialise(library: &ID3D12PipelineLibrary1, tmp: &std::path::Path, size: usiz
         // SAFETY: a buffer of the size the library asks for.
         return unsafe { library.Serialize(file.bytes_mut()) }.map_err(failed);
     }
-    let mut bytes = vec![0u8; size];
+    let mut bytes = zeroed(size).ok_or(std::io::ErrorKind::OutOfMemory)?;
     // SAFETY: a buffer of the size the library asks for.
     unsafe { library.Serialize(&mut bytes) }.map_err(failed)?;
     std::fs::write(tmp, &bytes)
+}
+
+/// Allocates the fallback buffer without aborting under memory pressure.
+fn zeroed(size: usize) -> Option<Vec<u8>> {
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(size).ok()?;
+    bytes.resize(size, 0);
+    Some(bytes)
 }
 
 /// Renames the written library `tmp` over the library's file in `dir`. This
@@ -742,6 +750,12 @@ pub(crate) fn note_used(key: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_save_buffer_the_host_cannot_give_is_refused() {
+        assert!(zeroed(usize::MAX / 2).is_none());
+        assert_eq!(zeroed(100).as_deref(), Some(&[0u8; 100][..]));
+    }
 
     #[test]
     fn names_change_with_what_goes_into_the_pipeline() {
