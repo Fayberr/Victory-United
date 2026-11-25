@@ -2026,14 +2026,28 @@ mod title_memory_tests {
     fn on_demand_skipped_detile_preserves_none_and_updates_judged() {
         use std::sync::atomic::Ordering::Relaxed;
         use windows_sys::Win32::System::Memory::*;
+        // The refresh reads title memory in place only while no guard test
+        // changes the mapping (it would read through the kernel instead and
+        // judge nothing); the guard tests hold this while they do.
+        let _serial = crate::watch::serial_with_guard_tests();
         let Some(host) = crate::host::host() else {
             return;
         };
         let rdesc: [u32; 14] = [3, 0, 0, 0, 1024, 0, 1024, (11 << 16) | 1, 98, 1, 0, 0x105, 0, 0];
         let total = crate::resource::placed_bytes(&rdesc).unwrap() as usize;
         // SAFETY: private reservation with only the first 64 KiB committed (all zeros).
-        let base = unsafe { VirtualAlloc(std::ptr::null(), total, MEM_RESERVE, PAGE_NOACCESS) }.cast::<u8>();
-        assert!(!base.is_null());
+        // An address the view guards or the journal still know from another
+        // test (they free what they marked) is kept, not freed, and not used.
+        let mut base;
+        let mut tries = 0;
+        loop {
+            base = unsafe { VirtualAlloc(std::ptr::null(), total, MEM_RESERVE, PAGE_NOACCESS) }.cast::<u8>();
+            assert!(!base.is_null());
+            tries += 1;
+            if crate::watch::untouched(base as usize, total) || tries > 4096 {
+                break;
+            }
+        }
         // SAFETY: committing the head block of our own reservation.
         let committed = unsafe { VirtualAlloc(base.cast(), 65536, MEM_COMMIT, PAGE_READWRITE) };
         assert!(!committed.is_null());

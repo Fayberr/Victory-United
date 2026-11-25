@@ -1663,6 +1663,30 @@ fn writable(at: usize) -> bool {
     n != 0 && info.State == MEM_COMMIT && info.Protect == PAGE_READWRITE
 }
 
+/// For tests outside this file that read title memory in place or depend
+/// on its mapping staying put: held, no guard test changes the mapping (they
+/// hold the same lock while they do).
+#[cfg(test)]
+pub(crate) fn serial_with_guard_tests() -> std::sync::MutexGuard<'static, ()> {
+    tests::lock_guards()
+}
+
+/// For tests: whether the view guards and the journal know nothing of
+/// `[start, start + bytes)`. Other tests free memory they marked or noted
+/// written, and an address reused would answer from what they left.
+#[cfg(test)]
+pub(crate) fn untouched(start: usize, bytes: usize) -> bool {
+    let (first, last) = (start / PAGE, (start + bytes).div_ceil(PAGE));
+    !(first..last).any(|b| known_view(b * PAGE))
+        && JOURNAL
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .written
+            .range(first..last)
+            .next()
+            .is_none()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1680,17 +1704,38 @@ mod tests {
         GUARD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// A fresh write-watched allocation of `bytes` at an address the view
+    /// guards and the journal know nothing of: other tests free memory they
+    /// marked or noted written, and an address reused would answer from
+    /// what they left. Addresses that are known are kept (never freed), so
+    /// they are not handed out again. 0 if none was found.
+    pub(super) fn fresh_watched(bytes: usize) -> usize {
+        static KEPT: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
+        for _ in 0..4096 {
+            // SAFETY: a private allocation, freed by the caller or kept here.
+            let p = unsafe {
+                VirtualAlloc(
+                    std::ptr::null(),
+                    bytes,
+                    MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH,
+                    PAGE_READWRITE,
+                )
+            } as usize;
+            if p == 0 {
+                return 0;
+            }
+            if untouched(p, bytes) {
+                return p;
+            }
+            KEPT.lock().unwrap_or_else(|e| e.into_inner()).push(p);
+        }
+        0
+    }
+
     #[test]
     fn written_pages_are_reported_to_every_asker() {
-        // SAFETY: a fresh write-watched allocation, freed at the end.
-        let p = unsafe {
-            VirtualAlloc(
-                std::ptr::null(),
-                4 * PAGE,
-                MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH,
-                PAGE_READWRITE,
-            )
-        } as usize;
+        // A fresh write-watched allocation, freed at the end.
+        let p = fresh_watched(4 * PAGE);
         assert_ne!(p, 0);
         let (start, end) = (p, p + 4 * PAGE);
         let (_, before) = writes(start, end, false).expect("watched");
@@ -2366,6 +2411,7 @@ mod tests {
 
 #[cfg(test)]
 mod mapping_tests {
+    use super::tests::lock_guards;
     use super::{title_memory_reading, title_memory_remapping};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, mpsc};
@@ -2375,6 +2421,9 @@ mod mapping_tests {
     /// a read in place waits for a change of mapping.
     #[test]
     fn reads_in_place_and_remappings_wait_for_each_other() {
+        // Holds the mapping lock for a while: no other test that reads
+        // title memory in place (the texture refreshes) runs meanwhile.
+        let _one = lock_guards();
         // A reader holds; the change does not begin until it lets go.
         let changed = Arc::new(AtomicBool::new(false));
         let reading = title_memory_reading();
@@ -2416,33 +2465,31 @@ mod mapping_tests {
 
 #[cfg(test)]
 mod wrote_tests {
-    use super::tests::lock_guards;
+    use super::tests::{fresh_watched, lock_guards};
     use super::{PAGE, ask_once, ask_once_end, asked, writes, wrote};
 
     #[test]
     fn wrote_keeps_ahead_asked_at_or_above_written_timestamps() {
         // Shares the journal and the askings with the guard tests: one at a time.
         let _one = lock_guards();
-        use windows_sys::Win32::System::Memory::{
-            MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
-        };
-        const MEM_WRITE_WATCH: u32 = 0x0020_0000;
-        // SAFETY: private write-watched 64 KiB page owned by this test.
-        let p = unsafe {
-            VirtualAlloc(
-                std::ptr::null(),
-                PAGE,
-                MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH,
-                PAGE_READWRITE,
-            )
-        } as usize;
+        use windows_sys::Win32::System::Memory::{MEM_RELEASE, VirtualFree};
+        let p = fresh_watched(PAGE);
         assert_ne!(p, 0);
 
         ask_once(&[(p, p + PAGE)]);
         wrote(p, PAGE);
 
         let (now, written) = writes(p, p + PAGE, false).expect("write-watched page");
-        let (asked_now, asked_written) = asked(p, p + PAGE).expect("in ask_once range");
+        let (asked_now, asked_written) = asked(p, p + PAGE).unwrap_or_else(|| {
+            let j = super::JOURNAL.read().unwrap_or_else(|e| e.into_inner());
+            panic!(
+                "not in ask_once range: known_view={} kept={} ahead={:?} page={}",
+                super::known_view(p),
+                j.kept,
+                j.ahead,
+                p / PAGE
+            )
+        });
         ask_once_end();
 
         // SAFETY: freeing our private reservation.
