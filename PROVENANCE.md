@@ -8,6 +8,9 @@ of it we merged pull requests from other projects. Commits keep their original a
 #802, #803, #804, #805, #806, #807, #808, #809, #812, #824, #827, #836, #837, #838, #839, #841,
 #845, #846, #853, #854, #855, #856, #857, #858, #860, #862, #864, #868
 
+**fxceless/victory-fork main:** synced up to `9c184b3` (14 commits, including the frame-rate
+third session).
+
 **Marvisak/VIctory:** #240, #443, #478, #1033, #1537, #1623, #1880, #1894, #1955, #1956, #2007,
 #2012, #2037, #2102
 
