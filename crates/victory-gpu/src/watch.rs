@@ -117,6 +117,17 @@ pub(crate) fn ask_ahead(ranges: &[(usize, usize)]) {
     if j.kept {
         return;
     }
+    // View memory the guards hold is left to `writes`, which answers it
+    // from the guards ([`known_view`]): the kernel's write watch can only
+    // fail there. Asked here with the others, a run holding such a range
+    // failed, was asked again by halves down to single ranges, failing
+    // each time, and the range then went to `writes` all the same (after
+    // triippywhale d0581a55). `VICTORY_VIEW_ASK=1` asks as before.
+    #[cfg(feature = "diagnostics")]
+    let all = pieces.len();
+    pieces.retain(|&(first, _)| !known_view(first * PAGE));
+    #[cfg(feature = "diagnostics")]
+    AHEAD_VIEWS.fetch_add((all - pieces.len()) as u64, std::sync::atomic::Ordering::Relaxed);
     j.ahead_asked = next_asking();
     j.ahead.clear();
     let mut i = 0;
@@ -154,6 +165,12 @@ fn slow(us: u64) {
     }
     SLOW[2].fetch_max(us, Relaxed);
 }
+
+/// Since the last frame line: ranges of view memory the guards hold that a
+/// submission's askings ahead ([`ask_ahead`], [`ask_once`]) left out. Each
+/// was a kernel asking that failed, or several, before.
+#[cfg(feature = "diagnostics")]
+pub(crate) static AHEAD_VIEWS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// [`SLOW`], taken.
 #[cfg(feature = "diagnostics")]
@@ -218,6 +235,15 @@ pub(crate) fn ask_once(ranges: &[(usize, usize)]) {
         if start >= end {
             continue;
         }
+        // View memory the guards hold is not asked about: the asking can
+        // only fail there, one failed kernel call for each such copy at
+        // every submission, and `writes` answers it from the guards
+        // (after triippywhale cc368c7c).
+        if known_view(start) {
+            #[cfg(feature = "diagnostics")]
+            AHEAD_VIEWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            continue;
+        }
         let (first, last) = (start / PAGE, end.div_ceil(PAGE));
         if !j.ahead.iter().any(|&(a, b)| a <= first && last <= b) && ask_kernel(j, first, last) {
             j.ahead.push((first, last));
@@ -254,6 +280,40 @@ pub(crate) fn wrote(at: usize, len: usize) {
     for page in at / PAGE..at.saturating_add(len).div_ceil(PAGE) {
         j.written.insert(page, now);
     }
+}
+
+/// We wrote the 64 KiB page numbered `page` of title memory through a
+/// view of our own (`crate::inplace::write_own`): no guard was opened and
+/// no kernel write-watch bit set, so the journal is told here. The page,
+/// and the same physical page at its other title addresses (`others`,
+/// page numbers), count as written at a new asking, which every host copy
+/// that holds them takes at its next refresh. Returns the asking that had
+/// last found `page` written (0: never) and the new one, for the copy
+/// that wrote to note itself current.
+pub(crate) fn wrote_own(page: usize, others: &[usize]) -> (u64, u64) {
+    let mut j = JOURNAL.write().unwrap_or_else(|e| e.into_inner());
+    let j = &mut *j;
+    let now = next_asking();
+    // As in [`wrote`]: an asking that stands for a submission, or for a
+    // flush, moves with it, or a copy taking the page at the standing
+    // asking would find it written "later" at every refresh.
+    if j.kept || !j.ahead.is_empty() {
+        j.ahead_asked = now;
+    }
+    let before = j.written.insert(page, now).unwrap_or(0);
+    for &other in others {
+        if other != page {
+            j.written.insert(other, now);
+        }
+    }
+    (before, now)
+}
+
+/// The asking that last found the 64 KiB page numbered `page` written (0:
+/// never). Read only, for `crate::backreads`.
+#[cfg(feature = "diagnostics")]
+pub(crate) fn stamp(page: usize) -> u64 {
+    JOURNAL.read().unwrap_or_else(|e| e.into_inner()).written.get(&page).copied().unwrap_or(0)
 }
 
 /// One kernel asking for `pieces` (page ranges in order); by halves if it
@@ -428,6 +488,10 @@ pub(crate) fn writes_kind(start: usize, end: usize, guarded: bool) -> Option<(u6
         },
         failed as u64,
     );
+    #[cfg(feature = "diagnostics")]
+    if failed && !known_view && guarded {
+        failed_asking(first * PAGE, last * PAGE);
+    }
     let is_view = if failed {
         if !guarded {
             return None;
@@ -460,6 +524,40 @@ pub(crate) fn writes_kind(start: usize, end: usize, guarded: bool) -> Option<(u6
 /// with `guarded`, view memory, which is then guarded).
 pub(crate) fn writes(start: usize, end: usize, guarded: bool) -> Option<(u64, Vec<(usize, u64)>)> {
     writes_kind(start, end, guarded).map(|(now, written, _)| (now, written))
+}
+
+/// Diagnostics: one in 2,048 of the askings the kernel's write watch
+/// refused for memory the guards did not know (some 200 a frame in the
+/// first rooms, each followed by a question to Windows about the memory):
+/// what the memory is and what the guards hold of its first block.
+#[cfg(feature = "diagnostics")]
+fn failed_asking(start: usize, end: usize) {
+    use windows_sys::Win32::System::Memory::{MEMORY_BASIC_INFORMATION, VirtualQuery};
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 2048 != 0 {
+        return;
+    }
+    // SAFETY: plain data filled in by the query.
+    let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: a valid out pointer of the right size.
+    let n = unsafe { VirtualQuery(start as *const _, &mut info, size_of_val(&info)) };
+    let (protected, clean, absent, viewed, aliased) = {
+        let g = guards();
+        let b = start / BLOCK;
+        (g.protected.contains(&b), g.clean.contains(&b), g.absent.contains(&b), covered(&g.views, b, b + 1), g.aliased.contains(&b))
+    };
+    tracing::info!(
+        "a failed write-watch asking (one in 2048): {start:#x}+{:#x}; Windows says (answered {n}): base {:#x} region {:#x} state {:#x} type {:#x} protect {:#x} allocation protect {:#x}; \
+         the guards of its first block: protected {protected} clean {clean} absent {absent} viewed {viewed} aliased {aliased}; is a view: {}",
+        end - start,
+        info.BaseAddress as usize,
+        info.RegionSize,
+        info.State,
+        info.Type,
+        info.Protect,
+        info.AllocationProtect,
+        is_view(start, end)
+    );
 }
 
 impl Tracked {
@@ -774,6 +872,12 @@ fn unpark_committed(g: &mut Guards) {
             g.unclean.insert(block);
         }
     }
+}
+
+/// Whether the block `page` is read-only by our hand and unwritten since a
+/// copy took it (diagnostics of `VICTORY_BACK_OWN_CHECK`).
+pub(crate) fn clean(page: usize) -> bool {
+    guards().clean.contains(&page)
 }
 
 /// For view memory: the pages of `[start, end)`'s blocks written since
@@ -1126,11 +1230,26 @@ fn protect_here(g: &mut Guards, from: usize, to: usize) {
     for block in from..to {
         if set(block, block + 1) {
             note(g, block, block + 1);
-        } else if block < uncommitted_end(block) {
-            g.absent.insert(block);
-            // Out of the unclean set while it stays so ([`Guards::parked`]).
-            if g.unclean.contains(&block) {
-                park(g, block);
+        } else {
+            #[cfg(feature = "diagnostics")]
+            let error = std::io::Error::last_os_error();
+            if block < uncommitted_end(block) {
+                g.absent.insert(block);
+                // Out of the unclean set while it stays so ([`Guards::parked`]).
+                if g.unclean.contains(&block) {
+                    park(g, block);
+                }
+            } else {
+                // Diagnostics: a committed block that will not be made
+                // read-only is reported written at every asking and never
+                // known to the guards (one in 1,024 said).
+                #[cfg(feature = "diagnostics")]
+                {
+                    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 1024 == 0 {
+                        tracing::info!("a block of title memory could not be made read-only (one in 1024): {:#x}: {error}", block * BLOCK);
+                    }
+                }
             }
         }
     }
@@ -1373,14 +1492,25 @@ static MAPPING: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
 /// What the runtime holds while it changes what title memory shows
 /// ([`title_memory_remapping`]).
-pub struct Remapping(#[allow(dead_code)] std::sync::RwLockWriteGuard<'static, ()>);
+pub struct Remapping(#[allow(dead_code)] std::sync::RwLockWriteGuard<'static, ()>, std::time::Instant);
+
+impl Drop for Remapping {
+    fn drop(&mut self) {
+        // From asking for the lock until it is let go (the frame log).
+        crate::framelog::add(crate::framelog::T::RemapUs, self.1.elapsed().as_micros() as u64);
+    }
+}
 
 /// The runtime is about to map, unmap or move physical pages of title
 /// memory: until what it returns is dropped, no read of title memory in
 /// place is under way and none begins ([`title_memory_reading`]). Taken
 /// around the whole change, the unmapping and the mapping again.
 pub fn title_memory_remapping() -> Remapping {
-    Remapping(MAPPING.write().unwrap_or_else(|e| e.into_inner()))
+    let asked = std::time::Instant::now();
+    let held = MAPPING.write().unwrap_or_else(|e| e.into_inner());
+    crate::framelog::add(crate::framelog::T::Remaps, 1);
+    crate::framelog::add(crate::framelog::T::RemapWaitUs, asked.elapsed().as_micros() as u64);
+    Remapping(held, asked)
 }
 
 /// What a read of title memory in place holds ([`title_memory_reading`]).
@@ -1409,6 +1539,10 @@ pub fn title_memory_reading_now() -> Option<Reading> {
 /// shows is new and read-write, so it is no longer guarded (nor known
 /// unmapped).
 pub fn title_memory_remapped(at: usize, len: usize) {
+    // Stored pages followed there end (`VICTORY_BACK_READS`): counted only.
+    #[cfg(feature = "diagnostics")]
+    crate::backreads::remapped(at, len);
+    crate::texback::remapped(at, len);
     // A placed texture there arrives, goes or changes with no descriptor
     // written.
     crate::descriptor::host::remapped(at, len);
@@ -1501,6 +1635,7 @@ fn install() {
         if open(&mut g, at, at + 1) {
             #[cfg(feature = "diagnostics")]
             crate::copystat::add(crate::copystat::C::GuardFaults, 1);
+            crate::framelog::add(crate::framelog::T::GuardFaults, 1);
             return EXCEPTION_CONTINUE_EXECUTION;
         }
         if writable(at) {
