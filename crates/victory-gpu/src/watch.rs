@@ -1676,7 +1676,7 @@ mod tests {
     /// deterministic when tests run in parallel.
     static GUARD_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    fn lock_guards() -> std::sync::MutexGuard<'static, ()> {
+    pub(super) fn lock_guards() -> std::sync::MutexGuard<'static, ()> {
         GUARD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -2416,10 +2416,13 @@ mod mapping_tests {
 
 #[cfg(test)]
 mod wrote_tests {
+    use super::tests::lock_guards;
     use super::{PAGE, ask_once, ask_once_end, asked, writes, wrote};
 
     #[test]
     fn wrote_keeps_ahead_asked_at_or_above_written_timestamps() {
+        // Shares the journal and the askings with the guard tests: one at a time.
+        let _one = lock_guards();
         use windows_sys::Win32::System::Memory::{
             MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
         };
