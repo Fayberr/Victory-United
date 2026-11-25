@@ -2030,6 +2030,9 @@ mod title_memory_tests {
         // changes the mapping (it would read through the kernel instead and
         // judge nothing); the guard tests hold this while they do.
         let _serial = crate::watch::serial_with_guard_tests();
+        // The refresh reads title memory in place unless a test holds the
+        // mapping lock for a change: one at a time with those.
+        let _one = crate::watch::serialize_tests();
         let Some(host) = crate::host::host() else {
             return;
         };
