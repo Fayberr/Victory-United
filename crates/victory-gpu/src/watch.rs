@@ -1663,6 +1663,22 @@ fn writable(at: usize) -> bool {
     n != 0 && info.State == MEM_COMMIT && info.Protect == PAGE_READWRITE
 }
 
+/// For tests: whether the view guards and the journal know nothing of
+/// `[start, start + bytes)`. Other tests free memory they marked or noted
+/// written, and an address reused would answer from what they left.
+#[cfg(test)]
+pub(crate) fn untouched(start: usize, bytes: usize) -> bool {
+    let (first, last) = (start / PAGE, (start + bytes).div_ceil(PAGE));
+    !(first..last).any(|b| known_view(b * PAGE))
+        && JOURNAL
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .written
+            .range(first..last)
+            .next()
+            .is_none()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1700,16 +1716,7 @@ mod tests {
             if p == 0 {
                 return 0;
             }
-            let (first, last) = (p / PAGE, (p + bytes).div_ceil(PAGE));
-            let noted = (first..last).any(|b| super::known_view(b * PAGE))
-                || super::JOURNAL
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .written
-                    .range(first..last)
-                    .next()
-                    .is_some();
-            if !noted {
+            if untouched(p, bytes) {
                 return p;
             }
             KEPT.lock().unwrap_or_else(|e| e.into_inner()).push(p);
