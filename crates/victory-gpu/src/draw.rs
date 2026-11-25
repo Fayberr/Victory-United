@@ -10,7 +10,6 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use victory_shader::resource::RootIndexedView;
 use victory_shader::{ResourceType, RootType, UsedResource};
 
 use crate::descriptor::View;
@@ -1457,7 +1456,7 @@ impl State {
         for stage in &p.stages {
             let t = stage.translated();
             STORES.set(t.stores);
-            let made = self.tables(list, &t.used, &stage.tables, &t.host.root_indexed_views, compute);
+            let made = self.tables(list, &t.used, &stage.tables, compute);
             STORES.set(true);
             if made.iter().any(|m| m.1 == u32::MAX) {
                 once!("a draw whose descriptor table found no free slots is dropped");
@@ -3133,7 +3132,6 @@ impl State {
         list: &HostList,
         used: &[UsedResource],
         layouts: &[TableLayout],
-        indexed: &[RootIndexedView],
         compute: bool,
     ) -> MadeTables {
         let tables = |u: &&UsedResource| u.root == RootType::Table;
@@ -3185,22 +3183,31 @@ impl State {
             let Some(host) = heap.host() else {
                 continue;
             };
-            let mut selected: Vec<u32> = indexed
-                .iter()
-                .filter(|index| index.table_slot == slot)
-                .map(|index| {
-                    let constant = self.user_value(
-                        compute,
-                        index.constant_slot,
-                        RootType::Constants,
-                        index.constant_dword,
-                    );
-                    // The shader adds i32 byte offsets and shifts by 5.
-                    index.byte_offset.wrapping_add(constant << index.shift) / 32
-                })
-                .collect();
-            selected.sort_unstable();
-            selected.dedup();
+            let evaluate = |index: &victory_shader::resource::RootIndexedView| {
+                let constant = self.user_value(
+                    compute,
+                    index.constant_slot,
+                    RootType::Constants,
+                    index.constant_dword,
+                );
+                // The shader adds i32 byte offsets and shifts by 5.
+                index.byte_offset.wrapping_add(constant << index.shift) / 32
+            };
+            let single;
+            let mut many;
+            let selected: &[u32] = match layout.indexed.as_slice() {
+                [] => &[],
+                [expression] => {
+                    single = evaluate(expression);
+                    std::slice::from_ref(&single)
+                }
+                expressions => {
+                    many = expressions.iter().map(evaluate).collect::<Vec<_>>();
+                    many.sort_unstable();
+                    many.dedup();
+                    &many
+                }
+            };
             let n = layout.records.last().map_or(0, |entry| entry.0)
                 .max(selected.last().copied().unwrap_or(0))
                 + 1;
@@ -3229,7 +3236,7 @@ impl State {
                         readable(list, u.kind, &view);
                     }
                 }
-                for k in selected {
+                for &k in selected {
                     if layout.records.binary_search_by_key(&k, |entry| entry.0).is_ok() {
                         continue;
                     }
