@@ -444,6 +444,9 @@ fn instruction(code: &[u8], offset: usize) -> Result<Instruction, ShaderError> {
         let vop3 = |encoding: Encoding, op: u32, w1: u32| {
             let op_name = name(encoding, op as u16);
             let count = match op_name {
+                // The shader compiler can attach a literal to a VOP3
+                // no-op, even though the instruction reads no registers.
+                Some("v_nop") => 3,
                 Some(n) => fields::vop3_source_count(encoding, op as u16, n),
                 None => 3,
             };
@@ -774,6 +777,15 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn vop3_nop_consumes_its_literal_before_the_next_instruction() {
+        let code = [0xD580_0000, 0xFF << 18, 0xFFFF_FFFF, S_ENDPGM];
+        assert_eq!(
+            summary(&code),
+            [(0, 3, "v_nop"), (12, 1, "s_endpgm")]
+        );
     }
 
     #[test]
