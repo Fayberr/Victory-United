@@ -1680,17 +1680,47 @@ mod tests {
         GUARD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// A fresh write-watched allocation of `bytes` at an address the view
+    /// guards and the journal know nothing of: other tests free memory they
+    /// marked or noted written, and an address reused would answer from
+    /// what they left. Addresses that are known are kept (never freed), so
+    /// they are not handed out again. 0 if none was found.
+    pub(super) fn fresh_watched(bytes: usize) -> usize {
+        static KEPT: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
+        for _ in 0..4096 {
+            // SAFETY: a private allocation, freed by the caller or kept here.
+            let p = unsafe {
+                VirtualAlloc(
+                    std::ptr::null(),
+                    bytes,
+                    MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH,
+                    PAGE_READWRITE,
+                )
+            } as usize;
+            if p == 0 {
+                return 0;
+            }
+            let (first, last) = (p / PAGE, (p + bytes).div_ceil(PAGE));
+            let noted = (first..last).any(|b| super::known_view(b * PAGE))
+                || super::JOURNAL
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .written
+                    .range(first..last)
+                    .next()
+                    .is_some();
+            if !noted {
+                return p;
+            }
+            KEPT.lock().unwrap_or_else(|e| e.into_inner()).push(p);
+        }
+        0
+    }
+
     #[test]
     fn written_pages_are_reported_to_every_asker() {
-        // SAFETY: a fresh write-watched allocation, freed at the end.
-        let p = unsafe {
-            VirtualAlloc(
-                std::ptr::null(),
-                4 * PAGE,
-                MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH,
-                PAGE_READWRITE,
-            )
-        } as usize;
+        // A fresh write-watched allocation, freed at the end.
+        let p = fresh_watched(4 * PAGE);
         assert_ne!(p, 0);
         let (start, end) = (p, p + 4 * PAGE);
         let (_, before) = writes(start, end, false).expect("watched");
@@ -2416,35 +2446,15 @@ mod mapping_tests {
 
 #[cfg(test)]
 mod wrote_tests {
-    use super::tests::lock_guards;
+    use super::tests::{fresh_watched, lock_guards};
     use super::{PAGE, ask_once, ask_once_end, asked, writes, wrote};
 
     #[test]
     fn wrote_keeps_ahead_asked_at_or_above_written_timestamps() {
         // Shares the journal and the askings with the guard tests: one at a time.
         let _one = lock_guards();
-        use windows_sys::Win32::System::Memory::{
-            MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
-        };
-        const MEM_WRITE_WATCH: u32 = 0x0020_0000;
-        // SAFETY: private write-watched 64 KiB pages owned by this test. The
-        // guard tests leave view blocks marked at addresses they have since
-        // freed, and an asking is not made into those: a page the guards
-        // still know is kept (so the next allocation differs) and not used.
-        let alloc = || unsafe {
-            VirtualAlloc(
-                std::ptr::null(),
-                PAGE,
-                MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH,
-                PAGE_READWRITE,
-            )
-        } as usize;
-        let mut skipped = Vec::new();
-        let mut p = alloc();
-        while p != 0 && super::known_view(p) && skipped.len() < 4096 {
-            skipped.push(p);
-            p = alloc();
-        }
+        use windows_sys::Win32::System::Memory::{MEM_RELEASE, VirtualFree};
+        let p = fresh_watched(PAGE);
         assert_ne!(p, 0);
 
         ask_once(&[(p, p + PAGE)]);
@@ -2463,12 +2473,8 @@ mod wrote_tests {
         });
         ask_once_end();
 
-        // SAFETY: freeing our private reservations.
+        // SAFETY: freeing our private reservation.
         unsafe { VirtualFree(p as *mut _, 0, MEM_RELEASE) };
-        for q in skipped {
-            // SAFETY: as above.
-            unsafe { VirtualFree(q as *mut _, 0, MEM_RELEASE) };
-        }
 
         assert_eq!(now, asked_now);
         let page = p / PAGE;
