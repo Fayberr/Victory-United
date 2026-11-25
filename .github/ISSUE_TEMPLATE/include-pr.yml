@@ -26,7 +26,5 @@ body:
     attributes:
       label: Rules
       options:
-        - label: It does not make the game look worse than on the Xbox.
-          required: true
         - label: It contains no game files or data and no leaked, stolen or pirated material.
           required: true

@@ -4,7 +4,7 @@ Thank you for helping. This project collects the best fixes for running GTA VI (
 on Windows into one tree. Read [LEGAL.md](LEGAL.md) first. It is short and it is the part that
 keeps this project alive.
 
-## The rules that cannot be bent
+## The few rules that matter
 
 1. **Nothing from the game goes into the repository.** No files, bytes, shaders, textures, text,
    screenshots, recordings, extracted tables. `cargo xtask policy` checks this and CI runs it.
@@ -18,10 +18,7 @@ keeps this project alive.
    compatible licence, and its source and author must be named in the PR and in
    [PROVENANCE.md](PROVENANCE.md). "Reference only" licences (for example XCL's GPL-2.0-only) mean
    read, do not copy.
-5. **Speed never comes from making the game look worse than on the Xbox.** Lower precision,
-   skipped effects, dropped shadows or resolution cuts are rejected, even if they are
-   opt-in defaults.
-6. **Nothing goes in that has not been built and run.** "It compiles" is not enough.
+5. **Test it before you send it.** Build it and run it. "It compiles" is not enough.
 
 ## AI-assisted code is welcome
 
@@ -66,8 +63,7 @@ Also:
 Open an issue titled `Include: <project> #<number>` with:
 
 - the link to the pull request or commit and its licence,
-- what it fixes and what you measured (before/after, same scene, same PC),
-- whether it touches visuals (it must not make them worse).
+- what it fixes and what you measured (before/after, same scene, same PC).
 
 Maintainers merge each accepted change as its own commit, keep the original author's credit, and
 add a line to [PROVENANCE.md](PROVENANCE.md). Changes that were tried and rejected are listed there

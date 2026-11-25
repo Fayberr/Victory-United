@@ -5,7 +5,7 @@ all the VIctory forks instead of yet another fork.
 
 **This repository contains no game files, code or assets.** You need your own copy of the game.
 It is not affiliated with or endorsed by the game's developer or publisher.
-Read [LEGAL.md](LEGAL.md) (disclaimer, hard rules, takedown contact) before using or forking.
+See [LEGAL.md](LEGAL.md) for the disclaimer and what does not belong in this repo.
 
 ## What this is
 
@@ -32,9 +32,6 @@ boot and menus run at 30 fps; the world runs at about 2 to 5 frames a second. Th
 is mostly idle, because the slow part is the layer that copies the Xbox's shared memory around
 for the PC. Light in shadow is missing (the game's ray tracing does not run yet). More in
 [docs/CURATED_CHANGES.md](docs/CURATED_CHANGES.md).
-
-Two rules for this tree: **speed must never come from making the game look worse than on the
-Xbox**, and **nothing is added that has not been built and run**.
 
 ## How to build and run
 
@@ -67,7 +64,6 @@ quality and safe. See [CONTRIBUTING.md](CONTRIBUTING.md) and [LEGAL.md](LEGAL.md
   something yourself.
 - Open an issue to propose a pull request for inclusion. Include a measurement (fps, ms a
   frame, or the crash it fixes) from a real run.
-- Anything that lowers visual quality to gain speed is out.
 
 ## Credits
 

@@ -16,7 +16,6 @@
 - [ ] No leaked, stolen or pirated material, and I did not use any as a reference.
 - [ ] No copy-protection, encryption or licence circumvention.
 - [ ] Any code from elsewhere has a compatible licence and is credited here and in PROVENANCE.md.
-- [ ] It does **not** make the game look worse than on the Xbox.
 - [ ] I built it and ran it, and I have read and understand every line (including any AI-written code).
 - [ ] `cargo fmt`, `cargo clippy -D warnings` and `cargo test` pass.
 - [ ] Every new `unsafe` block has a comment explaining why it is sound.
