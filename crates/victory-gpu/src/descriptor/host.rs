@@ -2560,6 +2560,10 @@ impl HostHeap {
         let (frame, tables) = (crate::frame::current(), sync_tables());
         let mut looked = 0u64;
         let mut due: Vec<(u32, u64)> = Vec::new();
+        // Never raw-copied and zero now, but possibly written through the API
+        // (`Create*View`, `CopyDescriptors`): `made` is read after the lock of
+        // the fingerprints is let go, as in `mirror_copied`.
+        let mut zeros: Vec<(u32, u64, u64)> = Vec::new();
         {
             let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
             if copied.is_empty() {
@@ -2582,9 +2586,11 @@ impl HostHeap {
                 };
                 // Never 0, which is "never looked at".
                 let print = record_print(record) | 1;
-                // The record last seen, or a slot never looked at that
-                // holds nothing: as it was.
-                if *last == print || (*last == 0 && record.iter().all(|&b| b == 0)) {
+                if *last == print {
+                    continue;
+                }
+                if *last == 0 && record.iter().all(|&b| b == 0) {
+                    zeros.push((index as u32, handle, print));
                     continue;
                 }
                 // A table's slot lately: left to its draws, and looked at
@@ -2595,6 +2601,26 @@ impl HostHeap {
                 }
                 *last = print;
                 due.push((index as u32, handle));
+            }
+        }
+        if !zeros.is_empty() {
+            let made = self.made.lock().unwrap_or_else(|e| e.into_inner());
+            zeros.retain(|&(index, _, _)| made.get(index as usize).is_some_and(|&key| key != 0));
+            drop(made);
+            if !zeros.is_empty() {
+                let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
+                for (index, handle, print) in zeros {
+                    if !tables && self.tabled_lately(index, frame) {
+                        COPIED_TABLED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        continue;
+                    }
+                    if let Some(last) = copied.get_mut(index as usize) {
+                        *last = print;
+                    }
+                    due.push((index, handle));
+                }
+                drop(copied);
+                due.sort_unstable_by_key(|&(index, _)| index);
             }
         }
         for &(index, handle) in &due {
