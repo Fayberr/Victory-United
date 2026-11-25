@@ -3360,7 +3360,19 @@ impl Shadow {
             return 0;
         }
         let _side = self.before.lock().unwrap_or_else(|e| e.into_inner());
-        // SAFETY: inside the mapping (checked above). The offsets are in a
+        self.card_merge_relay_locked(card, start, at, gpu, fetched_after, title)
+    }
+
+    fn card_merge_relay_locked(
+        &self,
+        card: &Card,
+        start: usize,
+        at: usize,
+        gpu: &[u8],
+        fetched_after: u64,
+        title: &mut Vec<u8>,
+    ) -> usize {
+        // SAFETY: inside the mapping (checked by caller). The offsets are in a
         // range declared and not done with, which no refresh writes; what
         // does write it (the title's bytes put in under shader writes)
         // holds the lock held here.
@@ -3371,6 +3383,28 @@ impl Shadow {
         let last = last_difference(gpu, held).unwrap_or(first);
         let (at, n) = (at + first, last + 1 - first);
         let (gpu, held) = (&gpu[first..=last], &mut held[first..=last]);
+        title.clear();
+        title.resize(n, 0);
+        let mapped = crate::host::read_into((start + at) as *const u8, title);
+        // If a coalesced multi-piece run spans a partly unmapped region, split
+        // it into 64 KiB chunks so mapped pieces still write back cleanly.
+        if !mapped && n > crate::watch::PAGE {
+            let mut written = 0;
+            let mut off = 0;
+            while off < n {
+                let chunk = (n - off).min(crate::watch::PAGE);
+                written += self.card_merge_relay_locked(
+                    card,
+                    start,
+                    at + off,
+                    &gpu[off..off + chunk],
+                    fetched_after,
+                    title,
+                );
+                off += chunk;
+            }
+            return written;
+        }
         let skip: Vec<(usize, usize)> = {
             let dirty = card.dirty.lock().unwrap_or_else(|e| e.into_inner());
             let sent = card.sent.lock().unwrap_or_else(|e| e.into_inner());
@@ -3381,9 +3415,6 @@ impl Shadow {
                 .filter(|&(a, b)| a < at + n && b > at)
                 .collect()
         };
-        title.clear();
-        title.resize(n, 0);
-        let mapped = crate::host::read_into((start + at) as *const u8, title);
         // The stretch as read: what the card did not change is the
         // title's, and may have been written again since.
         let as_read = (mapped && merge_race_on()).then(|| title.clone());

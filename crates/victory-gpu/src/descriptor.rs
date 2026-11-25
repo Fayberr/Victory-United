@@ -171,8 +171,8 @@ fn mirror(handle: u64) {
 /// empty) needs. 64 KiB a page, 4,096 of them at most (256 MB): a world
 /// frame's 300,000 to 485,000 records are 150 to 475 of those pages.
 #[cfg(windows)]
-fn seen_pages() -> &'static std::sync::Mutex<std::collections::HashMap<usize, Vec<u8>>> {
-    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, Vec<u8>>>> =
+fn seen_pages() -> &'static std::sync::Mutex<std::collections::HashMap<usize, (u64, Vec<u8>)>> {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, (u64, Vec<u8>)>>> =
         std::sync::OnceLock::new();
     SEEN.get_or_init(Default::default)
 }
@@ -207,6 +207,7 @@ pub(crate) fn sync_heaps() {
             continue;
         };
         let step = u64::from(step);
+        let cur_gen = host.copy_gen();
         // Capped host heaps have no counterparts for the title slots reserved
         // for per-draw tables; raw writes there must not be mirrored.
         let mirrored_count = heap.desc.count.min(host.count());
@@ -228,21 +229,21 @@ pub(crate) fn sync_heaps() {
                         let mut seen = seen_pages().lock().unwrap_or_else(|e| e.into_inner());
                         let held = seen.remove(&from);
                         let moved = match &held {
-                            Some(old) if old.as_slice() == page_bytes.as_slice() => {
+                            Some((old_gen, old)) if *old_gen == cur_gen && old.as_slice() == page_bytes.as_slice() => {
                                 seen.insert(from, held.unwrap_or_default());
                                 page += crate::watch::PAGE;
                                 continue;
                             }
-                            Some(old) => difference(old, &page_bytes).unwrap_or((0, page_bytes.len())),
+                            Some((_, old)) => difference(old, &page_bytes).unwrap_or((0, 0)),
                             None => (0, page_bytes.len()),
                         };
                         if seen.len() >= 4096 {
                             seen.clear();
                         }
-                        let mut store = held.unwrap_or_default();
+                        let mut store = held.map(|(_, b)| b).unwrap_or_default();
                         store.clear();
                         store.extend_from_slice(&page_bytes);
-                        seen.insert(from, store);
+                        seen.insert(from, (cur_gen, store));
                         moved
                     };
                     let mut slots = changed_slots(

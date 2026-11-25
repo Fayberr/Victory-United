@@ -30,6 +30,9 @@ pub(crate) struct HostHeap {
     /// records copied in as bytes last looked at it
     /// ([`HostHeap::mirror_copied`]; 0: never looked at). Made on first use.
     copied: Mutex<Vec<u64>>,
+    /// Bumped whenever [`forget_copied`] invalidates cached copied state so
+    /// [`crate::descriptor::sync_heaps`] re-checks slots on unchanged pages.
+    copy_gen: std::sync::atomic::AtomicU64,
     /// The host resource each slot views, held while the slot does: shaders
     /// index heaps directly, so a slot the title has not rewritten since it
     /// released the resource may still be read, and a freed host resource
@@ -1065,6 +1068,7 @@ impl HostHeap {
             sampler,
             made: Mutex::new(vec![0; count as usize]),
             copied: Mutex::new(Vec::new()),
+            copy_gen: std::sync::atomic::AtomicU64::new(0),
             kept: Mutex::new(vec![None; (count + extra) as usize]),
             next: Mutex::new((0, vec![false; DYNAMIC as usize])),
             free: std::sync::atomic::AtomicU32::new(DYNAMIC),
@@ -1597,7 +1601,12 @@ impl HostHeap {
     /// Clears the cached raw-copy fingerprint for `index` so a subsequent
     /// raw-byte copy back to an earlier record is not mistakenly skipped.
     /// Must never be called while holding `self.made`.
+    pub(crate) fn copy_gen(&self) -> u64 {
+        self.copy_gen.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn forget_copied(&self, index: u32) {
+        self.copy_gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(slot) = copied.get_mut(index as usize) {
             *slot = 0;
@@ -2138,8 +2147,7 @@ impl HostHeap {
         let mut self_changed = false;
         let result = {
             let mut made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-            let view = (tag == VIEW_TAG).then(|| view_at(i, generation)).flatten();
-            let Some(view) = view else {
+            let Some(view) = (tag == VIEW_TAG).then(|| view_at(i, generation)).flatten() else {
                 // Not a view of ours (never written, or of a resource the
                 // title released): nothing to read.
                 if made[index as usize] != 0 {
@@ -2151,6 +2159,10 @@ impl HostHeap {
                 } else if for_draw {
                     // Left for later and stale since: out of the sets and the stride table.
                     let _ = self.note_buffer(index, None, false);
+                }
+                drop(made);
+                if invalidate_copied && self_changed {
+                    self.forget_copied(index);
                 }
                 return None;
             };

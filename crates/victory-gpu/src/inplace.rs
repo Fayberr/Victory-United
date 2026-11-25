@@ -265,6 +265,68 @@ pub(crate) fn place(device: &ID3D12Device, heap: &ID3D12Heap, offset: u64, size:
 // census needs them to say which view memory is one run of a section (one
 // placed buffer could show it) and which is scattered pages.
 
+/// Addresses of views showing one 64 KiB physical page. Nearly every page is
+/// mapped in only one view, so store a single address inline with zero heap
+/// allocation and promote to a `BTreeSet` only when aliased.
+enum PageSet {
+    One(usize),
+    Many(std::collections::BTreeSet<usize>),
+}
+
+impl PageSet {
+    fn len(&self) -> usize {
+        match self {
+            Self::One(_) => 1,
+            Self::Many(set) => set.len(),
+        }
+    }
+
+    fn insert(&mut self, addr: usize) {
+        match self {
+            Self::One(only) if *only == addr => {}
+            Self::One(only) => {
+                let mut set = std::collections::BTreeSet::new();
+                set.insert(*only);
+                set.insert(addr);
+                *self = Self::Many(set);
+            }
+            Self::Many(set) => {
+                set.insert(addr);
+            }
+        }
+    }
+
+    fn remove(&mut self, addr: usize) -> bool {
+        match self {
+            Self::One(only) => *only == addr,
+            Self::Many(set) => {
+                set.remove(&addr);
+                if set.len() == 1 {
+                    let only = *set.iter().next().unwrap();
+                    *self = Self::One(only);
+                    false
+                } else {
+                    set.is_empty()
+                }
+            }
+        }
+    }
+
+    fn extend_into(&self, out: &mut Vec<usize>) {
+        match self {
+            Self::One(only) => out.push(*only),
+            Self::Many(set) => out.extend(set.iter().copied()),
+        }
+    }
+
+    fn to_vec(&self) -> Vec<usize> {
+        match self {
+            Self::One(only) => vec![*only],
+            Self::Many(set) => set.iter().copied().collect(),
+        }
+    }
+}
+
 struct Views {
     /// By address: bytes, the section's handle, the offset in it.
     views: BTreeMap<usize, (usize, usize, u64)>,
@@ -272,7 +334,7 @@ struct Views {
     /// page in every view that shows it. A write through one view of a
     /// page is a write of the bytes every other view shows
     /// (`crate::watch` guards them all).
-    pages: BTreeMap<(usize, u64), Vec<usize>>,
+    pages: BTreeMap<(usize, u64), PageSet>,
     /// Sections by handle: bytes, and whether made committed.
     sections: Vec<(usize, u64, bool)>,
 }
@@ -301,16 +363,26 @@ pub fn title_memory_view(at: usize, len: usize, section: usize, offset: u64) {
         v.views.insert(at, (len, section, offset));
         for k in 0..len.div_ceil(K64) {
             let page = at + k * K64;
-            let shown = v.pages.entry((section, offset + (k * K64) as u64)).or_default();
-            let before = shown.len();
-            if !shown.contains(&page) {
-                shown.push(page);
-            }
+            let key = (section, offset + (k * K64) as u64);
+            let before = match v.pages.get_mut(&key) {
+                Some(shown) => {
+                    let b = shown.len();
+                    shown.insert(page);
+                    b
+                }
+                None => {
+                    v.pages.insert(key, PageSet::One(page));
+                    0
+                }
+            };
             // Open every view of this page while it is tracked together
             // (<= MANY_VIEWS), and once more on the exact crossing to
             // MANY_VIEWS + 1 so previously guarded aliases are released.
-            if before > 0 && before <= crate::watch::MANY_VIEWS {
-                open.extend(shown.iter().copied());
+            if before > 0
+                && before <= crate::watch::MANY_VIEWS
+                && let Some(shown) = v.pages.get(&key)
+            {
+                shown.extend_into(&mut open);
             }
         }
     }
@@ -371,8 +443,7 @@ pub(crate) fn views_gone(at: usize, len: usize) -> Vec<(usize, usize)> {
                     was_many.insert(key);
                 }
                 let page = base + k * K64;
-                pages.retain(|&shown| shown != page);
-                if pages.is_empty() {
+                if pages.remove(page) {
                     v.pages.remove(&key);
                 }
             }
@@ -386,7 +457,7 @@ pub(crate) fn views_gone(at: usize, len: usize) -> Vec<(usize, usize)> {
         if let Some(shown) = v.pages.get(&key)
             && (2..=crate::watch::MANY_VIEWS).contains(&shown.len())
         {
-            reopen.extend(shown.iter().copied());
+            shown.extend_into(&mut reopen);
         }
     }
     page_runs(reopen)
@@ -421,7 +492,10 @@ pub(crate) fn pages_of(page: usize) -> Vec<usize> {
     if within >= bytes || !within.is_multiple_of(K64) {
         return Vec::new();
     }
-    v.pages.get(&(section, offset + within as u64)).cloned().unwrap_or_default()
+    v.pages
+        .get(&(section, offset + within as u64))
+        .map(PageSet::to_vec)
+        .unwrap_or_default()
 }
 
 /// Coalesces 64 KiB page addresses into contiguous `(address, bytes)` runs.

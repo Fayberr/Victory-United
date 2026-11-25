@@ -469,7 +469,7 @@ fn known_view(start: usize) -> bool {
     }
     let g = guards();
     let first = start / BLOCK;
-    g.protected.contains(&first) || g.absent.contains(&first) || (view_set() && covered(&g.views, first, first + 1))
+    !g.absent.contains(&first) && (g.protected.contains(&first) || (view_set() && covered(&g.views, first, first + 1)))
 }
 
 struct Guards {
@@ -543,6 +543,31 @@ fn add_range(ranges: &mut Vec<(usize, usize)>, first: usize, last: usize) {
         }
     }
     *ranges = joined;
+}
+
+/// Removes `[first, last)` from sorted, coalesced `ranges`.
+fn remove_range(ranges: &mut Vec<(usize, usize)>, first: usize, last: usize) {
+    if first >= last {
+        return;
+    }
+    let at = ranges.partition_point(|r| r.1 <= first);
+    if ranges.get(at).is_none_or(|r| r.0 >= last) {
+        return;
+    }
+    let mut next: Vec<(usize, usize)> = Vec::with_capacity(ranges.len() + 1);
+    for &(a, b) in ranges.iter() {
+        if b <= first || a >= last {
+            next.push((a, b));
+        } else {
+            if a < first {
+                next.push((a, first));
+            }
+            if b > last {
+                next.push((last, b));
+            }
+        }
+    }
+    *ranges = next;
 }
 
 /// Whether blocks `[first, last)` all lie in `ranges` (in order, joined).
@@ -720,11 +745,20 @@ fn guard(start: usize, end: usize) -> Option<Vec<usize>> {
     // asked Windows again, the walk to the region's end.
     let known = !*ASK.get_or_init(|| std::env::var_os("VICTORY_GUARD_ASK").is_some_and(|v| v == "1")) && {
         let g = guards();
-        g.protected.contains(&first) || g.absent.contains(&first) || (view_set() && covered(&g.views, first, last))
+        !g.absent.contains(&first) && (g.protected.contains(&first) || (view_set() && covered(&g.views, first, last)))
     };
     if !known {
         VIEW_STATS[3].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if !is_view(start, end) {
+            if view_set() {
+                let mut g = guards();
+                remove_range(&mut g.views, first, last);
+                for block in first..last {
+                    g.unclean.remove(&block);
+                    g.parked.remove(&block);
+                    g.parked_ordinary.remove(&block);
+                }
+            }
             return None;
         }
     }
@@ -836,9 +870,13 @@ fn guard_unclean(g: &mut Guards, first: usize, last: usize) -> Vec<usize> {
         written.extend(block * BLOCK / PAGE..(block + 1) * BLOCK / PAGE);
         if g.protected.contains(&block) {
             // Written through the runtime, or guarded with another view of
-            // its page: still read-only.
+            // its page: still read-only. That view may be one no copy checks:
+            // guarded again here, with the others.
             g.clean.insert(block);
             g.unclean.remove(&block);
+            if view_guard() {
+                protect_aliases(g, block);
+            }
             flush(g, &mut run);
             continue;
         }
@@ -1057,6 +1095,9 @@ fn open(g: &mut Guards, start: usize, end: usize) -> bool {
         for alias in crate::inplace::pages_of(block * BLOCK) {
             let alias = alias / BLOCK;
             if alias != block && g.protected.contains(&alias) && g.clean.remove(&alias) {
+                if covered(&g.views, alias, alias + 1) {
+                    g.unclean.insert(alias);
+                }
                 #[cfg(feature = "diagnostics")]
                 ALIASES[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
