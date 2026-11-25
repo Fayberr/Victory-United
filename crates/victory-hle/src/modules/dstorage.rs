@@ -687,11 +687,11 @@ impl Lane {
 }
 
 /// Staging bytes a request holds while it runs: what it buffers between
-/// the source and the destination. A memory source is borrowed, but
-/// combined zlib and BCPack decoding allocates an intermediate buffer.
+/// the source and the destination. File reads (compressed or raw bounce
+/// buffers) reserve source size; combined zlib and BCPack decoding also
+/// allocates an intermediate buffer.
 fn staging_bytes(request: &Request) -> u64 {
-    let buffered = request.options & (ZLIB | BCPACK | PAGE_DESTINATION) != 0;
-    let source = if buffered && request.options & MEMORY_SOURCE == 0 {
+    let source = if request.options & MEMORY_SOURCE == 0 {
         u64::from(request.source_size)
     } else {
         0
@@ -1589,12 +1589,12 @@ mod tests {
     }
 
     #[test]
-    fn staging_bounds_compressed_bytes_in_flight() {
+    fn staging_bounds_file_source_bytes_in_flight() {
         let mut l = lanes(100);
         l.lanes.insert(0, Lane::new(0, 64));
         read(&mut l, 0, ZLIB, 60);
         read(&mut l, 0, ZLIB, 60);
-        read(&mut l, 0, 0, 1000); // raw: straight to its destination
+        read(&mut l, 0, MEMORY_SOURCE, 1000); // borrowed, no input buffer
         l.submit(0);
         let first = l.start().unwrap();
         assert!(l.start().is_none(), "60 + 60 > 100");
@@ -1608,6 +1608,21 @@ mod tests {
         assert!(l.start().is_none());
         l.finish(&second, Ok(()));
         assert!(l.start().is_some());
+    }
+
+    #[test]
+    fn raw_file_bounce_buffers_share_the_staging_budget() {
+        let mut l = lanes(100);
+        l.lanes.insert(0, Lane::new(0, 64));
+        read(&mut l, 0, 0, 60);
+        read(&mut l, 0, ZLIB, 60);
+        l.submit(0);
+
+        let raw = l.start().unwrap();
+        assert_eq!(raw.staging, 60);
+        assert!(l.start().is_none(), "only 40 bytes of staging remain");
+        l.finish(&raw, Ok(()));
+        assert_eq!(l.start().unwrap().staging, 60);
     }
 
     fn check_combined_decode_staging(source_options: u64, expected_staging: u64) {
