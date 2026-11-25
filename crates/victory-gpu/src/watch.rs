@@ -2427,8 +2427,11 @@ mod wrote_tests {
             MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
         };
         const MEM_WRITE_WATCH: u32 = 0x0020_0000;
-        // SAFETY: private write-watched 64 KiB page owned by this test.
-        let p = unsafe {
+        // SAFETY: private write-watched 64 KiB pages owned by this test. The
+        // guard tests leave view blocks marked at addresses they have since
+        // freed, and an asking is not made into those: a page the guards
+        // still know is kept (so the next allocation differs) and not used.
+        let alloc = || unsafe {
             VirtualAlloc(
                 std::ptr::null(),
                 PAGE,
@@ -2436,6 +2439,12 @@ mod wrote_tests {
                 PAGE_READWRITE,
             )
         } as usize;
+        let mut skipped = Vec::new();
+        let mut p = alloc();
+        while p != 0 && super::known_view(p) && skipped.len() < 4096 {
+            skipped.push(p);
+            p = alloc();
+        }
         assert_ne!(p, 0);
 
         ask_once(&[(p, p + PAGE)]);
@@ -2454,8 +2463,12 @@ mod wrote_tests {
         });
         ask_once_end();
 
-        // SAFETY: freeing our private reservation.
+        // SAFETY: freeing our private reservations.
         unsafe { VirtualFree(p as *mut _, 0, MEM_RELEASE) };
+        for q in skipped {
+            // SAFETY: as above.
+            unsafe { VirtualFree(q as *mut _, 0, MEM_RELEASE) };
+        }
 
         assert_eq!(now, asked_now);
         let page = p / PAGE;
