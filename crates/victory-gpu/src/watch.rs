@@ -1671,13 +1671,6 @@ pub(crate) fn serial_with_guard_tests() -> std::sync::MutexGuard<'static, ()> {
     tests::lock_guards()
 }
 
-/// For tests: held by tests that use process-wide state (the view guards,
-/// the journal, the mapping lock) so that they run one at a time.
-#[cfg(test)]
-pub(crate) fn serialize_tests() -> std::sync::MutexGuard<'static, ()> {
-    tests::lock_guards()
-}
-
 /// For tests: whether the view guards and the journal know nothing of
 /// `[start, start + bytes)`. Other tests free memory they marked or noted
 /// written, and an address reused would answer from what they left.
@@ -2428,7 +2421,6 @@ mod mapping_tests {
     /// a read in place waits for a change of mapping.
     #[test]
     fn reads_in_place_and_remappings_wait_for_each_other() {
-        let _one = lock_guards();
         // Holds the mapping lock for a while: no other test that reads
         // title memory in place (the texture refreshes) runs meanwhile.
         let _one = lock_guards();
