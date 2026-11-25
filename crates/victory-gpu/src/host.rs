@@ -4836,13 +4836,23 @@ impl Host {
                         list.SetComputeRootUnorderedAccessView(2, before.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(3, work.differs.0.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(4, work.inline_buf.0.GetGPUVirtualAddress());
+                        let joins = rehash_runs();
                         let runs: Vec<crate::shadow::CardSpan> = if whole.iter().any(|s| Arc::ptr_eq(s, shadow)) {
                             vec![shadow.card_run(0, usize::MAX)]
                         } else {
-                            ranges.iter().map(|&(a, b)| shadow.card_run(a, b)).collect()
+                            // (In order: the next of the same piece, of the
+                            // tens of thousands there are, says nothing.)
+                            let mut runs: Vec<crate::shadow::CardSpan> = Vec::new();
+                            for run in ranges.iter().map(|&(a, b)| shadow.card_run(a, b)) {
+                                match runs.last_mut() {
+                                    Some(last) if joins && (last.first, last.pieces) == (run.first, run.pieces) => last.to = last.to.max(run.to),
+                                    _ => runs.push(run),
+                                }
+                            }
+                            runs
                         };
                         // The same pieces in fewer passes (`rehash_runs`).
-                        let runs = if rehash_runs() { crate::shadow::joined_piece_runs(runs) } else { runs };
+                        let runs = if joins { crate::shadow::joined_piece_runs(runs) } else { runs };
                         CARD_PASSES[0].fetch_add(runs.len() as u64, Ordering::Relaxed);
                         CARD_PASSES[1].fetch_add(runs.iter().map(|r| u64::from(r.pieces)).sum::<u64>(), Ordering::Relaxed);
                         for run in runs {

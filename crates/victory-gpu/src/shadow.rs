@@ -589,7 +589,9 @@ pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)
 
 /// Ranges in order, those that overlap or touch as one.
 fn joined(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
-    ranges.sort_unstable();
+    // (The sort that finds what is in order already: they come as a few
+    // stretches of tens of thousands in order, put behind one another.)
+    ranges.sort();
     let mut out: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
     for (from, to) in ranges {
         match out.last_mut() {
