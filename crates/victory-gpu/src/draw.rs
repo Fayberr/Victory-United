@@ -137,7 +137,26 @@ struct Window {
 }
 
 /// The most records clamped in one pass ([`windows`]).
-const WINDOW_MOST: u64 = 64;
+/// `VICTORY_INDIRECT_WINDOW_MOST` (16 to 65,536; 4,096 by default, which
+/// covers a whole argument buffer of mesh records in a few doubling passes).
+fn window_most() -> u64 {
+    static MOST: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *MOST.get_or_init(|| {
+        std::env::var("VICTORY_INDIRECT_WINDOW_MOST")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map_or(4096, |n| n.clamp(16, 65_536))
+    })
+}
+
+/// `VICTORY_CLAMP_LIGHT_RESTORE` (on by default, `=0` off): after a clamp
+/// pass before a draw, only the pipeline state the pass replaced is set
+/// again (the graphics root signature and its arguments are not touched by
+/// a compute pass), instead of forgetting what the host list has bound.
+fn light_restore() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_CLAMP_LIGHT_RESTORE").is_none_or(|v| v != "0"))
+}
 
 /// A window's first step after a walk is learned: the records clamped with
 /// the one that revealed it ([`serve`]).
@@ -270,7 +289,7 @@ pub(crate) fn serve(
 ///
 /// With the switch, when a draw asks for a record a short step after the
 /// one drawn before, the clamp takes that record and the ones that step
-/// apart after it (16, then twice as many each time, [`WINDOW_MOST`] at
+/// apart after it (16, then twice as many each time, [`window_most`] at
 /// most, never past the buffer) into
 /// the list's scratch buffer in one pass, and the draws that follow read
 /// their record there with no pass of ours and no barrier (the scratch
@@ -301,7 +320,60 @@ pub(crate) fn serve(
 /// before, at the next submission.
 fn windows() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("VICTORY_INDIRECT_WINDOW").is_some_and(|v| v == "1"))
+    *ON.get_or_init(|| std::env::var_os("VICTORY_INDIRECT_WINDOW").is_none_or(|v| v != "0"))
+}
+
+/// `VICTORY_INDIRECT_MERGE` (on by default, `=0` disables; needs [`windows`]):
+/// consecutive one-record indirect calls that read the next record of the
+/// same window, with the same pipeline, signature and bound state, are
+/// recorded as one `ExecuteIndirect` whose signature strides by the
+/// window's step and whose most commands is the run's length
+/// (`victory_core::batch`).
+pub(crate) fn merge() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        let asked = std::env::var_os("VICTORY_INDIRECT_MERGE").is_none_or(|v| v != "0");
+        let on = asked && windows();
+        if on {
+            tracing::info!("consecutive indirect calls on one window of records joined into one (VICTORY_INDIRECT_MERGE=1)");
+        } else if asked {
+            tracing::warn!("VICTORY_INDIRECT_MERGE=1 needs VICTORY_INDIRECT_WINDOW=1: not joined");
+        }
+        on
+    })
+}
+
+/// Indirect ops in, host `ExecuteIndirect` calls out, runs by length.
+static BATCH: victory_core::batch::Stats = victory_core::batch::Stats::new();
+
+/// Logs how indirect calls were joined since the last frame-rate line.
+pub(crate) fn batch_line(frames: f64) {
+    if !merge() || frames <= 0.0 {
+        return;
+    }
+    let (ops, calls, runs) = BATCH.take();
+    if ops == 0 {
+        return;
+    }
+    let by_len: String = victory_core::batch::BUCKET_NAMES
+        .iter()
+        .zip(runs)
+        .filter(|&(_, n)| n > 0)
+        .map(|(name, n)| format!("{name}: {:.0}", n as f64 / frames))
+        .collect::<Vec<_>>()
+        .join(", ");
+    tracing::info!(
+        "indirect calls joined per frame (VICTORY_INDIRECT_MERGE=1): {:.0} ops -> {:.0} host calls ({by_len})",
+        ops as f64 / frames,
+        calls as f64 / frames,
+    );
+}
+
+/// Indirect calls held back to be joined into one host call, and the scratch
+/// buffer they read.
+struct Held {
+    run: victory_core::batch::Run,
+    scratch: ID3D12Resource,
 }
 
 /// What one title list has set, and what its host list was last given.
@@ -337,6 +409,10 @@ pub(crate) struct State {
     /// The indirect records clamped last, if later draws may still read
     /// them ([`windows`]).
     window: Option<Window>,
+    /// Generation bumped by everything other than indirect calls ([`State::touched`]).
+    epoch: u64,
+    /// Consecutive indirect calls held back to be joined as one host call.
+    held: Option<Held>,
     /// What the host list has: pipeline, root signature, heaps.
     host_pipeline: usize,
     /// Graphics, compute.
@@ -497,13 +573,27 @@ pub(crate) static HEAP_TEXTURES_WAITING: AtomicU64 = AtomicU64::new(0);
 /// (`crate::resource::room`), for the memory line.
 pub(crate) static HEAP_TEXTURES_FULL: AtomicU64 = AtomicU64::new(0);
 
-/// Frames after a whole upload of a texture picked by index at which its
-/// memory is looked at again, each counted from the look before.
-const RECHECK_FRAMES: [u64; 5] = [4, 12, 40, 120, 400];
+/// Takes `more` from the time a run may spend bringing in a long queue of
+/// textures at more than the usual pace; whether some is left.
+/// `VICTORY_TEXTURE_GATE_S` sets it (0: none).
+fn catching_up(more: std::time::Duration) -> bool {
+    static SPENT: AtomicU64 = AtomicU64::new(0);
+    static TOTAL: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let total = *TOTAL.get_or_init(|| {
+        let seconds = std::env::var("VICTORY_TEXTURE_GATE_S")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(60);
+        seconds * 1000
+    });
+    let more = more.as_millis() as u64;
+    SPENT.fetch_add(more, Ordering::Relaxed) + more < total
+}
 
 /// Looks at uploaded textures picked by index that found the memory as it
-/// was, and that found it changed (uploaded again), since the start.
-pub(crate) static HEAP_TEXTURES_RECHECKED: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+/// was, that found it changed (uploaded again), since the start; and the
+/// slots that wait for such a look now.
+pub(crate) static HEAP_TEXTURES_RECHECKED: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
 /// Uploads of textures already on the card made while it had no room for
 /// new ones, since the start.
@@ -892,7 +982,11 @@ impl State {
         dword: u32,
         memory: Option<&crate::memory::Ready>,
     ) -> u32 {
-        use victory_shader::emit::{USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS};
+        use victory_shader::emit::{USER_GROUP_BASE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS};
+        // Set between the parts of a large dispatch (`group_base`).
+        if kind == USER_GROUP_BASE {
+            return 0;
+        }
         if kind == USER_MEMORY_BASE {
             return memory.map_or(0, |m| m.base);
         }
@@ -1536,39 +1630,109 @@ impl State {
         // materialized for this frame rather than nulled out at `Host::submit`.
         crate::descriptor::sync_heaps();
         // Per host heap: the host copy and range each slot's buffer view
-        // reads, kept from pass to pass. Only the slots written since the
-        // last pass are looked at again (83,000 slots a pass otherwise, 0.1 s
-        // at best); all of them every 16 passes, because a view of a
-        // released resource goes stale without a write, and a slot written
-        // before its memory had a host copy is only made then.
-        type Ranges = std::collections::HashMap<u32, (std::sync::Arc<crate::shadow::Shadow>, u64, u64)>;
-        static RANGES: std::sync::Mutex<Option<std::collections::HashMap<usize, (u64, Ranges)>>> =
+        // reads, partitioned into 64 buckets with per-bucket cached shadow
+        // spans so steady-state frames only inspect changed slots plus 1/64th
+        // of live slots (and skip unchanged slots without rebuilding spans
+        // across all 83,000 entries every frame).
+        type BucketMap = std::collections::HashMap<u32, (u64, std::sync::Arc<crate::shadow::Shadow>, u64, u64)>;
+        type SpanList = Vec<(std::sync::Arc<crate::shadow::Shadow>, u64, u64)>;
+        struct HeapBufferCache {
+            passes: u64,
+            buckets: [BucketMap; 64],
+            bucket_spans: [SpanList; 64],
+        }
+        impl HeapBufferCache {
+            fn new() -> Self {
+                Self {
+                    passes: 0,
+                    buckets: std::array::from_fn(|_| BucketMap::new()),
+                    bucket_spans: std::array::from_fn(|_| Vec::new()),
+                }
+            }
+            fn rebuild_bucket(&mut self, b: usize) {
+                let mut map: std::collections::HashMap<usize, (std::sync::Arc<crate::shadow::Shadow>, u64, u64)> =
+                    std::collections::HashMap::new();
+                for (_, shadow, from, to) in self.buckets[b].values() {
+                    let key = std::sync::Arc::as_ptr(shadow) as usize;
+                    let span = map.entry(key).or_insert_with(|| (shadow.clone(), *from, *to));
+                    span.1 = span.1.min(*from);
+                    span.2 = span.2.max(*to);
+                }
+                self.bucket_spans[b] = map.into_values().collect();
+            }
+        }
+        static RANGES: std::sync::Mutex<Option<std::collections::HashMap<usize, HeapBufferCache>>> =
             std::sync::Mutex::new(None);
         let mut kept = RANGES.lock().unwrap_or_else(|e| e.into_inner());
-        let (passes, ranges) = kept
+        let cache = kept
             .get_or_insert_with(Default::default)
             .entry(std::ptr::from_ref(host) as usize)
-            .or_insert_with(|| (0, Ranges::new()));
+            .or_insert_with(HeapBufferCache::new);
         let changed = host.buffer_changes();
-        let slots = if *passes % 16 == 0 {
-            ranges.clear();
-            host.buffer_slots()
+        let mut dirty_buckets: u64 = 0;
+        // `(index, force_refresh)`: changed slots always re-mirror; rolling
+        // slots use the fast unchanged check against their cached descriptor key.
+        let slots: Vec<(u32, bool)> = if cache.passes == 0 {
+            for b in 0..64 {
+                cache.buckets[b].clear();
+                cache.bucket_spans[b].clear();
+            }
+            dirty_buckets = u64::MAX;
+            host.buffer_slots().into_iter().map(|i| (i, true)).collect()
         } else {
-            changed
+            let bucket = (cache.passes & 63) as usize;
+            let mut batch: Vec<(u32, bool)> = Vec::with_capacity(changed.len() + 2048);
+            let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::with_capacity(changed.len());
+            for index in changed {
+                if seen.insert(index) {
+                    batch.push((index, true));
+                }
+            }
+            let rolling = host.buffer_slots_bucket(bucket as u32);
+            let live_bucket: std::collections::HashSet<u32> = rolling.iter().copied().collect();
+            let before_len = cache.buckets[bucket].len();
+            cache.buckets[bucket].retain(|index, _| live_bucket.contains(index));
+            if cache.buckets[bucket].len() != before_len {
+                dirty_buckets |= 1u64 << bucket;
+            }
+            for index in rolling {
+                if seen.insert(index) {
+                    batch.push((index, false));
+                }
+            }
+            batch
         };
-        *passes += 1;
+        cache.passes += 1;
         if let Some(why) = crate::descriptor::host::device_removed() {
             drop(kept);
             crate::host::fail(format_args!("host device lost before preparing buffer views: {why}"));
         }
         HEAP_PASS_PARTS[1].fetch_add(slots.len() as u64, Ordering::Relaxed);
-        for (n, &index) in slots.iter().enumerate() {
-            ranges.remove(&index);
+        for (n, &(index, force)) in slots.iter().enumerate() {
+            let b = (index & 63) as usize;
             let Some(handle) = heap.handle(index) else {
+                if cache.buckets[b].remove(&index).is_some() {
+                    dirty_buckets |= 1u64 << b;
+                }
                 continue;
             };
-            let Some(view) = host.mirror(index, handle, true) else {
-                continue;
+            let cached_key = if force {
+                0
+            } else {
+                cache.buckets[b]
+                    .get(&index)
+                    .filter(|(_, s, _, _)| !s.in_place())
+                    .map_or(0, |(k, _, _, _)| *k)
+            };
+            let (key, view) = match host.mirror_buffer(index, handle, cached_key) {
+                crate::descriptor::host::BufferMirror::Unchanged => continue,
+                crate::descriptor::host::BufferMirror::Empty => {
+                    if cache.buckets[b].remove(&index).is_some() {
+                        dirty_buckets |= 1u64 << b;
+                    }
+                    continue;
+                }
+                crate::descriptor::host::BufferMirror::Changed(key, view) => (key, view),
             };
             // Every 64 views while the device lives (a cheap query).
             if n % 64 == 63
@@ -1576,7 +1740,7 @@ impl State {
             {
                 let last: Vec<String> = slots[n - 63..=n]
                     .iter()
-                    .filter_map(|&i| crate::descriptor::view(heap.handle(i)?).map(|v| format!("{i}: {v:?}")))
+                    .filter_map(|&(i, _)| crate::descriptor::view(heap.handle(i)?).map(|v| format!("{i}: {v:?}")))
                     .map(|s| s.chars().take(200).collect())
                     .collect();
                 drop(kept);
@@ -1587,23 +1751,36 @@ impl State {
             // The copy the slot shows (`buffer_copy`), not the one the
             // view's range alone would find.
             let Some((shadow, address, len)) = crate::descriptor::host::buffer_copy(&view) else {
+                if cache.buckets[b].remove(&index).is_some() {
+                    dirty_buckets |= 1u64 << b;
+                }
                 continue;
             };
             #[cfg(feature = "diagnostics")]
             if host.shows(index, &shadow.buffer) == Some(false) {
                 HEAP_VIEWS_ELSEWHERE.fetch_add(1, Ordering::Relaxed);
             }
-            ranges.insert(index, (shadow, address, address + len));
+            cache.buckets[b].insert(index, (key, shadow, address, address + len));
+            dirty_buckets |= 1u64 << b;
         }
-        let views = ranges.len() as u32;
-        // Per host copy, the span its picked views cover.
+        let mut mask = dirty_buckets;
+        while mask != 0 {
+            let b = mask.trailing_zeros() as usize;
+            mask &= mask - 1;
+            cache.rebuild_bucket(b);
+        }
+        let views: u32 = cache.buckets.iter().map(|b| b.len() as u32).sum();
+        // Per host copy, the span its picked views cover (merged from 64
+        // pre-aggregated bucket span lists instead of scanning 83,000 slots).
         let mut spans: std::collections::HashMap<usize, (std::sync::Arc<crate::shadow::Shadow>, u64, u64)> =
             std::collections::HashMap::new();
-        for (shadow, from, to) in ranges.values() {
-            let key = std::sync::Arc::as_ptr(shadow) as usize;
-            let span = spans.entry(key).or_insert_with(|| (shadow.clone(), *from, *to));
-            span.1 = span.1.min(*from);
-            span.2 = span.2.max(*to);
+        for bucket_span in &cache.bucket_spans {
+            for (shadow, from, to) in bucket_span {
+                let key = std::sync::Arc::as_ptr(shadow) as usize;
+                let span = spans.entry(key).or_insert_with(|| (shadow.clone(), *from, *to));
+                span.1 = span.1.min(*from);
+                span.2 = span.2.max(*to);
+            }
         }
         drop(kept);
         let bytes: u64 = spans.values().map(|s| s.2 - s.1).sum();
@@ -1639,11 +1816,11 @@ impl State {
             }
             shadow.refresh(list, *from, to - from);
         }
+        HEAP_BUFFER_PASSES.fetch_add(1, Ordering::Relaxed);
+        HEAP_BUFFER_MICROS.fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
         let textures_began = std::time::Instant::now();
         self.heap_textures(list, heap, host);
         HEAP_PASS_PARTS[0].fetch_add(textures_began.elapsed().as_micros() as u64, Ordering::Relaxed);
-        HEAP_BUFFER_PASSES.fetch_add(1, Ordering::Relaxed);
-        HEAP_BUFFER_MICROS.fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
         static LOGGED: AtomicU64 = AtomicU64::new(0);
         // The first pass and every growth of the set by half.
         let seen = LOGGED.load(Ordering::Relaxed);
@@ -1886,6 +2063,13 @@ impl State {
         // Slots whose texture's memory the runtime mapped, unmapped or
         // wrote since the last pass are due again.
         host.texture_slots_remapped(frame);
+        host.texture_sweep(heap, frame);
+        if heap_recheck() {
+            let [same, changed, waiting] = host.texture_slots_rechecked(frame);
+            HEAP_TEXTURES_RECHECKED[0].fetch_add(same, Ordering::Relaxed);
+            HEAP_TEXTURES_RECHECKED[1].fetch_add(changed, Ordering::Relaxed);
+            HEAP_TEXTURES_RECHECKED[2].store(waiting, Ordering::Relaxed);
+        }
         // Levels on demand: the slots of textures whose first level with
         // memory changed since the last pass are made again from it.
         host.texture_views_remade();
@@ -1929,15 +2113,25 @@ impl State {
         // 1.6-2.2 s of each of the world's first twenty frames (run 20).
         // The rest waits for the next frames, as it does past the bytes.
         static SPAN_MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
-        let span = std::time::Duration::from_millis(*SPAN_MS.get_or_init(|| {
-            std::env::var("VICTORY_TEXTURE_STAGE_MS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(250)
+        let mut span = std::time::Duration::from_millis(*SPAN_MS.get_or_init(|| {
+            std::env::var("VICTORY_TEXTURE_STAGE_MS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(24)
         }));
-        // A backlog (a scene's first minutes: 22,000 slots due, 2-3 minutes of black
-        // surfaces at 192 MB a frame) gets three times the bytes and the time until it
-        // drains; `VICTORY_TEXTURE_CATCHUP=0` keeps the plain budget.
+        // A long queue (the world's first minutes) gets a bounded catch-up
+        // budget (`catching_up`, `VICTORY_TEXTURE_GATE_S`, 60 s) capped at
+        // 80 ms/pass so streaming never causes multi-second frame freezes.
+        // `VICTORY_TEXTURE_CATCHUP=0` keeps the plain budget.
+        const PER_FRAME_CATCHING_UP: u64 = 128 << 20;
+        const SPAN_CATCHING_UP: std::time::Duration = std::time::Duration::from_millis(80);
+        const LONG: u64 = 2_000;
         static CATCHUP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         let catchup = *CATCHUP.get_or_init(|| std::env::var_os("VICTORY_TEXTURE_CATCHUP").is_none_or(|v| v != "0"));
-        let (per_frame, span) = if catchup && due.len() >= 1024 { (per_frame * 3, span * 3) } else { (per_frame, span) };
+        let plain = span;
+        let per_frame = if catchup && census[0] > LONG && catching_up(std::time::Duration::ZERO) {
+            span = span.max(SPAN_CATCHING_UP);
+            per_frame.max(PER_FRAME_CATCHING_UP)
+        } else {
+            per_frame
+        };
         // A run made early (`State::early_textures`) has a budget of its
         // own: its bytes on top of what the frame has spent so far.
         // (Not `most`: that is the longest wait between looks, used below.)
@@ -1963,42 +2157,10 @@ impl State {
             // every 120 frames, changed or not; and asked by its first
             // page alone, one whose first page is the one missing counted
             // as not there.)
-            // A slot uploaded whole is looked at again a few times
-            // (`RECHECK_FRAMES`): the title writes a texture's view, and
-            // may fill the texture's memory itself only afterwards, with
-            // no descriptor write and nothing from the runtime to tell of
-            // it. The host copy then kept what the memory held at the
-            // first look for the rest of the run. The look reads 48 KiB;
-            // only a changed texture is uploaded again.
-            // `VICTORY_HEAP_RECHECK=0`: uploaded once, as before.
-            if let Some((at, len, print, looks, uploaded)) = host.texture_slot_checked(index) {
-                if crate::texture::fingerprint(at, len) == print {
-                    HEAP_TEXTURES_RECHECKED[0].fetch_add(1, Ordering::Relaxed);
-                    match RECHECK_FRAMES.get(usize::from(looks) + 1) {
-                        Some(wait) => {
-                            host.texture_slot_recheck(index, write, frame + wait, (at, len), print, looks + 1, uploaded)
-                        }
-                        None => host.texture_slot_done(index, write, None),
-                    }
-                    continue;
-                }
-                let n = HEAP_TEXTURES_RECHECKED[1].fetch_add(1, Ordering::Relaxed);
-                if n < 200 || n.is_multiple_of(1000) {
-                    tracing::warn!(
-                        slot = index,
-                        address = format_args!("{at:#x}"),
-                        bytes = len,
-                        frames_after_upload = frame.saturating_sub(uploaded),
-                        looks,
-                        changed = n + 1,
-                        "a texture picked by index changed after its upload with nothing to tell of it: uploaded again"
-                    );
-                }
-            }
             let mut partly = None;
             if let Some(View::Placed(false, resource, desc)) = heap.handle(index).and_then(crate::descriptor::view) {
                 let address = u64::from(desc[10]) | u64::from(desc[11]) << 32;
-                let len = crate::resource::placed_bytes(&resource).unwrap_or(1);
+                let len = crate::resource::placed_bytes_from(&resource, crate::resource::first_mip(&desc)).unwrap_or(1);
                 let mapped = crate::texture::mapped_bytes(address as *const u8, len as usize);
                 if mapped == 0 {
                     HEAP_TEXTURES_AWAY.fetch_add(1, Ordering::Relaxed);
@@ -2089,6 +2251,9 @@ impl State {
             // through a table: they upload it, and check it at every
             // submission that samples it.
             let tabled = crate::texture::is_staged(resource);
+            if tabled {
+                crate::texture::upload_again(resource);
+            }
             if let Some(view) = &view {
                 readable(list, sampled.kind, view);
             }
@@ -2139,15 +2304,13 @@ impl State {
             }
             HEAP_TEXTURE_BYTES.fetch_add(bytes, Ordering::Relaxed);
             HEAP_TEXTURES.fetch_add(1, Ordering::Relaxed);
-            match memory {
-                // Whole and uploaded: looked at again (see above).
-                Some((at, len)) => {
-                    let print = crate::texture::fingerprint(at, len);
-                    host.texture_slot_recheck(index, write, frame + RECHECK_FRAMES[0], (at, len), print, 0, frame);
-                }
-                None => host.texture_slot_done(index, write, again),
+            host.texture_slot_done(index, write, again);
+            // Whole and uploaded: looked at again (`texture_slots_rechecked`).
+            if let Some((at, len)) = memory {
+                host.texture_slot_recheck(index, frame, (at, len), crate::texture::fingerprint(at, len));
             }
         }
+        catching_up(began.elapsed().saturating_sub(plain));
     }
 
     /// For the frame listing, after a dropped dispatch's line: its group
@@ -2189,7 +2352,7 @@ impl State {
     /// Runs a dispatch on the host.
     pub(crate) fn dispatch(&mut self, list: &HostList, x: u32, y: u32, z: u32) {
         // It may write the arguments a window holds clamped.
-        self.window = None;
+        self.end_window(list);
         #[cfg(feature = "diagnostics")]
         if crate::pipeline::is_skipped(self.pipeline as This) {
             DROPPED.fetch_add(1, Ordering::Relaxed);
@@ -2230,9 +2393,40 @@ impl State {
         }
         #[cfg(feature = "diagnostics")]
         list.note_op(|| self.op_text(format!("dispatch {x}x{y}x{z}"), true));
-        // SAFETY: an open list with everything set.
-        unsafe { list.list.Dispatch(x, y, z) };
+        match group_base(p) {
+            Some((param, dword)) if x > crate::indirect::PART => {
+                // More than the host runs in one dimension: in parts.
+                // SAFETY: an open list with everything set; the parameter
+                // and dword are the pipeline's.
+                unsafe {
+                    let mut base = 0;
+                    while base < x {
+                        list.list.SetComputeRoot32BitConstant(param, base, dword);
+                        list.list.Dispatch((x - base).min(crate::indirect::PART), y, z);
+                        base += crate::indirect::PART;
+                    }
+                    list.list.SetComputeRoot32BitConstant(param, 0, dword);
+                }
+            }
+            // SAFETY: an open list with everything set.
+            _ => unsafe { list.list.Dispatch(x, y, z) },
+        }
+        self.note_writes(list);
         DISPATCHED.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// `VICTORY_BARRIER_MERGE`: marks unordered writes pending on `list` if
+    /// any stage of the currently bound pipeline can store to buffers or
+    /// textures (`Translated::writes`; unknown pipelines count as writing).
+    fn note_writes(&self, list: &HostList) {
+        if !crate::host::barrier_merge() {
+            return;
+        }
+        let writes = crate::pipeline::host_pipeline(self.pipeline as This)
+            .is_none_or(|p| p.stages.iter().any(|stage| stage.translated().writes));
+        if writes {
+            list.set_uav_pending(true);
+        }
     }
 
     /// What a draw or dispatch runs, for the device-removed report
@@ -2472,6 +2666,53 @@ impl State {
         )
     }
 
+    /// The title sets or records something other than an indirect call on
+    /// the list: indirect calls held back are recorded first, and later
+    /// ones are not joined to them ([`merge`]).
+    pub(crate) fn touched(&mut self, list: &HostList) {
+        self.epoch = self.epoch.wrapping_add(1);
+        self.flush_held(list);
+    }
+
+    /// Before closing or cutting a host list: flushes any held indirect run
+    /// and transitions an active window's scratch buffer back to `COMMON`.
+    pub(crate) fn finish_list(&mut self, list: &HostList) {
+        self.flush_held(list);
+        self.end_window(list);
+    }
+
+    /// Transitions the active window's scratch buffer back from
+    /// `INDIRECT_ARGUMENT` to `COMMON` and clears the window.
+    fn end_window(&mut self, list: &HostList) {
+        if let Some(w) = self.window.take() {
+            crate::indirect::done(list, &w.scratch);
+        }
+    }
+
+    /// Records the indirect calls held back as one host call.
+    fn flush_held(&mut self, list: &HostList) {
+        let Some(Held { run, scratch }) = self.held.take() else {
+            return;
+        };
+        const MESH: u32 = 10;
+        let (step, count, at) = run.call();
+        // Held only with a signature for the step (`execute_indirect`).
+        if let Some(signature) = host_signature(run.first.kind, step) {
+            // SAFETY: an open list with everything set when the run started
+            // and nothing recorded or set since; the scratch buffer is the
+            // list's and holds the window clamped in `INDIRECT_ARGUMENT`.
+            unsafe { list.list.ExecuteIndirect(&signature, count, &scratch, at, None, 0) };
+            BATCH.recorded(count);
+            self.note_writes(list);
+        }
+        if run.first.kind == MESH {
+            self.mesh_scissor(list, false);
+        }
+        if self.window.as_ref().is_none_or(|w| w.scratch != scratch) {
+            crate::indirect::done(list, &scratch);
+        }
+    }
+
     /// A mesh draw under `VICTORY_MESH_TEST=scissor` rasterises one pixel:
     /// the scissors before it (`on`), the title's after it.
     fn mesh_scissor(&self, list: &HostList, on: bool) {
@@ -2489,7 +2730,7 @@ impl State {
     /// Runs a mesh dispatch of `x` groups on the host (the title's mesh
     /// programs are one-dimensional).
     pub(crate) fn dispatch_mesh(&mut self, list: &HostList, x: u32) {
-        self.window = None;
+        self.end_window(list);
         #[cfg(feature = "diagnostics")]
         self.trace("mesh", x, 0);
         let ran = mesh_test() != 1
@@ -2502,6 +2743,7 @@ impl State {
                     self.mesh_scissor(list, true);
                     // SAFETY: an open list with everything set.
                     unsafe { l6.DispatchMesh(x, 1, 1) };
+                    self.note_writes(list);
                     self.mesh_scissor(list, false);
                     DRAWN.fetch_add(1, Ordering::Relaxed);
                     true
@@ -2879,7 +3121,7 @@ impl State {
         first: u32,
         first_instance: u32,
     ) {
-        self.window = None;
+        self.end_window(list);
         #[cfg(feature = "diagnostics")]
         self.trace("draw", vertices, first);
         let ready = self.prepare(list, false);
@@ -2901,6 +3143,7 @@ impl State {
                 list.list
                     .DrawInstanced(count, instances, from, first_instance)
             };
+            self.note_writes(list);
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         if !ran {
@@ -2983,7 +3226,7 @@ impl State {
         base: i32,
         first_instance: u32,
     ) {
-        self.window = None;
+        self.end_window(list);
         #[cfg(feature = "diagnostics")]
         self.trace("indexed", indices, first);
         // Indexed rectangles are drawn by the rectangle geometry stage
@@ -3001,6 +3244,7 @@ impl State {
                 list.list
                     .DrawIndexedInstanced(indices, instances, first, base, first_instance)
             };
+            self.note_writes(list);
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         if !ran {
@@ -3104,6 +3348,13 @@ impl State {
         // or may write the arguments.
         const WINDOW_USE: usize = usize::MAX - 0x77;
         let offset = args.offset(arguments);
+        // A dispatch that may have more groups than the host runs in one
+        // dimension, by a program that takes the number of its first group.
+        let parts = if kind == DISPATCH && max == 1 && count.is_none() {
+            group_base(p).zip(host_signature(DISPATCH, crate::indirect::PART_BYTES as u32))
+        } else {
+            None
+        };
         let windowed = windows()
             && kind != DISPATCH
             && max == 1
@@ -3111,8 +3362,37 @@ impl State {
             && !p.stages.iter().any(|stage| stage.translated().stores);
         // Another host list (a new one after a cut, or this one after its
         // reset) has another scratch buffer, or this one's with old bytes.
-        if !windowed || list.first_use(WINDOW_USE) {
+        if list.first_use(WINDOW_USE) {
             self.window = None;
+        } else if !windowed {
+            self.flush_held(list);
+            self.end_window(list);
+        }
+        // Joined to the calls held back, or those recorded first.
+        let joining = merge() && windowed && parts.is_none() && max == 1 && count.is_none();
+        let (pipeline, epoch) = (self.pipeline, self.epoch);
+        let this_call = |w: &Window| victory_core::batch::Call {
+            pipeline,
+            kind,
+            stride,
+            epoch,
+            copy: w.copy,
+            base: w.base,
+            step: w.step,
+            records: w.records,
+            offset,
+        };
+        if self.held.is_some() {
+            let next = self.window.as_ref().map(this_call);
+            let joined = joining
+                && next.is_some_and(|next| self.held.as_mut().is_some_and(|held| held.run.push(&next)));
+            if joined {
+                #[cfg(feature = "diagnostics")]
+                list.note_op(|| self.op_text(format!("indirect kind {kind} max {max} at {arguments:#x} (joined)"), false));
+                DRAWN.fetch_add(1, Ordering::Relaxed);
+                return true;
+            }
+            self.flush_held(list);
         }
         let same = |w: &Window| w.copy == args.id() && w.kind == kind && w.stride == stride;
         let previous = self
@@ -3132,7 +3412,7 @@ impl State {
             offset,
             args.left(arguments),
             previous,
-            WINDOW_MOST as u32,
+            window_most() as u32,
         );
         let (bounded, at) = match served {
             Serve::Held { at } => {
@@ -3161,6 +3441,9 @@ impl State {
                 (scratch, at)
             }
             Serve::Clamp { step, records } => {
+                // Transition the previous window's scratch buffer back to
+                // `COMMON` before the next clamp pass transitions it to `UAV`.
+                self.end_window(list);
                 args.refresh(list, arguments, len.max(u64::from(step) * u64::from(records)));
                 if let Some((s, at)) = &counter {
                     s.refresh(list, *at, 4);
@@ -3169,20 +3452,33 @@ impl State {
                 // own and copies clamped active records into a scratch
                 // buffer at offset 0.
                 let count_arg = counter.as_ref().map(|(s, at)| (&s.buffer, s.offset(*at)));
+                // Dedicated buffers (not placed over title memory that other
+                // buffers alias): the clamp may wait on them alone.
+                let own = !args.in_place() && counter.as_ref().is_none_or(|(s, _)| !s.in_place());
                 // More than the record asked for: a window clamped ahead,
                 // whose unfilled slots must not spend the list's budget.
-                let bounded = if windowed && records > 1 {
-                    crate::indirect::bound_ahead(list, (&args.buffer, offset), (kind, step, records))
+                let bounded = if parts.is_some() {
+                    crate::indirect::bound_split(list, (&args.buffer, offset), own)
+                } else if windowed && records > 1 {
+                    crate::indirect::bound_ahead(list, (&args.buffer, offset), (kind, step, records), own)
                 } else {
-                    crate::indirect::bound(list, (&args.buffer, offset), count_arg, (kind, step, records))
+                    crate::indirect::bound(list, (&args.buffer, offset), count_arg, (kind, step, records), own)
                 };
                 let Some(bounded) = bounded else {
-                    self.window = None;
                     why("not bounded (no clamp, or arguments not 4-byte aligned)");
                     return false;
                 };
-                self.host_pipeline = 0;
+                // The clamp pass replaced the pipeline state and compute root
+                // signature; a draw's graphics roots stay intact.
+                let before = self.host_pipeline;
                 self.host_roots[1] = 0;
+                self.host_pipeline = 0;
+                if light_restore() && kind != DISPATCH && before == p.pso.as_raw() as usize {
+                    // SAFETY: an open list and the pipeline the list had bound
+                    // before the clamp pass.
+                    unsafe { list.list.SetPipelineState(&p.pso) };
+                    self.host_pipeline = before;
+                }
                 self.window = windowed.then(|| Window {
                     copy: args.id(),
                     kind,
@@ -3202,6 +3498,9 @@ impl State {
             _ => false,
         };
         if !ran {
+            if self.window.as_ref().is_none_or(|w| w.scratch != bounded) {
+                crate::indirect::done(list, &bounded);
+            }
             why("prepare failed");
             return false;
         }
@@ -3212,20 +3511,50 @@ impl State {
         if kind == MESH {
             self.mesh_scissor(list, true);
         }
+        // A run that later calls may join: held back with the scratch
+        // buffer it reads.
+        if joining {
+            let run = self
+                .window
+                .as_ref()
+                .filter(|w| w.scratch == bounded)
+                .map(this_call)
+                .and_then(victory_core::batch::Run::start)
+                .filter(|r| r.call().2 == at && host_signature(kind, r.first.step).is_some());
+            if let Some(run) = run {
+                self.held = Some(Held { run, scratch: bounded });
+                DRAWN.fetch_add(1, Ordering::Relaxed);
+                return true;
+            }
+        }
         // SAFETY: an open list with everything set; the scratch buffer and
         // host copies are kept alive by the list, and the signature is cached.
         unsafe {
-            list.list.ExecuteIndirect(
-                &signature,
-                max,
-                &bounded,
-                at,
-                counter.as_ref().map(|(s, _)| &s.buffer),
-                counter.as_ref().map_or(0, |(s, at)| s.offset(*at)),
-            )
+            if let Some(((param, dword), signature)) = &parts {
+                for part in 0..crate::indirect::SPLIT {
+                    list.list.SetComputeRoot32BitConstant(*param, part * crate::indirect::PART, *dword);
+                    let at = u64::from(part) * crate::indirect::PART_BYTES;
+                    list.list.ExecuteIndirect(signature, 1, &bounded, at, None, 0);
+                }
+                list.list.SetComputeRoot32BitConstant(*param, 0, *dword);
+            } else {
+                list.list.ExecuteIndirect(
+                    &signature,
+                    max,
+                    &bounded,
+                    at,
+                    counter.as_ref().map(|(s, _)| &s.buffer),
+                    counter.as_ref().map_or(0, |(s, at)| s.offset(*at)),
+                )
+            }
         };
+        BATCH.recorded(1);
+        self.note_writes(list);
         if kind == MESH {
             self.mesh_scissor(list, false);
+        }
+        if self.window.as_ref().is_none_or(|w| w.scratch != bounded) {
+            crate::indirect::done(list, &bounded);
         }
         // The scratch buffer stays readable as arguments: the next draw of
         // the window reads it with no barrier, and the next clamp moves it
@@ -3237,6 +3566,17 @@ impl State {
         }
         true
     }
+}
+
+/// Where a compute pipeline's program takes the number of its first thread
+/// group (`victory_shader::emit::USER_GROUP_BASE`): the root parameter of
+/// its user data and the dword in it.
+fn group_base(p: &crate::pipeline::host::HostPipeline) -> Option<(u32, u32)> {
+    let stage = p.stages.first().filter(|_| p.compute)?;
+    let (param, _) = stage.user_data?;
+    let base = RootType::Other(victory_shader::emit::USER_GROUP_BASE);
+    let word = stage.translated().host.user_data.iter().find(|u| u.root == base)?;
+    Some((param, word.index))
 }
 
 /// The host command signature for one argument of `kind` with records
@@ -3348,7 +3688,12 @@ fn readable(list: &HostList, kind: ResourceType, view: &View) {
                 && let Some(t) = crate::resource::host_resource(*resource as This)
                 && crate::texture::title_written(t)
             {
-                crate::texture::upload(list, *resource as This, t);
+                // Of a texture the title placed, the mips the view shows.
+                let first = match (&placed, view) {
+                    (Some(_), View::Shader(_, Some(desc))) => crate::resource::first_mip(desc),
+                    _ => 0,
+                };
+                crate::texture::upload_from(list, *resource as This, t, first);
             }
             // A depth texture shaders also write: what they wrote, first.
             list.twin_use(*resource as This, false, false);
@@ -3635,13 +3980,13 @@ mod tests {
     //! before its test run, and the file was confirmed byte-identical to the
     //! pre-probe state afterwards.
 
-    use super::{LastWindow, Serve, STEP_MOST, WINDOW_FIRST, WINDOW_MOST, serve};
+    use super::{LastWindow, Serve, STEP_MOST, WINDOW_FIRST, serve};
 
     /// The mesh minimum, and the stride the title names: it draws one record
     /// a call, for which the stride means nothing.
     const STRIDE: u32 = 12;
-    /// The records one window may take (`WINDOW_MOST`).
-    const MOST: u32 = WINDOW_MOST as u32;
+    /// The records one window may take.
+    const MOST: u32 = 64;
     /// Where a run's first record is.
     const AT: u64 = 0x1000;
     /// Room in the copy for far more than any window.

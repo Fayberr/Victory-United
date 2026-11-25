@@ -34,8 +34,16 @@ mod indirect;
 #[cfg(windows)]
 mod inplace;
 pub mod list;
+#[cfg(windows)]
+mod memcopy;
+#[cfg(windows)]
+mod memory;
 pub mod object;
+#[cfg(windows)]
+mod over;
 pub mod pipeline;
+#[cfg(windows)]
+pub mod precompile;
 #[cfg(windows)]
 mod primitive;
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -44,6 +52,10 @@ pub mod query;
 pub mod queue;
 #[cfg(windows)]
 mod queue2;
+#[cfg(windows)]
+mod readback;
+#[cfg(windows)]
+mod rebar;
 pub mod resource;
 pub mod root;
 #[cfg(windows)]
@@ -52,8 +64,6 @@ mod census;
 mod sampler;
 #[cfg(windows)]
 pub mod shader_cache;
-#[cfg(windows)]
-mod memory;
 #[cfg(windows)]
 mod shadow;
 #[cfg(windows)]

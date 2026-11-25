@@ -42,12 +42,19 @@ pub(crate) fn sources(data: &[u8]) -> Vec<Source<'_>> {
     if sgd5::is_sgd5(data) {
         out.extend(sgd5::records(data).map(Source::Packed));
     }
-    let raw = memchr::memmem::find_iter(data, b"DXBC")
-        .filter(|&offset| Container::parse(&data[offset..]).is_ok())
-        .map(|offset| Source::Raw {
+    let raw = memchr::memmem::find_iter(data, b"DXBC").filter_map(|offset| {
+        let rest = &data[offset..];
+        Container::parse(rest).ok()?;
+        // `Container::parse` already validated that the total size at +0x18
+        // fits inside `rest`. Slicing to the exact container size keeps raw
+        // containers extracted from executables/DLLs byte-identical to what
+        // the title passes at pipeline creation (matching runtime cache keys).
+        let total = u32::from_le_bytes(rest[0x18..0x1c].try_into().ok()?) as usize;
+        Some(Source::Raw {
             offset,
-            data: &data[offset..],
-        });
+            data: &rest[..total],
+        })
+    });
     out.extend(raw);
     out
 }
@@ -224,4 +231,28 @@ fn format_instruction(i: &Instruction, wave64: bool) -> String {
         None => format!("<{:?} {:#x}>", i.encoding, i.opcode),
     };
     format!("    {:06x}: {:<44} {text}", i.offset, words.join(" "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_dxbc_source_slices_to_declared_container_size() {
+        // Minimal valid DXBC header with 0 parts (total_size = 0x20).
+        let mut blob = vec![0xAA; 16];
+        blob.extend_from_slice(b"DXBC");
+        blob.extend_from_slice(&[0u8; 16]); // digest
+        blob.extend_from_slice(&1u16.to_le_bytes()); // major
+        blob.extend_from_slice(&0u16.to_le_bytes()); // minor
+        blob.extend_from_slice(&0x20u32.to_le_bytes()); // total_size
+        blob.extend_from_slice(&0u32.to_le_bytes()); // part_count
+        blob.extend_from_slice(&[0xBB; 64]); // trailing non-container data
+
+        let found = sources(&blob);
+        assert_eq!(found.len(), 1);
+        let bytes = found[0].bytes().expect("raw container bytes");
+        assert_eq!(bytes.len(), 0x20);
+        assert_eq!(&bytes[..4], b"DXBC");
+    }
 }

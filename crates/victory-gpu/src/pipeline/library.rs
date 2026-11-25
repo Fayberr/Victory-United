@@ -514,10 +514,20 @@ pub(crate) fn pipeline(
     load: impl FnOnce(&ID3D12PipelineLibrary1, PCWSTR) -> windows::core::Result<ID3D12PipelineState>,
     create: impl FnOnce() -> windows::core::Result<ID3D12PipelineState>,
 ) -> windows::core::Result<ID3D12PipelineState> {
+    pipeline_with_status(name, load, create).map(|(pso, _)| pso)
+}
+
+/// Like [`pipeline`], also reporting whether the pipeline was loaded from the
+/// library (`true`) or freshly compiled and stored (`false`).
+pub(crate) fn pipeline_with_status(
+    name: &str,
+    load: impl FnOnce(&ID3D12PipelineLibrary1, PCWSTR) -> windows::core::Result<ID3D12PipelineState>,
+    create: impl FnOnce() -> windows::core::Result<ID3D12PipelineState>,
+) -> windows::core::Result<(ID3D12PipelineState, bool)> {
     let wide = HSTRING::from(name);
     let Some(library) = library() else {
         MADE.fetch_add(1, Ordering::Relaxed);
-        return create();
+        return create().map(|pso| (pso, false));
     };
     let began = std::time::Instant::now();
     let loaded = {
@@ -536,7 +546,7 @@ pub(crate) fn pipeline(
                 let label = LABEL.with(|l| l.borrow().clone());
                 format!("pipeline library: loaded {label} in {:.1} ms", began.elapsed().as_secs_f64() * 1e3)
             });
-            return Ok(pso);
+            return Ok((pso, true));
         }
         Err(e) => e,
     };
@@ -561,7 +571,7 @@ pub(crate) fn pipeline(
     if unsafe { library.library.StorePipeline(PCWSTR(wide.as_ptr()), &pso) }.is_ok() {
         library.added.fetch_add(1, Ordering::Relaxed);
     }
-    Ok(pso)
+    Ok((pso, false))
 }
 
 /// Writes the library and the early list if pipelines were added since the
@@ -586,21 +596,25 @@ pub(crate) fn save(now: bool) {
     // added: the library on disk is then what it was, and only the early
     // list is written (a title pipeline first drawn with wrote all 1,352 MB
     // of the library again: run 60's second save).
-    let bytes = {
+    let (bytes, write_early) = {
         let _all = one_call();
         // No store between asking the size and writing; loads go on.
         let _alone = library.saving.write().unwrap_or_else(|e| e.into_inner());
         let added = library.added.load(Ordering::Relaxed);
-        if !USED_CHANGED.swap(false, Ordering::Relaxed) && added == 0 {
+        let used_changed = USED_CHANGED.swap(false, Ordering::Relaxed);
+        if !used_changed && added == 0 {
             return;
         }
-        if added == 0 {
+        let bytes = if added == 0 {
             0
         } else {
             // SAFETY: a plain query.
             let size = unsafe { library.library.GetSerializedSize() };
             let _call = call("serialise", "the whole library");
             if let Err(e) = serialise(&library.library, &tmp, size) {
+                if used_changed {
+                    USED_CHANGED.store(true, Ordering::Relaxed);
+                }
                 tracing::warn!(error = %e, "host pipeline library not serialised");
                 let _ = std::fs::remove_file(&tmp);
                 return;
@@ -608,9 +622,9 @@ pub(crate) fn save(now: bool) {
             library.added.store(0, Ordering::Relaxed);
             SAVED.store(size as u64, Ordering::Relaxed);
             size
-        }
+        };
+        (bytes, used_changed)
     };
-    let used: Vec<String> = USED.lock().unwrap_or_else(|e| e.into_inner()).iter().flatten().cloned().collect();
     let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
     if bytes > 0 && library_written.is_ok() {
         // In place unless the system refused and the new one waits beside it.
@@ -626,12 +640,27 @@ pub(crate) fn save(now: bool) {
             )
         });
     }
-    let written = library_written
-        .and_then(|()| write_atomically(&dir.join(EARLY_FILE), used.join("\n").as_bytes()));
+    // Only rewrite `early-pipelines.txt` when this run actually recorded new
+    // used title pipelines; offline precompilation leaves `USED` untouched and
+    // must preserve any existing early list on disk.
+    let (early_count, written) = if write_early {
+        let used: Vec<String> = used().iter().flatten().cloned().collect();
+        let len = used.len();
+        let res = library_written
+            .and_then(|()| write_atomically(&dir.join(EARLY_FILE), used.join("\n").as_bytes()));
+        (len, res)
+    } else {
+        let len = USED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map_or(0, HashSet::len);
+        (len, library_written)
+    };
     match written {
         Ok(()) => tracing::info!(
             bytes,
-            early = used.len(),
+            early = early_count,
             made = MADE.load(Ordering::Relaxed),
             loaded = LOADED.load(Ordering::Relaxed),
             started_early = EARLY.load(Ordering::Relaxed),

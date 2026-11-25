@@ -126,6 +126,11 @@ pub(crate) struct Translated {
     /// Whether the shader's code can store to buffer memory ([`stores`]);
     /// true when its code is not known.
     pub(crate) stores: bool,
+    /// Whether the code can write anything through unordered access:
+    /// [`stores`], or an image store or atomic (a texture shaders write).
+    /// True when its code is not known. What `VICTORY_BARRIER_MERGE` asks
+    /// of an op before it counts it as unordered writes to wait for.
+    pub(crate) writes: bool,
 }
 
 #[cfg(windows)]
@@ -184,6 +189,7 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
     };
     let host = crate::shader_cache::host_shader(container)?;
     let stores = programs.is_empty() || programs.iter().any(stores);
+    let writes = stores || programs.iter().any(image_stores);
     let used = programs
         .into_iter()
         .find(|p| {
@@ -194,7 +200,21 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         })
         .map(|p| p.used)
         .unwrap_or_default();
-    Ok(Translated { host, used, stores })
+    Ok(Translated { host, used, stores, writes })
+}
+
+/// Whether a console program has an image store or atomic (it writes a
+/// texture through unordered access), or code that does not decode.
+#[cfg(windows)]
+fn image_stores(program: &victory_shader::NativeProgram) -> bool {
+    use victory_shader::gfx10::{Encoding, decode};
+    let Ok(code) = decode(&program.code) else {
+        return true;
+    };
+    code.iter().any(|i| {
+        matches!(i.encoding, Encoding::Mimg)
+            && i.name().is_none_or(|n| n.contains("store") || n.contains("atomic"))
+    })
 }
 
 /// The compute pipelines of the console's ray-tracing structure builder

@@ -100,6 +100,8 @@ mod own_bits;
 mod rect;
 mod sampler;
 mod shader;
+pub mod stand_in;
+pub mod exposure;
 mod threading;
 #[cfg(windows)]
 pub mod validator;
@@ -118,12 +120,12 @@ use crate::{ShaderError, io, ir, resource, structure};
 pub use bitcode::census;
 pub use link::{link_mesh, mesh_fits};
 pub use sampler::StaticSampler;
-pub use lower::set_host_max_wave;
+pub use lower::{host_max_wave, set_host_max_wave};
 pub use rect::rect_list_gs;
 pub use shader::{
     MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
     SLOT_STRIDES_COUNT, SLOT_VIEWS, SLOT_VIEWS_COUNT, SLOT_VIEWS_RECORD_BYTES, USER_DATA_SPACE,
-    USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
+    USER_GROUP_BASE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
     set_view_heap_limit, view_heap_limit,
 };
 
@@ -314,20 +316,25 @@ pub struct UserData {
 /// already translated came out changed (an extra evaluation in each), for
 /// the sake of 9 that did not translate.
 pub fn translate(container: &[u8]) -> Result<HostShader, ShaderError> {
-    match translate_plain(container) {
+    translate_code(container, None)
+}
+
+/// [`translate`] with `code` in place of the program's own when given.
+pub(crate) fn translate_code(container: &[u8], code: Option<Vec<u8>>) -> Result<HostShader, ShaderError> {
+    match translate_plain(container, code.as_deref()) {
         Err(ShaderError::Unsupported { what, .. }) if what == lower::FIRST_HALF => {
-            lower::with_first_half_pairs(|| translate_plain(container))
+            lower::with_first_half_pairs(|| translate_plain(container, code.as_deref()))
         }
         other => other,
     }
 }
 
-fn translate_plain(container: &[u8]) -> Result<HostShader, ShaderError> {
+fn translate_plain(container: &[u8], code: Option<&[u8]>) -> Result<HostShader, ShaderError> {
     let c = Container::parse(container)?;
     let dxil = c
         .part(FourCC::DXIL)
         .ok_or(ShaderError::Malformed("no DXIL part"))?;
-    let native = crate::native_programs(dxil.data)?
+    let mut native = crate::native_programs(dxil.data)?
         .into_iter()
         .find(|p| {
             matches!(
@@ -339,6 +346,9 @@ fn translate_plain(container: &[u8]) -> Result<HostShader, ShaderError> {
             offset: 0,
             what: "a container without a vertex, pixel, compute or mesh program",
         })?;
+    if let Some(code) = code {
+        native.code = code.to_vec();
+    }
     let p = crate::spill::build(&native)?;
     // Structurisation first: tracing per-lane descriptors needs it (its
     // failure is reported after the earlier stages').
@@ -1215,6 +1225,184 @@ mod tests {
         let sfi0 = host.part(FourCC::SFI0).unwrap().data;
         let features = u64::from_le_bytes(sfi0.try_into().unwrap());
         assert_ne!(features & 0x200, 0, "SFI0 {features:#x}: no StencilRef");
+    }
+
+    /// Triangle (0, 1, 2), each corner's 9-bit index in its 10-bit field.
+    const TRIANGLE: u32 = 1 << 10 | 2 << 20;
+    /// The edge flags of the three corners (bits 9, 19 and 29).
+    const EDGE_FLAGS: u32 = 1 << 9 | 1 << 19 | 1 << 29;
+    /// The culling bit.
+    const CULL: u32 = 1 << 31;
+
+    /// A one-wave (32-lane) triangle mesh program whose lanes all export
+    /// primitive `prim` and, as vertex `lane`, the position
+    /// (lane & 1 ? 3 : -1, lane & 2 ? 3 : -1, 0.5, 1): triangle (0, 1, 2)
+    /// covers the whole target.
+    fn triangle_mesh(prim: u32) -> Result<HostShader, ShaderError> {
+        let words = [
+            0xD765_0001u32, // v_mbcnt_lo_u32_b32 v1, -1, 0
+            0x0001_00C1,
+            0x3604_0281, // v_and_b32 v2, 1, v1
+            0x3606_0282, // v_and_b32 v3, 2, v1
+            0x7E04_0D02, // v_cvt_f32_u32 v2, v2
+            0x7E06_0D03, // v_cvt_f32_u32 v3, v3
+            0x1008_04F6, // v_mul_f32 v4, 4.0, v2
+            0x0608_08F3, // v_add_f32 v4, -1.0, v4
+            0x100A_06F4, // v_mul_f32 v5, 2.0, v3
+            0x060A_0AF3, // v_add_f32 v5, -1.0, v5
+            0x7E0C_02F0, // v_mov_b32 v6, 0.5
+            0x7E0E_02F2, // v_mov_b32 v7, 1.0
+            0x7E12_02FF, // v_mov_b32 v9, prim
+            prim,
+            0xF800_0941, // exp prim v9, off, off, off done
+            0x0000_0009,
+            0xF800_08CF, // exp pos0 v4, v5, v6, v7 done
+            0x0706_0504,
+            0xBF81_0000, // s_endpgm
+        ];
+        let native = NativeProgram {
+            stage: HwStage::Ms,
+            wave64: false,
+            vgprs: 10,
+            layout: vec![],
+            used: vec![],
+            io: StageIo::Ms(crate::native::MeshIo {
+                outputs: vec![],
+                clip_cntl: 0,
+                threads: 32,
+                max_vertices: 32,
+                max_primitives: 32,
+                topology: 2,
+                lds_bytes: 0,
+            }),
+            code: words.iter().flat_map(|w| w.to_le_bytes()).collect(),
+        };
+        let position = SigElement {
+            name: "SV_Position".into(),
+            index: 0,
+            kind: 3,
+            comp: 9,
+            interp: 0,
+            row: Some(0),
+            col: 0,
+            cols: 4,
+            usage: 0xF,
+            half: false,
+        };
+        let osg1 = container::signature(&[position], false);
+        let bytes = crate::dxbc::build(&[(FourCC::OSG1, &osg1)]);
+        let c = Container::parse(&bytes)?;
+        let p = ir::build(&native.patched_code(), native.wave64, native.vgprs)?;
+        let st = structure::structure(&p)?;
+        let res = resource::track(&p, &native.layout, native.stage, Some(&st))?;
+        let io = io::raise(&p, &native)?;
+        emit(&c, &native, &p, &st, &io, &res)
+    }
+
+    /// A primitive export's corners are 9-bit indices: the edge flag above
+    /// each (bits 9, 19, 29) is no part of it. Masking ten bits made a
+    /// flagged corner index 512 or more, past any mesh program's vertices
+    /// (the draw test below shows the triangle). Flagged, unflagged and
+    /// culled exports translate, and dxil.dll, where there is one, takes
+    /// each module.
+    #[test]
+    fn primitive_export_indices_drop_the_edge_flags() {
+        #[cfg(windows)]
+        let mut validator = super::validator::Validator::load(
+            super::validator::Validator::default_path().as_deref(),
+        )
+        .ok();
+        for prim in [
+            TRIANGLE,
+            TRIANGLE | EDGE_FLAGS,
+            TRIANGLE | EDGE_FLAGS | CULL,
+        ] {
+            let ms = triangle_mesh(prim).unwrap_or_else(|e| panic!("{prim:#x}: {e}"));
+            #[cfg(windows)]
+            if let Some(v) = validator.as_mut() {
+                v.validate(&mut ms.dxil.clone())
+                    .unwrap_or_else(|e| panic!("{prim:#x}: {e}"));
+            }
+        }
+    }
+
+    /// A triangle mesh program on the host GPU and on WARP (where they have
+    /// mesh shaders): triangle (0, 1, 2) covers the target with its corners'
+    /// edge flags set as without them; with the culling bit, nothing is lit.
+    #[test]
+    #[cfg(windows)]
+    fn edge_flagged_triangles_draw_as_unflagged_ones() {
+        use super::host::{Draw, Host, Root};
+        use windows::Win32::Graphics::Direct3D12::{
+            D3D12_FEATURE_D3D12_OPTIONS7, D3D12_FEATURE_DATA_D3D12_OPTIONS7,
+            D3D12_MESH_SHADER_TIER_NOT_SUPPORTED, D3D12_SHADER_VISIBILITY_MESH,
+        };
+        let _one = super::valu_tests::ONE_AT_A_TIME
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let ps = constant_color();
+        let mut ran = 0;
+        for (label, warp) in [("hardware", false), ("warp", true)] {
+            let Ok(host) = Host::new(warp) else {
+                eprintln!("no SM 6.6 {label} device; skipped");
+                continue;
+            };
+            let mut options = D3D12_FEATURE_DATA_D3D12_OPTIONS7::default();
+            // SAFETY: the query writes the structure of the given size.
+            let queried = unsafe {
+                host.device.CheckFeatureSupport(
+                    D3D12_FEATURE_D3D12_OPTIONS7,
+                    (&raw mut options).cast(),
+                    size_of_val(&options) as u32,
+                )
+            };
+            if queried.is_err() || options.MeshShaderTier == D3D12_MESH_SHADER_TIER_NOT_SUPPORTED {
+                eprintln!("no mesh shaders on the {label} device; skipped");
+                continue;
+            }
+            for (prim, culled) in [
+                (TRIANGLE, false),
+                (TRIANGLE | EDGE_FLAGS, false),
+                (TRIANGLE | EDGE_FLAGS | CULL, true),
+            ] {
+                let ms = triangle_mesh(prim).unwrap();
+                let root = host
+                    .root_signature_for(&[(&ms, D3D12_SHADER_VISIBILITY_MESH)])
+                    .unwrap();
+                let pso = host
+                    .mesh_pipeline_with(&root, &ms.dxil, &ps)
+                    .unwrap_or_else(|e| panic!("{label}: mesh pipeline: {e}"));
+                let texels = host
+                    .draw(
+                        &root,
+                        &pso,
+                        &Draw {
+                            roots: vec![(0, Root::Constants(vec![0]))],
+                            textures: &[],
+                            samplers: &[],
+                            vertices: &[],
+                            stride: 0,
+                            size: (16, 16),
+                            mesh_groups: 1,
+                        },
+                    )
+                    .unwrap_or_else(|e| panic!("{label}: draw: {e}"));
+                let lit = texels.iter().filter(|t| t[3] != 0.0).count();
+                if culled {
+                    assert_eq!(lit, 0, "{label}, {prim:#x}: a culled triangle lit texels");
+                    continue;
+                }
+                assert!(
+                    texels.iter().all(|t| *t == [1.0, 0.5, 0.25, 1.0]),
+                    "{label}, {prim:#x}: {lit} of 256 texels lit"
+                );
+            }
+            eprintln!("{label}: edge-flagged triangles drew");
+            ran += 1;
+        }
+        if ran == 0 {
+            eprintln!("no device with mesh shaders; skipped");
+        }
     }
 
     /// A wave64 compute program that writes only EXEC's high dword

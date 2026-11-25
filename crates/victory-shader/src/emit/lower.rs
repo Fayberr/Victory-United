@@ -747,6 +747,10 @@ thread_local! {
     static PAIRED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// See [`with_loose_lds`].
     static LDS_LOOSE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// While a stand-in is translated on this thread ([`super::stand_in`]):
+    /// the constant bit values written by every `image_store`.
+    pub(super) static STORE_PLAN: std::cell::RefCell<Option<super::stand_in::Plan>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Runs `f` with LDS reads and writes inside one lane-branch region accepted
@@ -869,7 +873,8 @@ pub(super) fn with_first_half_pairs<R>(translate: impl FnOnce() -> R) -> R {
     result
 }
 
-pub(super) fn host_max_wave() -> u32 {
+/// What [`set_host_max_wave`] was told (0: nothing).
+pub fn host_max_wave() -> u32 {
     #[cfg(test)]
     if let Some(lanes) = TEST_HOST_WAVE.get() {
         return lanes;
@@ -2423,7 +2428,15 @@ impl<'a> Lower<'a> {
                 return Val::I32(v);
             }
             Input::ThreadIdInGroup(c) => return self.thread_id(c),
-            Input::GroupId(c) => return self.compute_id("groupId.i32", 94, c),
+            Input::GroupId(c) => {
+                let id = self.compute_id("groupId.i32", 94, c);
+                if !self.one_dimensional() {
+                    return id;
+                }
+                let Val::I32(id) = id else { unreachable!() };
+                let base = self.host_word(RootType::Other(super::shader::USER_GROUP_BASE), 0, 0);
+                return Val::I32(self.s.m.bin(self.s.entry, Bin::Add, id, base));
+            }
             // Bits 0-5 the group's console waves, 6-11 this wave's index
             // among them (as Mesa reads `tg_size`).
             Input::GroupInfo => {
@@ -2502,6 +2515,16 @@ impl<'a> Lower<'a> {
             }
         };
         self.load_input(id, col)
+    }
+
+    /// Whether the program is a compute program that reads its group's
+    /// number in x alone, with room for a dword of the host's among its user data
+    /// (the host's root signature holds 64 dwords, views included).
+    fn one_dimensional(&self) -> bool {
+        const MOST: u32 = 20;
+        let reads = |c| self.x.io.inputs.iter().any(|i| i.1 == Input::GroupId(c));
+        let words = self.x.native.layout.iter().map(|e| u32::from(e.user_data) + e.sgprs).max().unwrap_or(0);
+        matches!(self.x.native.io, StageIo::Cs(_)) && reads(0) && !reads(1) && !reads(2) && words <= MOST && !crate::spill::is_spilled(self.x.native)
     }
 
     /// A component of a compute thread or group id, read in the entry block.
@@ -9544,7 +9567,23 @@ impl<'a> Lower<'a> {
                 return Err("image store data");
             };
             let mut vals = Vec::new();
+            let slot = match src {
+                Source::Loaded { load, first } => match &self.x.p.blocks[load.0].insts[load.1].fields {
+                    Fields::Smem { offset, .. } => Some(*offset as u32 / 4 + u32::from(*first)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let bits = STORE_PLAN.with(|p| p.borrow_mut().as_mut().map(|p| p.bits(slot)));
+            if let Some(bits) = bits {
+                // A stand-in ([`super::stand_in`]): the value in the
+                // output's own encoding.
+                vals = bits.map(|b| self.s.m.f32(b)).to_vec();
+            }
             for k in 0..4u8 {
+                if vals.len() == 4 {
+                    break;
+                }
                 // d16: two f16 channels per VGPR, low half first.
                 let r = if *d16 { k / 2 } else { k };
                 let v = inst.read(Reg::V(reg + r)).ok_or("image store data")?;
@@ -10874,8 +10913,11 @@ impl<'a> Lower<'a> {
         Ok(())
     }
 
-    /// Mesh: `exp prim` as the lane's primitive. Bit 31 culls it (all
-    /// indices 0: no area).
+    /// Mesh: `exp prim` as the lane's primitive. Each corner takes ten
+    /// bits: a 9-bit vertex index and, above it, its edge flag (bits 9, 19
+    /// and 29), which only the console's edge-flag rasterisation reads and
+    /// which is no part of the index. Bit 31 culls it (all indices 0: no
+    /// area).
     fn emit_indices(&mut self, e: &Export, guard: Option<V>) -> Result<(), Why> {
         let v = e.values[0].ok_or("a primitive export without its indices")?;
         let x = self.i32_of(v)?;
@@ -10908,7 +10950,7 @@ impl<'a> Lower<'a> {
         });
         let mut indices = [z; 3];
         for (k, slot) in indices.iter_mut().enumerate() {
-            let (shift, mask) = (self.s.m.i32(10 * k as u32), self.s.m.i32(0x3FF));
+            let (shift, mask) = (self.s.m.i32(10 * k as u32), self.s.m.i32(0x1FF));
             let i = self.s.m.bin(c, Bin::LShr, x, shift);
             let i = self.s.m.bin(c, Bin::And, i, mask);
             if let Some(n) = written {

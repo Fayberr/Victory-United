@@ -24,6 +24,48 @@ use windows::Win32::Graphics::Direct3D12::ID3D12Resource;
 use crate::host::{HostList, host};
 use crate::watch::PAGE;
 
+/// Per-page last copied write-watch sequence, tracking how many pages have
+/// never been copied whole (`uncopied == 0` enables the O(1)/O(|written|) fast
+/// path in [`Shadow::copy_stale`]).
+struct CopiedPages {
+    at: Vec<u64>,
+    uncopied: usize,
+}
+
+impl CopiedPages {
+    fn new(pages: usize) -> Self {
+        Self {
+            at: vec![0; pages],
+            uncopied: pages,
+        }
+    }
+
+    #[cfg(test)]
+    fn get(&self, index: usize) -> Option<u64> {
+        self.at.get(index).copied()
+    }
+
+    fn set(&mut self, index: usize, now: u64) {
+        if let Some(slot) = self.at.get_mut(index) {
+            if *slot == 0 && now != 0 {
+                self.uncopied -= 1;
+            } else if *slot != 0 && now == 0 {
+                self.uncopied += 1;
+            }
+            *slot = now;
+        }
+    }
+
+    fn all_copied(&self) -> bool {
+        self.uncopied == 0
+    }
+
+    #[cfg(any(test, feature = "diagnostics"))]
+    fn copied_count(&self) -> usize {
+        self.at.len() - self.uncopied
+    }
+}
+
 /// A title buffer's host copy.
 pub(crate) struct Shadow {
     pub(crate) buffer: ID3D12Resource,
@@ -34,7 +76,7 @@ pub(crate) struct Shadow {
     len: u64,
     /// Per page of title memory from `start`'s on: the write-watch asking
     /// after which it was last copied (0: never).
-    copied: Mutex<Vec<u64>>,
+    copied: Mutex<CopiedPages>,
     /// Whether the memory is write-watched: unknown, yes, no.
     watched: AtomicU8,
     /// Ranges shaders of a submission not yet copied back may be writing:
@@ -77,6 +119,8 @@ pub(crate) struct Shadow {
     /// and the bytes from the buffer's first byte to `start` (the heap
     /// begins on a 64 KiB line; a title buffer need not).
     place: Option<(windows::Win32::Graphics::Direct3D12::ID3D12Heap, u64)>,
+    /// Bytes reserved in `crate::rebar` (0 if not placed in GPU upload heap).
+    rebar: u64,
 }
 
 /// What a copy in the card's memory ([`cards`]) has beside the buffer
@@ -241,6 +285,22 @@ pub(crate) fn card_hash_bytes(size: u64) -> u64 {
     (size / PIECE as u64 + 2) * 16
 }
 
+/// Maximum share of VRAM budget (%) up to which card buffers may be allocated
+/// (`VICTORY_CARD_VRAM_PERCENT`, default 97 when [`card_room_kept_on`] keeps
+/// room for buffers else 92; clamped 50..=97). Kept higher than
+/// [`crate::resource::room_percent`] so hot compute/skinning buffers keep
+/// VRAM priority over streamed textures.
+fn card_vram_percent() -> u64 {
+    static PERCENT: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *PERCENT.get_or_init(|| {
+        let default = if card_room_kept_on() { 97 } else { 92 };
+        std::env::var("VICTORY_CARD_VRAM_PERCENT")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map_or(default, |p| p.clamp(50, 97))
+    })
+}
+
 /// A buffer of `size` bytes in the card's memory for a title buffer's
 /// copy, if the copy is to be there: [`cards`] is on, the size is within
 /// [`card_limits`] and below 1 GiB (the compare counts in 32 bits), and the
@@ -257,15 +317,11 @@ fn card_for(size: u64) -> Option<ID3D12Resource> {
     if !host.card_ready() {
         return None;
     }
-    // Only while the card has room: with this copy on it, a fifth of the
-    // budget the system gives us must still be free. Copies are made when
-    // the world loads, before the textures fill the card; the texture
-    // queue's own rule (`resource::room`: nine tenths of the budget) counts
-    // them, so the card's use stays where it was and the textures' share
-    // shrinks by the copies' bytes, at most `card_limits`' second number.
-    // (With `card_room_kept_on` the texture queue kept this copy's room
-    // free, and the copy may go up to the queue's own line.)
-    let hundredths = if card_room_kept_on() { 97 } else { 80 };
+    // Only while the card has room under `card_vram_percent()` (97% when
+    // `card_room_kept_on` reserves buffer headroom in the texture queue, else
+    // 92% by default): kept above textures so hot compute buffers like
+    // skinning stay in local VRAM instead of spilling onto PCIe.
+    let hundredths = card_vram_percent();
     if let Some([budget, used, ..]) = host.video_memory()
         && used + size > budget / 100 * hundredths
     {
@@ -303,7 +359,7 @@ fn card_for(size: u64) -> Option<ID3D12Resource> {
 }
 
 /// The most bytes of windows outside buffers whose copies go to the card's
-/// memory (`VICTORY_CARD_WINDOWS_MB`; 0, the default, none).
+/// memory (`VICTORY_CARD_WINDOWS_MB`; default 1536 MiB, `=0` disables).
 ///
 /// Windows are two thirds of the PC memory the card shares (run 104: 861
 /// windows, 3,552 MB of 5,400), and every draw that takes vertices, indices
@@ -315,15 +371,13 @@ fn card_for(size: u64) -> Option<ID3D12Resource> {
 /// unless a shader does declare a write to it one day.
 ///
 /// A window goes to the card while there is room under this number and
-/// while a fifth of the card's budget is free, as title buffers do
-/// (`card_for`): textures keep their room, and once they have filled the
-/// card later windows stay where they are. The CPU's side stays in the PC's
-/// memory, so the memory shared with the card does not shrink by this
-/// alone; what moves is what shaders read.
+/// while VRAM usage stays below 72% of budget, leaving textures (75%) and
+/// title buffers (`card_vram_percent`) their room. Tiny windows under
+/// 64 KiB stay in shared memory to avoid cluttering `CARDED`.
 fn window_card_most() -> u64 {
     static MOST: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
     *MOST.get_or_init(|| {
-        std::env::var("VICTORY_CARD_WINDOWS_MB").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(0) << 20
+        std::env::var("VICTORY_CARD_WINDOWS_MB").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(1536) << 20
     })
 }
 
@@ -334,7 +388,7 @@ static WINDOW_CARD_BYTES: AtomicU64 = AtomicU64::new(0);
 /// be there ([`window_card_most`]).
 fn window_card_for(size: u64) -> Option<ID3D12Resource> {
     let most = window_card_most();
-    if most == 0 || !cards() {
+    if most == 0 || !cards() || !((64 << 10)..(1 << 30)).contains(&size) {
         return None;
     }
     let host = host()?;
@@ -342,7 +396,7 @@ fn window_card_for(size: u64) -> Option<ID3D12Resource> {
         return None;
     }
     if let Some([budget, used, ..]) = host.video_memory()
-        && used + size > budget / 10 * 8
+        && used + size > budget / 100 * 72
     {
         return None;
     }
@@ -1180,6 +1234,9 @@ fn give_back(v: Vec<u8>) {
 }
 
 const NOT_WATCHED: u8 = 2;
+/// Physical-page view memory tracked by `watch::writes_guarded` (skips the
+/// failing `GetWriteWatch` kernel syscall on every refresh).
+const VIEW_GUARDED: u8 = 3;
 
 // Fixed-size equality compiles to two SIMD comparisons on Windows x64.
 // Only the first or last unequal chunk needs a byte-wise search.
@@ -2011,6 +2068,9 @@ impl Drop for Shadow {
         }
         LIVE[0].fetch_sub(1, Ordering::Relaxed);
         LIVE[1].fetch_sub(self.len, Ordering::Relaxed);
+        if self.rebar != 0 {
+            crate::rebar::released(self.rebar);
+        }
         if self.kept.get_mut().unwrap_or_else(|e| e.into_inner()).1 {
             KEPT_BYTES.fetch_sub(self.len, Ordering::Relaxed);
         }
@@ -2192,7 +2252,7 @@ pub(crate) fn window_use() -> [u64; 8] {
     let loose = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
     for s in loose.values() {
         let copied = s.copied.lock().unwrap_or_else(|e| e.into_inner());
-        let pages = copied.iter().filter(|&&at| at != 0).count() as u64;
+        let pages = copied.copied_count() as u64;
         out[0] += (pages * PAGE as u64).min(s.len);
         if crate::host::references(&s.buffer) > 1 {
             out[1] += 1;
@@ -2329,6 +2389,12 @@ impl Shadow {
         self.watched.load(Ordering::Relaxed) == NOT_WATCHED
     }
 
+    /// Whether the memory behind the copy is physical-page view memory tracked
+    /// by guards rather than `GetWriteWatch` (`ask_ahead` can skip it).
+    pub(crate) fn is_view_guarded(&self) -> bool {
+        self.watched.load(Ordering::Relaxed) == VIEW_GUARDED
+    }
+
     /// The copy's own number (see the field).
     pub(crate) fn id(&self) -> u64 {
         self.id
@@ -2337,6 +2403,12 @@ impl Shadow {
     /// Offset of a title address from the buffer's start.
     pub(crate) fn offset(&self, address: u64) -> u64 {
         address - self.start + self.place.as_ref().map_or(0, |place| place.1)
+    }
+
+    /// Whether the copy is placed over title memory in place (other
+    /// buffers may alias it).
+    pub(crate) fn in_place(&self) -> bool {
+        self.place.is_some()
     }
 
     /// Title memory `[start, start + len)` in place: `placed` is a buffer
@@ -2373,7 +2445,7 @@ impl Shadow {
             gpu,
             start,
             len,
-            copied: Mutex::new(vec![0; pages as usize]),
+            copied: Mutex::new(CopiedPages::new(pages as usize)),
             watched: AtomicU8::new(0),
             pending: Mutex::default(),
             flights: Mutex::default(),
@@ -2389,6 +2461,7 @@ impl Shadow {
             card: None,
             window: false,
             place: None,
+            rebar: 0,
         }
     }
 
@@ -2418,6 +2491,9 @@ impl Shadow {
             return;
         }
         let len = len.min(self.left(address));
+        if !crate::readback::copy_back(address, len) {
+            return;
+        }
         list.defer_gpu_write(self, address as usize, len as usize);
     }
 
@@ -2868,7 +2944,7 @@ impl Shadow {
         let base = start / PAGE;
         let copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
         busy.into_iter().any(|(a, e)| match crate::watch::asked(a, e) {
-            Some((_, written)) => !stale_pages_in(base, &copied, a, e, &written).is_empty(),
+            Some((_, written)) => !stale_pages_in(base, &copied.at, a, e, &written).is_empty(),
             None => true,
         })
     }
@@ -2923,7 +2999,7 @@ impl Shadow {
             };
             let stale: Vec<usize> = {
                 let copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-                stale_pages_in(base, &copied, a, e, &written)
+                stale_pages_in(base, &copied.at, a, e, &written)
             };
             for page in stale {
                 let (lo, hi) = ((page * PAGE).max(a), ((page + 1) * PAGE).min(e));
@@ -2987,9 +3063,7 @@ impl Shadow {
                 // only whole pages, and the page is looked at again.
                 if (page * PAGE).max(start) >= a && ((page + 1) * PAGE).min(end) <= e {
                     let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-                    if let Some(at) = copied.get_mut(page - base) {
-                        *at = now;
-                    }
+                    copied.set(page - base, now);
                 }
             }
         }
@@ -3040,9 +3114,18 @@ impl Shadow {
     /// [`Shadow::update`] of `[from, to)` (inside the buffer) where no
     /// shader writes.
     fn update_free(&self, from: usize, to: usize) -> usize {
-        if self.watched.load(Ordering::Relaxed) != NOT_WATCHED {
-            if let Some((now, written)) = crate::watch::writes(from, to, true) {
-                self.watched.store(1, Ordering::Relaxed);
+        let mode = self.watched.load(Ordering::Relaxed);
+        if mode != NOT_WATCHED {
+            let result = if mode == VIEW_GUARDED {
+                crate::watch::writes_guarded(from, to).map(|(now, w)| (now, w, true))
+            } else {
+                crate::watch::writes_kind(from, to, true)
+            };
+            if let Some((now, written, is_view)) = result {
+                let next = if is_view { VIEW_GUARDED } else { 1 };
+                if mode != next {
+                    self.watched.store(next, Ordering::Relaxed);
+                }
                 let copied = self.copy_stale(from, to, now, &written);
                 self.refresh_check(from, to);
                 #[cfg(feature = "diagnostics")]
@@ -3127,11 +3210,55 @@ impl Shadow {
     /// asking), whole pages within the buffer.
     fn copy_stale(&self, from: usize, to: usize, now: u64, written: &[(usize, u64)]) -> usize {
         let base = self.start as usize / PAGE;
+        let (start, end) = (self.start as usize, (self.start + self.len) as usize);
+        let first_page = from / PAGE;
+        let last = (to - 1) / PAGE;
         let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Fast path: once every page of the copy has been initialized at least
+        // once, skip untouched pages completely — O(1) when `written` is empty
+        // and O(|written|) otherwise (instead of O((to - from) / PAGE)).
+        if copied.all_copied() {
+            if written.is_empty() {
+                return 0;
+            }
+            let mut bytes = 0;
+            let mut run: Option<(usize, usize)> = None;
+            for &(page, write) in written {
+                if page < first_page || page > last {
+                    continue;
+                }
+                let at = copied.at[page - base];
+                if write <= at {
+                    continue;
+                }
+                if (page * PAGE).max(start) >= from && ((page + 1) * PAGE).min(end) <= to {
+                    copied.set(page - base, now);
+                }
+                match run {
+                    Some((_, run_end)) if page < run_end => {}
+                    Some((run_start, run_end)) if page == run_end => {
+                        run = Some((run_start, page + 1));
+                    }
+                    Some((run_start, run_end)) => {
+                        bytes += self.copy((run_start * PAGE).max(from), (run_end * PAGE).min(to));
+                        run = Some((page, page + 1));
+                    }
+                    None => run = Some((page, page + 1)),
+                }
+            }
+            if let Some((run_start, run_end)) = run {
+                bytes += self.copy((run_start * PAGE).max(from), (run_end * PAGE).min(to));
+            }
+            return bytes;
+        }
+
         let mut writes = written.iter().peekable();
         let (mut bytes, mut run) = (0, None);
-        let last = (to - 1) / PAGE;
-        for page in from / PAGE..=last {
+        for page in first_page..=last {
+            while writes.peek().is_some_and(|&&(p, _)| p < page) {
+                writes.next();
+            }
             let write = match writes.peek() {
                 Some(&&(p, w)) if p == page => {
                     writes.next();
@@ -3139,13 +3266,12 @@ impl Shadow {
                 }
                 _ => 0,
             };
-            let at = &mut copied[page - base];
-            if *at == 0 || write > *at {
+            let at = copied.at[page - base];
+            if at == 0 || write > at {
                 // A page only partly in the range is copied in part: it
                 // stays stale for the rest.
-                let (start, end) = (self.start as usize, (self.start + self.len) as usize);
                 if (page * PAGE).max(start) >= from && ((page + 1) * PAGE).min(end) <= to {
-                    *at = now;
+                    copied.set(page - base, now);
                 }
                 run.get_or_insert(page);
             } else if let Some(first) = run.take() {
@@ -3578,6 +3704,10 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
             entry.shadow = Some(Arc::new(Shadow::placed(placed, key.0, len, false)));
             return entry.shadow.clone();
         }
+        if !big && let Some(shadow) = rebar_copy(crate::rebar::Kind::Buffer, key.0, len, size, false) {
+            entry.shadow = Some(shadow);
+            return entry.shadow.clone();
+        }
         let (buffer, data) = host()?.shared_buffer(size)?;
         crate::host::name(&buffer, || format!("title buffer {:#x}+{len:#x}", key.0));
         // A big one, with `cards`: shaders get a buffer in the card's own
@@ -3626,6 +3756,31 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
         entry.shadow = Some(shadow);
     }
     entry.shadow.clone()
+}
+
+/// A host copy in CPU-visible card memory (`D3D12_HEAP_TYPE_GPU_UPLOAD`,
+/// `crate::rebar`), if enabled, supported and within budget.
+fn rebar_copy(kind: crate::rebar::Kind, start: u64, len: u64, size: u64, window: bool) -> Option<Arc<Shadow>> {
+    let cpu_read = crate::readback::tagged_in(start, len);
+    if !crate::rebar::reserve(kind, size, cpu_read) {
+        return None;
+    }
+    let Some((buffer, data)) = host()?.gpu_upload_buffer(size) else {
+        crate::rebar::released(size);
+        return None;
+    };
+    crate::host::name(&buffer, || {
+        format!(
+            "title {} {start:#x}+{len:#x} (rebar)",
+            if window { "memory" } else { "buffer" }
+        )
+    });
+    // SAFETY: a live buffer.
+    let gpu = unsafe { buffer.GetGPUVirtualAddress() };
+    let mut shadow = Shadow::new(buffer, data, gpu, start, len);
+    shadow.window = window;
+    shadow.rebar = size;
+    Some(Arc::new(shadow))
 }
 
 /// Titles also use memory outside any buffer object as GPU memory (
@@ -3796,6 +3951,11 @@ fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Sha
     // window is the title's own memory, with nothing to copy.
     if let Some(placed) = crate::inplace::place_for(start, len, true) {
         let shadow = Arc::new(Shadow::placed(placed, start, len, true));
+        note(&shadow);
+        map.insert((start, len), shadow.clone());
+        return Some(shadow);
+    }
+    if let Some(shadow) = rebar_copy(crate::rebar::Kind::Window, start, len, len, true) {
         note(&shadow);
         map.insert((start, len), shadow.clone());
         return Some(shadow);
@@ -4113,6 +4273,27 @@ mod card_merge_tests {
         // older card byte is taken for a shader's write.
         let before = land(7);
         assert_eq!(before[title_byte], content[title_byte]);
+    }
+
+    #[test]
+    fn copied_pages_tracks_uncopied_count_and_fast_path_condition() {
+        let mut pages = super::CopiedPages::new(4);
+        assert!(!pages.all_copied());
+        assert_eq!(pages.copied_count(), 0);
+        pages.set(0, 10);
+        pages.set(0, 20); // updating an already-copied page keeps count stable
+        assert_eq!(pages.copied_count(), 1);
+        assert!(!pages.all_copied());
+        pages.set(1, 10);
+        pages.set(2, 10);
+        pages.set(3, 10);
+        assert!(pages.all_copied());
+        assert_eq!(pages.copied_count(), 4);
+        assert_eq!(pages.get(2), Some(10));
+        assert_eq!(pages.get(4), None);
+        pages.set(1, 0);
+        assert!(!pages.all_copied());
+        assert_eq!(pages.copied_count(), 3);
     }
 }
 

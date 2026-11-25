@@ -36,6 +36,9 @@ fn host_gpu_failed(what: &str) -> ! {
     unreachable!("the process has ended")
 }
 
+#[cfg(windows)]
+pub use victory_gpu::precompile;
+
 /// The offline warm-up: see `victory_gpu::shader_cache::warm`.
 pub fn warm_shader(container: &[u8]) -> Result<bool, String> {
     #[cfg(windows)]
