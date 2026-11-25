@@ -370,6 +370,9 @@ pub(crate) fn walk_held(this: This) -> bool {
     true
 }
 
+#[cfg(windows)]
+pub(crate) use make::frame_drew;
+
 /// Whether the title's pipeline `this` is one of the structure builder's.
 #[cfg(windows)]
 pub(crate) fn is_builder(this: This) -> bool {

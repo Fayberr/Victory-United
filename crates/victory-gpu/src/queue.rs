@@ -1430,6 +1430,8 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         #[cfg(not(feature = "diagnostics"))]
         let _ = shown;
     }
+    #[cfg(windows)]
+    crate::pipeline::frame_drew(crate::draw::drawn());
     #[cfg(not(windows))]
     let _ = (planes, plane_parameters);
     S_OK
