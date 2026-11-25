@@ -1153,6 +1153,7 @@ extern "system" fn present(
         if crate::capture::listed(frame) {
             before_sync();
             crate::capture::dump_targets(frame);
+            crate::capture::dump_args(frame);
         }
     }
     #[cfg(all(windows, feature = "diagnostics"))]
