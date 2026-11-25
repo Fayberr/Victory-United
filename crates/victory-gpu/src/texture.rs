@@ -2026,6 +2026,10 @@ mod title_memory_tests {
     fn on_demand_skipped_detile_preserves_none_and_updates_judged() {
         use std::sync::atomic::Ordering::Relaxed;
         use windows_sys::Win32::System::Memory::*;
+        // The refresh reads title memory in place only while no guard test
+        // changes the mapping (it would read through the kernel instead and
+        // judge nothing); the guard tests hold this while they do.
+        let _serial = crate::watch::serial_with_guard_tests();
         let Some(host) = crate::host::host() else {
             return;
         };

@@ -1663,6 +1663,14 @@ fn writable(at: usize) -> bool {
     n != 0 && info.State == MEM_COMMIT && info.Protect == PAGE_READWRITE
 }
 
+/// For tests outside this file that read title memory in place or depend
+/// on its mapping staying put: held, no guard test changes the mapping (they
+/// hold the same lock while they do).
+#[cfg(test)]
+pub(crate) fn serial_with_guard_tests() -> std::sync::MutexGuard<'static, ()> {
+    tests::lock_guards()
+}
+
 /// For tests: whether the view guards and the journal know nothing of
 /// `[start, start + bytes)`. Other tests free memory they marked or noted
 /// written, and an address reused would answer from what they left.
