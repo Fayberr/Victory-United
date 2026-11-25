@@ -419,6 +419,84 @@ struct Job {
 // SAFETY: as for `Lane`.
 unsafe impl Send for Job {}
 
+/// How many storage workers run at once. The pool reads, inflates and unpacks
+/// in parallel, so the useful count is the PC's **physical** cores: logical
+/// processors count SMT twins, which add little to a pool that already
+/// oversubscribes the cores the submitting thread and the copies need. One
+/// 8-core/16-thread laptop ran 16 workers and had the submitting thread
+/// waiting behind them; 8 measured `copying back` at 2.4-3.5 ms/MB against
+/// 5.7 ms/MB with 16. `VICTORY_DSTORAGE_WORKERS` sets the count outright.
+fn worker_count() -> usize {
+    static COUNT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *COUNT.get_or_init(|| {
+        if let Some(n) = std::env::var("VICTORY_DSTORAGE_WORKERS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|n| (1..=64).contains(n))
+        {
+            return n;
+        }
+        let logical = std::thread::available_parallelism().map_or(4, |n| n.get());
+        physical_cores().unwrap_or(logical).min(logical).clamp(1, 32)
+    })
+}
+
+/// The PC's physical cores, if the system will say so (`RelationProcessorCore`
+/// returns one record per core, whatever its SMT twins are).
+#[cfg(windows)]
+fn physical_cores() -> Option<usize> {
+    use windows_sys::Win32::System::SystemInformation::{
+        GetLogicalProcessorInformationEx, RelationProcessorCore,
+        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+    };
+    let mut len: u32 = 0;
+    // SAFETY: a null buffer asks for the size; the call fails with
+    // ERROR_INSUFFICIENT_BUFFER and fills `len`.
+    unsafe {
+        GetLogicalProcessorInformationEx(RelationProcessorCore, std::ptr::null_mut(), &mut len)
+    };
+    if len == 0 {
+        return None;
+    }
+    let mut buf = vec![0u64; (len as usize).div_ceil(size_of::<u64>())];
+    // SAFETY: the buffer is aligned and large enough for the requested bytes.
+    let ok = unsafe {
+        GetLogicalProcessorInformationEx(
+            RelationProcessorCore,
+            buf.as_mut_ptr().cast::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(),
+            &mut len,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    // SAFETY: the initialized buffer contains at least `len` bytes, and the
+    // successful call returned the number of bytes it filled.
+    let records = unsafe { std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), len as usize) };
+    count_core_records(records)
+}
+
+#[cfg(windows)]
+fn count_core_records(mut records: &[u8]) -> Option<usize> {
+    // The Win32 header is a four-byte Relationship followed by a four-byte Size.
+    const HEADER_SIZE: usize = 8;
+    let mut cores = 0usize;
+    while !records.is_empty() {
+        let size = u32::from_le_bytes(records.get(4..HEADER_SIZE)?.try_into().ok()?) as usize;
+        if size < HEADER_SIZE {
+            return None;
+        }
+        records = records.get(size..)?;
+        cores += 1;
+    }
+    (cores > 0).then_some(cores)
+}
+
+#[cfg(not(windows))]
+fn physical_cores() -> Option<usize> {
+    None
+}
+
 /// The scheduler, with its workers started on first use; `None` if not
 /// even one worker could start.
 fn scheduler() -> Option<&'static Scheduler> {
@@ -448,7 +526,7 @@ fn scheduler() -> Option<&'static Scheduler> {
         })
         .as_ref()?;
     STARTED.call_once(|| {
-        let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let workers = worker_count();
         let started = (0..workers)
             .filter(|i| {
                 std::thread::Builder::new()
@@ -1407,6 +1485,16 @@ mod tests {
 
     use super::*;
     use crate::modules::xgameruntime::method;
+
+    #[test]
+    fn counts_processor_core_records_using_the_size_field() {
+        let mut records = [0u8; 40];
+        records[4..8].copy_from_slice(&16u32.to_le_bytes());
+        records[20..24].copy_from_slice(&24u32.to_le_bytes());
+        assert_eq!(count_core_records(&records), Some(2));
+        assert_eq!(count_core_records(&records[..39]), None);
+        assert_eq!(count_core_records(&records[24..]), None);
+    }
 
     fn call<F: Copy>(object: *mut c_void, slot: usize) -> F {
         // SAFETY: every object here starts with the runtime header.
