@@ -139,6 +139,124 @@ struct Window {
 /// The most records clamped in one pass ([`windows`]).
 const WINDOW_MOST: u64 = 64;
 
+/// A window's first step after a walk is learned: the records clamped with
+/// the one that revealed it ([`serve`]).
+const WINDOW_FIRST: u32 = 16;
+
+/// The widest walk that is still the title stepping through an array of
+/// records, in bytes ([`serve`]).
+const STEP_MOST: u64 = 256;
+
+/// The window the last clamp opened, as [`serve`] sees it: numbers only.
+/// The scratch buffer stays the caller's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LastWindow {
+    /// Where the window's first record is in its host copy.
+    pub(crate) base: u64,
+    /// Bytes from one record to the next in the window; never 0 in a window
+    /// a clamp stored, since the clamp refuses a stride of 0.
+    pub(crate) step: u32,
+    /// Records in the window; at least 1.
+    pub(crate) records: u32,
+}
+
+/// What a windowed indirect call does with its record ([`serve`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Serve {
+    /// The window already holds this record, clamped, at this byte offset
+    /// in its scratch buffer: execute it and clamp nothing.
+    Held { at: u64 },
+    /// Clamp `records` (`>= 1`) records `step` bytes apart, starting at
+    /// this one.
+    Clamp { step: u32, records: u32 },
+}
+
+/// What one windowed indirect call does with its record ([`windows`]).
+///
+/// `windows` learns the step the title walks its records by, because a
+/// title that draws one record per call names a stride that means nothing
+/// for the walk (12 bytes named, 32 walked: run 87). This decides, from
+/// numbers alone, whether the record is already clamped in the window and,
+/// if not, how many records to clamp and how far apart — the part of
+/// `State::execute_indirect` that needs no device.
+///
+/// `declared_records` is what the call asked for. A call asking for more
+/// than one record is clamped as it asked, with no window: `windows` takes
+/// single-record calls only, and the caller passes `previous` only then. A
+/// count of 0 is passed through unchanged, as it always was.
+///
+/// The caller passes `previous` only for the window of the same host copy,
+/// the same record kind and the same declared stride. Any other window is
+/// `None`: its records sit at other offsets in another buffer.
+///
+/// Rules, in order:
+/// 1. `Held` iff `previous` is `Some(w)` with `w.step != 0`, `offset >=
+///    w.base`, `(offset - w.base) % w.step == 0` and `(offset - w.base) /
+///    w.step < w.records`. A step of 0 holds nothing: it is not a walk, and
+///    dividing by it would panic.
+/// 2. Otherwise the walk from the window's last record is the candidate
+///    step: `last = w.base + (w.records - 1) * w.step` (saturating),
+///    `walk = offset - last` (saturating). It is a walk iff `walk != 0`,
+///    `walk >= declared_stride`, `walk % 4 == 0`, `walk <= STEP_MOST`, and
+///    either `w.records == 1` or `walk == w.step`. Then `step = walk`,
+///    `fit = (left / walk).min(most)`, and `records = (if w.records == 1 {
+///    WINDOW_FIRST } else { w.records * 2 }).min(fit).max(1)`.
+/// 3. Otherwise `Clamp { step: declared_stride, records: declared_records }`.
+///
+/// Total on every input: no panic, no division by zero, no overflow.
+/// `left == 0`, a walk wider than `left`, and `most == 0` all end at one
+/// record, because the count is floored at one after the cap is applied —
+/// the cap needs no guard of its own.
+///
+/// `declared_stride == 0`: with no window, or with no walk from one, the
+/// result is `Clamp { step: 0, records: declared_records }`, which `bound`
+/// refuses rather than guessing a step. With a window it follows rule 2,
+/// where `walk >= declared_stride` holds for any walk; the walk still has
+/// to be non-zero, a multiple of 4, and no wider than [`STEP_MOST`].
+pub(crate) fn serve(
+    declared_stride: u32,
+    declared_records: u32,
+    offset: u64,
+    left: u64,
+    previous: Option<LastWindow>,
+    most: u32,
+) -> Serve {
+    if let Some(w) = previous {
+        let step = u64::from(w.step);
+        if w.step != 0 && offset >= w.base {
+            let at = offset - w.base;
+            if at.is_multiple_of(step) && at / step < u64::from(w.records) {
+                return Serve::Held { at };
+            }
+        }
+        let last = w
+            .base
+            .saturating_add(u64::from(w.records.saturating_sub(1)).saturating_mul(step));
+        let walk = offset.saturating_sub(last);
+        let walks = walk != 0
+            && walk >= u64::from(declared_stride)
+            && walk.is_multiple_of(4)
+            && walk <= STEP_MOST
+            && (w.records == 1 || walk == step);
+        if walks {
+            let fit = (left / walk).min(u64::from(most)) as u32;
+            let want = if w.records == 1 {
+                WINDOW_FIRST
+            } else {
+                w.records.saturating_mul(2)
+            };
+            return Serve::Clamp {
+                step: walk as u32,
+                records: want.min(fit).max(1),
+            };
+        }
+    }
+    Serve::Clamp {
+        step: declared_stride,
+        records: declared_records,
+    }
+}
+
 /// Whether indirect draws that read record after record of one argument
 /// buffer are clamped a window at a time (`VICTORY_INDIRECT_WINDOW=1`; off
 /// by default).
@@ -3007,14 +3125,35 @@ impl State {
             self.window = None;
         }
         let same = |w: &Window| w.copy == args.id() && w.kind == kind && w.stride == stride;
-        let hit = self
+        let previous = self
             .window
             .as_ref()
-            .filter(|w| same(w) && offset >= w.base)
-            .filter(|w| (offset - w.base) % u64::from(w.step) == 0 && (offset - w.base) / u64::from(w.step) < u64::from(w.records))
-            .map(|w| (w.scratch.clone(), offset - w.base, w.step));
-        let (bounded, at) = match hit {
-            Some((scratch, at, step)) => {
+            .filter(|w| same(w))
+            .map(|w| LastWindow {
+                base: w.base,
+                step: w.step,
+                records: w.records,
+            });
+        // Not windowed: `self.window` was cleared above, so `previous` is
+        // `None` and the ask is clamped as it stands, every record of it.
+        let served = serve(
+            stride,
+            max,
+            offset,
+            args.left(arguments),
+            previous,
+            WINDOW_MOST as u32,
+        );
+        let (bounded, at) = match served {
+            Serve::Held { at } => {
+                // `serve` says `Held` only for a record of the window
+                // `previous` came from, and nothing has cleared it since.
+                let window = self
+                    .window
+                    .as_ref()
+                    .expect("a window holds the record it served");
+                let scratch = window.scratch.clone();
+                let step = window.step;
                 // Diagnostics of windows: the record clamped again and
                 // compared (`crate::indirect::window_check`).
                 if crate::indirect::window_check()
@@ -3031,28 +3170,7 @@ impl State {
                 }
                 (scratch, at)
             }
-            None => {
-                // A record a short step after the last window's last one
-                // (the same step as that window's, if it had one): the
-                // title walks the buffer, so the ones that step apart
-                // after it are clamped with it.
-                let (step, records) = match &self.window {
-                    Some(w) if windowed && same(w) => {
-                        let last = w.base + u64::from(w.records - 1) * u64::from(w.step);
-                        let step = offset.saturating_sub(last);
-                        let walks = step >= u64::from(stride)
-                            && step <= 256
-                            && step % 4 == 0
-                            && (w.records == 1 || step == u64::from(w.step));
-                        if walks {
-                            let fit = (args.left(arguments) / step).min(WINDOW_MOST) as u32;
-                            (step as u32, (if w.records == 1 { 16 } else { w.records * 2 }).min(fit).max(1))
-                        } else {
-                            (stride, max)
-                        }
-                    }
-                    _ => (stride, max),
-                };
+            Serve::Clamp { step, records } => {
                 args.refresh(list, arguments, len.max(u64::from(step) * u64::from(records)));
                 if let Some((s, at)) = &counter {
                     s.refresh(list, *at, 4);
@@ -3469,3 +3587,395 @@ pub(crate) fn depth_bounds(list: &HostList, min: f32, max: f32) {
         unsafe { l1.OMSetDepthBounds(min, max) };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! The indirect window's walk arithmetic (`serve`), with no device: this
+    //! is the part of `State::execute_indirect` that decides, from numbers,
+    //! whether a record is already clamped and how many to clamp next.
+    //!
+    //! Every case below is derived from the numbers recorded for the title's
+    //! mesh draws: a 12-byte declared stride (`crate::indirect`'s mesh
+    //! minimum) over records the title actually walks 32 bytes apart, with
+    //! 16-byte runs that end a window (`draw.rs`'s `windows` doc comment,
+    //! run 87: 2,173 of a frame's 3,349 records 32 apart, 283 at 16).
+    //!
+    //! The second argument is what the call asked for. `serve` carries it
+    //! because the caller's non-windowed path needs it: one record clamped
+    //! where the call asked for several would execute the rest out of a
+    //! scratch buffer that holds one. The caller offers `previous` only to a
+    //! single-record call (`max == 1` in `windowed`), so the window rule and
+    //! the declared count never both apply to one call.
+    //!
+    //! `windows` is off by default and the recorded measurement of it
+    //! (`README.md`: tried out of tree, lost the device twice) is not
+    //! reproduced here. These tests pin the arithmetic; they do not claim
+    //! the window is safe on the card.
+    //!
+    //! Mutation probes run 2026-11-25, each red for the stated reason, then
+    //! restored (the file was confirmed byte-identical afterwards):
+    //! (a) the doubling `w.records.saturating_mul(2)` -> `w.records`: 4
+    //!     failed — `the_record_after_a_window_doubles_it`,
+    //!     `windows_double_to_the_cap_and_stop`,
+    //!     `records_the_window_holds_clamp_nothing` (its one-past-the-window
+    //!     count), `the_cap_is_a_parameter`.
+    //! (b) the floor `.max(1)` on the record count removed: 2 failed —
+    //!     `a_buffer_with_room_for_a_few_records_clamps_only_those` at
+    //!     "left 31" (a copy with 31 bytes left asked for 0 records) and
+    //!     `a_cap_of_zero_still_clamps_one`. The floor is the live guard
+    //!     against a zero count; a cap of 0 is not what holds it at one.
+    //! (c) `walk <= STEP_MOST` -> `walk < STEP_MOST`: 1 failed,
+    //!     `a_step_at_the_cap_is_a_walk_and_one_past_it_is_not`.
+    //! (d) `at / step < u64::from(w.records)` removed: 6 failed —
+    //!     `records_the_window_holds_clamp_nothing`,
+    //!     `the_record_after_a_window_doubles_it`,
+    //!     `windows_double_to_the_cap_and_stop`,
+    //!     `a_step_at_the_cap_is_a_walk_and_one_past_it_is_not`,
+    //!     `a_declared_stride_of_zero_with_a_window_follows_the_walk_rule`,
+    //!     `the_cap_is_a_parameter`.
+    //! (e) `let walks = walk != 0` -> `let walks = true`: 1 failed,
+    //!     `a_walk_of_zero_is_not_a_walk`, panicking at the `left / walk`
+    //!     line with "attempt to divide by zero" — the totality claim's one
+    //!     otherwise-unobserved clause.
+    //! (f) the fallback's `records: declared_records` -> `records: 1` (the
+    //!     regression this signature exists to make impossible): 1 failed,
+    //!     `non_windowed_clamps_every_record_it_asked_for`.
+    //!
+    //! Every mutation was confirmed present with `git diff --no-index`
+    //! before its test run, and the file was confirmed byte-identical to the
+    //! pre-probe state afterwards.
+
+    use super::{LastWindow, Serve, STEP_MOST, WINDOW_FIRST, WINDOW_MOST, serve};
+
+    /// The mesh minimum, and the stride the title names: it draws one record
+    /// a call, for which the stride means nothing.
+    const STRIDE: u32 = 12;
+    /// The records one window may take (`WINDOW_MOST`).
+    const MOST: u32 = WINDOW_MOST as u32;
+    /// Where a run's first record is.
+    const AT: u64 = 0x1000;
+    /// Room in the copy for far more than any window.
+    const ROOM: u64 = 1 << 20;
+
+    fn was(base: u64, step: u32, records: u32) -> Option<LastWindow> {
+        Some(LastWindow {
+            base,
+            step,
+            records,
+        })
+    }
+
+    #[test]
+    fn first_call_of_a_run_clamps_one_record() {
+        assert_eq!(
+            serve(STRIDE, 1, AT, ROOM, None, MOST),
+            Serve::Clamp {
+                step: STRIDE,
+                records: 1
+            }
+        );
+    }
+
+    #[test]
+    fn the_second_call_learns_the_walk_and_takes_sixteen() {
+        // One record clamped, the next one a 32-byte step later: the walk is
+        // learned and the records that step apart after it come with it.
+        assert_eq!(
+            serve(STRIDE, 1, AT + 32, ROOM, was(AT, STRIDE, 1), MOST),
+            Serve::Clamp {
+                step: 32,
+                records: WINDOW_FIRST
+            }
+        );
+    }
+
+    #[test]
+    fn records_the_window_holds_clamp_nothing() {
+        let window = was(AT, 32, WINDOW_FIRST);
+        for k in [0u64, 1, 5, 15] {
+            assert_eq!(
+                serve(STRIDE, 1, AT + k * 32, ROOM, window, MOST),
+                Serve::Held { at: k * 32 },
+                "record {k} of the window is held"
+            );
+        }
+        // One past the window: clamped again, not served from it.
+        assert_eq!(
+            serve(STRIDE, 1, AT + 16 * 32, ROOM, window, MOST),
+            Serve::Clamp {
+                step: 32,
+                records: 32
+            }
+        );
+    }
+
+    #[test]
+    fn the_record_after_a_window_doubles_it() {
+        assert_eq!(
+            serve(STRIDE, 1, AT + 16 * 32, ROOM, was(AT, 32, 16), MOST),
+            Serve::Clamp {
+                step: 32,
+                records: 32
+            }
+        );
+    }
+
+    #[test]
+    fn windows_double_to_the_cap_and_stop() {
+        assert_eq!(
+            serve(STRIDE, 1, AT + 32 * 32, ROOM, was(AT, 32, 32), MOST),
+            Serve::Clamp {
+                step: 32,
+                records: 64
+            }
+        );
+        // 64 doubled is 128, which the cap brings back to 64.
+        assert_eq!(
+            serve(STRIDE, 1, AT + 64 * 32, ROOM, was(AT, 32, 64), MOST),
+            Serve::Clamp {
+                step: 32,
+                records: 64
+            }
+        );
+    }
+
+    #[test]
+    fn a_sixteen_apart_record_ends_a_window() {
+        assert_eq!(
+            serve(STRIDE, 1, AT + 15 * 32 + 16, ROOM, was(AT, 32, 16), MOST),
+            Serve::Clamp {
+                step: STRIDE,
+                records: 1
+            }
+        );
+    }
+
+    #[test]
+    fn after_a_sixteen_apart_record_the_next_window_learns_sixteen() {
+        assert_eq!(
+            serve(
+                STRIDE,
+                1,
+                AT + 16 * 32,
+                ROOM,
+                was(AT + 15 * 32 + 16, STRIDE, 1),
+                MOST
+            ),
+            Serve::Clamp {
+                step: 16,
+                records: WINDOW_FIRST
+            }
+        );
+    }
+
+    #[test]
+    fn a_step_that_is_not_a_multiple_of_four_is_no_walk() {
+        assert_eq!(
+            serve(STRIDE, 1, AT + 15 * 32 + 30, ROOM, was(AT, 32, 16), MOST),
+            Serve::Clamp {
+                step: STRIDE,
+                records: 1
+            }
+        );
+    }
+
+    #[test]
+    fn a_step_narrower_than_the_declared_stride_is_no_walk() {
+        // 8 apart would make the records overlap in the scratch buffer.
+        assert_eq!(
+            serve(STRIDE, 1, AT + 15 * 32 + 8, ROOM, was(AT, 32, 16), MOST),
+            Serve::Clamp {
+                step: STRIDE,
+                records: 1
+            }
+        );
+    }
+
+    #[test]
+    fn a_step_at_the_cap_is_a_walk_and_one_past_it_is_not() {
+        // A record clamped alone relearns any aligned step, the cap included.
+        assert_eq!(
+            serve(STRIDE, 1, AT + STEP_MOST, ROOM, was(AT, 32, 1), MOST),
+            Serve::Clamp {
+                step: STEP_MOST as u32,
+                records: WINDOW_FIRST
+            }
+        );
+        assert_eq!(
+            serve(STRIDE, 1, AT + STEP_MOST + 4, ROOM, was(AT, 32, 1), MOST),
+            Serve::Clamp {
+                step: STRIDE,
+                records: 1
+            }
+        );
+        // A window of more than one record keeps its own step: a wider walk
+        // from it is not the same array.
+        assert_eq!(
+            serve(
+                STRIDE,
+                1,
+                AT + 31 * 32 + STEP_MOST,
+                ROOM,
+                was(AT, 32, 32),
+                MOST
+            ),
+            Serve::Clamp {
+                step: STRIDE,
+                records: 1
+            }
+        );
+    }
+
+    #[test]
+    fn a_buffer_with_room_for_a_few_records_clamps_only_those() {
+        let one = was(AT, STRIDE, 1);
+        for (left, records) in [(32 * 5, 5u32), (32, 1), (31, 1), (0, 1)] {
+            assert_eq!(
+                serve(STRIDE, 1, AT + 32, left, one, MOST),
+                Serve::Clamp { step: 32, records },
+                "left {left}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_step_of_zero_never_divides() {
+        // A window is never stored with a step of 0 (the clamp refuses such a
+        // stride), but this must not panic if one ever is.
+        assert_eq!(
+            serve(STRIDE, 1, AT + 32, ROOM, was(AT, 0, 16), MOST),
+            Serve::Clamp {
+                step: STRIDE,
+                records: 1
+            }
+        );
+    }
+
+    #[test]
+    fn a_walk_of_zero_is_not_a_walk() {
+        // The one clause of the totality claim nothing else observes: a zero
+        // stride satisfies `walk >= declared_stride`, `walk % 4 == 0` and
+        // `records == 1`, so without `walk != 0` this reaches `left / walk`.
+        assert_eq!(
+            serve(0, 1, AT, ROOM, was(AT, 0, 1), MOST),
+            Serve::Clamp {
+                step: 0,
+                records: 1
+            }
+        );
+    }
+
+    #[test]
+    fn a_declared_stride_of_zero_clamps_one() {
+        // D3D12 refuses such a signature anyway; the clamp refuses it rather
+        // than guessing a step.
+        assert_eq!(
+            serve(0, 1, AT, ROOM, None, MOST),
+            Serve::Clamp {
+                step: 0,
+                records: 1
+            }
+        );
+    }
+
+    #[test]
+    fn a_declared_stride_of_zero_with_a_window_follows_the_walk_rule() {
+        // Not the one-record clamp: `walk >= declared_stride` is vacuously
+        // true at 0, so the walk decides. `bound` still refuses step 0.
+        assert_eq!(
+            serve(0, 1, AT + 32, ROOM, was(AT, 32, 1), MOST),
+            Serve::Clamp {
+                step: 32,
+                records: WINDOW_FIRST
+            }
+        );
+    }
+
+    #[test]
+    fn non_windowed_clamps_every_record_it_asked_for() {
+        // With no window the ask is clamped as it stands. The first draft of
+        // this extraction clamped one record here whatever the call asked
+        // for, and a call for five would then have executed five records out
+        // of a scratch buffer holding one.
+        for asked in [0u32, 1, 5, u32::MAX] {
+            assert_eq!(
+                serve(STRIDE, asked, AT, ROOM, None, MOST),
+                Serve::Clamp {
+                    step: STRIDE,
+                    records: asked
+                },
+                "asked for {asked}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_record_behind_the_window_is_no_hit() {
+        assert_eq!(
+            serve(STRIDE, 1, AT - 0x100, ROOM, was(AT, 32, 16), MOST),
+            Serve::Clamp {
+                step: STRIDE,
+                records: 1
+            }
+        );
+    }
+
+    #[test]
+    fn the_cap_is_a_parameter() {
+        assert_eq!(
+            serve(STRIDE, 1, AT + 32 * 32, ROOM, was(AT, 32, 32), 256),
+            Serve::Clamp {
+                step: 32,
+                records: 64
+            }
+        );
+        assert_eq!(
+            serve(STRIDE, 1, AT + 64 * 32, ROOM, was(AT, 32, 64), 256),
+            Serve::Clamp {
+                step: 32,
+                records: 128
+            }
+        );
+        assert_eq!(
+            serve(STRIDE, 1, AT + 128 * 32, ROOM, was(AT, 32, 128), 256),
+            Serve::Clamp {
+                step: 32,
+                records: 256
+            }
+        );
+        // 256 doubled is 512, which the wider cap brings back to 256.
+        assert_eq!(
+            serve(STRIDE, 1, AT + 256 * 32, ROOM, was(AT, 32, 256), 256),
+            Serve::Clamp {
+                step: 32,
+                records: 256
+            }
+        );
+    }
+
+    #[test]
+    fn a_one_record_window_relearns_any_aligned_step() {
+        assert_eq!(
+            serve(STRIDE, 1, AT + 16, ROOM, was(AT, 32, 1), MOST),
+            Serve::Clamp {
+                step: 16,
+                records: WINDOW_FIRST
+            }
+        );
+    }
+
+    #[test]
+    fn a_cap_of_zero_still_clamps_one() {
+        // The cap is read by `fit` with no guard of its own: the trailing
+        // `.max(1)` on the count is what keeps it at one. A count of 0 would
+        // make the caller's last-record arithmetic underflow.
+        assert_eq!(
+            serve(STRIDE, 1, AT + 32, ROOM, was(AT, STRIDE, 1), 0),
+            Serve::Clamp {
+                step: 32,
+                records: 1
+            }
+        );
+    }
+}
+
