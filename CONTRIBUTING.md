@@ -54,7 +54,6 @@ Also:
 
 - Keep each PR to one topic, one reviewable commit series, with a clear message that says why.
 - Add or update a test when behaviour can be tested without game files (synthetic data only).
-- Keep any new diagnostics behind the existing diagnostic feature or an environment variable.
 - Update docs when behaviour changes.
 - Do not commit builds, caches, logs, saves or dumps.
 
@@ -65,10 +64,5 @@ Open an issue titled `Include: <project> #<number>` with:
 - the link to the pull request or commit and its licence,
 - what it fixes and what you measured (before/after, same scene, same PC).
 
-Maintainers merge each accepted change as its own commit, keep the original author's credit, and
-add a line to [PROVENANCE.md](PROVENANCE.md). Changes that were tried and rejected are listed there
-too, with the reason, so nobody repeats the work.
-
-## Reviewing
-
-Be kind and specific. Review the change, not the person. Measurements beat opinions.
+Accepted changes are merged as their own commit with the original author's credit, and added to
+[PROVENANCE.md](PROVENANCE.md).
