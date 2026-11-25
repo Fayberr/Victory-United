@@ -1204,7 +1204,7 @@ impl HostHeap {
             copy_gen: std::sync::atomic::AtomicU64::new(0),
             kept: Mutex::new(vec![None; (count + extra) as usize]),
             next: Mutex::new((0, taken)),
-            free: std::sync::atomic::AtomicU32::new(DYNAMIC - 1),
+            free: std::sync::atomic::AtomicU32::new(DYNAMIC),
             too_long: std::sync::atomic::AtomicU32::new(u32::MAX),
             strides,
             views,
