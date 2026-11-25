@@ -2442,7 +2442,16 @@ mod wrote_tests {
         wrote(p, PAGE);
 
         let (now, written) = writes(p, p + PAGE, false).expect("write-watched page");
-        let (asked_now, asked_written) = asked(p, p + PAGE).expect("in ask_once range");
+        let (asked_now, asked_written) = asked(p, p + PAGE).unwrap_or_else(|| {
+            let j = super::JOURNAL.read().unwrap_or_else(|e| e.into_inner());
+            panic!(
+                "not in ask_once range: known_view={} kept={} ahead={:?} page={}",
+                super::known_view(p),
+                j.kept,
+                j.ahead,
+                p / PAGE
+            )
+        });
         ask_once_end();
 
         // SAFETY: freeing our private reservation.
