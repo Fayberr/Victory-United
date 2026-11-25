@@ -182,6 +182,42 @@ impl<'a> Lower<'a> {
                     }
                 }
                 return Ok(());
+            } else if count <= 8 && count % 4 == 0 {
+                // A table entry chosen at run time asks the host's table of view addresses;
+                // one load may carry two descriptors (8 dwords).
+                let mut wrote = false;
+                for group in 0..count / 4 {
+                    let first = (4 * group) as u8;
+                    let Some((lo, hi, len, stride)) =
+                        self.view_address_indexed(site, first).ok().flatten()
+                    else {
+                        continue;
+                    };
+                    wrote = true;
+                    for k in 4 * group..4 * group + 4 {
+                        let reg = Reg::S(code + k as u8);
+                        let v = match k % 4 {
+                            0 => lo,
+                            1 => hi,
+                            2 => len,
+                            _ => stride,
+                        };
+                        self.write(inst, reg, v, None);
+                    }
+                }
+                if wrote {
+                    return Ok(());
+                }
+                if std::env::var_os("VICTORY_DESC_WHY").is_some() {
+                    eprintln!(
+                        "DESC-WHY {:#x} {} scalar={:?} lane_copied={}",
+                        inst.machine.offset,
+                        inst.name(),
+                        address,
+                        self.x.res.lane_copied.contains(&site)
+                    );
+                }
+                return Err("a descriptor read only as data");
             } else {
                 if std::env::var_os("VICTORY_DESC_WHY").is_some() {
                     eprintln!(
@@ -267,7 +303,12 @@ impl<'a> Lower<'a> {
                 // a buffer whose address alone is read does.)
                 if first == 0
                     && (computed || sized)
-                    && let Some((lo, hi)) = self.view_address(site)
+                    && let Some((lo, hi)) = self.view_address(site).or_else(|| {
+                        self.view_address_indexed(site, 0)
+                            .ok()
+                            .flatten()
+                            .map(|(lo, hi, _, _)| (lo, hi))
+                    })
                 {
                     words.extend([(0, lo), (1, hi)]);
                 }
@@ -344,5 +385,91 @@ impl<'a> Lower<'a> {
             }
             _ => None,
         }
+    }
+
+    /// [`Self::view_address`] for a table entry chosen at run time (a computed
+    /// index into a descriptor table or the resource heap): the host's table
+    /// of the buffer views' title addresses by heap slot
+    /// ([`super::super::shader::SLOT_VIEWS`]).
+    pub(super) fn view_address_indexed(
+        &mut self,
+        site: Site,
+        first: u8,
+    ) -> Result<Option<(V, V, V, V)>, Why> {
+        let a = *self
+            .scalar
+            .get(&site)
+            .ok_or("an untracked descriptor load")?;
+        let root = self
+            .x
+            .native
+            .layout
+            .get(a.param)
+            .map(|p| p.root)
+            .ok_or("a descriptor outside the tables")?;
+        if !matches!(root, super::RootType::Table | super::RootType::ResourceHeap)
+            || a.dynamic.is_none()
+        {
+            return Ok(None);
+        }
+        let c = self.cur;
+        let slot = self.heap_index(site, first, false)?;
+        let last = self.s.m.i32(super::super::shader::SLOT_VIEWS_COUNT - 1);
+        let i32t = self.s.t.i32;
+        let slot = self.s.op(c, "binary.i32", Attr::ReadNone, i32t, 40, &[slot, last]);
+        self.s.m.tag(slot, super::Tag::Clamp);
+        let shift = self.s.m.i32(view_record_shift());
+        let byte = self.s.m.bin(c, Bin::Shl, slot, shift);
+        let h = self.s.root_srv_handle(super::super::shader::SLOT_VIEWS);
+        let iu = self.s.m.undef(self.s.t.i32);
+        let mask = self.s.m.i8(0xF);
+        let align = self.s.m.i32(4);
+        let r = self.s.op(
+            c,
+            "rawBufferLoad.f32",
+            Attr::ReadOnly,
+            self.s.t.res_ret,
+            139,
+            &[h, byte, iu, mask, align],
+        );
+        let lo = self.s.m.extract(c, r, 0);
+        let hi = self.s.m.extract(c, r, 1);
+        let len = self.s.m.extract(c, r, 2);
+        let stride = self.s.m.extract(c, r, 3);
+        let (lo, hi, len, stride) = (
+            self.as_int(lo),
+            self.as_int(hi),
+            self.as_int(len),
+            self.as_int(stride),
+        );
+        // The loaded address is the view's own: `a.offset` is a place in the
+        // descriptor table (already part of `slot`), not in the buffer.
+        Ok(Some((lo, hi, len, stride)))
+    }
+}
+
+/// Shift taking a heap slot to the byte of its [`super::super::shader::SLOT_VIEWS`] record.
+fn view_record_shift() -> u32 {
+    debug_assert!(super::super::shader::SLOT_VIEWS_RECORD_BYTES.is_power_of_two());
+    super::super::shader::SLOT_VIEWS_RECORD_BYTES.trailing_zeros()
+}
+
+#[cfg(test)]
+mod view_table_tests {
+    #[test]
+    fn view_records_are_indexed_by_their_sixteen_byte_size() {
+        assert_eq!(super::super::super::shader::SLOT_VIEWS_RECORD_BYTES, 16);
+        assert_eq!(1u32 << super::view_record_shift(), 16);
+        assert_eq!(5u32 << super::view_record_shift(), 80);
+    }
+
+    #[test]
+    fn view_address_indexed_keeps_the_loaded_address() {
+        let src = include_str!("descriptor_data.rs");
+        let body = src
+            .split("fn view_address_indexed")
+            .nth(1)
+            .unwrap();
+        assert!(!body.contains("address_plus("));
     }
 }

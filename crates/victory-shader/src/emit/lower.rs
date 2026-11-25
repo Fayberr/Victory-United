@@ -20,6 +20,11 @@ use crate::native::{HwStage, NativeProgram, ResourceType, RootType, StageIo, Usa
 use crate::resource::{Address, CODE, MEMORY, Resources, Role, Site, Source};
 use crate::structure::{Atom, Bool, LaneExit, Structured};
 
+/// Packed dot-product lowering (`v_dot*`), a child module so it shares the
+/// emitter's state without growing this file.
+#[path = "dot.rs"]
+mod dot;
+
 /// The ray-tracing node test (`image_bvh_intersect_ray`), a child module so
 /// it shares the emitter's state.
 #[path = "intersect.rs"]
@@ -671,7 +676,7 @@ fn lds_meetings(p: &crate::ir::Program, st: &Structured, all: &[bool]) -> Option
             }
         }
     }
-    if (0..n).any(|r| reads[r] && writes[r]) {
+    if (0..n).any(|r| reads[r] && writes[r]) && !LDS_LOOSE.get() {
         return None;
     }
     let mut meet = vec![(false, false); n];
@@ -740,6 +745,20 @@ thread_local! {
     static LOCAL_ANY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// See [`with_paired_lanes`].
     static PAIRED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// See [`with_loose_lds`].
+    static LDS_LOOSE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with LDS reads and writes inside one lane-branch region accepted
+/// ([`lds_meetings`]): the two host waves of a console wave meet only where
+/// such a region is entered and left. APPROXIMATE: a value one half writes and
+/// the other half reads inside the region may be read stale. The last resort
+/// for console wave64 programs a 32-lane host would otherwise refuse.
+pub(super) fn with_loose_lds<R>(f: impl FnOnce() -> R) -> R {
+    let was = LDS_LOOSE.replace(true);
+    let r = f();
+    LDS_LOOSE.set(was);
+    r
 }
 
 /// Runs `f` with console wave64 compute programs on 32-lane hosts lowered in the paired form:
@@ -2405,7 +2424,23 @@ impl<'a> Lower<'a> {
             }
             Input::ThreadIdInGroup(c) => return self.thread_id(c),
             Input::GroupId(c) => return self.compute_id("groupId.i32", 94, c),
-            Input::GroupInfo => return Val::Missing("the thread-group info SGPR"),
+            // Bits 0-5 the group's console waves, 6-11 this wave's index
+            // among them (as Mesa reads `tg_size`).
+            Input::GroupInfo => {
+                let StageIo::Cs(cs) = self.x.native.io else {
+                    return Val::Missing("the thread-group info SGPR");
+                };
+                let wave: u32 = if self.x.native.wave64 { 64 } else { 32 };
+                let threads = cs.threads.iter().product::<u32>();
+                let (e, i32t) = (self.s.entry, self.s.t.i32);
+                let flat = self.s.op(e, "flattenedThreadIdInGroup.i32", Attr::ReadNone, i32t, 96, &[]);
+                let w = self.s.m.i32(wave.trailing_zeros());
+                let index = self.s.m.bin(e, Bin::LShr, flat, w);
+                let six = self.s.m.i32(6);
+                let index = self.s.m.bin(e, Bin::Shl, index, six);
+                let count = self.s.m.i32(threads.div_ceil(wave) & 0x3f);
+                return Val::I32(self.s.m.bin(e, Bin::Or, index, count));
+            }
             Input::MeshGroup => {
                 let Val::I32(g) = self.compute_id("groupId.i32", 94, 0) else {
                     unreachable!()
@@ -3673,6 +3708,42 @@ impl<'a> Lower<'a> {
         self.s.m.cast(c, Cast::Trunc, hi, self.s.t.i32)
     }
 
+    /// `VICTORY_NAN_GUARD` (on unless `0`): a float a pixel program exports to a colour
+    /// target (and, with `stores`, a store writes to a typed image or buffer), with NaN made 0 and an infinity
+    /// ±65504, so one bad pixel does not stay in a history the title blends into each frame.
+    fn nan_guard(&mut self, f: V, strict: bool) -> V {
+        // 0: off; unset: colour exports only; `stores`: typed stores as well.
+        static MODE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+        let mode = *MODE.get_or_init(|| match std::env::var("VICTORY_NAN_GUARD").as_deref() {
+            Ok("0") => 0,
+            Ok("stores") => 2,
+            _ => 1,
+        });
+        if mode == 0 || (!strict && mode < 2) {
+            return f;
+        }
+        let c = self.cur;
+        let bits = self.as_int(f);
+        let mag = self.s.m.i32(0x7FFF_FFFF);
+        let abs = self.s.m.bin(c, Bin::And, bits, mag);
+        let inf_bits = self.s.m.i32(0x7F80_0000);
+        let nan = if strict {
+            self.s.m.cmp(c, pred::IUGT, abs, inf_bits)
+        } else {
+            let quiet = self.s.m.i32(0x7FC0_0000);
+            self.s.m.cmp(c, pred::EQ, abs, quiet)
+        };
+        let inf = self.s.m.cmp(c, pred::EQ, abs, inf_bits);
+        let sign_bit = self.s.m.i32(0x8000_0000);
+        let sign = self.s.m.bin(c, Bin::And, bits, sign_bit);
+        let big = self.s.m.i32(65504f32.to_bits());
+        let big = self.s.m.bin(c, Bin::Or, sign, big);
+        let zero = self.s.m.i32(0);
+        let r = self.s.m.select(c, inf, big, bits);
+        let r = self.s.m.select(c, nan, zero, r);
+        self.as_float(r)
+    }
+
     /// `0 × anything = 0`, as in D3D9.
     fn legacy_mul(&mut self, a: V, b: V) -> V {
         let c = self.cur;
@@ -3972,7 +4043,15 @@ impl<'a> Lower<'a> {
             return Ok(self.s.op(at, "waveAnyTrue", Attr::NoUnwind, self.s.t.i1, 113, &[either]));
         }
         // (not for a console wave cut into host waves that do not exchange)
-        if !self.console_lanes || self.local || self.exchange.is_none() && self.halves.is_some() {
+        // (local waves with any mask taken approximately: the host wave's own answer, as
+        // `local_any` gives for every wave-wide test; opt-in `VICTORY_SCC_LOCAL_ANY=1`)
+        let local_any = self.local
+            && self.local_any
+            && std::env::var_os("VICTORY_SCC_LOCAL_ANY").is_some_and(|v| v == "1");
+        if !self.console_lanes
+            || self.local && !local_any
+            || self.exchange.is_none() && self.halves.is_some()
+        {
             return Err(LANE_MASK);
         }
         let at = at(self)?;
@@ -3980,7 +4059,7 @@ impl<'a> Lower<'a> {
         let (i1t, i32t) = (self.s.t.i1, self.s.t.i32);
         let some = self.s.op(at, "waveAnyTrue", Attr::NoUnwind, i1t, 113, &[bit]);
         self.s.flags |= flags::WAVE_OPS;
-        if !self.exchange.as_ref().is_some_and(|e| !e.1) {
+        if local_any || !self.exchange.as_ref().is_some_and(|e| !e.1) {
             return Ok(some);
         }
         if !made.is_none_or(|b| self.all_lanes(b)) {
@@ -5756,6 +5835,24 @@ impl<'a> Lower<'a> {
                 };
                 (self.s.m.bin(c, op, a, b), None)
             }
+            // Low or high halves of two dwords packed: s0's in bits 0-15.
+            "s_pack_ll_b32_b16" | "s_pack_lh_b32_b16" | "s_pack_hh_b32_b16" => {
+                let (a, b) = (src32(self, 0)?, src32(self, 1)?);
+                let (k16, low) = (self.s.m.i32(16), self.s.m.i32(0xffff));
+                let a = if name == "s_pack_hh_b32_b16" {
+                    self.s.m.bin(c, Bin::LShr, a, k16)
+                } else {
+                    a
+                };
+                let a = self.s.m.bin(c, Bin::And, a, low);
+                let b = if name == "s_pack_ll_b32_b16" {
+                    self.s.m.bin(c, Bin::Shl, b, k16)
+                } else {
+                    let high = self.s.m.i32(0xffff_0000);
+                    self.s.m.bin(c, Bin::And, b, high)
+                };
+                (self.s.m.bin(c, Bin::Or, a, b), None)
+            }
             "s_lshl1_add_u32" | "s_lshl2_add_u32" | "s_lshl3_add_u32" | "s_lshl4_add_u32" => {
                 let (a, b) = (src32(self, 0)?, src32(self, 1)?);
                 let k = self.s.m.i32(u32::from(name.as_bytes()[6] - b'0'));
@@ -6869,6 +6966,9 @@ impl<'a> Lower<'a> {
         if let Some(op) = name.strip_prefix("v_pk_") {
             return self.packed16(inst, op, guard);
         }
+        if name.starts_with("v_dot") {
+            return self.dot_product(inst, name, guard);
+        }
         if let Some(r) = self.valu_f64(inst, name, guard) {
             return r;
         }
@@ -7514,7 +7614,11 @@ impl<'a> Lower<'a> {
                     None if self.mask_data == MaskData::Console => {
                         // Each host wave taken as a wave of its own has no
                         // console lane numbers to pick the bits by.
-                        if self.local {
+                        // (approximate mode: lanes numbered by the group's flat thread
+                        // index, the console's numbering where its waves run consecutive
+                        // threads, as compute and mesh groups do)
+                        let threads = matches!(self.x.native.stage, HwStage::Cs | HwStage::Ms);
+                        if self.local && !(self.local_any && threads) {
                             return Err("a constant lane mask in a half-wave");
                         }
                         let m = mask.ok_or(UNTRACKED)?;
@@ -9457,6 +9561,7 @@ impl<'a> Lower<'a> {
                     self.float_of(v)?
                 });
             }
+            let vals: Vec<V> = vals.into_iter().map(|v| self.nan_guard(v, false)).collect();
             let h = self.handle(site, src, false, props)?;
             let at = self.begin_guarded(guard);
             let mut args = vec![h];
@@ -10376,7 +10481,8 @@ impl<'a> Lower<'a> {
                 args.push(self.handle(site, src, false, (10 | u, 0x409))?);
                 args.extend([index.unwrap_or(self.s.m.i32(0)), iu]);
                 for x in vals {
-                    args.push(self.as_float(x));
+                    let f = self.as_float(x);
+                    args.push(self.nan_guard(f, false));
                 }
                 (69, "bufferStore.f32")
             } else {
@@ -10727,9 +10833,12 @@ impl<'a> Lower<'a> {
                     .op(c, "legacyF16ToF32", Attr::ReadNone, f32t, 131, &[x]);
                 x = self.as_int(f);
             }
+            let pixel = self.s.pixel;
             let el = &mut elements(self, primitive)[id];
             el.usage |= 1 << col;
-            let (suffix, x) = match el.comp {
+            let (kind, comp) = (el.kind, el.comp);
+            let target = !mesh && pixel && kind == 16 && comp == 9;
+            let (suffix, x) = match comp {
                 9 if half.is_some() => (".f32", self.as_float(x)),
                 9 => {
                     let f = match self.floats.get(&value) {
@@ -10740,6 +10849,7 @@ impl<'a> Lower<'a> {
                 }
                 _ => (".i32", x),
             };
+            let x = if target { self.nan_guard(x, true) } else { x };
             let sig = if primitive { id as u32 } else { self.sig_id(false, id) };
             let mut args = vec![
                 self.s.m.i32(sig),

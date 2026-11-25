@@ -58,6 +58,11 @@ pub(crate) struct HostHeap {
     /// (`victory_shader::emit::SLOT_STRIDES`): an upload buffer of
     /// `SLOT_STRIDES_COUNT` dwords, its GPU address and its mapping.
     strides: Option<(ID3D12Resource, u64, usize)>,
+    /// View heaps: the title address of the buffer view at each title slot,
+    /// four dwords per slot, for shaders that read a descriptor's address out
+    /// of a table at an index they compute
+    /// (`victory_shader::emit::SLOT_VIEWS`).
+    views: Option<(ID3D12Resource, u64, usize)>,
     /// Title slots holding buffer views. Such a view gets its host slot
     /// (and its memory a host copy) only when something reads it: a draw
     /// through a table, or [`HostHeap::buffer_slots`] for shaders that pick
@@ -943,6 +948,20 @@ impl HostHeap {
                 Some((buffer, gpu, data as usize))
             })
             .flatten();
+        let views = (!sampler)
+            .then(|| {
+                let bytes = u64::from(victory_shader::emit::SLOT_VIEWS_COUNT)
+                    * u64::from(victory_shader::emit::SLOT_VIEWS_RECORD_BYTES);
+                let (buffer, data) = host.upload_buffer(bytes)?;
+                // SAFETY: the buffer's whole mapping; a live buffer.
+                let gpu = unsafe {
+                    std::ptr::write_bytes(data, 0, bytes as usize);
+                    buffer.GetGPUVirtualAddress()
+                };
+                crate::host::name(&buffer, || "view addresses by view heap slot".to_owned());
+                Some((buffer, gpu, data as usize))
+            })
+            .flatten();
         let h = HostHeap {
             heap,
             cpu,
@@ -957,6 +976,7 @@ impl HostHeap {
             free: std::sync::atomic::AtomicU32::new(DYNAMIC),
             too_long: std::sync::atomic::AtomicU32::new(u32::MAX),
             strides,
+            views,
             buffers: Mutex::default(),
             changed: Mutex::default(),
             textures: Mutex::default(),
@@ -1117,6 +1137,16 @@ impl HostHeap {
     /// The table's buffer, for a list to hold.
     pub(crate) fn strides_buffer(&self) -> Option<&ID3D12Resource> {
         self.strides.as_ref().map(|s| &s.0)
+    }
+
+    /// The GPU address of the table of view addresses by title slot.
+    pub(crate) fn views_gpu(&self) -> Option<u64> {
+        self.views.as_ref().map(|s| s.1)
+    }
+
+    /// The view-address table's buffer, for a list to hold.
+    pub(crate) fn views_buffer(&self) -> Option<&ID3D12Resource> {
+        self.views.as_ref().map(|s| &s.0)
     }
 
     /// Up to `max` title slots whose texture view is due at `frame`, each
@@ -1603,6 +1633,21 @@ impl HostHeap {
             // dword, either value is one the slot had).
             unsafe { (*data as *mut u32).add(index as usize).write_volatile(stride.unwrap_or(0)) };
         }
+        let range = view.and_then(buffer_range);
+        if let Some((_, _, data)) = &self.views
+            && index < victory_shader::emit::SLOT_VIEWS_COUNT
+        {
+            // SAFETY: inside the mapping; a whole slot, written at once:
+            // the address, the byte length and the element stride.
+            unsafe {
+                let at = (*data as *mut u32).add(index as usize * 4);
+                let (address, len) = range.unwrap_or((0, 0));
+                at.write_volatile(address as u32);
+                at.add(1).write_volatile((address >> 32) as u32);
+                at.add(2).write_volatile(len as u32);
+                at.add(3).write_volatile(stride.unwrap_or(0));
+            };
+        }
         let mut buffers = self.buffers.lock().unwrap_or_else(|e| e.into_inner());
         let was = if stride.is_some() {
             buffers.insert(index);
@@ -1779,7 +1824,7 @@ impl HostHeap {
         let Some(host) = host() else { return };
         let desc = D3D12_CONSTANT_BUFFER_VIEW_DESC {
             BufferLocation: gpu,
-            SizeInBytes: size.next_multiple_of(256),
+            SizeInBytes: cbv_size(size),
         };
         // SAFETY: a slot of our heap; the memory is the caller's.
         unsafe {
@@ -2651,7 +2696,7 @@ fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Kept> {
             }
             let desc = D3D12_CONSTANT_BUFFER_VIEW_DESC {
                 BufferLocation: gpu,
-                SizeInBytes: size.next_multiple_of(256),
+                SizeInBytes: cbv_size(size),
             };
             // SAFETY: a slot of our heap; the range lies in the host copy.
             unsafe { device.CreateConstantBufferView(Some(&desc), at) };
@@ -3573,4 +3618,14 @@ mod own_copy_tests {
         assert_eq!(own_bytes_if(true, 8, base, 2, 4, 0, 0, false), None);
         assert_eq!(own_bytes_if(false, 8, base, 2, 4, 32, 32, true), None);
     }
+}
+
+/// Largest constant buffer view D3D12 takes (4096 16-byte elements). A
+/// title view past it (a shader only reads its first 64 KiB) made an
+/// invalid view that removed NVIDIA's device (0x887A0001).
+const MAX_CBV_BYTES: u32 = 65_536;
+
+/// The host size of a constant buffer view of `size` bytes.
+fn cbv_size(size: u32) -> u32 {
+    size.next_multiple_of(256).min(MAX_CBV_BYTES)
 }
