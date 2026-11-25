@@ -19,6 +19,7 @@ are off by default there.
 
 **Marvisak/VIctory:** #240, #443, #478, #1033, #1537, #1623, #1880, #1894, #1955, #1956, #2007,
 #2012, #2037, #2102
+(pull requests still open there, taken 2026-11-26:) #2900, #2901, #2902, #2906
 
 **Marvisak/VIctory main:** looked through up to `842b0cb`. About 130 single commits taken over (shader
 lowering fixes, format and loader fixes, GPU stability fixes, dialog and input fixes), each one with the
