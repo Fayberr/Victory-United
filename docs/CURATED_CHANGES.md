@@ -1,7 +1,7 @@
 # VIctory Curated
 
 This local WinPC build combines compatibility and performance changes on
-`curated/perf-fixes` in `X:\GTA 6 PC\victory-curated`. The source checkouts
+the `curated/perf-fixes` line (now `main` of Victory United). The source checkouts
 for VIctory, victory-fork, and victory-perf retain their own launchers,
 configurations, shader caches, and save directories.
 
@@ -40,18 +40,18 @@ remote sessions.
 
 ## Use on WinPC
 
-- `X:\GTA 6 PC\launch-victory-curated.bat` uses a Series S profile, half
+- `launch-curated.cmd` uses a Series S profile, half
   render scale, on-demand texture residency and the lighting fallbacks.
 - `--series-x` uses Series X with the curated performance flags. `--raw`
   starts the binary with its defaults. Those modes are useful for comparing
   rendering at different settings.
 - `--bind-only` checks executable and DLL imports without running the title.
   `--prewarm` fills the curated shader and compute pipeline caches.
-- `X:\GTA 6 PC\update-victory-curated.bat` rebuilds the checked-out local
+- a local update script rebuilds the checked-out local
   branch using the installed Windows MSVC toolchain and native CPU target.
 
-The curated cache is `X:\GTA 6 PC\cache\victory-curated`. The curated
-save and runtime directory is `X:\GTA 6 PC\data\victory-curated`.
+The curated cache is a separate cache folder. The curated
+save and runtime directory is a separate data folder.
 The source launcher is `launch-curated.cmd`. The shortcut batch file in the
 parent folder delegates to it. It resolves the existing title files beside
 the checkout.
