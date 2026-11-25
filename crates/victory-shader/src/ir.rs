@@ -299,7 +299,7 @@ fn unspill(
     // per instruction the scalar codes it writes.
     let mut stores = [false; 256];
     let mut other = [false; 256];
-    let mut used = [false; 128];
+    let mut used = [false; 256];
     let mut parks: Vec<Option<(bool, u8, u8, u32)>> = Vec::with_capacity(list.len());
     let mut written: Vec<Vec<u8>> = Vec::with_capacity(list.len());
     let mut read: Vec<Vec<u8>> = Vec::with_capacity(list.len());
@@ -436,10 +436,9 @@ fn unspill(
     // scalars and leaves about 20 machine codes unused.
     let past = usize::from(PARKED);
     let mut free = [false; 256];
-    for c in (0..105).chain(108..=123) {
+    for c in (0..105).chain(108..=123).chain(past..255) {
         free[c] = !used[c];
     }
-    free[past..255].fill(true);
     let mut codes: Vec<((u8, u32), u8)> = Vec::new();
     for &(reg, lane) in &pairs {
         let at = (108..123).chain((0..104).rev()).chain(past..254).find(|&c| free[c] && free[c + 1]);
@@ -2130,6 +2129,14 @@ mod tests {
         assert_eq!(vgprs(&movrels.reads), [4, 5, 0]);
         assert_eq!(movrels.read(Reg::V(4)), movreld.write(Reg::V(4)));
         assert!(build(&code, false, 4).is_err(), "v4 is past 4 VGPRs");
+    }
+
+    #[test]
+    fn unspill_tracks_the_full_scalar_destination_field() {
+        let program = build_words(&[0xD760_0080, 256 | 128 << 9, S_ENDPGM], false);
+        let inst = &program.blocks[0].insts[0];
+        assert_eq!(inst.name(), "v_readlane_b32");
+        assert!(inst.write(Reg::S(128)).is_some());
     }
 
     /// `PS_VoxelizeVisiblity`'s parking (0xa18-0xa38, 0xe44-0xe4c, 0x2df8, 0x3184): a lane
