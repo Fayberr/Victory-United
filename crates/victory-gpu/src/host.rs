@@ -2173,6 +2173,10 @@ struct Deferred {
     /// Buffer ranges refreshed since the last title copy (host copy,
     /// address, bytes): refreshing them again would find the same bytes.
     refreshed: crate::fx::Set<(usize, usize, usize)>,
+    /// Upload memory filled from title memory since the last title write
+    /// (source, bytes): its host address, which a second fill would find
+    /// holding the same bytes.
+    filled: crate::fx::Map<(usize, usize), u64>,
     /// Shader-written ranges already recorded since the last copy or new
     /// refresh on the same host copy, avoiding thousands of duplicate
     /// `Step::GpuWrite` entries per frame.
@@ -7585,6 +7589,7 @@ impl HostList {
             .copies
             .push(Step::Copy(dst as usize, src as usize, len));
         deferred.refreshed.clear();
+        deferred.filled.clear();
         deferred.gpu_written.clear();
     }
 
@@ -7594,6 +7599,21 @@ impl HostList {
         self.deferred()
             .copies
             .push(Step::Fill(dst as usize, src as usize, len));
+    }
+
+    /// The host GPU address of `len` bytes of upload memory holding the title
+    /// memory at `src` as of the list's submission: one copy for every ask
+    /// until a title copy intervenes.
+    pub(crate) fn fill_scratch(&self, src: *const u8, len: u64) -> Option<u64> {
+        let key = (src as usize, len as usize);
+        let known = self.deferred().filled.get(&key).copied();
+        if known.is_some() {
+            return known;
+        }
+        let (gpu, to) = self.scratch(len)?;
+        self.defer_fill(to, src, len as usize);
+        self.deferred().filled.insert(key, gpu);
+        Some(gpu)
     }
 
     /// Brings `[address, address + len)` of a buffer's host copy up to date
@@ -7913,6 +7933,7 @@ impl HostList {
         let mut deferred = self.deferred();
         deferred.copies.push(Step::Run(Box::new(work), None));
         deferred.refreshed.clear();
+        deferred.filled.clear();
         deferred.gpu_written.clear();
     }
 
@@ -7922,6 +7943,7 @@ impl HostList {
         let mut deferred = self.deferred();
         deferred.copies.push(Step::Run(Box::new(work), Some((dst, src, len))));
         deferred.refreshed.clear();
+        deferred.filled.clear();
         deferred.gpu_written.clear();
     }
 
