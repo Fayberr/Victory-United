@@ -5,6 +5,7 @@ all the VIctory forks instead of yet another fork.
 
 **This repository contains no game files, code or assets.** You need your own copy of the game.
 It is not affiliated with or endorsed by the game's developer or publisher.
+Read [LEGAL.md](LEGAL.md) (disclaimer, hard rules, takedown contact) before using or forking.
 
 ## What this is
 
@@ -53,6 +54,11 @@ that are meant to be temporary.
 
 Saves, caches and settings live in their own data folder per build. A save from another build
 does not appear here until you copy its `saves` folder over.
+
+## Contributing
+
+Pull requests and AI-assisted code are welcome, as long as the code is tested on a real run, high
+quality and safe. See [CONTRIBUTING.md](CONTRIBUTING.md) and [LEGAL.md](LEGAL.md).
 
 ## Curating (for contributors)
 

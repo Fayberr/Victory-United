@@ -1,0 +1,19 @@
+name: Rights holder notice
+description: For rights holders who believe something here infringes their rights.
+title: "Rights holder notice"
+body:
+  - type: markdown
+    attributes:
+      value: We take this seriously and respond in good faith. See LEGAL.md. You can also reach the owner via the GitHub profile @Fayberr.
+  - type: input
+    id: who
+    attributes:
+      label: Who you are and which rights you represent
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: File paths or commits you are concerned about, and why
+    validations:
+      required: true

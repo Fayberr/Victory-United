@@ -1,0 +1,32 @@
+name: Include a fix from another project
+description: Propose a pull request or commit from VIctory, a fork or another project for inclusion.
+title: "Include: <project> #<number>"
+body:
+  - type: input
+    id: link
+    attributes:
+      label: Link to the pull request or commit
+    validations:
+      required: true
+  - type: input
+    id: licence
+    attributes:
+      label: Licence of that code
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What it fixes, and what you measured
+      description: Same scene, same PC, before and after (fps, ms per frame, or the crash it fixes).
+    validations:
+      required: true
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Rules
+      options:
+        - label: It does not make the game look worse than on the Xbox.
+          required: true
+        - label: It contains no game files or data and no leaked, stolen or pirated material.
+          required: true
