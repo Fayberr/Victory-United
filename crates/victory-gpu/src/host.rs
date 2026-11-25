@@ -2167,6 +2167,9 @@ struct Deferred {
     /// descriptor heaps): the title may release its objects before it
     /// submits the list.
     kept: Vec<windows::core::IUnknown>,
+    /// The host pipelines `bind_pipeline` kept (by address), so a pipeline
+    /// the list binds again is not kept again.
+    bound: crate::fx::Set<usize>,
     /// Buffer ranges refreshed since the last title copy (host copy,
     /// address, bytes): refreshing them again would find the same bytes.
     refreshed: crate::fx::Set<(usize, usize, usize)>,
@@ -7534,18 +7537,27 @@ impl HostList {
             && self.twins.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
     }
 
-    /// Notes a pipeline the list binds; called where it is bound.
-    pub(crate) fn used_pipeline(&self, name: &str) {
-        {
+    /// Notes a pipeline the list binds and keeps it and its root signature
+    /// until the list is reset, the first time only: the list keeps the
+    /// first, so its address names the same pipeline from then on. Called
+    /// where it is bound.
+    pub(crate) fn bind_pipeline(&self, p: &crate::pipeline::host::HostPipeline) {
+        let mut deferred = self.deferred();
+        if deferred.bound.insert(p.pso.as_raw() as usize) {
+            deferred.kept.push(p.pso.clone().into());
+            deferred.kept.push(p.root.clone().into());
+            drop(deferred);
             let mut pipelines = self.pipelines.lock().unwrap_or_else(|e| e.into_inner());
-            if !pipelines.contains(name) {
-                pipelines.insert(name.to_owned());
+            if !pipelines.contains(&p.name) {
+                pipelines.insert(p.name.clone());
             }
+        } else {
+            drop(deferred);
         }
         if crate::cardmeter::pipelines() {
             // The pipeline before it ends here on the card's clock.
             crate::cardmeter::end(&self.list, crate::cardmeter::Span::from_raw(self.pipeline_meter.swap(u32::MAX, Ordering::Relaxed)));
-            self.pipeline_meter.store(crate::cardmeter::begin_named(&self.list, name).raw(), Ordering::Relaxed);
+            self.pipeline_meter.store(crate::cardmeter::begin_named(&self.list, &p.name).raw(), Ordering::Relaxed);
         }
     }
 
