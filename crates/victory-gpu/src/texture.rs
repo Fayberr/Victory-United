@@ -64,6 +64,9 @@ pub(crate) struct Staging {
     /// Set once a texture's memory turns out to be view-guarded so future
     /// refreshes skip the failing `GetWriteWatch` syscall.
     is_view: std::sync::atomic::AtomicBool,
+    /// The fence of the last late submission that actually reads this
+    /// staging buffer. Checked only when new contents will be written.
+    last_upload: std::sync::atomic::AtomicU64,
     /// When a list last recorded a use of it (`crate::host::moment`).
     used: std::sync::atomic::AtomicU64,
     /// Levels on demand (`crate::tiles`): the texture's host copy was made
@@ -808,7 +811,7 @@ pub(crate) fn upload_from(list: &HostList, resource: This, texture: &ID3D12Resou
     {
         #[cfg(feature = "diagnostics")]
         crate::copystat::add(crate::copystat::C::TexSkipped, 1);
-        list.defer_texture(staging);
+        list.defer_texture(staging, false);
         return;
     }
     #[cfg(feature = "diagnostics")]
@@ -872,16 +875,6 @@ pub(crate) fn upload_from(list: &HostList, resource: This, texture: &ID3D12Resou
         // SAFETY: an open list; both locations name live resources.
         unsafe { list.list.CopyTextureRegion(&to, 0, 0, 0, &from, None) };
     }
-    // When the list is submitted, its copy takes what the staging buffer
-    // holds by then: noted before the check below, which sets `dirty`
-    // again if it detiles (the next list then uploads once more).
-    {
-        let staging = staging.clone();
-        list.defer_host(move || {
-            staging.uploaded.store(true, Relaxed);
-            staging.dirty.store(false, Relaxed);
-        });
-    }
     // Levels on demand (`crate::tiles`): after the check below, in the
     // order of this list's steps, and before the list is executed, the
     // levels the staging buffer holds as the title's are given the card's
@@ -891,10 +884,10 @@ pub(crate) fn upload_from(list: &HostList, resource: This, texture: &ID3D12Resou
     let on_demand = if staging.on_demand { crate::resource::host_tiled(resource) } else { None };
     let Some(on_demand) = on_demand else {
         // Once per submission however many of its lists sample the texture.
-        list.defer_texture(staging);
+        list.defer_texture(staging, true);
         return;
     };
-    list.defer_texture(staging.clone());
+    list.defer_texture(staging.clone(), true);
     list.defer_tiles(move || {
         let Some(held) = staging.detiled_levels() else {
             return;
@@ -1093,6 +1086,18 @@ impl Staging {
             }
         }
         held
+    }
+
+    /// Note an upload before checking for changed contents. The check sets
+    /// dirty again if the next list needs to upload newer contents.
+    pub(crate) fn note_upload(&self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.uploaded.store(true, Relaxed);
+        self.dirty.store(false, Relaxed);
+    }
+
+    pub(crate) fn note_upload_fence(&self, fence: u64) {
+        self.last_upload.store(fence, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Forgets what the staging buffer was last filled from: the next
@@ -1378,7 +1383,12 @@ impl Staging {
 
     /// Detiles `tiled` (the texture's memory) into the staging buffer.
     fn detile(&self, tiled: &[u8]) {
-        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        use std::sync::atomic::Ordering::Relaxed;
+        let fence = self.last_upload.swap(0, Relaxed);
+        if fence != 0 {
+            host().expect("an upload has a host").wait_for_staging(fence);
+        }
+        self.dirty.store(true, Relaxed);
         // Levels on demand: which levels are the title's is judged here,
         // once, for what the staging buffer holds from now on. The step
         // that gives levels their memory goes by this answer.
@@ -1810,6 +1820,7 @@ fn staging(resource: This, texture: &ID3D12Resource, first: u32) -> Option<Arc<S
         uploaded: std::sync::atomic::AtomicBool::new(false),
         motion_copy: std::sync::atomic::AtomicBool::new(false),
         is_view: std::sync::atomic::AtomicBool::new(false),
+        last_upload: std::sync::atomic::AtomicU64::new(0),
         used: std::sync::atomic::AtomicU64::new(crate::host::moment()),
         on_demand,
         has_detiled: std::sync::atomic::AtomicBool::new(false),
@@ -2074,6 +2085,7 @@ mod title_memory_tests {
             last: std::sync::Mutex::default(),
             dirty: std::sync::atomic::AtomicBool::new(false),
             uploaded: std::sync::atomic::AtomicBool::new(false),
+            last_upload: std::sync::atomic::AtomicU64::new(0),
             motion_copy: std::sync::atomic::AtomicBool::new(false),
             is_view: std::sync::atomic::AtomicBool::new(false),
             used: std::sync::atomic::AtomicU64::new(0),
