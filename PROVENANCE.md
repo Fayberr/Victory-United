@@ -17,7 +17,7 @@ third session).
 **Marvisak/VIctory:** #240, #443, #478, #1033, #1537, #1623, #1880, #1894, #1955, #1956, #2007,
 #2012, #2037, #2102
 
-**Marvisak/VIctory main:** looked through up to `842b0cb`. About 125 single commits taken over (shader
+**Marvisak/VIctory main:** looked through up to `842b0cb`. About 130 single commits taken over (shader
 lowering fixes, format and loader fixes, GPU stability fixes, dialog and input fixes), each one with the
 upstream hash on the last line of its message and its original author. The large rework series (page
 tables, title memory, texture staging) is not taken: our tree already has its own versions of those.
