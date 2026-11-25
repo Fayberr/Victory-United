@@ -91,6 +91,17 @@ pub extern "system" fn XMemVirtualAlloc(
     flags: u64,
     protect: u32,
 ) -> *mut c_void {
+    virtual_alloc(base, size, kind, flags, protect, victory_gpu::title_memory_allocated)
+}
+
+fn virtual_alloc(
+    base: *mut c_void,
+    size: usize,
+    kind: u32,
+    flags: u64,
+    protect: u32,
+    on_alloc: impl FnOnce(usize, usize),
+) -> *mut c_void {
     let (lowest, highest) = address_range(flags);
     let mut requirements = MEM_ADDRESS_REQUIREMENTS {
         LowestStartingAddress: lowest as *mut c_void,
@@ -178,7 +189,11 @@ pub extern "system" fn XMemVirtualAlloc(
         );
     }
     if !at.is_null() && !placeholder {
-        victory_gpu::title_memory_allocated(at as usize, size);
+        // Windows rounds a fixed commit down to a page. Keep the caller's end
+        // of the range so the notification reaches the last watch block.
+        let rounded = at as usize;
+        let leading = if kind & MEM_COMMIT != 0 { (base as usize).saturating_sub(rounded) } else { 0 };
+        on_alloc(rounded, size + leading);
     }
     // (Grand Theft Auto VI asks for its 32-bit heap with kind 0x42000,
     // without the 64 KiB page bits: not `placeholder` above, though the host
@@ -2033,6 +2048,21 @@ pub(crate) fn module() -> HleModule {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unaligned_commit_notifies_both_watch_blocks() {
+        let reservation = XMemVirtualAlloc(std::ptr::null_mut(), 2 * PAGE, MEM_RESERVE, 0, PAGE_NOACCESS);
+        assert!(!reservation.is_null());
+        let boundary = reservation as usize + PAGE;
+        let mut notified = None;
+        let at = virtual_alloc((boundary - 1) as _, 2, MEM_COMMIT, 0, PAGE_READWRITE, |start, len| {
+            notified = Some(start..start + len);
+        });
+        // SAFETY: this test owns the reservation.
+        assert_ne!(unsafe { VirtualFree(reservation, 0, MEM_RELEASE) }, 0);
+        assert!(!at.is_null());
+        assert_eq!(notified, Some(at as usize..boundary + 1));
+    }
 
     fn query(address: *const c_void) -> BasicInformation {
         // SAFETY: plain data; zero is a valid value.
