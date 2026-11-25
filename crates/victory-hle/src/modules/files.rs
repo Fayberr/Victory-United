@@ -552,7 +552,16 @@ pub extern "C" fn fread(buffer: *mut u8, size: usize, count: usize, stream: File
         return read(buffer, size, count, stream);
     }
     const CHUNK: usize = 1 << 20;
-    let mut beside = vec![0u8; total.min(CHUNK)];
+    // One buffer a thread, not a megabyte of zeros allocated for every
+    // call: the title reads its assets through here, and the allocation
+    // (and the zeroing of it) was paid per call.
+    thread_local! {
+        static BESIDE: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let mut beside = BESIDE.with(|b| std::mem::take(&mut *b.borrow_mut()));
+    if beside.len() < total.min(CHUNK) {
+        beside.resize(total.min(CHUNK), 0);
+    }
     let mut done = 0;
     while done < total {
         let want = (total - done).min(CHUNK);
@@ -568,6 +577,7 @@ pub extern "C" fn fread(buffer: *mut u8, size: usize, count: usize, stream: File
             break;
         }
     }
+    BESIDE.with(|b| *b.borrow_mut() = beside);
     done / size
 }
 
