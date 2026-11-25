@@ -31,6 +31,19 @@ Copy `victory.example.toml` to `victory.toml` and point it at your game folder. 
 the signed x64 Agility runtime (Microsoft.Direct3D.D3D12 1.620.2), and `stage-agility.ps1` fetches
 and checks it. `launch-curated.cmd` is an example of how to start the game.
 
+## Saves
+
+Progress is kept per data folder, so a new data folder starts a new game unless a save is
+imported. `VICTORY_PATCH` makes the game skip encrypting its story saves, which lets a save that
+was converted from a PS5 file load:
+
+```
+set VICTORY_PATCH=0x28d0d60=31c0c3:ffc9f7c1
+```
+
+The patch is written into the loaded copy only, and only if the bytes it expects are still there.
+`launch-curated.cmd --no-save-encryption` sets it. Details: [docs/saves.md](docs/saves.md).
+
 ## Contributing
 
 Pull requests are welcome, including AI-assisted ones. See [CONTRIBUTING.md](CONTRIBUTING.md). If
