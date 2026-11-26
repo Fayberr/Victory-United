@@ -120,17 +120,9 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
                 #[cfg(windows)]
                 ambient: (stage == "compute").then(|| crate::ambient::role(bytes)).flatten(),
                 #[cfg(windows)]
-<<<<<<< HEAD
-                translated: OnceLock::new(),
-||||||| merged common ancestors
-                translated: OnceLock::new(),
-                #[cfg(windows)]
-                walks: OnceLock::new(),
-=======
                 bakes: bakes(bytes),
                 #[cfg(windows)]
                 translated: OnceLock::new(),
->>>>>>> origin/exp/vibr-head
             })
         })
         .clone()
