@@ -531,6 +531,9 @@ pub(crate) struct HostPipeline {
     /// A mesh pipeline (graphics without vertex input).
     pub(crate) mesh: bool,
     pub(crate) pso: ID3D12PipelineState,
+    /// Actual library key and declared color formats for opt-in mismatch reports.
+    #[cfg(feature = "diagnostics")]
+    pub(crate) traced_targets: Option<(String, D3D12_RT_FORMAT_ARRAY)>,
     pub(crate) root: ID3D12RootSignature,
     /// Vertex, then pixel stage, or the compute stage.
     pub(crate) stages: Vec<Stage>,
@@ -776,6 +779,8 @@ impl HostPipeline {
             crate::host::name(&pso, || format!("{shaders:?}"));
             return Some(HostPipeline {
                 compute: true,
+                #[cfg(feature = "diagnostics")]
+                traced_targets: None,
                 mesh: false,
                 pso,
                 root,
@@ -830,6 +835,8 @@ impl HostPipeline {
             return Some(HostPipeline {
                 compute: false,
                 mesh: true,
+                #[cfg(feature = "diagnostics")]
+                traced_targets: crate::draw::rtv_trace::enabled().then_some((name, g.targets)),
                 pso,
                 root,
                 stages: bound,
@@ -914,14 +921,16 @@ impl HostPipeline {
                 || unsafe { host.device.CreateGraphicsPipelineState(desc) },
             )
         };
-        let mut made = make(&desc, &name(rect_gs.as_ref()));
+        let mut library_key = name(rect_gs.as_ref());
+        let mut made = make(&desc, &library_key);
         if made.is_err() && rect_gs.is_some() {
             // The host refused the geometry stage: once more without it.
             tracing::warn!(?shaders, "host pipeline refused with the rectangle geometry stage");
             host.log_messages();
             desc.GS = D3D12_SHADER_BYTECODE::default();
             rect_gs = None;
-            made = make(&desc, &name(None));
+            library_key = name(None);
+            made = make(&desc, &library_key);
         }
         let pso = match made {
             Ok(pso) => pso,
@@ -946,6 +955,8 @@ impl HostPipeline {
         Some(HostPipeline {
             compute: false,
             mesh: false,
+            #[cfg(feature = "diagnostics")]
+            traced_targets: crate::draw::rtv_trace::enabled().then_some((library_key, g.targets)),
             pso,
             root,
             stages: bound,
@@ -1476,6 +1487,103 @@ mod tests {
         float2 p = float2((i << 1) & 2, i & 2);
         return float4(p * 2.0 - 1.0, 0.5, 1.0);
     }";
+
+    fn single_color_target(format: DXGI_FORMAT) -> GraphicsState {
+        let mut state = GraphicsState {
+            targets: targets(&[format]),
+            topology: D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+            ..GraphicsState::default()
+        };
+        state.depth.DepthEnable = false.into();
+        state
+    }
+
+    #[test]
+    fn changing_only_typed_rtv_zero_changes_the_graphics_library_key() {
+        let key = |format| {
+            super::super::library::name(
+                "graphics",
+                b"test root",
+                &[b"test vertex shader", b"test pixel shader"],
+                &single_color_target(format).describe(),
+            )
+        };
+        assert_ne!(key(DXGI_FORMAT_R10G10B10A2_UNORM), key(DXGI_FORMAT_R11G11B10_FLOAT));
+    }
+
+    /// The two typed color formats observed in #44, with our own shaders.
+    /// Explicit opt-in so a missing device or compiler cannot count as a pass.
+    #[test]
+    #[ignore = "requires a D3D12 device with pipeline library support and PC DXC"]
+    fn typed_rtv_zero_pipelines_reload_only_with_their_own_format() {
+        use windows::Win32::Foundation::E_INVALIDARG;
+        use windows::core::{HSTRING, Interface, PCWSTR};
+
+        let host = host().expect("D3D12 device required for the RTV probe");
+        let device: ID3D12Device1 = host.device.cast().expect("ID3D12Device1");
+        let dxc = dxc().expect("PC dxc.exe required for the RTV probe");
+        let dir = tempfile::tempdir().unwrap();
+        let vs = compile(&dxc, dir.path(), VS, "vs_6_5");
+        let ps = compile(&dxc, dir.path(), PS, "ps_6_5");
+        let (root, root_bytes) = root_signature(&host.device, &[], &[], false).unwrap();
+        let [(name24, desc24), (name26, desc26)] =
+            [DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R11G11B10_FLOAT].map(|format| {
+                let state = single_color_target(format);
+                let key =
+                    super::super::library::name("graphics", &root_bytes, &[&vs, &ps], &state.describe());
+                let desc = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
+                    // SAFETY: borrowed COM pointer; root outlives both descriptors.
+                    pRootSignature: unsafe { std::mem::transmute_copy(&root) },
+                    VS: code(&vs),
+                    PS: code(&ps),
+                    BlendState: host_blend(&state.blend, &state.targets),
+                    SampleMask: state.sample_mask,
+                    RasterizerState: state.rasterizer,
+                    DepthStencilState: state.depth,
+                    PrimitiveTopologyType: state.topology,
+                    NumRenderTargets: state.targets.NumRenderTargets,
+                    RTVFormats: state.targets.RTFormats,
+                    DSVFormat: state.depth_format,
+                    SampleDesc: state.samples,
+                    ..Default::default()
+                };
+                (HSTRING::from(key.as_str()), desc)
+            });
+        assert_ne!(name24, name26);
+
+        let bytes = {
+            let library = super::super::library::empty_test_library(&device)
+                .expect("D3D12 pipeline library support");
+            for (name, desc) in [(&name24, &desc24), (&name26, &desc26)] {
+                // SAFETY: valid descriptor, live root signature and shaders, null-terminated name.
+                unsafe {
+                    let pso: ID3D12PipelineState =
+                        device.CreateGraphicsPipelineState(desc).expect("create PSO");
+                    library.StorePipeline(PCWSTR(name.as_ptr()), &pso).expect("store PSO");
+                }
+            }
+            // SAFETY: a private library and a buffer of the requested size.
+            unsafe {
+                let mut bytes = vec![0; library.GetSerializedSize()];
+                assert!(!bytes.is_empty());
+                library.Serialize(&mut bytes).expect("serialize both PSOs");
+                bytes
+            }
+        };
+        // SAFETY: bytes remains alive and unmodified until the reloaded library is dropped.
+        let reloaded: ID3D12PipelineLibrary =
+            unsafe { device.CreatePipelineLibrary(&bytes) }.expect("reopen library");
+        let load = |name: &HSTRING, desc: &D3D12_GRAPHICS_PIPELINE_STATE_DESC| {
+            // SAFETY: the name, descriptor and referenced root and shaders are live.
+            unsafe {
+                reloaded.LoadGraphicsPipeline::<_, ID3D12PipelineState>(PCWSTR(name.as_ptr()), desc)
+            }
+        };
+        assert_eq!(load(&name24, &desc26).unwrap_err().code(), E_INVALIDARG);
+        assert_eq!(load(&name26, &desc24).unwrap_err().code(), E_INVALIDARG);
+        drop(load(&name24, &desc24).expect("reload RGB10A2 pipeline"));
+        drop(load(&name26, &desc26).expect("reload R11G11B10 pipeline"));
+    }
 
     /// A graphics pipeline with `DepthBoundsTestEnable` loads back from the
     /// pipeline library and culls or passes fragments according to

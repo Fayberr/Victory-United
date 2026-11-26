@@ -3831,6 +3831,13 @@ struct Sent {
     writes: Vec<(usize, crate::queue::Written, usize)>,
 }
 
+/// The queue fence behind a submission and, if it was sent ahead, the
+/// work to hand to the landing thread while still holding the submit lock.
+struct Submission<'a> {
+    fence: u64,
+    ahead: Option<(std::sync::MutexGuard<'a, u64>, Sent)>,
+}
+
 /// A submission on the card that has not been waited for ([`late`]): its
 /// host lists, taken from the title's (which it may reset meanwhile), and
 /// what is to be done once it has run.
@@ -4716,7 +4723,7 @@ mod landed_tests {
         // back as `crate::draw::State::tables_done` does: once.
         let mut ran = |runs: &mut Vec<u32>| {
             for first in runs.drain(..) {
-                heap.release(first, RUN);
+                heap.release(heap.id(), first, RUN);
             }
         };
         assert!(past_lag(&mut flights, 64, &mut ran).is_empty());
@@ -4728,7 +4735,7 @@ mod landed_tests {
         assert!(past_lag(&mut flights, 64, &mut ran).is_empty());
         assert_eq!(heap.dynamic(RUN), None);
         for first in again {
-            heap.release(first, RUN);
+            heap.release(heap.id(), first, RUN);
         }
     }
 }
@@ -5259,7 +5266,7 @@ mod late_tests {
         producer.defer_read_back(readback, title.as_mut_ptr(), [16, 2, 32]);
         producer.close();
 
-        let (submitted, sent) = host.submit(&[&producer], &[], true).unwrap();
+        let (submitted, sent) = host.submit(&[&producer], &[], true).ahead.unwrap();
         // SAFETY: the submission lock is held and the event and fence are
         // ours. The test keeps the producer, upload and destination alive.
         unsafe {
@@ -7004,10 +7011,11 @@ impl Host {
 
     /// Runs closed lists and waits for them, and with [`late`] for
     /// everything sent to the card before them, which is settled first.
-    pub(crate) fn execute(&self, runs: &[&HostList]) {
+    /// Returns the queue fence value covering these lists.
+    pub(crate) fn execute(&self, runs: &[&HostList]) -> u64 {
         // Behind what the title's queues were given before it.
         crate::queue::before_sync();
-        let _ = self.submit(runs, &[], false);
+        self.submit(runs, &[], false).fence
     }
 
     /// Runs a closed internal upload-only host list synchronously without
@@ -7065,7 +7073,7 @@ impl Host {
     fn send_late(&self, lists: Vec<crate::list::Detached>, order: Vec<usize>, parts: &[usize]) {
         let sent = {
             let runs: Vec<&HostList> = order.iter().map(|&i| lists[i].host()).collect();
-            self.submit(&runs, parts, true)
+            self.submit(&runs, parts, true).ahead
         };
         let Some((mut submitted, sent)) = sent else {
             // (Not reached: a submission sent ahead always comes back.)
@@ -7122,11 +7130,13 @@ impl Host {
     /// flight ([`late_free_present`]): not waited for, settled with the
     /// others. The caller keeps the list and does not reset it before the
     /// submission whose number comes back has finished ([`FINISHED`]); 0 if
-    /// it ran and was waited for after all.
-    fn execute_own(&self, list: &HostList) -> u64 {
+    /// it ran and was waited for after all. The second value is the queue
+    /// fence covering the list in either case.
+    fn execute_own(&self, list: &HostList) -> (u64, u64) {
         late_threads();
-        let Some((submitted, sent)) = self.submit(&[list], &[], true) else {
-            return 0;
+        let Submission { fence, ahead: flight } = self.submit(&[list], &[], true);
+        let Some((submitted, sent)) = flight else {
+            return (0, fence);
         };
         let number = sent.number;
         {
@@ -7157,7 +7167,7 @@ impl Host {
         LINE_MOVED.notify_one();
         RELAY_MOVED.notify_one();
         drop(submitted);
-        number
+        (number, fence)
     }
 
     /// Waits for the card to run every flight in the air ([`late`]) and
@@ -7361,7 +7371,7 @@ impl Host {
     /// `parts`: the lists of `runs` at which another part begins
     /// ([`joins`]): those go to the queue in calls of their own, one after the
     /// other, as they would have.
-    fn submit<'a>(&'a self, runs: &[&HostList], parts: &[usize], late: bool) -> Option<(std::sync::MutexGuard<'a, u64>, Sent)> {
+    fn submit<'a>(&'a self, runs: &[&HostList], parts: &[usize], late: bool) -> Submission<'a> {
         #[cfg(feature = "diagnostics")]
         let called = std::time::Instant::now();
         #[cfg(feature = "diagnostics")]
@@ -7553,7 +7563,7 @@ impl Host {
         batch.fill();
         stage.next("submit: the last refreshes");
         part = prep_part(1, part);
-        batch.flush();
+        batch.flush(None);
         crate::watch::ask_once_end();
         #[cfg(feature = "diagnostics")]
         split.part(2);
@@ -7690,7 +7700,7 @@ impl Host {
                 writes,
             };
             working(was_working);
-            return Some((submitted, sent));
+            return Submission { fence: *submitted, ahead: Some((submitted, sent)) };
         }
         let (lists, compare) = lists.split_at(compare_at.unwrap_or(lists.len()));
         // Diagnostics: each list on its own, timed (`VICTORY_GPU_TIMING`).
@@ -7775,6 +7785,7 @@ impl Host {
             let _ = (i, started);
         }
         let _ = &firsts;
+        let fence = *submitted;
         FINISHED.store(this_submission, Ordering::Release);
         bury(this_submission);
         let gpu = prepared.elapsed();
@@ -7856,7 +7867,7 @@ impl Host {
             crate::shadow::relay_fetched(*QUEUE_ORDER.lock().unwrap_or_else(|e| e.into_inner()));
         }
         working(was_working);
-        None
+        Submission { fence, ahead: None }
     }
 
     /// With `VICTORY_D3D12_DRED`: the faulting address and the allocations
@@ -9671,7 +9682,7 @@ impl HostList {
                     let free = !touches(air, p.src, p.src + p.len) && !touches(air, p.dst, p.dst + p.len);
                     batch.fill();
                     if free {
-                        batch.title_written();
+                        batch.title_written(TitleWrite::PlacedCopy);
                     }
                     if let Some(bytes) = p.prepare(free) {
                         batch.placed.push((p.shadow.clone(), p.dst, bytes));
@@ -9714,7 +9725,7 @@ impl HostList {
                     #[cfg(feature = "diagnostics")]
                     let started = std::time::Instant::now();
                     if matches!(step, Step::Run(..)) {
-                        batch.title_written();
+                        batch.title_written(TitleWrite::Deferred);
                         // (It may write anywhere, a heap's records too.)
                         crate::port_journal::prep_wrote();
                     }
@@ -9844,6 +9855,18 @@ static SPLIT: [std::sync::atomic::AtomicU64; 16] = [const { std::sync::atomic::A
 #[cfg(feature = "diagnostics")]
 static FLUSHES: [std::sync::atomic::AtomicU64; 4] = [const { std::sync::atomic::AtomicU64::new(0) }; 4];
 
+/// The list step that needs to see pending refreshes completed.
+enum TitleWrite {
+    Copy,
+    PlacedCopy,
+    Deferred,
+}
+
+/// Nonempty refresh flushes before each kind of title write, and their nanoseconds.
+#[cfg(feature = "diagnostics")]
+static TITLE_WRITE_FLUSHES: [[std::sync::atomic::AtomicU64; 2]; 3] =
+    [const { [const { std::sync::atomic::AtomicU64::new(0) }; 2] }; 3];
+
 /// Counts into [`SPLIT`].
 #[cfg(feature = "diagnostics")]
 struct Split(std::cell::Cell<std::time::Instant>);
@@ -9906,6 +9929,16 @@ fn split_line(frames: f64) {
         e[0],
         e[1] / 1e3,
     );
+    let writes = TITLE_WRITE_FLUSHES.each_ref().map(|[count, nanos]| {
+        (count.swap(0, Ordering::Relaxed) as f64 / frames, nanos.swap(0, Ordering::Relaxed) as f64 / 1e6 / frames)
+    });
+    if writes.iter().any(|&(count, _)| count > 0.0) {
+        let [(copy, copy_ms), (placed, placed_ms), (deferred, deferred_ms)] = writes;
+        tracing::info!(
+            "refresh flushes before title writes per frame: copies {copy:.1} in {copy_ms:.2} ms, placed copies {placed:.1} in \
+             {placed_ms:.2} ms, deferred writes {deferred:.1} in {deferred_ms:.2} ms"
+        );
+    }
     tracing::info!(
         "asking about title memory per frame, all threads: {:.0} kernel askings over {:.0} MB ({:.1} ms, {:.0} pages of 4 KiB found \
          written, {:.0} askings refused); {:.0} questions about holes; view ranges: {:.0} answered by their \
@@ -10486,9 +10519,9 @@ impl Batch {
 
     /// Before a step that writes title memory: pending refreshes are done
     /// first, and textures are checked again after it.
-    fn title_written(&mut self) {
+    fn title_written(&mut self, write: TitleWrite) {
         self.check_textures();
-        self.flush();
+        self.flush(Some(write));
         self.ahead.clear();
         self.textures.clear();
         self.texture_spans.clear();
@@ -10502,7 +10535,7 @@ impl Batch {
     /// beside them stays so.
     fn title_wrote(&mut self, at: usize, len: usize) {
         self.check_textures();
-        self.flush();
+        self.flush(Some(TitleWrite::Copy));
         self.textures.clear();
         self.texture_spans.clear();
         let end = at + len;
@@ -10808,7 +10841,7 @@ impl Batch {
         NEAR[4].fetch_add(keep.len() as u64, Relaxed);
         if !due.is_empty() {
             self.refreshes = due;
-            self.flush();
+            self.flush(None);
         }
         self.refreshes = keep;
         self.index = self
@@ -10889,7 +10922,7 @@ impl Batch {
         }
     }
 
-    fn flush(&mut self) {
+    fn flush(&mut self, _write: Option<TitleWrite>) {
         self.refresh_textures();
         self.index.clear();
         if self.refreshes.is_empty() {
@@ -10901,9 +10934,15 @@ impl Batch {
         self.flush_all();
         #[cfg(feature = "diagnostics")]
         {
-            SPLIT[6].fetch_add(began.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            let nanos = began.elapsed().as_nanos() as u64;
+            SPLIT[6].fetch_add(nanos, Ordering::Relaxed);
             FLUSHES[0].fetch_add(1, Ordering::Relaxed);
             FLUSHES[1].fetch_add(all as u64, Ordering::Relaxed);
+            if let Some(write) = _write {
+                let [count, time] = &TITLE_WRITE_FLUSHES[write as usize];
+                count.fetch_add(1, Ordering::Relaxed);
+                time.fetch_add(nanos, Ordering::Relaxed);
+            }
         }
     }
 
@@ -12599,7 +12638,7 @@ impl Host {
                 crate::popwatch::take(&self.device, list, texture)
             };
             #[cfg(feature = "diagnostics")]
-            p.panel.draw(self, copy, &back, (width, height), format);
+            let panel_copy = p.panel.draw(self, copy, &back, (width, height), format);
             #[cfg(not(feature = "diagnostics"))]
             let _ = frame;
             if composed {
@@ -12621,23 +12660,22 @@ impl Host {
                 list.ResourceBarrier(&post);
             }
             copy.close();
-            let flown = match slot {
+            let (flown, fence) = match slot {
                 Some(i) => {
-                    let flown = self.execute_own(copy);
+                    let (flown, fence) = self.execute_own(copy);
                     p.ahead[i].1 = flown;
-                    flown
+                    (flown, fence)
                 }
-                None => {
-                    self.execute(&[copy]);
-                    0
-                }
+                None => (0, self.execute(&[copy])),
             };
+            #[cfg(feature = "diagnostics")]
+            p.panel.submitted(panel_copy, fence);
             #[cfg(feature = "diagnostics")]
             if let Some(taken) = watched {
                 crate::popwatch::sent(taken, flown, frame);
             }
             #[cfg(not(feature = "diagnostics"))]
-            let _ = flown;
+            let _ = (flown, fence);
             #[cfg(feature = "diagnostics")]
             if let Some((buffer, footprint)) = capture {
                 crate::capture::save_read_back(frame, &buffer, &footprint);
@@ -13645,7 +13683,7 @@ mod refresh_tests {
             for (shadow, at, len) in part {
                 batch.add(shadow, *at, *len);
             }
-            batch.flush();
+            batch.flush(None);
         }
         crate::watch::ask_once_end();
     }
@@ -13656,6 +13694,7 @@ mod refresh_tests {
     /// title memory holds.
     #[test]
     fn refreshed_ranges_hold_title_memory() {
+        let _one = crate::watch::one_asking_test();
         // SAFETY (all blocks): title memory and copies of the test's own,
         // written by this thread and, in `Batch::flush`, by the threads that
         // refresh, which are done when it returns.
@@ -13777,6 +13816,7 @@ mod refresh_tests {
     /// `VICTORY_TEST_ROUNDS`, if what is landed is noted before it is in.)
     #[test]
     fn landings_title_writes_and_light_refreshes_at_once() {
+        let _one = crate::watch::one_asking_test();
         use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
         assert!(crate::safecopy::on());
         const LEN: usize = 24 * PAGE;
@@ -14004,6 +14044,7 @@ mod refresh_tests {
     /// is so no more once something wrote it.
     #[test]
     fn unchanged_ranges_are_known() {
+        let _one = crate::watch::one_asking_test();
         for view in [false, true] {
             let region = title(8 * PAGE, view);
             // (A page read for the first time counts as written.)
@@ -14095,6 +14136,7 @@ mod refresh_tests {
     #[test]
     #[ignore]
     fn frame_of_refreshes() {
+        let _one = crate::watch::one_asking_test();
         let mut random = Random(0x9876_5432_1234_5671);
         const EACH: usize = 224 << 10;
         const BIG: usize = 174 << 20;
@@ -14197,7 +14239,7 @@ mod refresh_tests {
 
 #[cfg(test)]
 mod batch {   // Batch::texture_due lives here; `mod tests` is already taken at the top of this file
-    use super::{Batch, RamBand, ram_band};
+    use super::{Batch, RamBand, TitleWrite, ram_band};
     use std::sync::Arc;
 
     #[test]
@@ -14269,7 +14311,7 @@ mod batch {   // Batch::texture_due lives here; `mod tests` is already taken at 
         assert!(!batch.texture_due(&a));
         // A copy into title memory or work that may write it may have
         // changed the texture's memory.
-        batch.title_written();
+        batch.title_written(TitleWrite::Copy);
         assert!(batch.texture_due(&a));
         assert!(!batch.texture_due(&a));
         // A fresh submission starts over.

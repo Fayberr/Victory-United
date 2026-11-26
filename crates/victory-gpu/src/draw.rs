@@ -24,6 +24,9 @@ use crate::host::HostList;
 use crate::object::This;
 use crate::pipeline::host::HostPipeline;
 
+#[cfg(feature = "diagnostics")]
+pub(crate) mod rtv_trace;
+
 /// Shader interface metadata shared by every pipeline variant and draw.
 pub(crate) struct TablePlan {
     groups: Vec<TableGroup>,
@@ -505,6 +508,76 @@ fn windows() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_INDIRECT_WINDOW").is_some_and(|v| v == "1"))
 }
 
+/// Whether indirect executions whose arguments or count lie in title memory
+/// the card reads in place (renderer port 1, `VICTORY_PORT_CONSTANTS=1`) are
+/// clamped alone, right before they run (`VICTORY_PORT_CONSTANTS_ORDER`; `=0`:
+/// in batches and windows as any other).
+///
+/// A batch or a window clamps records ahead: in the pass recorded where it
+/// was opened, before the commands between it and the execution that reads
+/// the record. For a host copy that is fine, its bytes are the title's of
+/// the submission. Where the card reads the title's memory in place, the
+/// records the title's culling passes write between the two are read before
+/// they are written: the execution draws the records of an earlier frame,
+/// or none. With port 1 on, palms and trees in the boat mission's cutscene
+/// were missing for runs of frames while the camera moved (runs pop-5,
+/// pop-11 to pop-13), and with ports 1 and 5 off they were not (pop-10;
+/// POPIN.md).
+fn in_place_order() -> bool {
+    crate::toggled!("VICTORY_PORT_CONSTANTS_ORDER")
+}
+
+/// With [`in_place_order`]: such executions never in a batch (unset or
+/// `VICTORY_PORT_CONSTANTS_ORDER_ALONE=1`: the palms stayed in every frame,
+/// run pop-14). `=0`: in a batch opened after the last shader that may
+/// write buffers; not enough, the palms still came and went (run pop-15).
+fn in_place_alone() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_PORT_CONSTANTS_ORDER_ALONE").is_none_or(|v| v != "0"))
+}
+
+/// Since the last line: indirect executions with arguments in place, those
+/// clamped alone for it, and the 1 MiB ranges they came from (diagnostics).
+static IN_PLACE_INDIRECT: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+static IN_PLACE_RANGES: std::sync::Mutex<std::collections::BTreeMap<u64, [u64; 3]>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// An indirect execution of `kind` with its arguments at `arguments` in place.
+fn in_place_indirect(arguments: u64, kind: u32) {
+    IN_PLACE_INDIRECT[0].fetch_add(1, Ordering::Relaxed);
+    IN_PLACE_INDIRECT[1].fetch_add(u64::from(in_place_order()), Ordering::Relaxed);
+    let slot = match kind {
+        2 => 1,
+        10 => 2,
+        _ => 0,
+    };
+    let mut ranges = IN_PLACE_RANGES.lock().unwrap_or_else(|e| e.into_inner());
+    ranges.entry(arguments >> 20).or_default()[slot] += 1;
+}
+
+/// With the frame line: indirect executions with arguments in place per
+/// frame over `frames`, and the ranges most of them came from.
+pub(crate) fn in_place_indirect_line(frames: f64) {
+    let [all, alone] = [0, 1].map(|i| IN_PLACE_INDIRECT[i].swap(0, Ordering::Relaxed));
+    if all == 0 {
+        return;
+    }
+    let ranges = std::mem::take(&mut *IN_PLACE_RANGES.lock().unwrap_or_else(|e| e.into_inner()));
+    let mut by: Vec<(u64, [u64; 3])> = ranges.into_iter().collect();
+    by.sort_by_key(|(_, n)| std::cmp::Reverse(n.iter().sum::<u64>()));
+    let top: Vec<String> = by
+        .iter()
+        .take(6)
+        .map(|(mb, n)| format!("{:#x}+1MiB: {:.0} draws {:.0} dispatches {:.0} mesh", mb << 20, n[0] as f64 / frames, n[1] as f64 / frames, n[2] as f64 / frames))
+        .collect();
+    tracing::info!(
+        "renderer port 1: indirect executions with arguments or count in place per frame: {:.0}, of them {:.0} clamped after every shader write before them (VICTORY_PORT_CONSTANTS_ORDER); from {} ranges of 1 MiB, the busiest: {}",
+        all as f64 / frames,
+        alone as f64 / frames,
+        by.len(),
+        top.join("; ")
+    );
+}
+
 /// Whether indirect executions of one record are clamped in batches
 /// (`crate::indirect::batch`; `VICTORY_INDIRECT_BATCH=0`: each on its own,
 /// or in windows ([`windows`])).
@@ -599,6 +672,8 @@ pub(crate) struct State {
     /// list: a draw's pipeline is one for them
     /// (`crate::pipeline::host_pipeline_for`).
     target_formats: crate::pipeline::host::TargetFormats,
+    #[cfg(feature = "diagnostics")]
+    bound_rtv_formats: [(i32, bool); 8],
     viewports: Vec<D3D12_VIEWPORT>,
     scissors: Vec<RECT>,
     blend: Option<[f32; 4]>,
@@ -643,9 +718,9 @@ pub(crate) struct State {
     /// Tables made afresh in this list: (table, slot count, contents) → first
     /// dynamic slot.
     fresh_tables: std::collections::HashMap<(u64, u32, u64), FreshTable, std::hash::BuildHasherDefault<crate::host::AddressHash>>,
-    /// The dynamic slots the list holds: title heap, first, count; given
-    /// back when the list has run, is reset or released.
-    dynamic: Vec<(usize, u32, u32)>,
+    /// Title heap address, host heap identity, first slot, and slot count.
+    /// Given back when the list has run, is reset or released.
+    dynamic: Vec<(usize, u64, u32, u32)>,
     /// Root SRVs bound as one-view tables in this list: (title heap, title
     /// address; 0 for none) → dynamic slot, and the host copy the slot
     /// shows: later draws of the list bring that one up to date, whatever
@@ -662,8 +737,8 @@ pub(crate) struct State {
 
 impl Drop for State {
     fn drop(&mut self) {
-        for &(heap, first, n) in &self.dynamic {
-            crate::descriptor::release_dynamic(heap, first, n);
+        for &(heap, id, first, n) in &self.dynamic {
+            crate::descriptor::release_dynamic(heap, id, first, n);
         }
     }
 }
@@ -684,8 +759,8 @@ impl State {
             static ONCE: std::sync::Once = std::sync::Once::new();
             ONCE.call_once(|| tracing::warn!("a list ran again after its descriptor tables were given back"));
         }
-        for (heap, first, n) in self.dynamic.drain(..) {
-            crate::descriptor::release_dynamic(heap, first, n);
+        for (heap, id, first, n) in self.dynamic.drain(..) {
+            crate::descriptor::release_dynamic(heap, id, first, n);
         }
         self.fresh_tables.clear();
         self.recording = 0;
@@ -1732,6 +1807,10 @@ impl State {
             return;
         }
         self.host_targets = Some(now);
+        #[cfg(feature = "diagnostics")]
+        if rtv_trace::enabled() {
+            self.bound_rtv_formats = rtv_trace::bound_formats(&views);
+        }
         let rtvs: Vec<_> = views.iter().map(|(texture, desc)| host.rtv(*texture, desc.as_ref())).collect();
         let dsv = dsv.map(|(texture, record)| host.dsv(texture, record.depth_desc().as_ref()));
         // SAFETY: an open list; the views were just made.
@@ -2499,7 +2578,7 @@ impl State {
                     crate::pipeline::note_why("no free dynamic slot for the one-view table of a root view".to_owned());
                     return false;
                 };
-                self.dynamic.push((key.0, index, 1));
+                self.dynamic.push((key.0, host.id(), index, 1));
                 if let Some((a, s)) = &shadow {
                     // SAFETY: a live buffer.
                     let base = unsafe { s.buffer.GetGPUVirtualAddress() };
@@ -2575,7 +2654,7 @@ impl State {
                     crate::pipeline::note_why("no free dynamic slot for the one-view table of a root view".to_owned());
                     return false;
                 };
-                self.dynamic.push((key.0, index, 1));
+                self.dynamic.push((key.0, host.id(), index, 1));
                 self.root_srv_slots
                     .insert(key, (index, shadow.as_ref().map(|(_, s)| s.clone())));
                 match &shadow {
@@ -4719,7 +4798,12 @@ impl State {
                     }
                     // SAFETY: an open list with everything set.
                     unsafe { l6.DispatchMesh(x.min(65_535), 1, 1) };
-                    self.drew(list, crate::pipeline::host_pipeline(self.pipeline as This));
+                    self.drew(
+                        list,
+                        crate::pipeline::host_pipeline(self.pipeline as This),
+                        #[cfg(feature = "diagnostics")]
+                        "DispatchMesh",
+                    );
                     self.mesh_scissor(list, false);
                     DRAWN.fetch_add(1, Ordering::Relaxed);
                     true
@@ -5145,7 +5229,7 @@ impl State {
                 staged.push((table, n));
             }
             self.dynamic
-                .push((std::ptr::from_ref(heap) as usize, first, n));
+                .push((std::ptr::from_ref(heap) as usize, host.id(), first, n));
             // The title's own slots of this table: what the draw reads of
             // them it brings up to date here, in the dynamic slots.
             let title_first = heap.index(table).filter(|first| first + n <= host.count());
@@ -5407,7 +5491,12 @@ impl State {
                 list.list
                     .DrawInstanced(count, instances, from, first_instance)
             };
-            self.drew(list, crate::pipeline::host_pipeline(self.pipeline as This));
+            self.drew(
+                list,
+                crate::pipeline::host_pipeline(self.pipeline as This),
+                #[cfg(feature = "diagnostics")]
+                "DrawInstanced",
+            );
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         if !ran {
@@ -5514,7 +5603,12 @@ impl State {
                 list.list
                     .DrawIndexedInstanced(indices, instances, first, base, first_instance)
             };
-            self.drew(list, crate::pipeline::host_pipeline(self.pipeline as This));
+            self.drew(
+                list,
+                crate::pipeline::host_pipeline(self.pipeline as This),
+                #[cfg(feature = "diagnostics")]
+                "DrawIndexedInstanced",
+            );
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         if !ran {
@@ -5537,7 +5631,25 @@ impl State {
 
     /// A draw with the pipeline `p` was recorded (as [`State::buffers_written`]
     /// if its shaders can store to buffers).
-    fn drew(&mut self, list: &HostList, p: Option<&HostPipeline>) {
+    fn drew(
+        &mut self,
+        list: &HostList,
+        p: Option<&HostPipeline>,
+        #[cfg(feature = "diagnostics")] draw_call: &'static str,
+    ) {
+        #[cfg(feature = "diagnostics")]
+        if let Some(pipeline) = p
+            && let Some((key, declared)) = &pipeline.traced_targets
+        {
+            // The host pipeline already has the guest stage names and container hashes.
+            rtv_trace::check(
+                key,
+                declared,
+                &self.bound_rtv_formats,
+                draw_call,
+                &pipeline.name,
+            );
+        }
         if p.is_none_or(|p| p.stages.iter().any(|stage| stage.translated().stores)) {
             self.batch = None;
         }
@@ -5698,12 +5810,31 @@ impl State {
             why("mesh draws are switched off (VICTORY_MESH_TEST=skip)");
             return false;
         }
+        // Renderer port 1: arguments (or their count) in the title's memory
+        // read in place ([`in_place_order`]): clamped alone, right before
+        // their execution, after a wait for every earlier shader write.
+        let in_place = args.in_place() || counter.as_ref().is_some_and(|(s, _)| s.in_place());
+        if in_place {
+            in_place_indirect(arguments, kind);
+        }
+        let ordered = in_place && in_place_order();
+        // Alone (`VICTORY_PORT_CONSTANTS_ORDER_ALONE=1`): no batch at all.
+        // Else a batch that a shader writing buffers was recorded after is
+        // not used: a new one is opened here, after it (what
+        // `VICTORY_INDIRECT_BATCH=1` does for every batch).
+        let alone = ordered && in_place_alone();
+        if ordered {
+            if alone || self.batch.as_ref().is_some_and(|b| b.wrote) {
+                self.batch = None;
+            }
+            self.window = None;
+        }
         // One record without a count: clamped in a batch (`batches`). Not a
         // spread dispatch: the batch writes 12-byte records and the spread
         // signature reads 20-byte ones, so the program got garbage group
         // counts (black picture with `VICTORY_DISPATCH_SPREAD` on, measured
         // by halving the fork's switches). It is clamped on its own below.
-        let batch = if batches() > 0 && max == 1 && count.is_none() && !is_spread {
+        let batch = if !alone && batches() > 0 && max == 1 && count.is_none() && !is_spread {
             args.refresh(list, arguments, len);
             self.batched(list, &args, arguments, kind)
         } else {
@@ -5719,6 +5850,7 @@ impl State {
         const WINDOW_USE: usize = usize::MAX - 0x77;
         let offset = args.offset(arguments);
         let windowed = windows()
+            && !ordered
             && kind != DISPATCH
             && max == 1
             && count.is_none()
@@ -5861,7 +5993,12 @@ impl State {
         if kind == DISPATCH {
             self.buffers_written();
         } else {
-            self.drew(list, Some(p));
+            self.drew(
+                list,
+                Some(p),
+                #[cfg(feature = "diagnostics")]
+                "ExecuteIndirect",
+            );
         }
         // The scratch buffer stays readable as arguments: the next draw of
         // the window reads it with no barrier, and the next clamp moves it

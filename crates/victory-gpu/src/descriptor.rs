@@ -930,6 +930,7 @@ static SYNC_SPLIT: [std::sync::atomic::AtomicU64; 5] = [const { std::sync::atomi
 #[cfg(windows)]
 pub(crate) fn sync_line(frames: f64) {
     crate::port_descriptors::line(frames);
+    crate::draw::in_place_indirect_line(frames);
     let [twins, moved, lost] = [0, 1, 2].map(|i| host::TWINS[i].swap(0, std::sync::atomic::Ordering::Relaxed));
     if twins > 0 {
         tracing::info!(
@@ -1065,15 +1066,15 @@ pub(crate) fn with_heap<T>(heap: usize, f: impl FnOnce(&Heap) -> T) -> Option<T>
 }
 
 /// Gives back dynamic slots of the host heap behind the title heap at
-/// `heap`, if that heap still exists.
+/// `heap`, if its host heap still has the identity that took the slots.
 #[cfg(windows)]
-pub(crate) fn release_dynamic(heap: usize, first: u32, n: u32) {
+pub(crate) fn release_dynamic(heap: usize, id: u64, first: u32, n: u32) {
     let heaps = SHADER_HEAPS.read().unwrap_or_else(|e| e.into_inner());
     if heaps.iter().any(|&(_, _, h)| h == heap)
         // SAFETY: registered heaps are live (removed when dropped).
         && let Some(Some(host)) = unsafe { &*(heap as *const Heap) }.host.get()
     {
-        host.release(first, n);
+        host.release(id, first, n);
     }
 }
 
@@ -2418,8 +2419,19 @@ mod tests {
                 )
             };
             assert!(!host.made(5));
-            sync_heaps();
-            assert!(host.made(5));
+            // Another test's begin_sync_heaps can have the heap-sync thread
+            // running a sync of its own: that one may take this page's write
+            // and make the record a moment after this sync returns.
+            let mut made = false;
+            for _ in 0..200 {
+                sync_heaps();
+                made = host.made(5);
+                if made {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert!(made);
         }
         slot::<extern "system" fn(This) -> u32>(h, 0x10)(h);
         // SAFETY: this allocation belongs to the test.
@@ -2724,5 +2736,71 @@ mod tests {
         // A size that does not match the count is not a placement.
         assert_eq!(create(desc, Placement { address, size: 7 }, &mut h), S_OK);
         assert_ne!(slot::<extern "system" fn(This) -> u64>(h, 0x48)(h), address);
+    }
+
+    /// Load test (`cargo test -p victory-gpu --lib --locked placed_view_shapes_load -- --ignored --nocapture`).
+    /// A million placed views whose descriptions differ only in padding words
+    /// make one shape; a million that really differ make a million. Then each
+    /// description word is varied alone, to list the words that tell shapes apart.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "load test: about a million table inserts"]
+    fn placed_view_shapes_load() {
+        use crate::loadprobe::{mix, private_bytes};
+        const N: u64 = 1_000_000;
+        let shapes = || VIEWS.read().unwrap().shapes.len();
+        let mut slot = [0u32; 8];
+        let handle = slot.as_mut_ptr() as u64;
+        let null = std::ptr::null();
+        // A 2D texture SRV (dimension 4): the union's words 4-7 are used; 3, 8 and 9 are padding.
+        let resource = [3, 0, 0, 0, 0x4321, 0, 0x4321, 0x10001, 28, 1, 0, 0, 0, 0];
+        let desc = [28, 4, 0x1688, 0, 0, 1, 0, 0, 0, 0, 0x2000, 0x6, 0, 0, 0, 0];
+        let before = (shapes(), private_bytes());
+        for n in 0..N {
+            let mut r = resource;
+            r[1] = mix(n);
+            r[13] = mix(n + N);
+            let mut d = desc;
+            (d[3], d[8], d[9]) = (mix(n + 2 * N), mix(n + 3 * N), mix(n + 4 * N));
+            let address = 0xd_0000_0000 + n * 0x1_0000;
+            (d[10], d[11]) = (address as u32, (address >> 32) as u32);
+            create_placed_srv(null, &r, &d, handle);
+        }
+        let padding = (shapes() - before.0, private_bytes().saturating_sub(before.1));
+        eprintln!("padding only: {N} views -> {} new shapes, private memory +{} KiB", padding.0, padding.1 >> 10);
+        // Control: the mip level (word 4) really differs.
+        let mid = (shapes(), private_bytes());
+        for n in 0..N / 10 {
+            let mut d = desc;
+            (d[4], d[5]) = (n as u32 + 1, 0);
+            create_placed_srv(null, &resource, &d, handle);
+        }
+        let control = (shapes() - mid.0, private_bytes().saturating_sub(mid.1));
+        eprintln!("control: {} really different views -> {} new shapes, private memory +{} KiB", N / 10, control.0, control.1 >> 10);
+        assert_eq!(control.0 as u64, N / 10, "views that differ are shapes");
+        // One word at a time, 64 values each, from a base the other tests do not use.
+        let mut identity = Vec::new();
+        for (name, count) in [("resource", 14usize), ("view", 16)] {
+            for w in 0..count {
+                if name == "view" && (w == 10 || w == 11) {
+                    continue; // the address
+                }
+                let base = shapes();
+                for v in 0..64u32 {
+                    let mut r = [3, 0, 0, 0, 0x7777, 0, 0x7777, 0x10001, 28, 1, 0, 0, 0, 0];
+                    let mut d = [28, 4, 0x1688, 0, 0, 1, 0, 0, 0, 0, 0x2000, 0x6, 0, 0, 0, 0];
+                    let v = 0x5000_0000 + v * 0x1111;
+                    if name == "resource" { r[w] = v } else { d[w] = v }
+                    create_placed_srv(null, &r, &d, handle);
+                }
+                let grew = shapes() - base;
+                eprintln!("{name} word {w:2}: 64 values -> {grew} shapes");
+                if grew > 2 {
+                    identity.push(format!("{name}[{w}]"));
+                }
+            }
+        }
+        eprintln!("words that tell shapes apart: {identity:?}");
+        assert!(padding.0 <= 4, "padding alone made {} shapes out of {N}", padding.0);
     }
 }

@@ -1,21 +1,26 @@
-# Starts the title with the settings this fork is played with (README.md, "How to run it").
+# Starts the title with the settings this fork is played with (README.md, "Getting started").
 #   scripts\play.ps1 -Exe <path of your own copy's executable>
 # -Safe         without the newer, faster ways (the first thing to try when something is wrong)
 # -RayTracing   the title's own ray-traced indirect light: lit interiors, about a third slower
 # -Windowed     a window instead of the whole screen (full screen is the default)
+# -NoPanel      without the performance panel (on by default, F3 hides it while playing)
 # -Console      series-x (the default) or series-s: the console the title takes this PC for
 # -Build        target\diag (the default, the build all measurements are of) or target\release
-# -Machine      auto (the default: by the graphics card), 7900xtx or 4090
-# -More         other settings: -More @{VICTORY_PANEL='1'}
+# -Machine      auto (the default: by the graphics card), 7900xtx, 4070 or 4090
+# -More         other settings: -More @{VICTORY_PANEL='1'} or -More @{VICTORY_AMBIENT='1.0'}
+# On a smaller NVIDIA PC, compare the same Series S scene after a fresh start
+# with one override at a time, e.g. -More @{VICTORY_LAND_THREADS='3'} for
+# copy-back work, or -More @{VICTORY_THIN_THREADS='6'} for list translation.
 # Run it from a normal window, not as administrator: the driver then keeps its shader cache elsewhere.
 param(
     [Parameter(Mandatory)][string]$Exe,
     [switch]$Safe,
     [switch]$RayTracing,
     [switch]$Windowed,
+    [switch]$NoPanel,
     [ValidateSet('series-x', 'series-s')][string]$Console = 'series-x',
     [ValidateSet('diag', 'release')][string]$Build = 'diag',
-    [ValidateSet('auto', '7900xtx', '4090')][string]$Machine = 'auto',
+    [ValidateSet('auto', '7900xtx', '4070', '4090')][string]$Machine = 'auto',
     [hashtable]$More = @{}
 )
 $settings = @{
@@ -25,7 +30,7 @@ $settings = @{
     VICTORY_SHOW_AFTER = '1'; VICTORY_AMBIENT = '0.8'; VICTORY_D3D12_DRED = 'light'
 }
 if ($Machine -eq 'auto') {
-    # An NVIDIA card (PCI vendor 10DE) gets the 4090's settings, any other the 7900 XTX's.
+    # Use the existing vendor defaults. The 4070 / 7800X3D profile is explicit.
     $cards = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | ForEach-Object { $_.PNPDeviceID })
     $Machine = if ($cards -match 'VEN_10DE') { '4090' } else { '7900xtx' }
 }
@@ -54,6 +59,18 @@ if ($Machine -eq '7900xtx') {
     # their draws are dropped, the picture -Safe is there to check.
     $settings.VICTORY_WAVE_WIDE_ONLY = '6f225b641c5b0708,5dc3b25986622949,369cbe906ea72764,2cc4c197ee29e291'
 }
+if ($Machine -eq '4070') {
+    # Ryzen 7 7800X3D: eight physical cores, versus the 4090 test PC's sixteen.
+    # Keep the same wave64 allowlist and rendering profile; spend VRAM on
+    # shader buffers before textures consume it. No approximate shader modes.
+    $settings.VICTORY_THIN_THREADS = '8'; $settings.VICTORY_UNDER_THREADS = '6'; $settings.VICTORY_LAND_THREADS = '4'
+    $settings.VICTORY_MAP_THREADS = '1'; $settings.VICTORY_PIPELINE_WORKERS = '3'
+    if (-not $Safe) {
+        $settings.VICTORY_CARD_RESERVE_BUDGETS = '1'
+        $settings.VICTORY_CARD_BUFFERS_MIN_KB = '64'; $settings.VICTORY_CARD_BUFFERS_MB = '1536'
+        $settings.VICTORY_CARD_WINDOWS_MB = '1024'
+    }
+}
 # -Safe leaves out every way still on trial, and the newest faster ones.
 if ($Safe) {
     $settings.VICTORY_UNDER_WIDE = '0'; $settings.VICTORY_LAND_ECHO = '0'
@@ -66,12 +83,19 @@ if ($Safe) {
 if ($RayTracing) { $settings.VICTORY_BVH_BUILDER = '1' }
 # The whole screen, with no frame, as on the console.
 if (-not $Windowed) { $settings.VICTORY_FULLSCREEN = '1' }
+# The performance panel (FPS, frame times, GPU, CPU, VRAM, RAM) in the upper left
+# corner, so clips and screenshots show what the build runs at and on what PC.
+if (-not $NoPanel) { $settings.VICTORY_PANEL = '1' }
 foreach ($k in $More.Keys) { $settings[$k] = $More[$k] }
 
 $ram = (Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue).TotalPhysicalMemory
 Write-Host "Settings for the $Machine$(if ($Safe) { ', safe' })$(if ($RayTracing) { ', with ray tracing' })."
+if ($Console -eq 'series-s' -and $Machine -eq '4090') {
+    Write-Host ("Series S requests {0} list translation threads, {1} for memory updates, and {2} for landing." -f
+        $settings.VICTORY_THIN_THREADS, $settings.VICTORY_UNDER_THREADS, $settings.VICTORY_LAND_THREADS)
+}
 if ($ram -and $ram -lt 60GB) {
-    Write-Host ("This PC has {0:N0} GB: private memory reaches 40-46 GB; keep a system-managed page file." -f ($ram / 1GB))
+    Write-Host ("Windows reports {0:N1} GiB of physical RAM. Keep a system-managed page file. See docs/measurements.md for measured Series S memory use." -f ($ram / 1GB))
 }
 
 $victory = Join-Path $PSScriptRoot "..\target\$Build\victory.exe"

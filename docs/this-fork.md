@@ -5,9 +5,6 @@ credits) and the changes below, made and measured on one PC: RTX 4090, Ryzen 9
 9950X3D, 48 GB of RAM, a 4K screen. Each change names the switch that controls it
 where there is one; the default is the behaviour described.
 
-They come over to this tree in batches, so some are still on their way: the
-commit log says which are in.
-
 ## Playing
 
 - **Full screen.** The title's window covers the whole monitor with no frame
@@ -16,9 +13,36 @@ commit log says which are in.
   screen while the title runs; the picture is stretched to either. DXGI's own
   Alt+Enter, which would make the swap chain exclusive full screen, is turned off.
 - **Settings for an RTX 4090 / Ryzen 9 9950X3D / 48 GB** (`scripts\play.ps1
-  -Machine 4090`, picked for any NVIDIA card): the thread counts and switches in
-  the README's table. `-Safe` keeps the wave-wide list there: without it four
+  -Machine 4090`, picked for any NVIDIA card): the thread counts and switches
+  `scripts\play.ps1` sets. `-Safe` keeps the wave-wide list there: without it four
   wave64 programs do not translate on a 32-lane card and their draws are dropped.
+- **A performance panel** in the top-left corner (diagnostics builds; on by
+  default in `scripts\play.ps1`, **F3** hides it, `-NoPanel` leaves it out):
+  FPS against the target, frame times with a graph, 1% low and worst frame,
+  draws, resolution, GPU name and load, VRAM, CPU name with per-core bars, the
+  game's RAM and the PC's. The GPU load is the busiest engine of this process on
+  the game's adapter, from Windows' "GPU Engine" counters (labelled `APP`), or an
+  estimate from the queue's idle time when Windows has no sample (`EST`). The
+  HUD is Belo's.
+
+## Memory and frame rate
+
+How each of these was found, with the numbers:
+[findings-rtx4090.md](findings-rtx4090.md).
+
+- **A placed view keeps one shape.** The words the title leaves unwritten in
+  view and resource descriptions (padding, unused union tails) are zeroed before
+  a view is keyed, so the same view no longer makes a new shape each time it
+  arrives. Before, the game grew to 52 GB in 70 minutes, past physical RAM.
+  Entries no resource releases are capped at a million
+  (`VICTORY_OWNERLESS_VIEWS`).
+- **Small pooled textures sit at 4 KiB placements**, except on AMD cards, which
+  keep the 64 KiB that avoided device losses on an RX 7900 XTX
+  (`VICTORY_POOL_SMALL=1` or `=0` picks either on any card).
+- **Structured views that begin off an element get no copy of their bytes** by
+  default. Making one holds a global lock; on a card whose view heap has no raw
+  twins (NVIDIA) every such view took it, and the list threads queued on it down
+  to 6 fps (`VICTORY_STRUCTURED_RAW=1` makes the copies).
 
 ## Picture
 
@@ -49,7 +73,10 @@ commit log says which are in.
   shaders too, and `victory warm` makes a pipeline again when the wave-wide list
   that decides its shaders changes.
 - **XAsync**: a call is over by the time its result shows, so a title that begins
-  the next call on the block at once is not refused.
+  the next call on the block at once is not refused. The call stays registered
+  through its provider's cleanup: a wait for its status sleeps until that call's
+  result is published, even if the block is reused, and a status query from
+  inside the cleanup returns at once instead of waiting for itself.
 - **Late DLLs**: a title DLL whose imports fail to bind leaves nothing loaded
   behind for the next `LoadLibrary` of its name.
 - **Closing**: only a `WM_CLOSE` to the title's own window ends the title; other

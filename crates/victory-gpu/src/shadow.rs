@@ -520,12 +520,11 @@ fn resolve_card_limits(
 fn card_limits() -> (u64, u64) {
     static LIMITS: std::sync::OnceLock<(u64, u64)> = std::sync::OnceLock::new();
     *LIMITS.get_or_init(|| {
-        let env_mb = |name: &str| std::env::var(name).ok().and_then(|v| v.trim().parse::<u64>().ok());
         let vram_budget = crate::host::host().and_then(|h| h.video_memory()).map(|[budget, ..]| budget);
         let (mut min_bytes, max_bytes) = resolve_card_limits(
             vram_budget,
-            env_mb("VICTORY_CARD_BUFFERS_MIN_MB"),
-            env_mb("VICTORY_CARD_BUFFERS_MB"),
+            std::env::var("VICTORY_CARD_BUFFERS_MIN_MB").ok().as_deref().and_then(parse_mib),
+            explicit_card_buffers_mb(),
         );
         // `VICTORY_CARD_BUFFERS_MIN_KB` (after fxceless c36971b2) says the
         // least size in KiB, so that it can go under 1 MiB: 64 is every title
@@ -550,17 +549,42 @@ fn card_limits() -> (u64, u64) {
     })
 }
 
+/// Use the same parsed override for allocation and reservation.
+fn explicit_card_buffers_mb() -> Option<u64> {
+    static MB: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *MB.get_or_init(|| std::env::var("VICTORY_CARD_BUFFERS_MB").ok().as_deref().and_then(parse_mib))
+}
+
+fn parse_mib(value: &str) -> Option<u64> {
+    value.trim().parse().ok()
+}
+
 /// Bytes alive of copies' card sides, and of their "before" twins.
 static CARD_BYTES: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 
+/// Bytes of title-memory-by-address (RT BVH) arenas placed in local VRAM.
+static BY_ADDRESS_CARD_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// Local-VRAM buffer breakdown for the HUD: `[card_buffers_and_windows, bvh_arenas]`.
+#[cfg(feature = "diagnostics")]
+pub(crate) fn vram_breakdown() -> [u64; 2] {
+    let bvh = BY_ADDRESS_CARD_BYTES.load(Ordering::Relaxed);
+    let win = WINDOW_CARD_BYTES.load(Ordering::Relaxed).saturating_sub(bvh);
+    let buf = CARD_BYTES[0].load(Ordering::Relaxed)
+        + CARD_BYTES[1].load(Ordering::Relaxed)
+        + win
+        + WINDOW_MAPPED_BYTES.load(Ordering::Relaxed);
+    [buf, bvh]
+}
+
 /// Whether the texture queue leaves room on the card for the card copies
-/// of title buffers that are not made yet
-/// (`VICTORY_CARD_ROOM_FOR_BUFFERS=1`; off by default).
+/// of title buffers that are not made yet. The reservation is enabled by
+/// default. `VICTORY_CARD_ROOM_FOR_BUFFERS=0` disables it.
 ///
 /// The copies are made in one burst when the world loads (run 189: 94 of
-/// its 95 within two seconds, right before the first world frame), and
-/// [`card_for`] makes one only while the card is under eight tenths of its
-/// budget. That held as long as the textures picked by index filled the
+/// its 95 within two seconds, right before the first world frame). Without
+/// the reservation, [`card_for`] allows copies up to 80% of the reported
+/// local budget. That held as long as the textures picked by index filled the
 /// card after the burst. Since the texture queue keeps packed neighbours
 /// (52b8060) it fills the card while the world loads: 85% and more at the
 /// burst in runs 190 to 192, so one copy of 95 was made, the CPU looked
@@ -569,9 +593,8 @@ static CARD_BYTES: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 ///
 /// With the switch, the texture queue's rule (`resource::room`) counts the
 /// part of [`card_limits`]' second number that no copy has taken yet as
-/// used, and a copy may be made up to nine tenths of the budget: the room
-/// it takes was kept for it. After the burst what is kept is what the
-/// burst left of the limit (87 MB of 1,024 in run 189).
+/// used. After the burst, only the unused part of that limit is reserved
+/// (87 MB of 1,024 in run 189).
 ///
 /// On by default from the build after run 199
 /// (`VICTORY_CARD_ROOM_FOR_BUFFERS=0`: off, as before). Run 193 had it on and still made 31 copies of 95: the copies
@@ -585,6 +608,12 @@ static CARD_BYTES: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 fn card_room_kept_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_CARD_ROOM_FOR_BUFFERS").is_none_or(|v| v != "0"))
+}
+
+/// The 4070 profile opts into reserving the configured buffer and window budgets.
+fn reserve_card_budgets() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_CARD_RESERVE_BUDGETS").is_some_and(|v| v == "1"))
 }
 
 /// Title buffers big enough for a copy in the card's memory that were
@@ -605,8 +634,30 @@ pub(crate) fn card_room_kept() -> u64 {
     // 5 GB that never came (941 MB in 97 copies after fifteen minutes), and
     // no texture was made any more with 5 GB of the card free (session
     // play-1125-0127: 1,453 passes refused, the ground and people black).
+    let (buffers, windows) = reservation_limits(
+        card_limits().1, explicit_card_buffers_mb().is_some(), window_card_most(), reserve_card_budgets(),
+    );
+    remaining_card_room(
+        buffers,
+        CARD_BYTES[0].load(Ordering::Relaxed),
+        CARD_REFUSED[1].load(Ordering::Relaxed),
+        windows,
+        WINDOW_CARD_BYTES.load(Ordering::Relaxed),
+    )
+}
+
+fn reservation_limits(buffers: u64, explicit_buffers: bool, windows: u64, reserve: bool) -> (u64, u64) {
     const SEEN: u64 = 1 << 30;
-    card_limits().1.min(SEEN).saturating_sub(CARD_BYTES[0].load(Ordering::Relaxed) + CARD_REFUSED[1].load(Ordering::Relaxed))
+    if reserve {
+        (if explicit_buffers { buffers } else { buffers.min(SEEN) }, windows)
+    } else {
+        (buffers.min(SEEN), 0)
+    }
+}
+
+fn remaining_card_room(buffers: u64, used: u64, refused: u64, windows: u64, window_used: u64) -> u64 {
+    buffers.saturating_sub(used.saturating_add(refused))
+        .saturating_add(windows.saturating_sub(window_used))
 }
 
 /// The copies in the card's memory.
@@ -744,14 +795,12 @@ fn card_room_for(size: u64) -> Option<ID3D12Resource> {
     if !host.card_ready() {
         return None;
     }
-    // Only while the card has room: with this copy on it, a fifth of the
-    // budget the system gives us must still be free. Copies are made when
-    // the world loads, before the textures fill the card; the texture
-    // queue's own rule (`resource::room`: nine tenths of the budget) counts
+    // Copies are made when the world loads, before the textures fill the
+    // card. The texture queue's own rule (`resource::room`) counts
     // them, so the card's use stays where it was and the textures' share
     // shrinks by the copies' bytes, at most `card_limits`' second number.
-    // (With `card_room_kept_on` the texture queue kept this copy's room
-    // free, and the copy may go up to the queue's own line.)
+    // With room reserved for buffers, local usage including the new copy
+    // may reach 97% of the reported budget. Disabling the reservation uses 80%.
     let hundredths = if card_room_kept_on() { 97 } else { 80 };
     if let Some([budget, used, ..]) = host.video_memory()
         && used + size > budget / 100 * hundredths
@@ -802,8 +851,8 @@ fn card_room_for(size: u64) -> Option<ID3D12Resource> {
 /// unless a shader does declare a write to it one day.
 ///
 /// A window goes to the card while there is room under this number and
-/// while a fifth of the card's budget is free, as title buffers do
-/// (`card_for`): textures keep their room, and once they have filled the
+/// the occupancy limit (80% by default, 97% with its budget reserved).
+/// Textures keep their room, and once they have filled the
 /// card later windows stay where they are. The CPU's side stays in the PC's
 /// memory, so the memory shared with the card does not shrink by this
 /// alone; what moves is what shaders read.
@@ -900,7 +949,7 @@ fn window_room_for(size: u64) -> Option<ID3D12Resource> {
         return None;
     }
     if let Some([budget, used, ..]) = host.video_memory()
-        && used + size > budget / 10 * 8
+        && used.saturating_add(size) > window_usage_limit(budget, reserve_card_budgets() && card_room_kept_on())
     {
         return None;
     }
@@ -913,6 +962,10 @@ fn window_room_for(size: u64) -> Option<ID3D12Resource> {
         WINDOW_CARD_BYTES.fetch_sub(size, Ordering::Relaxed);
     }
     buffer
+}
+
+fn window_usage_limit(budget: u64, reserved: bool) -> u64 {
+    if reserved { budget / 100 * 97 } else { budget / 10 * 8 }
 }
 
 /// What went up, by send: its number, and the offsets, in order and joined
@@ -1750,25 +1803,92 @@ mod relay_tests {
 }
 
 /// Snapshot memory kept for reuse (already touched, so no page faults).
-static POOL: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
+static POOL: Mutex<SnapshotPool> = Mutex::new(SnapshotPool { buffers: Vec::new(), bytes: 0 });
+
+#[derive(Default)]
+struct SnapshotPool {
+    /// Descending capacity order, preserved on insertion and removal.
+    buffers: Vec<Vec<u8>>,
+    bytes: usize,
+}
+
+impl SnapshotPool {
+    fn take(&mut self, n: usize) -> Option<Vec<u8>> {
+        let most = n.saturating_mul(4).max(1 << 20);
+        let i = self.buffers.partition_point(|v| v.capacity() >= n).checked_sub(1)?;
+        if self.buffers[i].capacity() > most {
+            return None;
+        }
+        let v = self.buffers.remove(i);
+        self.bytes -= v.capacity();
+        Some(v)
+    }
+
+    fn put(&mut self, v: Vec<u8>) {
+        let capacity = v.capacity();
+        let i = self.buffers.partition_point(|b| b.capacity() >= capacity);
+        self.buffers.insert(i, v);
+        self.bytes += capacity;
+    }
+
+    /// Normal returns keep the largest buffers, including one oversized buffer.
+    fn keep_largest(&mut self, count: usize, most: usize) -> Vec<Vec<u8>> {
+        if self.buffers.len() <= count && self.bytes <= most {
+            return Vec::new();
+        }
+        let (mut keep, mut bytes) = (0, 0);
+        for v in self.buffers.iter().take(count) {
+            let next = bytes + v.capacity();
+            if keep > 0 && next > most {
+                break;
+            }
+            keep += 1;
+            bytes = next;
+        }
+        self.bytes = bytes;
+        self.buffers.split_off(keep)
+    }
+
+    /// Pressure sweeps keep the smallest buffers. An idle sweep takes the whole pool.
+    fn keep_smallest(&mut self, most: usize) -> Vec<Vec<u8>> {
+        if most == 0 {
+            self.bytes = 0;
+            return std::mem::take(&mut self.buffers);
+        }
+        if self.bytes <= most {
+            return Vec::new();
+        }
+        let (mut keep, mut bytes) = (0, 0);
+        for v in self.buffers.iter().rev() {
+            let next = bytes + v.capacity();
+            if next > most {
+                break;
+            }
+            keep += 1;
+            bytes = next;
+        }
+        self.bytes = bytes;
+        let kept = self.buffers.split_off(self.buffers.len() - keep);
+        std::mem::replace(&mut self.buffers, kept)
+    }
+}
+
+/// When a snapshot buffer was last taken from or given back to [`POOL`]
+/// ([`crate::host::moment`]), for [`let_go_idle_snapshots`]. Read and
+/// updated while holding the pool lock so a sweep sees the latest use.
+static POOL_USED: AtomicU64 = AtomicU64::new(0);
 
 /// An empty buffer with room for `n` bytes, from the pool if it has one
 /// of about that size: a small copy's snapshot took the 174 MB buffer kept
 /// for the big heap's, which then got another, until eight of them were
 /// reserved (1.4 GB in run 24).
 fn pooled(n: usize) -> Vec<u8> {
-    let mut pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
-    let most = n.saturating_mul(4).max(1 << 20);
-    let fit = pool
-        .iter()
-        .enumerate()
-        .filter(|(_, v)| v.capacity() >= n && v.capacity() <= most)
-        .min_by_key(|(_, v)| v.capacity())
-        .map(|(i, _)| i);
-    let mut v = match fit {
-        Some(i) => pool.swap_remove(i),
-        None => Vec::with_capacity(n),
+    let reused = {
+        let mut pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
+        POOL_USED.store(crate::host::moment(), Ordering::Relaxed);
+        pool.take(n)
     };
+    let mut v = reused.unwrap_or_else(|| Vec::with_capacity(n));
     v.clear();
     v
 }
@@ -1792,21 +1912,219 @@ fn snapshots_kept() -> usize {
 /// bytes in all.
 fn give_back(v: Vec<u8>) {
     const KEPT: usize = 512 << 20;
+    let count = snapshots_kept();
     let mut pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
-    pool.push(v);
-    pool.sort_by_key(|v| std::cmp::Reverse(v.capacity()));
-    let (mut kept, mut total) = (0, 0usize);
-    for v in pool.iter().take(snapshots_kept()) {
-        total = total.saturating_add(v.capacity());
-        if kept > 0 && total > KEPT {
-            break;
-        }
-        kept += 1;
-    }
+    POOL_USED.store(crate::host::moment(), Ordering::Relaxed);
+    pool.put(v);
     // (Given back to the kernel without the lock: milliseconds.)
-    let gone = pool.split_off(kept);
+    let gone = pool.keep_largest(count, KEPT);
     drop(pool);
     drop(gone);
+}
+
+/// What [`POOL`] keeps after a sweep while the host is short of memory
+/// ([`crate::residency::pressured`]): the smallest buffers, up to this many
+/// bytes in all. They are the ones asked for most (most of a frame's 330
+/// ranges are small), and the large ones are what fills the 512 MiB.
+const POOL_PRESSURED_KEPT: usize = 32 << 20;
+
+/// Lets go of the snapshot buffers [`POOL`] keeps when nobody wants them.
+/// Only [`give_back`] ever trimmed the pool, and only when another buffer
+/// came back, so once snapshots stopped the last 512 MiB stayed for the
+/// rest of the run, low memory or not (a load test: 524,123 KiB kept after
+/// five idle seconds; 13 MiB private once emptied by hand). Now
+/// - idle for the time the other host caches wait ([`crate::host::ram_idle_ms`])
+///   and four frames, all of it goes;
+/// - while the host is short of memory, all but [`POOL_PRESSURED_KEPT`]
+///   goes, the largest first, whatever the size of the largest. Returns can
+///   refill the pool between sweeps.
+///
+/// The next snapshot is then memory fresh from the kernel, as it was for
+/// every snapshot past the pool before. Called by the once-a-second sweep.
+fn let_go_idle_snapshots() {
+    const IDLE_FRAMES: u64 = 4;
+    let idle_ms = crate::host::ram_idle_ms(crate::host::available_physical_ram());
+    let pressured = crate::residency::pressured();
+    let gone = {
+        let mut pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
+        let idle = crate::host::long_ago(POOL_USED.load(Ordering::Relaxed), idle_ms, IDLE_FRAMES);
+        let Some(most) = snapshots_to_keep(idle, pressured) else { return };
+        pool.keep_smallest(most)
+    };
+    // (Given back to the kernel without the lock.)
+    drop(gone);
+}
+
+/// How many bytes of snapshot buffers [`POOL`] may keep: none once idle,
+/// [`POOL_PRESSURED_KEPT`] while the host is short of memory, otherwise
+/// what [`give_back`] keeps (`None`: nothing to do).
+fn snapshots_to_keep(idle: bool, pressured: bool) -> Option<usize> {
+    if idle {
+        Some(0)
+    } else if pressured {
+        Some(POOL_PRESSURED_KEPT)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod pool_tests {
+    use super::*;
+
+    fn sizes(pool: &[Vec<u8>]) -> Vec<usize> {
+        pool.iter().map(Vec::capacity).collect()
+    }
+
+    fn pool_with_sizes(mib: &[usize]) -> SnapshotPool {
+        let mut pool = SnapshotPool::default();
+        for &n in mib {
+            pool.put(Vec::with_capacity(n << 20));
+        }
+        pool
+    }
+
+    #[test]
+    fn reuse_takes_the_smallest_fit_and_tracks_capacity() {
+        let mut pool = pool_with_sizes(&[8, 1, 4, 2, 4]);
+        assert!(pool.take(9 << 20).is_none());
+        assert_eq!(pool.take(3 << 20).unwrap().capacity(), 4 << 20);
+        assert_eq!(pool.take(5 << 20).unwrap().capacity(), 8 << 20);
+        assert_eq!(sizes(&pool.buffers), [4 << 20, 2 << 20, 1 << 20]);
+        assert_eq!(pool.bytes, 7 << 20);
+        assert_eq!(pool.take(1).unwrap().capacity(), 1 << 20);
+        assert!(pool.take(1).is_none());
+        assert_eq!(pool.bytes, 6 << 20);
+    }
+
+    #[test]
+    fn normal_returns_obey_size_and_count_limits() {
+        let mut pool = pool_with_sizes(&[8, 2, 4, 1]);
+        assert!(pool.keep_largest(4, 16 << 20).is_empty());
+        assert_eq!(pool.bytes, 15 << 20);
+        assert_eq!(sizes(&pool.keep_largest(2, 16 << 20)), [2 << 20, 1 << 20]);
+        assert_eq!(pool.bytes, 12 << 20);
+        assert_eq!(sizes(&pool.keep_largest(2, 7 << 20)), [4 << 20]);
+        assert_eq!(pool.bytes, 8 << 20);
+        assert_eq!(sizes(&pool.keep_largest(0, 7 << 20)), [8 << 20]);
+        assert!(pool.buffers.is_empty());
+        assert_eq!(pool.bytes, 0);
+    }
+
+    #[test]
+    fn trimming_keeps_the_smallest_up_to_the_limit() {
+        let mut pool = pool_with_sizes(&[8, 1, 4, 2]);
+        let gone = pool.keep_smallest(7 << 20);
+        assert_eq!(sizes(&pool.buffers), [4 << 20, 2 << 20, 1 << 20]);
+        assert_eq!(sizes(&gone), [8 << 20]);
+        assert_eq!(pool.bytes, 7 << 20);
+        assert!(pool.keep_smallest(7 << 20).is_empty());
+    }
+
+    #[test]
+    fn trimming_to_nothing_empties_the_pool() {
+        let mut pool = pool_with_sizes(&[3, 1]);
+        let gone = pool.keep_smallest(0);
+        assert!(pool.buffers.is_empty());
+        assert_eq!(pool.bytes, 0);
+        assert_eq!(sizes(&gone), [3 << 20, 1 << 20]);
+    }
+
+    #[test]
+    fn a_buffer_past_the_limit_goes_even_alone() {
+        // `give_back` always keeps its largest buffer; under pressure that
+        // one goes too.
+        let mut pool = pool_with_sizes(&[600]);
+        let gone = pool.keep_smallest(POOL_PRESSURED_KEPT);
+        assert!(pool.buffers.is_empty());
+        assert_eq!(pool.bytes, 0);
+        assert_eq!(gone.len(), 1);
+    }
+
+    #[test]
+    fn an_idle_pool_goes_and_a_pressed_one_shrinks() {
+        assert_eq!(snapshots_to_keep(true, false), Some(0));
+        assert_eq!(snapshots_to_keep(true, true), Some(0));
+        assert_eq!(snapshots_to_keep(false, true), Some(POOL_PRESSURED_KEPT));
+        assert_eq!(snapshots_to_keep(false, false), None);
+    }
+
+    /// A full pool used by eight snapshot workers. Run alone in a fresh process;
+    /// reports wall-clock time for 80,000 acquire/return pairs in this process.
+    #[test]
+    #[ignore]
+    fn pool_contention_load() {
+        const WORKERS: usize = 8;
+        const PAIRS_PER_WORKER: usize = 10_000;
+        for i in 0..384 {
+            give_back(Vec::with_capacity((16 + i % 64) << 10));
+        }
+        let barrier = std::sync::Barrier::new(WORKERS + 1);
+        let elapsed = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..WORKERS)
+                .map(|worker| {
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        for i in 0..PAIRS_PER_WORKER {
+                            let size = (16 + (i * 31 + worker * 7) % 64) << 10;
+                            let mut buffer = pooled(size);
+                            buffer.push(0);
+                            give_back(buffer);
+                        }
+                    })
+                })
+                .collect();
+            let start = std::time::Instant::now();
+            barrier.wait();
+            for worker in workers {
+                worker.join().unwrap();
+            }
+            start.elapsed()
+        });
+        eprintln!("snapshot pool: {} pairs, {:.3} ms", WORKERS * PAIRS_PER_WORKER, elapsed.as_secs_f64() * 1000.0);
+    }
+
+    /// The pool after snapshots stop, in a process's private bytes: before,
+    /// 512 MiB stayed however long nothing asked. Run alone (the pool is
+    /// global): `cargo test -p victory-gpu --lib
+    /// shadow::pool_tests::pool_memory_load -- --ignored --nocapture --test-threads=1`
+    #[test]
+    #[ignore]
+    fn pool_memory_load() {
+        fn private_kib() -> usize {
+            use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS_EX};
+            use windows_sys::Win32::System::Threading::GetCurrentProcess;
+            // SAFETY: plain data the call fills in, for this process.
+            let mut c: PROCESS_MEMORY_COUNTERS_EX = unsafe { std::mem::zeroed() };
+            c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
+            unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), (&raw mut c).cast(), c.cb) };
+            c.PrivateUsage >> 10
+        }
+        let start = private_kib();
+        for i in 0..256usize {
+            let mut v = pooled((1 + i % 32) << 20);
+            v.resize(v.capacity(), 1);
+            give_back(v);
+        }
+        let kept = POOL.lock().unwrap().bytes;
+        let full = private_kib();
+        let gone = POOL.lock().unwrap().keep_smallest(POOL_PRESSURED_KEPT);
+        drop(gone);
+        let pressed = private_kib();
+        let gone = POOL.lock().unwrap().keep_smallest(0);
+        drop(gone);
+        let idle = private_kib();
+        eprintln!(
+            "pool kept {} KiB; private KiB over the start: full {}, pressed {}, idle {}",
+            kept >> 10,
+            full.saturating_sub(start),
+            pressed.saturating_sub(start),
+            idle.saturating_sub(start)
+        );
+        assert!(pressed.saturating_sub(start) <= (POOL_PRESSURED_KEPT >> 10) + 8 * 1024);
+        assert!(POOL.lock().unwrap().buffers.is_empty());
+    }
 }
 
 const NOT_WATCHED: u8 = 2;
@@ -2283,7 +2601,8 @@ pub(crate) fn back_line(frames: f64) {
     tracing::info!(
         "shader writes looked for on the CPU per frame: {:.1} MB compared in {:.0} ranges of windows outside buffers ({:.1} MB \
          snapshotted), {:.1} MB in {:.0} ranges of title buffers' copies ({:.1} MB snapshotted), of them {:.1} MB in copies \
-         of 1 MiB or more (VICTORY_CARD_BUFFERS_MIN_MB=1 would have the card look there)",
+         of 1 MiB or more. VICTORY_CARD_BUFFERS_MIN_MB=1 sets only the lower size limit. Local copies must also be below \
+         1 GiB and fit the buffer cap and the allowed share of any reported VRAM budget",
         mb(c[2]),
         c[5],
         mb(c[0]),
@@ -3505,6 +3824,8 @@ static WINDOW_BAND: std::sync::Mutex<crate::host::RamBand> =
 /// again. Called before a submission starts, by the thread that submits.
 pub(crate) fn let_go_idle() {
     const IDLE_FRAMES: u64 = 4;
+    // Before the windows: their table may be empty while the pool is not.
+    let_go_idle_snapshots();
     let budget = window_budget();
     let mut idle_ms = crate::host::ram_idle_ms(crate::host::available_physical_ram());
     let mut keep = u64::MAX;
@@ -3599,7 +3920,7 @@ pub(crate) fn memory() -> [u64; 6] {
     };
     let (kept, kept_bytes) = {
         let pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
-        (pool.len() as u64, pool.iter().map(|v| v.capacity() as u64).sum::<u64>())
+        (pool.buffers.len() as u64, pool.bytes as u64)
     };
     [
         LIVE[0].load(Ordering::Relaxed),
@@ -6162,7 +6483,10 @@ pub(crate) fn by_address(start: u64, len: u64) -> Option<Arc<Shadow>> {
         None
     };
     let buffer = match on_card {
-        Some(buffer) => buffer,
+        Some(buffer) => {
+            BY_ADDRESS_CARD_BYTES.fetch_add(len, Ordering::Relaxed);
+            buffer
+        }
         None => host.shared_buffer(len)?.0,
     };
     crate::host::name(&staging, || format!("title memory {start:#x}+{len:#x} by address, the CPU's side"));
@@ -6390,6 +6714,31 @@ mod window_tests {
         WINDOW, cover, default_card_limits_mb, grid, holder, longest_tail, resolve_card_limits,
         tail_of, window_of, window_victims,
     };
+
+    #[test]
+    fn only_the_explicit_profile_reserves_full_budgets() {
+        use super::{parse_mib, reservation_limits, window_usage_limit};
+        const MIB: u64 = 1 << 20;
+        assert_eq!(reservation_limits(1536 * MIB, true, 1024 * MIB, false), (1024 * MIB, 0));
+        assert_eq!(reservation_limits(1536 * MIB, true, 1024 * MIB, true), (1536 * MIB, 1024 * MIB));
+        // A missing or invalid override uses the adapter default, with the 1 GiB reserve cap.
+        assert_eq!(parse_mib(" 1536 "), Some(1536));
+        let invalid = parse_mib("not a number");
+        assert_eq!(invalid, None);
+        assert_eq!(reservation_limits(2048 * MIB, invalid.is_some(), 1024 * MIB, true), (1024 * MIB, 1024 * MIB));
+        assert_eq!(reservation_limits(512 * MIB, false, 0, false), (512 * MIB, 0));
+        assert_eq!(window_usage_limit(1_099, false), 872);
+        assert_eq!(window_usage_limit(1_099, true), 970);
+    }
+
+    #[test]
+    fn texture_admission_reserves_buffers_and_windows_independently() {
+        use super::remaining_card_room;
+        const MIB: u64 = 1 << 20;
+        assert_eq!(remaining_card_room(1536 * MIB, 512 * MIB, 0, 1024 * MIB, 256 * MIB), 1792 * MIB);
+        assert_eq!(remaining_card_room(512 * MIB, 256 * MIB, 1024 * MIB, 1024 * MIB, 256 * MIB), 768 * MIB);
+        assert_eq!(remaining_card_room(0, u64::MAX, 1, 0, 0), 0);
+    }
 
     #[test]
     fn window_budget_evicts_oldest_only_until_it_fits() {
