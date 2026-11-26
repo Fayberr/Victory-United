@@ -27,7 +27,6 @@ mod texstore;
 mod backreads;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod capture;
-<<<<<<< HEAD
 #[cfg(windows)]
 mod cardmeter;
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -36,11 +35,6 @@ mod renderdoc;
 mod shot;
 #[cfg(windows)]
 mod compose;
-||||||| 85d564167
-=======
-#[cfg(windows)]
-mod compose;
->>>>>>> avatar/main
 pub mod console;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod copystat;
