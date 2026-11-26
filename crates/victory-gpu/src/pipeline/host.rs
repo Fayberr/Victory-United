@@ -830,7 +830,7 @@ impl HostPipeline {
         }
         let host = host()?;
 
-        let aniso_point_mip_supported = aniso_point_mip_supported(&host.device);
+        let aniso_point_mip = aniso_point_mip_supported(&host.device);
 
         // The root signature the translated shaders' bindings define.
         let mut params: Vec<D3D12_ROOT_PARAMETER1> = Vec::new();
@@ -845,7 +845,7 @@ impl HostPipeline {
             let (user_data, root_cbvs, root_srvs, root_uavs) = collect_stage_bindings(
                 t,
                 visibility,
-                aniso_point_mip_supported,
+                aniso_point_mip,
                 &mut params,
                 &mut ranges,
                 &mut samplers,
