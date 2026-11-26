@@ -106,14 +106,7 @@ impl ResourceDesc {
     }
 
     /// The texture of this one's levels from `base` on.
-<<<<<<< HEAD
-    #[allow(clippy::wrong_self_convention)]
-    fn from_level(&self, base: u32) -> ResourceDesc {
-||||||| 0a4356653
-    fn from_level(&self, base: u32) -> ResourceDesc {
-=======
     fn levels_from(&self, base: u32) -> ResourceDesc {
->>>>>>> vicetay/main
         let mut d = *self;
         if base > 0 {
             d.width = (d.width >> base).max(1);

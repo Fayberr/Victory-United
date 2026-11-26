@@ -3428,12 +3428,7 @@ void work() {
         heap_pairs: [[Option<ID3D12DescriptorHeap>; 2]; 2],
         tables: [D3D12_GPU_DESCRIPTOR_HANDLE; 2],
         targets: [D3D12_CPU_DESCRIPTOR_HANDLE; 2],
-<<<<<<< HEAD
         _depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
-||||||| 0a4356653
-        depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
-=======
->>>>>>> vicetay/main
         depth_tested: D3D12_CPU_DESCRIPTOR_HANDLE,
         stamps: ID3D12QueryHeap,
         back: ID3D12Resource,
@@ -3741,12 +3736,7 @@ void work() {
                     heap_pairs,
                     tables,
                     targets,
-<<<<<<< HEAD
                     _depth_written: depth_written,
-||||||| 0a4356653
-                    depth_written,
-=======
->>>>>>> vicetay/main
                     depth_tested,
                     stamps,
                     back,
