@@ -130,15 +130,6 @@ pub(crate) enum C {
     WaitsForGroups,
     WaitsForBuffers,
     IndirectBounded,
-<<<<<<< HEAD
-||||||| 9c184b35b
-    /// `watch::writes` kernel askings that failed (the range is not
-    /// write-watched: view memory or not watchable).
-    WatchFailed,
-    /// `watch::writes` askings not made because the range's first block is
-    /// already known to be guarded view memory (no kernel call).
-    WatchKnownView,
-=======
     /// `watch::writes` kernel askings that failed (the range is not
     /// write-watched: view memory or not watchable).
     WatchFailed,
@@ -167,10 +158,11 @@ pub(crate) enum C {
     RefreshKnownUs,
     /// Refreshes skipped as known unchanged (`VICTORY_REGION_SKIP`).
     RefreshSkipped,
->>>>>>> origin/exp/fork-head
 }
-<<<<<<< HEAD
-const COUNTERS: usize = 80;
+/// One past the last counter, following the enum (a fixed 80 was outrun by
+/// the refresh counters and ended run 324 with an index past the end).
+const COUNTERS: usize = C::RefreshSkipped as usize + 1;
+const _: () = assert!(COUNTERS <= 256, "the counters' array stays small");
 /// One of some sets of counters, each in lines of the processor's memory of
 /// its own: a set for all threads had them wait for each other's lines at
 /// every list call (what counts here is summed up for the log alone).
@@ -196,16 +188,6 @@ fn bank() -> usize {
     })
     .unwrap_or(0)
 }
-||||||| 9c184b35b
-const COUNTERS: usize = 80;
-static COUNT: [AtomicU64; COUNTERS] = [const { AtomicU64::new(0) }; COUNTERS];
-=======
-/// One slot per counter: follows the enum (a fixed 80 was outrun by the
-/// refresh counters and ended run 324 with an index past the end).
-const COUNTERS: usize = C::RefreshSkipped as usize + 1;
-const _: () = assert!(COUNTERS <= 256, "the counters' array stays small");
-static COUNT: [AtomicU64; COUNTERS] = [const { AtomicU64::new(0) }; COUNTERS];
->>>>>>> origin/exp/fork-head
 
 pub(crate) fn add(c: C, n: u64) {
     COUNT[bank()].0[c as usize].fetch_add(n, Relaxed);
@@ -1411,27 +1393,12 @@ pub(crate) fn log(frames: f64) {
         );
     }
     tracing::info!(
-<<<<<<< HEAD
-||||||| 9c184b35b
-        "  write-watch askings per frame that failed in the kernel: {:.0}; not made because the range \
-         is known guarded view memory: {:.0} (VICTORY_VIEW_ASK=1 asks the kernel anyway); such ranges left \
-         out of the submissions' askings ahead: {:.0}",
-        c[C::WatchFailed as usize],
-        c[C::WatchKnownView as usize],
-        crate::watch::AHEAD_VIEWS.swap(0, Relaxed) as f64 / frames,
-    );
-    crate::draw::window_line(frames);
-    tracing::info!(
-=======
         "  write-watch askings per frame that failed in the kernel: {:.0} ({:.2} ms in all with their guard walks); \
-         not made because the range is known guarded view memory: {:.0} ({:.2} ms in all) (VICTORY_VIEW_ASK=1 asks \
-         the kernel anyway; VICTORY_VIEW_KNOWN=1 keeps written view blocks known); such ranges left \
-         out of the submissions' askings ahead: {:.0}",
+         not made because the range is known guarded view memory: {:.0} ({:.2} ms in all)",
         c[C::WatchFailed as usize],
         c[C::WatchFailedUs as usize] / 1e3,
         c[C::WatchKnownView as usize],
         c[C::WatchKnownUs as usize] / 1e3,
-        crate::watch::AHEAD_VIEWS.swap(0, Relaxed) as f64 / frames,
     );
     tracing::info!(
         "  refreshes of watched host copies per frame: {:.0} copied nothing ({:.2} ms), {:.0} copied something \
@@ -1447,9 +1414,7 @@ pub(crate) fn log(frames: f64) {
         c[C::RefreshKnownUs as usize] / 1e3,
         c[C::RefreshSkipped as usize],
     );
-    crate::draw::window_line(frames);
     tracing::info!(
->>>>>>> origin/exp/fork-head
         "  waits for every earlier shader write, per frame: {:.0} for the title's barrier groups, {:.0} \
          for its barriers on buffers; {:.0} indirect commands bounded (a dispatch of ours between two \
          such waits each); barrier experiment {}",
