@@ -84,7 +84,6 @@ pub fn load(prepared: &PreparedImage, dir: &Path) -> Result<LoadedImage> {
         // SAFETY: just mapped, and no title code has run.
         unsafe { crate::tls::redirect(loaded.base(), &loaded.info) }?;
     }
-<<<<<<< HEAD
     if std::env::var_os(crate::hooks::NO_WATCHDOG_ENV).is_some() {
         // SAFETY: just mapped, and no title code has run.
         let applied = unsafe { crate::hooks::disarm_watchdog(loaded.base(), &prepared.original_hash) };
@@ -100,14 +99,6 @@ pub fn load(prepared: &PreparedImage, dir: &Path) -> Result<LoadedImage> {
             crate::hooks::OWN_UPSCALER_ENV
         );
     }
-||||||| merged common ancestors
-=======
-    if std::env::var_os(crate::hooks::NO_WATCHDOG_ENV).is_some() {
-        // SAFETY: just mapped, and no title code has run.
-        let applied = unsafe { crate::hooks::disarm_watchdog(loaded.base(), &prepared.original_hash) };
-        tracing::info!(applied, "title watchdog hooks ({})", crate::hooks::NO_WATCHDOG_ENV);
-    }
->>>>>>> vibr/main
     tracing::info!(
         base = format_args!("{:#x}", loaded.base()),
         preferred = format_args!("{:#x}", loaded.info.image_base),
