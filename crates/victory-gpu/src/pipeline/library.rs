@@ -944,23 +944,12 @@ fn save_pause(took: std::time::Duration) -> std::time::Duration {
 /// last save and [`save_pause`] has passed (or `now`). One thread saves; the
 /// others do not wait for it.
 pub(crate) fn save(now: bool) {
-<<<<<<< HEAD
     use std::sync::TryLockError;
     // When the last save ended, and how long it took. Held for all of a
     // save: worker saves and shutdown's `save(true)` never race on the
     // `.tmp` or target files.
     static LAST: Mutex<Option<(std::time::Instant, std::time::Duration)>> = Mutex::new(None);
-||||||| merged common ancestors
-    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-    const SAVE_EVERY: std::time::Duration = std::time::Duration::from_secs(20);
-=======
-    // Held over serialisation and both writes, so overlapping saves cannot
-    // replace files under each other.
-    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-    const SAVE_EVERY: std::time::Duration = std::time::Duration::from_secs(20);
->>>>>>> belobug/main
     let (Some(dir), Some(library)) = (DIR.get(), library()) else { return };
-<<<<<<< HEAD
     let mut last = if now {
         store_waiting();
         LAST.lock().unwrap_or_else(|e| e.into_inner())
@@ -969,59 +958,8 @@ pub(crate) fn save(now: bool) {
             Ok(last) => last,
             Err(TryLockError::Poisoned(e)) => e.into_inner(),
             Err(TryLockError::WouldBlock) => return,
-||||||| merged common ancestors
-    {
-        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-        if !now && last.is_some_and(|t| t.elapsed() < SAVE_EVERY) {
-            return;
-        }
-        *last = Some(std::time::Instant::now());
-    }
-    let blob = {
-        let mut l = library.lock().unwrap_or_else(|e| e.into_inner());
-        if l.added == 0 && !USED_CHANGED.swap(false, Ordering::Relaxed) {
-            return;
-        }
-        // SAFETY: a buffer of the size the library asks for.
-        let bytes = unsafe {
-            let mut bytes = vec![0u8; l.library.GetSerializedSize()];
-            l.library.Serialize(&mut bytes).map(|()| bytes)
-        };
-        match bytes {
-            Ok(bytes) => {
-                l.added = 0;
-                bytes
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "host pipeline library not serialised");
-                return;
-            }
-=======
-    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    if !now && last.is_some_and(|t| t.elapsed() < SAVE_EVERY) {
-        return;
-    }
-    *last = Some(std::time::Instant::now());
-    let (blob, saved_additions) = {
-        let l = library.lock().unwrap_or_else(|e| e.into_inner());
-        if l.added == 0 && !USED_CHANGED.load(Ordering::Relaxed) {
-            return;
-        }
-        // SAFETY: a buffer of the size the library asks for.
-        let bytes = unsafe {
-            let mut bytes = vec![0u8; l.library.GetSerializedSize()];
-            l.library.Serialize(&mut bytes).map(|()| bytes)
-        };
-        match bytes {
-            Ok(bytes) => (bytes, l.added),
-            Err(e) => {
-                tracing::warn!(error = %e, "host pipeline library not serialised");
-                return;
-            }
->>>>>>> belobug/main
         }
     };
-<<<<<<< HEAD
     if !now && last.is_some_and(|(ended, took)| ended.elapsed() < save_pause(took)) {
         return;
     }
@@ -1115,20 +1053,7 @@ fn write_out(dir: &std::path::Path, library: &Library) {
             .map_or(0, HashSet::len);
         (len, library_written)
     };
-||||||| merged common ancestors
-    let used: Vec<String> = USED.lock().unwrap_or_else(|e| e.into_inner()).iter().flatten().cloned().collect();
-    let written = std::fs::create_dir_all(dir)
-        .and_then(|()| write_atomically(&dir.join(LIBRARY_FILE), &blob))
-        .and_then(|()| write_atomically(&dir.join(EARLY_FILE), used.join("\n").as_bytes()));
-=======
-    let used_changed = USED_CHANGED.swap(false, Ordering::Relaxed);
-    let used: Vec<String> = USED.lock().unwrap_or_else(|e| e.into_inner()).iter().flatten().cloned().collect();
-    let written = std::fs::create_dir_all(dir)
-        .and_then(|()| write_atomically(&dir.join(LIBRARY_FILE), &blob))
-        .and_then(|()| write_atomically(&dir.join(EARLY_FILE), used.join("\n").as_bytes()));
->>>>>>> belobug/main
     match written {
-<<<<<<< HEAD
         Ok(()) => tracing::info!(
             bytes,
             early = early_count,
@@ -1138,43 +1063,9 @@ fn write_out(dir: &std::path::Path, library: &Library) {
             "host pipeline library saved"
         ),
         Err(e) => tracing::warn!(error = %e, "host pipeline library not saved"),
-||||||| merged common ancestors
-        Ok(()) => tracing::info!(
-            bytes = blob.len(),
-            early = used.len(),
-            made = MADE.load(Ordering::Relaxed),
-            loaded = LOADED.load(Ordering::Relaxed),
-            started_early = EARLY.load(Ordering::Relaxed),
-            "host pipeline library saved"
-        ),
-        Err(e) => tracing::warn!(error = %e, "host pipeline library not saved"),
-=======
-        Ok(()) => {
-            let mut l = library.lock().unwrap_or_else(|e| e.into_inner());
-            // Keep pipelines stored while the files were being written.
-            l.added = l.added.saturating_sub(saved_additions);
-            tracing::info!(
-                bytes = blob.len(),
-                early = used.len(),
-                made = MADE.load(Ordering::Relaxed),
-                loaded = LOADED.load(Ordering::Relaxed),
-                started_early = EARLY.load(Ordering::Relaxed),
-                "host pipeline library saved"
-            );
-        }
-        Err(e) => {
-            // At least one cache file was not published. Keep the counters
-            // dirty for the next save.
-            if used_changed {
-                USED_CHANGED.store(true, Ordering::Relaxed);
-            }
-            tracing::warn!(error = %e, "host pipeline library not saved");
-        }
->>>>>>> belobug/main
     }
 }
 
-<<<<<<< HEAD
 /// Writes the library's `size` serialised bytes to the file `tmp`: through
 /// a mapping of that file, so that the bytes are the file's pages and not
 /// 1.3 GB more of the process's own memory for the seconds a save takes;
@@ -1192,31 +1083,6 @@ fn serialise(library: &ID3D12PipelineLibrary1, tmp: &std::path::Path, size: usiz
     // SAFETY: a buffer of the size the library asks for.
     unsafe { library.Serialize(&mut bytes) }.map_err(failed)?;
     std::fs::write(tmp, &bytes)
-||||||| merged common ancestors
-/// Writes `bytes` to a temporary file beside `path`, then renames it over
-/// `path`: a reader never sees a part.
-fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
-=======
-/// Writes `bytes` to a unique temporary file beside `path`, then renames it
-/// over `path`: a reader never sees a part, and overlapping saves do not
-/// share a temporary file.
-fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let extension = format!(
-        "tmp-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    );
-    let tmp = path.with_extension(extension);
-    let written = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
-    if written.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    written
->>>>>>> belobug/main
 }
 
 /// Allocates the fallback buffer without aborting under memory pressure.
