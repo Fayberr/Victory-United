@@ -37,7 +37,7 @@ mask. The diagnostics build logs every frame and saves every 16th frame.
   frames that were looked at show the room lit through the window, the fence outside and the
   character, with no white or black blocks. Some detail is missing: the game's ray-traced light is
   not built by default, and [Vice-Tay's list of known problems](https://github.com/TaynanGT/Vice-Tay#known-problems)
-  (flat colour bands, some objects in flat colours, blocky clouds) was not checked here.
+  was not checked here.
 - **Stability:** no crash or GPU hang in that 7 minute run. Vice-Tay reports memory growing in long
   sessions and the frame rate falling with it; a longer run on our machine is in progress and its
   result is added here when it is done.
