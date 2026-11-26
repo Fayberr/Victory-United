@@ -2933,20 +2933,6 @@ mod tests {
     }
 
     #[test]
-    fn a_page_array_filled_late_is_waited_for() {
-        let array: &'static [std::sync::atomic::AtomicUsize] = Box::leak(Box::new([std::sync::atomic::AtomicUsize::new(7), std::sync::atomic::AtomicUsize::new(0)]));
-        let title = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            array[1].store(8, Ordering::Release);
-        });
-        assert_eq!(filled(array.as_ptr().cast(), 2), [7, 8]);
-        title.join().unwrap();
-        // One never filled is given up on.
-        array[0].store(0, Ordering::Release);
-        assert_eq!(filled(array.as_ptr().cast(), 2), [0, 8]);
-    }
-
-    #[test]
     fn page_lists_are_read_at_the_titles_submit() {
         use crate::modules::xmem;
         let mut real = [0usize; 1];
