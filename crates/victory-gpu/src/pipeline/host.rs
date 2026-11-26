@@ -147,31 +147,6 @@ impl GraphicsState {
     }
 }
 
-impl GraphicsState {
-    /// The blend description for the host: blending off for integer render
-    /// targets. The console's blender passes integer targets through; D3D12
-    /// calls blending one an error (debug layer message 676, "The render
-    /// target format at slot 2 is format (R8_UINT). This format does not
-    /// support blending": a G-buffer pass of Grand Theft Auto VI), and what
-    /// NVIDIA's driver writes there is undefined. Without independent blend
-    /// the first slot's description holds for all, so it is spread to every
-    /// slot first. `VICTORY_FIX_INTBLEND=0`: the title's description as is.
-    fn host_blend(&self) -> D3D12_BLEND_DESC {
-        if std::env::var_os("VICTORY_FIX_INTBLEND").is_some_and(|v| v == "0") {
-            return self.blend;
-        }
-        let mut blend = host_blend(&self.blend, &self.targets);
-        // A logic op cannot be set where blending is off either.
-        let n = (self.targets.NumRenderTargets as usize).min(8);
-        for i in 0..n {
-            if integer_format(self.targets.RTFormats[i]) {
-                blend.RenderTarget[i].LogicOpEnable = false.into();
-            }
-        }
-        blend
-    }
-}
-
 /// The title's blend state as the host takes it: blending off on integer
 /// render targets. The console ignores blending there, and titles leave it
 /// on (the world sets it on an `R8_UINT` target), but D3D12 does not allow
