@@ -4899,13 +4899,12 @@ fn buffer_view_ok(format: DXGI_FORMAT, first: u64, count: u32, stride: u32, raw:
             .is_some_and(|end| end <= width)
 }
 
-<<<<<<< HEAD
-/// A constant buffer view's host byte length: multiple of 256 bytes, at
-/// most the 64 KiB a shader can index. The host removes the device for a
-/// larger one, and the title's heap holds old views of any size in slots it
-/// does not use.
+/// VU's name for a constant buffer view's host byte length
+/// ([`constant_bytes`]): multiple of 256 bytes, at most the 64 KiB a shader
+/// can index. The host removes the device for a larger one, and the title's
+/// heap holds old views of any size in slots it does not use.
 fn constant_size(size: u32) -> u32 {
-    size.min(64 << 10).next_multiple_of(256)
+    constant_bytes(size)
 }
 
 /// How many of `count` elements of `element` bytes from `first` on lie in
@@ -4943,8 +4942,6 @@ fn left_null(why: &'static str, unordered: bool, address: u64, len: u64, element
     }
 }
 
-||||||| a26859fc
-=======
 /// Raw twins ([`raw_twins`]) made since the last frame line, and those of them that
 /// do not begin on 16 bytes, as a raw view must ([`move_raw`]), and those of
 /// these that could not be moved there (null).
@@ -5009,7 +5006,6 @@ fn twin_window(format: DXGI_FORMAT, first: u64, count: u32, stride: u32, raw: bo
     Some((from / 4, dwords, (start - from) as u32))
 }
 
->>>>>>> avatar/main
 fn buffer_srv(
     address: u64,
     len: u64,
@@ -5017,55 +5013,6 @@ fn buffer_srv(
     at: D3D12_CPU_DESCRIPTOR_HANDLE,
     twin: Option<D3D12_CPU_DESCRIPTOR_HANDLE>,
 ) -> Option<Kept> {
-<<<<<<< HEAD
-    let shadow = crate::shadow::find(address, len)?;
-    let offset = shadow.offset(address);
-    // Off the elements of that copy: on a copy of its own bytes, from its
-    // element 0 (`own_bytes`).
-    let (shadow, offset) = {
-        // SAFETY: a buffer view's union member.
-        let b = unsafe { desc.Anonymous.Buffer };
-        let raw = b.Flags.0 & D3D12_BUFFER_SRV_FLAG_RAW.0 != 0;
-        match own_bytes(
-            offset,
-            address,
-            len,
-            desc.Format,
-            b.FirstElement,
-            b.NumElements,
-            element_size(&desc),
-            b.StructureByteStride,
-            raw,
-        )
-        .and_then(|(start, bytes)| crate::shadow::exact(start, bytes))
-        {
-            Some(own) => {
-                desc.Anonymous.Buffer.FirstElement = 0;
-                (own, 0)
-            }
-            None => (shadow, offset),
-        }
-    };
-||||||| a26859fc
-    let shadow = crate::shadow::find(address, len)?;
-    let offset = shadow.offset(address);
-    // Off the elements of that copy: on a copy of its own bytes, from its
-    // element 0 (`own_bytes`).
-    let (shadow, offset) = {
-        // SAFETY: a buffer view's union member.
-        let b = unsafe { desc.Anonymous.Buffer };
-        let unknown = desc.Format == DXGI_FORMAT_UNKNOWN;
-        match own_bytes(offset, address, b.FirstElement, b.NumElements, element_size(&desc), b.StructureByteStride, unknown)
-            .and_then(|(start, bytes)| crate::shadow::exact(start, bytes))
-        {
-            Some(own) => {
-                desc.Anonymous.Buffer.FirstElement = 0;
-                (own, 0)
-            }
-            None => (shadow, offset),
-        }
-    };
-=======
     let mut shadow = crate::shadow::find(address, len)?;
     let mut offset = shadow.offset(address);
     let unit = element_size(&desc);
@@ -5079,7 +5026,6 @@ fn buffer_srv(
         (shadow, offset) = (home, 0);
         own.FirstElement = 0;
     }
->>>>>>> avatar/main
     // A structured view as a raw view of the same bytes (see `raw_window`).
     // SAFETY: a buffer view's union member.
     let structured = unsafe { desc.Anonymous.Buffer };
@@ -5110,23 +5056,12 @@ fn buffer_srv(
         }
         buffer.FirstElement += offset / element;
     }
-<<<<<<< HEAD
     // SAFETY: a live buffer.
-    let width = unsafe { shadow.buffer.GetDesc() }.Width;
+    let width = shadow.width();
     let unit = if window.is_some() { 4 } else { element };
     buffer.NumElements = elements_inside(buffer.FirstElement, buffer.NumElements, unit, width);
     let (first, count, stride) = (buffer.FirstElement, buffer.NumElements, buffer.StructureByteStride);
     let raw = buffer.Flags.0 & D3D12_BUFFER_SRV_FLAG_RAW.0 != 0;
-||||||| a26859fc
-    let (first, count, stride) = (buffer.FirstElement, buffer.NumElements, buffer.StructureByteStride);
-    let raw = buffer.Flags.0 & D3D12_BUFFER_SRV_FLAG_RAW.0 != 0;
-    // SAFETY: a live buffer.
-    let width = unsafe { shadow.buffer.GetDesc() }.Width;
-=======
-    let (first, count, stride) = (buffer.FirstElement, buffer.NumElements, buffer.StructureByteStride);
-    let raw = buffer.Flags.0 & D3D12_BUFFER_SRV_FLAG_RAW.0 != 0;
-    let width = shadow.width();
->>>>>>> avatar/main
     if !buffer_view_ok(desc.Format, first, count, stride, raw, width) {
         REFUSED_VIEWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let why = if raw { "raw, refused by the host" } else { "refused by the host" };
@@ -5195,52 +5130,13 @@ fn buffer_uav(
     let unit = {
         // SAFETY: a buffer view's union member.
         let b = unsafe { desc.Anonymous.Buffer };
-<<<<<<< HEAD
         let raw = b.Flags.0 & D3D12_BUFFER_UAV_FLAG_RAW.0 != 0;
-        let element = if b.StructureByteStride > 0 {
-||||||| a26859fc
-        let element = if b.StructureByteStride > 0 {
-=======
         if b.StructureByteStride > 0 {
->>>>>>> avatar/main
             u64::from(b.StructureByteStride)
         } else if raw {
             4
         } else {
             crate::resource::element(desc.Format.0 as u32).map_or(0, |(bytes, _)| bytes)
-<<<<<<< HEAD
-        };
-        match own_bytes(
-            shadow.offset(address),
-            address,
-            len,
-            desc.Format,
-            b.FirstElement,
-            b.NumElements,
-            element,
-            b.StructureByteStride,
-            raw,
-        )
-        .and_then(|(start, bytes)| crate::shadow::exact(start, bytes))
-        {
-            Some(own) => {
-                desc.Anonymous.Buffer.FirstElement = 0;
-                (own, true)
-            }
-            None => (shadow, false),
-||||||| a26859fc
-        };
-        let unknown = desc.Format == DXGI_FORMAT_UNKNOWN;
-        match own_bytes(shadow.offset(address), address, b.FirstElement, b.NumElements, element, b.StructureByteStride, unknown)
-            .and_then(|(start, bytes)| crate::shadow::exact(start, bytes))
-        {
-            Some(own) => {
-                desc.Anonymous.Buffer.FirstElement = 0;
-                (own, true)
-            }
-            None => (shadow, false),
-=======
->>>>>>> avatar/main
         }
     };
     // SAFETY: a buffer view's union member.
@@ -5544,12 +5440,7 @@ fn constant_bytes(size: u32) -> u32 {
 
 /// Makes the host descriptor for `view` at `at`: the host resource it
 /// views, or `None` if it cannot.
-<<<<<<< HEAD
 fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Made> {
-||||||| a26859fc
-fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Kept> {
-=======
-fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Kept> {
     make_twinned(view, at, None)
 }
 
@@ -5560,8 +5451,7 @@ fn make_twinned(
     view: &View,
     at: D3D12_CPU_DESCRIPTOR_HANDLE,
     twin: Option<D3D12_CPU_DESCRIPTOR_HANDLE>,
-) -> Option<Kept> {
->>>>>>> avatar/main
+) -> Option<Made> {
     let host = host()?;
     let device = &host.device;
     match view {
@@ -5577,23 +5467,8 @@ fn make_twinned(
             }
             let desc = D3D12_CONSTANT_BUFFER_VIEW_DESC {
                 BufferLocation: gpu,
-<<<<<<< HEAD
-                SizeInBytes: constant_size(size),
-||||||| a26859fc
-                SizeInBytes: size.next_multiple_of(256),
-=======
                 SizeInBytes: constant_bytes(size),
->>>>>>> avatar/main
             };
-<<<<<<< HEAD
-            // SAFETY: a slot of our heap; the range lies in the host copy.
-            unsafe { device.CreateConstantBufferView(Some(&desc), at) };
-            Some(Made::plain(Some(shadow.buffer.clone())))
-||||||| a26859fc
-            // SAFETY: a slot of our heap; the range lies in the host copy.
-            unsafe { device.CreateConstantBufferView(Some(&desc), at) };
-            Some(Some(shadow.buffer.clone()))
-=======
             // SAFETY: slots of our heap; the range lies in the host copy.
             unsafe {
                 device.CreateConstantBufferView(Some(&desc), at);
@@ -5601,8 +5476,7 @@ fn make_twinned(
                     device.CreateConstantBufferView(Some(&desc), twin);
                 }
             }
-            Some(Some(shadow.buffer.clone()))
->>>>>>> avatar/main
+            Some(Made::plain(Some(shadow.buffer.clone())))
         }
         View::Shader(resource, desc) => {
             let resource = *resource as crate::object::This;
@@ -5684,13 +5558,7 @@ fn make_twinned(
             } else if let (Some((data, len)), Some(desc)) =
                 (crate::resource::buffer_bytes(resource), desc)
             {
-<<<<<<< HEAD
-                buffer_srv(data as u64, len, srv_desc(desc), at).map(Made::plain)
-||||||| a26859fc
-                buffer_srv(data as u64, len, srv_desc(desc), at)
-=======
-                buffer_srv(data as u64, len, srv_desc(desc), at, twin)
->>>>>>> avatar/main
+                buffer_srv(data as u64, len, srv_desc(desc), at, twin).map(Made::plain)
             } else {
                 None
             }
@@ -5700,13 +5568,7 @@ fn make_twinned(
             let Some(texture) = crate::resource::host_resource(resource) else {
                 return match (crate::resource::buffer_bytes(resource), desc) {
                     (Some((data, len)), Some(desc)) => {
-<<<<<<< HEAD
-                        buffer_uav(data as u64, len, uav_desc(desc), at).map(Made::plain)
-||||||| a26859fc
-                        buffer_uav(data as u64, len, uav_desc(desc), at)
-=======
-                        buffer_uav(data as u64, len, uav_desc(desc), at, twin)
->>>>>>> avatar/main
+                        buffer_uav(data as u64, len, uav_desc(desc), at, twin).map(Made::plain)
                     }
                     _ => None,
                 };
@@ -5817,21 +5679,9 @@ fn make_twinned(
                 return None;
             }
             if *unordered {
-<<<<<<< HEAD
-                buffer_uav(address, len, uav_desc(words), at).map(Made::plain)
-||||||| a26859fc
-                buffer_uav(address, len, uav_desc(words), at)
-=======
-                buffer_uav(address, len, uav_desc(words), at, twin)
->>>>>>> avatar/main
+                buffer_uav(address, len, uav_desc(words), at, twin).map(Made::plain)
             } else {
-<<<<<<< HEAD
-                buffer_srv(address, len, srv_desc(words), at).map(Made::plain)
-||||||| a26859fc
-                buffer_srv(address, len, srv_desc(words), at)
-=======
-                buffer_srv(address, len, srv_desc(words), at, twin)
->>>>>>> avatar/main
+                buffer_srv(address, len, srv_desc(words), at, twin).map(Made::plain)
             }
         }
     }
@@ -6390,7 +6240,6 @@ fn null_view(at: D3D12_CPU_DESCRIPTOR_HANDLE) {
 mod tests {
     use super::*;
 
-<<<<<<< HEAD
     use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
     use windows::core::Interface;
 
@@ -6656,8 +6505,6 @@ mod tests {
     }
 
 
-||||||| a26859fc
-=======
     /// A view of a host copy that begins at a later level shows the same
     /// levels of it.
     #[test]
@@ -6736,7 +6583,6 @@ mod tests {
         super::read_all(start);
     }
 
->>>>>>> avatar/main
     /// A null texture UAV keeps the title's dimension (3D for the world's
     /// wind field), and is 2D when the title names none.
     #[test]
@@ -7913,7 +7759,6 @@ mod record_print_tests {
         assert_ne!(record_print(&[0u8; 32]) | 1, 0);
     }
 
-<<<<<<< HEAD
 #[cfg(test)]
 mod own_copy_tests {
     use super::{DXGI_FORMAT, DXGI_FORMAT_R32_TYPELESS, DXGI_FORMAT_UNKNOWN, HostHeap, own_bytes_if};
@@ -7923,18 +7768,7 @@ mod own_copy_tests {
     /// A buffer view gets a copy of its own bytes only when it is in bounds,
     /// valid for the host, off its buffer copy's alignment, and not a
     /// structured view that can be a raw view of the same bytes.
-||||||| a26859fc
-#[cfg(test)]
-mod own_copy_tests {
-    use super::own_bytes_if;
-
-    /// A buffer view gets a copy of its own bytes only when it has no host
-    /// view on its buffer's copy: off that copy's elements, and not a
-    /// structured view that can be a raw view of the same bytes.
-=======
->>>>>>> avatar/main
     #[test]
-<<<<<<< HEAD
     fn a_view_off_its_copys_elements_gets_its_own_bytes() {
         let base = 0xd_9000_0000u64;
         // On an element: the buffer's copy (the two cases of every run's
@@ -8047,52 +7881,6 @@ mod own_copy_tests {
         let last = first + heap.dynamic - 1;
         heap.release(last, 1);
         assert_eq!(heap.dynamic(2), None);
-||||||| a26859fc
-    fn a_view_off_its_copys_elements_gets_its_own_bytes() {
-        let base = 0xd_9000_0000u64;
-        // On an element: the buffer's copy (the two cases of every run's
-        // log are the ones below).
-        assert_eq!(own_bytes_if(true, 24, base, 3, 10, 12, 0, false), None);
-        assert_eq!(own_bytes_if(true, 0, base, 0, 10, 12, 0, false), None);
-        // A typed view of 12-byte elements, 5,222,240 bytes into its copy
-        // (8 past an element): its own bytes, from its first element.
-        assert_eq!(own_bytes_if(true, 5_222_240, base, 3, 10, 12, 0, false), Some((base + 36, 120)));
-        // A structured view of 32-byte elements 8 bytes in: not on 16, so
-        // no raw view of the copy either.
-        assert_eq!(own_bytes_if(true, 8, base, 2, 4, 32, 32, true), Some((base + 64, 128)));
-        // The same 16 bytes in: off its elements, but a raw view of the
-        // copy's bytes does (as before).
-        assert_eq!(own_bytes_if(true, 16, base, 2, 4, 32, 32, true), None);
-        // No elements, no size, or the switch off: as before.
-        assert_eq!(own_bytes_if(true, 8, base, 2, 0, 32, 32, true), None);
-        assert_eq!(own_bytes_if(true, 8, base, 2, 4, 0, 0, false), None);
-        assert_eq!(own_bytes_if(false, 8, base, 2, 4, 32, 32, true), None);
-=======
-    fn dynamic_search_can_find_a_run_across_the_cursor() {
-        let Some(heap) = HostHeap::new(false, 4) else {
-            eprintln!("no host descriptor heap; skipped");
-            return;
-        };
-        let first = heap.dynamic(1).unwrap();
-        let left = heap.dynamic(2).unwrap();
-        let right = heap.dynamic(2).unwrap();
-        let rest = heap.dynamic(heap.dynamic - 5).unwrap();
-        assert_eq!((first, left, right, rest), (4, 5, 7, 9));
-
-        // Reallocating the left half puts the cursor back in the middle.
-        heap.release(left, 2);
-        assert_eq!(heap.dynamic(2), Some(left));
-        heap.release(left, 2);
-        heap.release(right, 2);
-        assert_eq!(heap.dynamic(4), Some(left));
-        assert_eq!(heap.dynamic(1), None);
-
-        // A free slot at each physical end does not form a two-slot range.
-        heap.release(first, 1);
-        let last = first + heap.dynamic - 1;
-        heap.release(last, 1);
-        assert_eq!(heap.dynamic(2), None);
->>>>>>> avatar/main
     }
 }
 
