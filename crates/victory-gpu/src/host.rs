@@ -36,12 +36,9 @@ pub(crate) fn texture_state(state: u32) -> u32 {
 /// ring of host descriptors is enough.
 const RTV_RING: u32 = 1024;
 
-<<<<<<< HEAD
 /// Whether the host device has GPU upload heaps (asked when it is made).
 static GPU_UPLOAD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-||||||| merged common ancestors
-=======
 /// An asynchronous submission still running on the GPU: its staging textures
 /// and bindless plans stay alive until `fence` completes.
 struct InFlight {
@@ -85,7 +82,6 @@ static PREWARM_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 /// waited for and its results put back.
 static FINISHED_FENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
->>>>>>> belobug/main
 pub(crate) struct Host {
     pub(crate) device: ID3D12Device,
     pub(crate) depth_bounds_supported: bool,
@@ -109,16 +105,12 @@ pub(crate) struct Host {
     messages: Option<ID3D12InfoQueue>,
     next_rtv: AtomicU32,
     presenter: Mutex<Option<Presenter>>,
-<<<<<<< HEAD
     spare_uploads: Mutex<Spare<MappedUpload>>,
     /// The adapter the device is on, for its memory budget
     /// ([`Host::video_memory`]); `None` if the system does not name it.
     adapter: Option<IDXGIAdapter3>,
-||||||| merged common ancestors
-=======
     /// Device-local VRAM card buffer engine (Wave64 GPU page hashing), lazily initialized.
     card: OnceLock<Option<Mutex<crate::card::CardEngine>>>,
->>>>>>> belobug/main
 }
 
 // SAFETY: D3D12 devices, queues, fences and descriptor heaps are
@@ -127,7 +119,6 @@ unsafe impl Send for Host {}
 // SAFETY: as above.
 unsafe impl Sync for Host {}
 
-<<<<<<< HEAD
 /// Host objects the title let go of while a submission may still use them
 /// (a texture its descriptors name, a descriptor slot's old resource), by
 /// the submission count they wait for. The title's descriptor writes and
@@ -963,92 +954,6 @@ pub(crate) fn log_removal_context() {
 /// [`log_removal_context`]).
 static DATA_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-||||||| merged common ancestors
-=======
-/// Host objects the title let go of while a submission may still use them
-/// (a texture its descriptors name, a descriptor slot's old resource), by
-/// the submission count they wait for. The title's descriptor writes and
-/// releases reach the host at once, from its own threads, while the host
-/// runs a submission for most of a second in the world: freeing there was
-/// a GPU page fault on the freed texture (DXGI_ERROR_DEVICE_HUNG,
-/// 2026-11-24, RX 7600).
-static RETIRED: Mutex<std::collections::VecDeque<Retired>> =
-    Mutex::new(std::collections::VecDeque::new());
-/// Submissions started and finished (waited for).
-static STARTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static FINISHED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// Presented host frames a retired object is also kept for. Worker threads
-/// record lists ahead of submission and a title frame spans many
-/// submissions, so finishing the submissions running when it was retired
-/// is not enough on its own. Ages are in frames presented to the host, not
-/// the title's 60 Hz clock (which ticks many times per host frame while
-/// the host runs at 1-2 fps).
-const KEEP_FRAMES: u64 = 32;
-
-/// And the time a retired object is kept for at least: in the menus 32
-/// frames are a third of a second, and lists recorded ahead, or descriptors
-/// the title left in a heap, named copies freed by then (with
-/// `VICTORY_RAYS=1`: page faults inside destroyed 4 and 10.78 MiB buffers,
-/// Radeon GPU Detective, runs rt2 and rt6; with nothing freed the run went
-/// on into the world, rt3).
-/// shortcut: a time, not a count of what still names the object.
-const KEEP_TIME: std::time::Duration = std::time::Duration::from_secs(8);
-
-/// A retired object, dropped on whatever thread finishes the submission.
-struct Retired {
-    /// The submission count it waits for.
-    submission: u64,
-    /// The presented frame it was retired in.
-    frame: u64,
-    /// When.
-    at: std::time::Instant,
-    #[allow(dead_code)]
-    object: Box<dyn std::any::Any>,
-}
-// SAFETY: what is retired is D3D12 objects (free-threaded) and the
-// reference-counted wrappers holding them, dropped once.
-unsafe impl Send for Retired {}
-
-/// Drops `object` once every submission running now has finished and
-/// [`KEEP_FRAMES`] more frames were presented.
-pub(crate) fn retire<T: 'static>(object: T) {
-    let submission = STARTED.load(Ordering::Acquire);
-    let frame = crate::queue::presented();
-    RETIRED.lock().unwrap_or_else(|e| e.into_inner()).push_back(Retired {
-        submission,
-        frame,
-        at: std::time::Instant::now(),
-        object: Box::new(object),
-    });
-}
-
-/// Drops what waited for submissions up to `finished` and is old enough
-/// in presented frames.
-fn bury(finished: u64) {
-    // Diagnostics (`VICTORY_KEEP_RETIRED`): nothing is freed, to tell a use
-    // after free from a wild address.
-    if cfg!(feature = "diagnostics") && std::env::var_os("VICTORY_KEEP_RETIRED").is_some() {
-        return;
-    }
-    let now = crate::queue::presented();
-    let done: Vec<Retired> = {
-        let mut retired = RETIRED.lock().unwrap_or_else(|e| e.into_inner());
-        // In the order they came: the old ones are at the front.
-        let n = retired
-            .iter()
-            .take_while(|r| {
-                r.submission <= finished
-                    && now.saturating_sub(r.frame) >= KEEP_FRAMES
-                    && r.at.elapsed() >= KEEP_TIME
-            })
-            .count();
-        retired.drain(..n).collect()
-    };
-    drop(done);
-}
-
->>>>>>> belobug/main
 /// Time spent in submissions since the last frame-rate line, in
 /// microseconds: preparing them on the CPU (title memory copies, texture
 /// detiling), then waiting for the GPU.
@@ -1096,7 +1001,6 @@ fn card_clock_us(i: usize, us: u64) {
 static COPY_BACK: [std::sync::atomic::AtomicU64; 2] =
     [std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0)];
 
-<<<<<<< HEAD
 /// The card's clock, for the frame line of every run, in microseconds since
 /// the last one: how long the card had nothing of ours queued; how much of
 /// that while the thread that holds the submission lock was working (the
@@ -1194,15 +1098,11 @@ fn card_clock_line(frames: f64, ms: f64) {
     );
 }
 
-||||||| merged common ancestors
-=======
 /// Bindless heaps' slots made ready (microseconds), since the last
 /// frame-rate line: plans at submission (part of the preparing), and
 /// placed textures as draws are recorded.
 pub(crate) static BINDLESS_US: [std::sync::atomic::AtomicU64; 2] =
     [std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0)];
-
->>>>>>> belobug/main
 /// Of the preparing: title memory copies (microseconds, bytes) and texture
 /// refreshes (microseconds, bytes hashed), since the last frame-rate line.
 pub(crate) static PREPARING: [std::sync::atomic::AtomicU64; 4] = [
@@ -1444,13 +1344,6 @@ fn create() -> windows::core::Result<Host> {
             D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device)?;
             tracing::info!("host device on the software adapter (WARP)");
         } else {
-<<<<<<< HEAD
-            D3D12CreateDevice(None, D3D_FEATURE_LEVEL_12_0, &mut device)?;
-            // Whether a GPU hang ends the run or freezes the PC (#1054).
-            crate::tdr::log();
-||||||| merged common ancestors
-            D3D12CreateDevice(None, D3D_FEATURE_LEVEL_12_0, &mut device)?;
-=======
             match fastest_adapter() {
                 Ok(adapter) => D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device)?,
                 Err(e) => {
@@ -1458,7 +1351,8 @@ fn create() -> windows::core::Result<Host> {
                     D3D12CreateDevice(None, D3D_FEATURE_LEVEL_12_0, &mut device)?;
                 }
             }
->>>>>>> belobug/main
+            // Whether a GPU hang ends the run or freezes the PC (#1054).
+            crate::tdr::log();
         }
         let device = device.ok_or_else(windows::core::Error::empty)?;
         // Before anything is made with it (`VICTORY_RECORD`).
@@ -1513,7 +1407,6 @@ fn create() -> windows::core::Result<Host> {
         let messages = debug
             .then(|| device.cast::<ID3D12InfoQueue>().ok())
             .flatten();
-<<<<<<< HEAD
         let queue: ID3D12CommandQueue = device.CreateCommandQueue(&D3D12_COMMAND_QUEUE_DESC {
             Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
             ..Default::default()
@@ -1544,37 +1437,28 @@ fn create() -> windows::core::Result<Host> {
                 .map(|()| own.Budget)
         });
         crate::rebar::probe(&device, card_budget);
-||||||| merged common ancestors
-        let queue: ID3D12CommandQueue = device.CreateCommandQueue(&D3D12_COMMAND_QUEUE_DESC {
-            Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
-            ..Default::default()
-        })?;
-        let fence: ID3D12Fence = device.CreateFence(0, D3D12_FENCE_FLAG_NONE)?;
-        let event = CreateEventW(None, false, false, None)?;
-        let rtvs: ID3D12DescriptorHeap =
-            device.CreateDescriptorHeap(&D3D12_DESCRIPTOR_HEAP_DESC {
-                Type: D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-                NumDescriptors: RTV_RING,
-                ..Default::default()
-            })?;
-        let rtv_size = device.GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-        let dsvs: ID3D12DescriptorHeap =
-            device.CreateDescriptorHeap(&D3D12_DESCRIPTOR_HEAP_DESC {
-                Type: D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
-                NumDescriptors: RTV_RING,
-                ..Default::default()
-            })?;
-        let dsv_size = device.GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
-=======
-        let host = Host::from_device(device, messages)?;
->>>>>>> belobug/main
         tracing::info!("host D3D12 device ready");
-<<<<<<< HEAD
+        let depth_bounds_supported = {
+            let mut options = D3D12_FEATURE_DATA_D3D12_OPTIONS2::default();
+            // SAFETY: writes `options` of the given size.
+            unsafe {
+                device
+                    .CheckFeatureSupport(
+                        D3D12_FEATURE_D3D12_OPTIONS2,
+                        (&raw mut options).cast(),
+                        size_of_val(&options) as u32,
+                    )
+                    .is_ok()
+            } && options.DepthBoundsTestSupported.as_bool()
+        };
         Ok(Host {
             device,
+            depth_bounds_supported,
+            gpu_upload: upload,
             queue,
             fence,
             submitted: Mutex::new(0),
+            in_flight: Mutex::new(std::collections::VecDeque::new()),
             event,
             rtvs,
             rtv_size,
@@ -1586,25 +1470,8 @@ fn create() -> windows::core::Result<Host> {
             presenter: Mutex::new(None),
             spare_uploads: Mutex::new(Spare::new()),
             adapter,
+            card: OnceLock::new(),
         })
-||||||| merged common ancestors
-        Ok(Host {
-            device,
-            queue,
-            fence,
-            submitted: Mutex::new(0),
-            event,
-            rtvs,
-            rtv_size,
-            dsvs,
-            dsv_size,
-            next_dsv: AtomicU32::new(0),
-            messages,
-            next_rtv: AtomicU32::new(0),
-            presenter: Mutex::new(None),
-        })
-=======
-        Ok(host)
     }
 }
 
@@ -1636,6 +1503,7 @@ impl Host {
                     )
                     .is_ok()
                 && options16.GPUUploadHeapSupported.as_bool();
+            GPU_UPLOAD.store(gpu_upload, Ordering::Relaxed);
             tracing::info!(gpu_upload, "D3D12 GPU upload heap (Resizable BAR)");
             let queue: ID3D12CommandQueue = device.CreateCommandQueue(&D3D12_COMMAND_QUEUE_DESC {
                 Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -1657,6 +1525,9 @@ impl Host {
                     ..Default::default()
                 })?;
             let dsv_size = device.GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+            let adapter = CreateDXGIFactory2::<IDXGIFactory4>(DXGI_CREATE_FACTORY_FLAGS(0))
+                .and_then(|factory| factory.EnumAdapterByLuid::<IDXGIAdapter3>(device.GetAdapterLuid()))
+                .ok();
             Ok(Host {
                 device,
                 depth_bounds_supported,
@@ -1674,6 +1545,8 @@ impl Host {
                 messages,
                 next_rtv: AtomicU32::new(0),
                 presenter: Mutex::new(None),
+                spare_uploads: Mutex::new(Spare::new()),
+                adapter,
                 card: OnceLock::new(),
             })
         }
@@ -1695,10 +1568,6 @@ impl Host {
                 }
             })
             .as_ref()
-    }
-
-    pub(crate) fn card_ready(&self) -> bool {
-        self.card_engine().is_some()
     }
 
     /// Executes a single command list on the direct queue and waits for it to
@@ -1750,7 +1619,6 @@ fn fastest_adapter() -> windows::core::Result<IDXGIAdapter1> {
             "host adapter"
         );
         Ok(adapter)
->>>>>>> belobug/main
     }
 }
 
@@ -1793,7 +1661,6 @@ pub(crate) fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
 
 #[cfg(test)]
 mod tests {
-<<<<<<< HEAD
     /// The steps whose time goes into the preparing's sums read the clock;
     /// the title's work run at submission only with diagnostics, which sum
     /// it. (Refreshes, shader writes, tile mappings and textures, which need
@@ -1990,45 +1857,6 @@ mod tests {
             assert_ne!(VirtualFree(base.cast(), 0, MEM_RELEASE), 0);
         }
     }
-
-||||||| merged common ancestors
-=======
-    #[test]
-    fn sparse_copies_preserve_islands_and_observe_remaps() {
-        use windows_sys::Win32::System::Memory::*;
-        const N: usize = 5 << 16;
-        // SAFETY: we reserve a private region, commit selected pages inside it,
-        // and only directly access the pages while they are writable.
-        unsafe {
-            let base = VirtualAlloc(std::ptr::null(), N, MEM_RESERVE, PAGE_NOACCESS).cast::<u8>();
-            assert!(!base.is_null());
-            let mut expected = vec![0; N];
-            for (offset, value) in [(0, 9), (2 << 16, 37), (N - 4096, 85)] {
-                let at = base.add(offset);
-                assert_eq!(VirtualAlloc(at.cast(), 4096, MEM_COMMIT, PAGE_READWRITE), at.cast());
-                at.write_bytes(value, 4096);
-                expected[offset..offset + 4096].fill(value);
-            }
-            for remap in [false, true] {
-                if remap {
-                    let mut old = 0;
-                    assert_ne!(VirtualProtect(base.cast(), 4096, PAGE_NOACCESS, &mut old), 0);
-                    expected[..4096].fill(0);
-                    let at = base.add(1 << 16);
-                    assert_eq!(VirtualAlloc(at.cast(), 4096, MEM_COMMIT, PAGE_READWRITE), at.cast());
-                    at.write_bytes(0xc7, 4096);
-                    expected[1 << 16..(1 << 16) + 4096].fill(0xc7);
-                }
-                let mut out = vec![0xee; N];
-                super::copy_mapped(out.as_mut_ptr().add(27), base.add(27), N - 54, false);
-                assert_eq!(out[27..N - 27], expected[27..N - 27]);
-                assert!(out[..27].iter().chain(&out[N - 27..]).all(|&v| v == 0xee));
-            }
-            assert_ne!(VirtualFree(base.cast(), 0, MEM_RELEASE), 0);
-        }
-    }
-
->>>>>>> belobug/main
     use super::*;
 
     /// A list with no work before its waits, as the title's queues meet one
@@ -2108,15 +1936,9 @@ const BATCHES: u32 = 8;
 /// A host command list and its allocator, always used together.
 pub(crate) struct HostList {
     allocator: ID3D12CommandAllocator,
-<<<<<<< HEAD
     /// With barriers held and joined (`rec`).
     pub(crate) list: rec::Rec,
-||||||| merged common ancestors
-    pub(crate) list: ID3D12GraphicsCommandList,
-=======
-    pub(crate) list: ID3D12GraphicsCommandList,
     pub(crate) depth_bounds: Option<ID3D12GraphicsCommandList1>,
->>>>>>> belobug/main
     /// Work for submission time, in recorded order.
     deferred: Mutex<Deferred>,
     /// Upload memory for data the list's draws make (expanded vertices),
@@ -2129,7 +1951,6 @@ pub(crate) struct HostList {
     /// list names alive until it is reset, even if the title releases the
     /// resource first.
     states: Mutex<States>,
-<<<<<<< HEAD
     /// What the list does with depth textures that have a colour twin, by
     /// twin ([`TwinUse`]).
     twins: Mutex<std::collections::HashMap<usize, TwinUse>>,
@@ -2141,37 +1962,23 @@ pub(crate) struct HostList {
     /// The list that runs those transitions just before this one, made
     /// when the list first has such transitions ([`lazy_prelude`]).
     prelude: OnceLock<Option<Prelude>>,
-||||||| merged common ancestors
-    /// The list that runs those transitions just before this one.
-    prelude: (ID3D12CommandAllocator, ID3D12GraphicsCommandList),
-=======
-    /// The list that runs those transitions just before this one.
-    prelude: (ID3D12CommandAllocator, ID3D12GraphicsCommandList),
     /// What the title's list held for this recording, if the title reset or
     /// released it while a submission of it was still to run.
     kept: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
     /// Draws and dispatches recorded.
     work: Mutex<usize>,
->>>>>>> belobug/main
     /// The pipelines the list binds, for reports of slow submissions.
-<<<<<<< HEAD
     pipelines: std::sync::Arc<Mutex<std::collections::BTreeSet<String>>>,
     /// What its indirect executions ran, for the report of a removed device.
     #[cfg(feature = "diagnostics")]
     indirects: indirects::Shared,
-||||||| merged common ancestors
-    pipelines: Mutex<std::collections::BTreeSet<String>>,
-=======
-    pipelines: Mutex<std::collections::BTreeSet<String>>,
     /// Queries begun in the list and not ended yet: host heap, type, index,
     /// and whether a draw since was not run on the host (`missed_draw`).
     queries: Mutex<Vec<(ID3D12QueryHeap, D3D12_QUERY_TYPE, u32, bool)>>,
->>>>>>> belobug/main
     /// The work its indirect executions may still do (`indirect`): a
     /// shader-writable word, zeroed when the list is submitted, and after
     /// it what the clamp notes about mesh records. In memory the CPU maps.
     budget: OnceLock<Option<(ID3D12Resource, usize)>>,
-<<<<<<< HEAD
     /// The same words in the card's own memory ([`card_budget`]), which the
     /// clamp uses instead when there is one: zeroed in the list before its
     /// first clamp, its notes copied to `budget` when the list closes.
@@ -2215,11 +2022,6 @@ pub(crate) struct HostList {
     /// The records its draws read from slots that its prelude fills
     /// (`crate::indirect::gather`).
     gather: Mutex<Gather>,
-||||||| merged common ancestors
-=======
-    /// Device-local scratch buffer for clamped indirect arguments (`indirect`),
-    /// grown to the largest indirect execution recorded on the list.
-    indirect_args: Mutex<Option<(ID3D12Resource, u64)>>,
     /// Host fence value signalled by the last submission that ran this list.
     last_fence: std::sync::atomic::AtomicU64,
     /// Dispatches and buffer copies recorded since the reset: what may have
@@ -2228,7 +2030,6 @@ pub(crate) struct HostList {
     /// Buffers for clamped indirect arguments when this list holds the
     /// clamps of the list after it (`clamp_room`).
     clamp_chunks: Mutex<ClampChunks>,
->>>>>>> belobug/main
     /// The texts of the markers `note_op` set, in order (for device-removed
     /// data without marker texts), with the host GPU range a copy reads.
     #[cfg(feature = "diagnostics")]
@@ -3132,7 +2933,6 @@ struct Scratch {
 // SAFETY: the chunk pointers are persistent mappings of upload buffers.
 unsafe impl Send for Scratch {}
 
-<<<<<<< HEAD
 impl Drop for Scratch {
     fn drop(&mut self) {
         give_chunks(std::mem::take(&mut self.chunks));
@@ -3963,41 +3763,6 @@ struct CardPlan {
     /// With [`upq`]: the copy list and buffer what went up came through.
     up: Option<upq::Slot>,
 }
-||||||| merged common ancestors
-const SCRATCH_CHUNK: u64 = 4 << 20;
-=======
-const SCRATCH_CHUNK: u64 = 512 << 10;
-
-/// Scratch chunks no list uses: lists give theirs back when reset. Each list
-/// keeping the chunks of its largest use added up to gigabytes, as the title
-/// has hundreds of lists.
-static SCRATCH_FREE: Mutex<Vec<(ID3D12Resource, usize, u64)>> = Mutex::new(Vec::new());
-/// Free chunks kept; more are released.
-const SCRATCH_KEPT: usize = 256;
-
-impl Scratch {
-    fn give_back(&mut self) {
-        (self.current, self.used) = (0, 0);
-        let mut free = SCRATCH_FREE.lock().unwrap_or_else(|e| e.into_inner());
-        free.append(&mut self.chunks);
-        let over = free.len().saturating_sub(SCRATCH_KEPT);
-        let over: Vec<_> = free.drain(..over).collect();
-        drop(free);
-        drop(over);
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        if self.chunks.is_empty() {
-            return;
-        }
-        // A submission may still read them.
-        let chunks = std::mem::take(&mut self.chunks);
-        retire(chunks);
-    }
-}
->>>>>>> belobug/main
 
 /// One piece of submission-time work, in recorded order.
 enum Step {
@@ -4026,7 +3791,6 @@ enum Step {
     /// Brings a texture's staging buffer up to date and, when dirty, copies
     /// it into the host texture on the list's prelude: once per submission,
     /// whichever lists sample it, until a `Copy` or `Run` intervenes.
-<<<<<<< HEAD
     Texture {
         staging: std::sync::Arc<crate::texture::Staging>,
         uploads: bool,
@@ -4034,6 +3798,17 @@ enum Step {
     /// A title buffer copy that the list does on the card ([`place`]): what
     /// is done on the CPU for it.
     Placed(place::Placed),
+}
+
+/// A texture-to-buffer readback copied from a mapped readback buffer into
+/// title memory once the GPU submission completes.
+struct Readback {
+    dst: usize,
+    src: usize,
+    dst_pitch: usize,
+    src_pitch: usize,
+    lines: usize,
+    row_bytes: usize,
 }
 
 struct MappedUpload {
@@ -4047,25 +3822,6 @@ impl Drop for MappedUpload {
         ALIVE[6].fetch_sub(1, Ordering::Relaxed);
         ALIVE[7].fetch_sub(self.size, Ordering::Relaxed);
     }
-||||||| merged common ancestors
-    Texture(std::sync::Arc<crate::texture::Staging>),
-=======
-    Texture(
-        std::sync::Arc<crate::texture::Staging>,
-        std::sync::Arc<crate::resource::HostTexture>,
-    ),
-}
-
-/// A texture-to-buffer readback copied from a mapped readback buffer into
-/// title memory once the GPU submission completes.
-struct Readback {
-    dst: usize,
-    src: usize,
-    dst_pitch: usize,
-    src_pitch: usize,
-    lines: usize,
-    row_bytes: usize,
->>>>>>> belobug/main
 }
 
 /// What a list does on the CPU when it is submitted: copies between host
@@ -4085,19 +3841,11 @@ struct Deferred {
     /// descriptor heaps): the title may release its objects before it
     /// submits the list.
     kept: Vec<windows::core::IUnknown>,
-<<<<<<< HEAD
     /// The host pipelines `bind_pipeline` kept (by address), so a pipeline
     /// the list binds again is not kept again.
     bound: crate::fx::Set<usize>,
-||||||| merged common ancestors
-=======
-    /// The host pipelines `bind_pipeline` kept (by address), so a pipeline
-    /// the list binds again is not kept again.
-    bound: std::collections::HashSet<usize>,
->>>>>>> belobug/main
     /// Buffer ranges refreshed since the last title copy (host copy,
     /// address, bytes): refreshing them again would find the same bytes.
-<<<<<<< HEAD
     refreshed: crate::fx::Set<(usize, usize, usize)>,
     /// Upload memory filled from title memory since the last title write
     /// (source, bytes): its host address, which a second fill would find
@@ -4107,22 +3855,10 @@ struct Deferred {
     /// refresh on the same host copy, avoiding thousands of duplicate
     /// `Step::GpuWrite` entries per frame.
     gpu_written: crate::fx::Set<(usize, usize, usize)>,
-||||||| merged common ancestors
-    refreshed: std::collections::HashSet<(usize, usize, usize)>,
-=======
-    refreshed: std::collections::HashSet<(usize, usize, usize)>,
-    /// Buffer ranges declared written by shaders since the last title copy
-    /// (host copy, address, bytes): declaring them again would change nothing.
-    gpu_written: std::collections::HashSet<(usize, usize, usize)>,
-    /// Upload memory filled from title memory since the last title write
-    /// (source, bytes): its host address, which a second fill would find
-    /// holding the same bytes.
-    filled: std::collections::HashMap<(usize, usize), u64>,
     /// View heaps the list's draws index directly (`ResourceDescriptorHeap[]`),
     /// and whether any of their shaders may write memory: their slots are
     /// brought up to date once per submission, after every other step.
     bindless: Vec<(std::sync::Arc<crate::descriptor::host::HostHeap>, bool)>,
->>>>>>> belobug/main
     /// Textures whose contents the list brings up to date.
     textures: crate::fx::Set<usize>,
     /// Last GPU source copied into each aliased host texture in this list.
@@ -4130,7 +3866,6 @@ struct Deferred {
     /// Bottom-of-pipe writes, done once the list has run: address, what,
     /// bytes.
     writes: Vec<(usize, crate::queue::Written, usize)>,
-<<<<<<< HEAD
     /// Textures read back (texture to buffer copies), done once the list
     /// has run: the host buffer the list copies the texels into, the title
     /// memory they go to, the bytes of a row, the rows, the title's row
@@ -4141,20 +3876,13 @@ struct Deferred {
     back_wanted: Vec<crate::texback::Target>,
     /// Those copies, whose texels go to title memory once the list has run.
     texture_backs: Vec<crate::texback::Back>,
-    /// Whether the indirect-work budget is zeroed for this recording (a
-    /// step on the CPU, or in the list for the card's copy).
-||||||| merged common ancestors
-    /// Whether a step zeroes the indirect-work budget.
-=======
     /// Waits for memory values, with how many `writes` precede them.
     waits: Vec<(usize, crate::memwait::Wait)>,
     /// The work before each of `writes`.
     marks: Vec<usize>,
-    /// How many of `writes` this submission has done already.
-    early: usize,
     wait_marks: Vec<usize>,
-    /// Whether a step zeroes the indirect-work budget.
->>>>>>> belobug/main
+    /// Whether the indirect-work budget is zeroed for this recording (a
+    /// step on the CPU, or in the list for the card's copy).
     budget_zeroed: bool,
     /// The indirect scratch buffer (`HostList::indirect_args`, by its
     /// interface pointer) that a clamp in this recording left readable as
@@ -6930,7 +6658,6 @@ impl Host {
         })
     }
 
-<<<<<<< HEAD
     /// Whether the host GPU supports the depth bounds test; logged once.
     pub(crate) fn depth_bounds(&self) -> bool {
         static BOUNDS: OnceLock<bool> = OnceLock::new();
@@ -7040,8 +6767,6 @@ impl Host {
         Some((info.CurrentUsage >> 20).min(u64::from(u32::MAX)) as u32)
     }
 
-||||||| merged common ancestors
-=======
     /// The wave sizes the host runs (D3D12 options 1), which translated
     /// compute shaders that declare the console's wave size must fit;
     /// logged once. Unknown (the query fails): any.
@@ -7080,8 +6805,6 @@ impl Host {
             target
         })
     }
-
->>>>>>> belobug/main
     /// A new list, open for recording.
     pub(crate) fn new_list(&self) -> windows::core::Result<HostList> {
         crate::census::made(8, 0);
@@ -7140,7 +6863,6 @@ impl Host {
                 &allocator,
                 None,
             )?;
-<<<<<<< HEAD
             let prelude = OnceLock::new();
             if !lazy_prelude() {
                 let _ = prelude.set(self.make_prelude());
@@ -7168,65 +6890,25 @@ impl Host {
                     ),
                 );
             }
-||||||| merged common ancestors
-            let prelude_allocator: ID3D12CommandAllocator = self
-                .device
-                .CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT)?;
-            let prelude: ID3D12GraphicsCommandList = self.device.CreateCommandList(
-                0,
-                D3D12_COMMAND_LIST_TYPE_DIRECT,
-                &prelude_allocator,
-                None,
-            )?;
-            prelude.Close()?;
-=======
-            let prelude_allocator: ID3D12CommandAllocator = self
-                .device
-                .CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT)?;
-            let prelude: ID3D12GraphicsCommandList = self.device.CreateCommandList(
-                0,
-                D3D12_COMMAND_LIST_TYPE_DIRECT,
-                &prelude_allocator,
-                None,
-            )?;
-            prelude.Close()?;
             crate::memstat::add(&crate::memstat::LISTS, 1);
->>>>>>> belobug/main
             Ok(HostList {
                 allocator,
-<<<<<<< HEAD
-                list: rec::Rec::new(list),
-||||||| merged common ancestors
-                list,
-=======
                 depth_bounds: self.depth_bounds_supported.then(|| list.cast()).transpose()?,
-                list,
->>>>>>> belobug/main
+                list: rec::Rec::new(list),
                 deferred: Mutex::default(),
                 scratch: Mutex::default(),
                 states: Mutex::default(),
-<<<<<<< HEAD
                 twins: Mutex::default(),
                 aliases: Mutex::default(),
                 written: Mutex::default(),
                 prelude,
                 pipelines,
-||||||| merged common ancestors
-                prelude: (prelude_allocator, prelude),
-                pipelines: Mutex::default(),
-                budget: OnceLock::new(),
-=======
-                prelude: (prelude_allocator, prelude),
                 kept: Mutex::default(),
                 work: Mutex::default(),
                 writes: Default::default(),
                 clamp_chunks: Mutex::default(),
-                pipelines: Mutex::default(),
                 queries: Mutex::default(),
-                budget: OnceLock::new(),
-                indirect_args: Mutex::default(),
                 last_fence: std::sync::atomic::AtomicU64::new(0),
->>>>>>> belobug/main
                 #[cfg(feature = "diagnostics")]
                 indirects,
                 budget: OnceLock::new(),
@@ -7255,7 +6937,6 @@ impl Host {
         }
     }
 
-<<<<<<< HEAD
     /// The card's clock ([`CARD_CLOCK_US`]), made at the first send.
     fn card_clock(&self) -> Option<&'static CardClock> {
         static CLOCK: OnceLock<Option<CardClock>> = OnceLock::new();
@@ -9010,11 +8691,6 @@ impl Host {
         }
     }
 
-    /// Runs closed lists and waits for them, and with [`late`] for
-    /// everything sent to the card before them, which is settled first.
-||||||| merged common ancestors
-    /// Runs closed lists and waits for them.
-=======
     /// Finishes the unwaited submissions that have run, oldest first, and
     /// buries objects retired before them. The caller holds `submitted`:
     /// finishing puts back what shaders wrote, as a submission does.
@@ -9116,10 +8792,8 @@ impl Host {
         self.reap_completed();
     }
 
-    /// Runs closed lists; waits synchronously when CPU copy-back, readbacks, or
-    /// bottom-of-pipe writes require GPU completion, or returns asynchronously
-    /// so CPU recording overlaps GPU execution.
->>>>>>> belobug/main
+    /// Runs closed lists and waits for them, and with [`late`] for
+    /// everything sent to the card before them, which is settled first.
     pub(crate) fn execute(&self, runs: &[&HostList]) {
 <<<<<<< HEAD
         // Behind what the title's queues were given before it and have
