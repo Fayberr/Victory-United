@@ -5136,42 +5136,20 @@ fn twin_uav(
     Some(desc)
 }
 
-<<<<<<< HEAD
 /// The bytes of the host's constant buffer view for a title's of `size`:
 /// whole 256s, and at most the 64 KiB a shader can index. The host removes
 /// the device for a larger view, and the title's heap holds such sizes in
-/// slots it does not use.
+/// slots it does not use. A view of no bytes stays one (rounded up from 1 it
+/// became 256 bytes of whatever lies at its address in the host copy, other
+/// bytes every frame: a floor in the first rooms flickered).
 fn constant_bytes(size: u32) -> u32 {
     const LARGEST: u32 = 64 << 10;
+    if size > LARGEST {
+        once!(size, "a constant buffer view over 64 KiB, made 64 KiB (the host takes no more)");
+    }
     size.min(LARGEST).next_multiple_of(256)
 }
 
-||||||| 9c184b35b
-=======
-/// The size of a constant buffer view the host takes: 256-byte steps, and
-/// at most 4,096 vectors (65,536 bytes, `D3D12_REQ_CONSTANT_BUFFER_ELEMENT_COUNT`).
-/// The title names constant views of more (one of 1,306,368 bytes, in the
-/// world); `CreateConstantBufferView` with such a size is an invalid call,
-/// and NVIDIA removes the device for it (`DXGI_ERROR_INVALID_CALL`), in
-/// the frame the view is made. A shader reads at most 4,096 vectors through
-/// a constant view, so nothing it can read is lost.
-fn constant_view_size(size: u32) -> u32 {
-    const MOST: u32 = 4096 * 16;
-    // The cap before the rounding (fork pull request #1206): a size within
-    // 255 of the largest number would round past it, to 0 in a release
-    // build, and a view of no bytes be made with no line said.
-    if size > MOST {
-        once!(size, "a constant buffer view over 64 KiB, made 64 KiB (the host takes no more)");
-        return MOST;
-    }
-    // A view of no bytes stays one: a shader reads zeros through it, as on the
-    // console. Rounded up from 1 it became 256 bytes of whatever lies at its
-    // address in the host copy (the ring of per-draw constants among it), other
-    // bytes every frame: a floor in the first rooms flickered.
-    size.next_multiple_of(256)
-}
-
->>>>>>> origin/exp/fork-head
 /// Makes the host descriptor for `view` at `at`: the host resource it
 /// views, or `None` if it cannot.
 fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Kept> {
@@ -5201,13 +5179,7 @@ fn make_twinned(
             }
             let desc = D3D12_CONSTANT_BUFFER_VIEW_DESC {
                 BufferLocation: gpu,
-<<<<<<< HEAD
                 SizeInBytes: constant_bytes(size),
-||||||| 9c184b35b
-                SizeInBytes: size.next_multiple_of(256),
-=======
-                SizeInBytes: constant_view_size(size),
->>>>>>> origin/exp/fork-head
             };
             // SAFETY: slots of our heap; the range lies in the host copy.
             unsafe {
@@ -5376,7 +5348,9 @@ fn make_twinned(
             }
             const BUFFER: u32 = 1;
             if resource[0] != BUFFER {
-<<<<<<< HEAD
+                // Counted by kind: a shader view lands here only if no
+                // resource could be made at its address.
+                PLACED_NOT_MADE[usize::from(*unordered)].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let at = u64::from(desc[10]) | u64::from(desc[11]) << 32;
                 if *unordered || at != 0 {
                     // shortcut: unordered access to a texture the title placed
@@ -5399,20 +5373,6 @@ fn make_twinned(
                         );
                     }
                 }
-||||||| 9c184b35b
-                // shortcut: unordered access to a texture the title placed
-                // itself is not mirrored; give it a resource as shader
-                // views of such textures get when a dispatch writes one.
-                once!(dimension = resource[0], "placed unordered texture view not mirrored");
-=======
-                // Counted by kind: a shader view lands here only if no
-                // resource could be made at its address.
-                PLACED_NOT_MADE[usize::from(*unordered)].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                // shortcut: unordered access to a texture the title placed
-                // itself is not mirrored; give it a resource as shader
-                // views of such textures get when a dispatch writes one.
-                once!(dimension = resource[0], "placed unordered texture view not mirrored");
->>>>>>> origin/exp/fork-head
                 return None;
             }
             // The resource description's width, after the alignment.
@@ -5433,7 +5393,6 @@ fn make_twinned(
     }
 }
 
-<<<<<<< HEAD
 /// The view `desc` of a texture, of a host copy of its levels from `base`
 /// on (`crate::resource::held_only`). What it shows of larger ones, if any,
 /// is left out.
@@ -5451,14 +5410,11 @@ fn from_base(desc: &mut D3D12_SHADER_RESOURCE_VIEW_DESC, base: u32) {
     t.ResourceMinLODClamp = (t.ResourceMinLODClamp - base as f32).max(0.0);
 }
 
-||||||| 9c184b35b
-=======
 /// Placed texture views [`make`] could not make, since the start: shader
 /// views (no resource at the address) and unordered access views.
 pub(crate) static PLACED_NOT_MADE: [std::sync::atomic::AtomicU64; 2] =
     [const { std::sync::atomic::AtomicU64::new(0) }; 2];
 
->>>>>>> origin/exp/fork-head
 /// Writes of a slot with another view of the placed texture it showed,
 /// since the start: the slot kept showing the old view.
 pub(crate) static KEPT_VIEWS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -5920,7 +5876,6 @@ fn null_view(at: D3D12_CPU_DESCRIPTOR_HANDLE) {
 mod tests {
     use super::*;
 
-<<<<<<< HEAD
     /// A view of a host copy that begins at a later level shows the same
     /// levels of it.
     #[test]
@@ -5997,23 +5952,6 @@ mod tests {
         super::read_short(start);
         assert!(pending());
         super::read_all(start);
-    }
-
-||||||| 9c184b35b
-=======
-    /// A constant view is made in 256-byte steps and at most 64 KiB, the
-    /// most the host takes (a larger size removes the device on NVIDIA).
-    #[test]
-    fn constant_views_are_at_most_64_kib() {
-        assert_eq!(constant_view_size(0), 0);
-        assert_eq!(constant_view_size(1), 256);
-        assert_eq!(constant_view_size(16), 256);
-        assert_eq!(constant_view_size(256), 256);
-        assert_eq!(constant_view_size(65_536), 65_536);
-        assert_eq!(constant_view_size(1_306_368), 65_536);
-        assert_eq!(constant_view_size(65_537), 65_536);
-        assert_eq!(constant_view_size(u32::MAX), 65_536);
-        assert_eq!(constant_view_size(u32::MAX - 100), 65_536);
     }
 
     /// Typed buffer views of 32-bit integer formats are made in the float
@@ -6282,7 +6220,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         );
     }
 
->>>>>>> origin/exp/fork-head
     /// A null texture UAV keeps the title's dimension (3D for the world's
     /// wind field), and is 2D when the title names none.
     #[test]

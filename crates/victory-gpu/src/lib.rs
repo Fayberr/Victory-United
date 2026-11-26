@@ -31,40 +31,22 @@ mod cores;
 pub mod descriptor;
 pub mod device;
 #[cfg(windows)]
-<<<<<<< HEAD
-||||||| 9c184b35b
-mod drvwatch;
-#[cfg(windows)]
-mod fpsbox;
-#[cfg(windows)]
-mod spread;
-#[cfg(windows)]
-=======
 mod drvwatch;
 #[cfg(windows)]
 mod fpsbox;
 #[cfg(windows)]
 mod stats;
 #[cfg(windows)]
-mod spread;
-#[cfg(windows)]
->>>>>>> origin/exp/fork-head
 mod draw;
 pub mod dxgi;
 pub mod fence;
 pub mod frame;
-<<<<<<< HEAD
 #[cfg(all(windows, feature = "diagnostics"))]
 mod book;
-||||||| 9c184b35b
-#[cfg(windows)]
-pub mod framelog;
-=======
 #[cfg_attr(not(windows), allow(dead_code))]
 mod heap_pass;
 #[cfg(windows)]
 pub mod framelog;
->>>>>>> origin/exp/fork-head
 #[cfg(windows)]
 mod heap_worker;
 #[cfg(windows)]
@@ -143,13 +125,7 @@ pub fn frame_phase() -> u32 {
 pub use inplace::{title_memory_freeing, title_memory_section, title_memory_section_gone, title_memory_view};
 #[cfg(windows)]
 pub use watch::{
-<<<<<<< HEAD
-    kernel_writing, title_memory_allocated, title_memory_freed, title_memory_reading, title_memory_remapped,
-    title_memory_remapping, title_memory_splitting, title_memory_unmapping, title_memory_written,
-||||||| 9c184b35b
-    title_memory_reading, title_memory_remapped, title_memory_remapping, title_memory_written,
-=======
-    title_memory_committed, title_memory_reading, title_memory_remapped, title_memory_remapping, title_memory_written,
->>>>>>> origin/exp/fork-head
+    kernel_writing, title_memory_allocated, title_memory_committed, title_memory_freed, title_memory_reading,
+    title_memory_remapped, title_memory_remapping, title_memory_splitting, title_memory_unmapping, title_memory_written,
     writing as kernel_will_write,
 };
