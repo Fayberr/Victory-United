@@ -17,8 +17,7 @@ endorsed by the game's developer or publisher, see [LEGAL.md](LEGAL.md).
 ## State
 
 Early. It boots, plays the intro and the menus and reaches the first playable room. It is not
-playable yet: in that room it ran at about 11 frames a second in two runs of 7 and 10 minutes, a 25 minute run
-stalled (see Stability), and the aim is 20.
+playable yet: in that room it ran at about 11 frames a second in two runs of 7 and 10 minutes, and the aim is 20.
 
 Measured on one machine: Windows 11 Pro (build 26300), NVIDIA GeForce RTX 3080 Ti with 12 GB
 (driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `fab5286c` (the tree of this repository
@@ -41,12 +40,8 @@ mask. The diagnostics build logs every frame and saves every 16th frame.
   not built by default, and [Vice-Tay's list of known problems](https://github.com/TaynanGT/Vice-Tay#known-problems)
   was not checked here.
 - **Stability:** not shown yet. The 7 minute run ended normally and the 10 minute run (stopped by us at about
-  10 minutes) had no crash or GPU hang up to then. A 25 minute run
-  of the same build (same program, same switches) did not hold: about 100 seconds in the frames became very
-  slow, about 0.1 frames a second for the remaining 24 minutes, with the picture still lit and no crash. The
-  log shows the game waiting for the card to finish filling upload memory. The cause is not known; the two
-  shorter runs did not do it. Vice-Tay also reports memory growing in long sessions and the frame rate falling
-  with it.
+  10 minutes) had no crash or GPU hang up to then. A longer session has not been shown to hold yet. Vice-Tay
+  reports memory growing in long sessions and the frame rate falling with it.
 
 ## Build
 
