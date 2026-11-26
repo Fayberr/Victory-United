@@ -375,36 +375,77 @@ fn imdct_half(input: &[f32], out: &mut [f32], scale: f32) {
     }
 }
 
-/// In-place radix-2 forward DFT (`exp(-2πi nk/N)`).
-fn fft(re: &mut [f64], im: &mut [f64]) {
-    let n = re.len();
-    let mut j = 0;
-    for i in 1..n {
-        let mut bit = n >> 1;
-        while j & bit != 0 {
-            j ^= bit;
-            bit >>= 1;
-        }
-        j |= bit;
-        if i < j {
-            re.swap(i, j);
-            im.swap(i, j);
-        }
-    }
-    let mut len = 2;
-    while len <= n {
-        let (ws, wc) = (-2.0 * std::f64::consts::PI / len as f64).sin_cos();
-        for start in (0..n).step_by(len) {
-            let (mut cr, mut ci) = (1.0, 0.0);
-            for k in 0..len / 2 {
-                let (a, b) = (start + k, start + k + len / 2);
-                let (tr, ti) = (re[b] * cr - im[b] * ci, re[b] * ci + im[b] * cr);
-                (re[b], im[b]) = (re[a] - tr, im[a] - ti);
-                (re[a], im[a]) = (re[a] + tr, im[a] + ti);
-                (cr, ci) = (cr * wc - ci * ws, cr * ws + ci * wc);
+/// Everything [`imdct_half`] needs for one size `n` that does not depend on
+/// the coefficients: the pre-rotation `exp(-iπk/n)` and post-rotation
+/// `exp(-iπ(4k+1)/4n)` of each of the n/2 FFT points, the FFT's bit-reversed
+/// order and its butterfly rotations. Each value is computed with the same
+/// expression (for the butterflies the same running product) the transform
+/// used to work out on every call, so it gives the same bits.
+struct Rotations {
+    pre_re: Vec<f64>,
+    pre_im: Vec<f64>,
+    post_re: Vec<f64>,
+    post_im: Vec<f64>,
+    /// Where the bit-reversal permutation puts each point.
+    reversed: Vec<u16>,
+    /// The butterfly rotations of every stage, the stage of length `len`
+    /// starting at `len / 2 - 1`.
+    twiddle_re: Vec<f64>,
+    twiddle_im: Vec<f64>,
+}
+
+impl Rotations {
+    fn new(n: usize) -> Rotations {
+        let m = n / 2;
+        let (pre_re, pre_im) = (0..m)
+            .map(|k| {
+                let (s, c) = (-std::f64::consts::PI * k as f64 / n as f64).sin_cos();
+                (c, s)
+            })
+            .unzip();
+        let (post_re, post_im) = (0..m)
+            .map(|k| {
+                let (s, c) =
+                    (-std::f64::consts::PI * (4 * k + 1) as f64 / (4 * n) as f64).sin_cos();
+                (c, s)
+            })
+            .unzip();
+        // The swaps of the in-place bit-reversal, applied to the identity.
+        let mut reversed: Vec<u16> = (0..m as u16).collect();
+        let mut j = 0;
+        for i in 1..m {
+            let mut bit = m >> 1;
+            while j & bit != 0 {
+                j ^= bit;
+                bit >>= 1;
+            }
+            j |= bit;
+            if i < j {
+                reversed.swap(i, j);
             }
         }
-        len <<= 1;
+        let mut twiddle_re = Vec::with_capacity(m.saturating_sub(1));
+        let mut twiddle_im = Vec::with_capacity(m.saturating_sub(1));
+        let mut len = 2;
+        while len <= m {
+            let (ws, wc) = (-2.0 * std::f64::consts::PI / len as f64).sin_cos();
+            let (mut cr, mut ci) = (1.0, 0.0);
+            for _ in 0..len / 2 {
+                twiddle_re.push(cr);
+                twiddle_im.push(ci);
+                (cr, ci) = (cr * wc - ci * ws, cr * ws + ci * wc);
+            }
+            len <<= 1;
+        }
+        Rotations {
+            pre_re,
+            pre_im,
+            post_re,
+            post_im,
+            reversed,
+            twiddle_re,
+            twiddle_im,
+        }
     }
 
     #[inline(always)]
