@@ -129,15 +129,6 @@ impl Default for GraphicsState {
     }
 }
 
-/// Whether `format` is an integer (UINT/SINT) render target format, which
-/// the host cannot blend.
-fn integer_format(format: DXGI_FORMAT) -> bool {
-    matches!(
-        format.0,
-        3 | 4 | 7 | 8 | 12 | 14 | 17 | 18 | 25 | 30 | 32 | 36 | 38 | 42 | 43 | 50 | 52 | 57 | 59 | 62 | 64
-    )
-}
-
 impl GraphicsState {
     /// The blend description for the host: blending off for integer render
     /// targets. The console's blender passes integer targets through; D3D12
