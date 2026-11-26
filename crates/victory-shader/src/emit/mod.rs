@@ -887,11 +887,9 @@ fn emit_forms(
                 grouped = Some(again);
             }
         }
-        // Last of all, for a program that would still ask for 64-lane waves, which this host
-        // refuses outright: the wave-wide form after all (unless `VICTORY_WAVE_WIDE=0`). Every
-        // group barrier it adds now stands behind decisions the two host waves take as one
-        // ([`widen`]). Not before the forms above: the programs they take keep their
-        // translation.
+        // `VICTORY_WAVE_WIDE=last`: the wave-wide form after all for a program every form
+        // above left at 64 lanes, which a 32-lane host refuses outright. Every group barrier
+        // it adds stands behind decisions the two host waves take as one ([`widen`]).
         if wide_last {
             let deep_on = std::env::var_os("VICTORY_WAVE_DEEP_SKIPS").is_none_or(|v| v != "0");
             let deep = if deep_on { form(ir::without_skips(p, true)) } else { None };
