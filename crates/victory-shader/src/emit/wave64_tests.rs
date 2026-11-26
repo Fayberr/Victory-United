@@ -741,7 +741,6 @@ fn the_lanes_past_a_count_of_threads_do_not_run() {
         }
     }
 }
-<<<<<<< HEAD
 
 /// The prefix of wave totals the console's structure builder computes: each console
 /// wave of a 256-thread group writes its total (10 + its index) to LDS, then, under
@@ -1375,8 +1374,6 @@ fn both_host_waves_observe_the_lds_flag_after_the_join() {
     }
     eprintln!("all 14 flag dispatches passed on a 32-lane hardware adapter");
 }
-||||||| 0a4356653
-=======
 
 /// Lowers `body` as a console program of one 64-lane wave (or 32 when `wave64` is not set)
 /// for a host of 32-lane waves, validates it and runs it there; each lane stores v3 to dword
@@ -1575,4 +1572,3 @@ fn the_console_threads_of_a_two_dimensional_group_are_each_given_once() {
     }
     eprintln!("ran on the hardware device: 64 of 64 console threads, each once");
 }
->>>>>>> vicetay/main
