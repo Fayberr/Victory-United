@@ -831,17 +831,9 @@ pub(crate) struct State {
     /// Graphics, compute.
     host_roots: [usize; 2],
     host_heaps: [usize; 2],
-<<<<<<< HEAD
+    host_heaps_set: bool,
     /// Tables made afresh in this list, keyed by their address, entry count
     /// and record hash.
-||||||| 0a4356653
-    /// Tables made afresh in this list: (table, slot count, contents) → first
-    /// dynamic slot.
-=======
-    host_heaps_set: bool,
-    /// Tables made afresh in this list: (table, slot count, contents) → first
-    /// dynamic slot.
->>>>>>> vicetay/main
     fresh_tables: std::collections::HashMap<(u64, u32, u64), FreshTable, std::hash::BuildHasherDefault<crate::host::AddressHash>>,
     /// The dynamic slots the list holds: title heap, first, count; given
     /// back when the list has run, is reset or released.
@@ -2514,7 +2506,6 @@ impl State {
             if t.stores && crate::picked::on() && crate::picked::picks(&stage.shader, &t.picks) {
                 crate::picked::runs_in(list);
             }
-<<<<<<< HEAD
             BINDING_WRITES.set(t.stores);
             let made = self.tables(
                 list,
@@ -2526,11 +2517,6 @@ impl State {
                 compute,
             );
             BINDING_WRITES.set(t.stores);
-||||||| 0a4356653
-            let made = self.tables(list, &t.used, &t.host.root_indexed_views, compute);
-=======
-            let made = self.tables(list, &t.tables, compute);
->>>>>>> vicetay/main
             STORES.set(true);
             if made.iter().any(|m| m.1 == u32::MAX) {
                 once!("a draw whose descriptor table found no free slots is dropped");
@@ -2559,7 +2545,6 @@ impl State {
                 } else {
                     crate::memory::Use::Reads
                 };
-<<<<<<< HEAD
                 let ready = if unbuilt {
                     let heap = match self.heaps[0] {
                         0 => None,
@@ -2567,14 +2552,9 @@ impl State {
                     };
                     heap.and_then(|heap| crate::memory::empty(list, heap))
                 } else {
-                    self.memory_ready(list, &t, compute, use_)
+                    self.memory_ready(list, t, compute, use_)
                 };
                 let Some(ready) = ready else {
-||||||| 0a4356653
-                let Some(ready) = self.memory_ready(list, &t, compute, use_) else {
-=======
-                let Some(ready) = self.memory_ready(list, t, compute, use_) else {
->>>>>>> vicetay/main
                     once!("a shader that reads title memory by address without a view heap to hold its views: the draw is dropped");
                     return false;
                 };
@@ -2655,7 +2635,6 @@ impl State {
                         }
                         continue;
                     }
-<<<<<<< HEAD
                     if srv && slot == victory_shader::emit::SLOT_VIEWS {
                         // Ours: the title addresses of the heap's buffer
                         // views, for a descriptor read as data.
@@ -2673,8 +2652,6 @@ impl State {
                         }
                         continue;
                     }
-||||||| 0a4356653
-=======
                     if srv && slot == victory_shader::emit::SLOT_TABLE_STRIDES {
                         // Ours: the shader inspects typed view kinds for its
                         // descriptor tables only (already mirrored by `tables`),
@@ -2693,7 +2670,6 @@ impl State {
                         }
                         continue;
                     }
->>>>>>> vicetay/main
                     let tabled = srv && crate::pipeline::host::bounded_root_srvs();
                     let Some(&Root::View(address)) = self.roots_ref(compute).get(usize::from(slot))
                     else {
@@ -3033,7 +3009,6 @@ impl State {
             *MARKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
         }
         let started = std::time::Instant::now();
-<<<<<<< HEAD
         // Discover raw-byte-copied buffer and placed-texture views before
         // draining `buffer_changes()` and `heap_textures()`, so they are
         // materialized for this frame rather than nulled out at `Host::submit`.
@@ -3085,38 +3060,8 @@ impl State {
                     }
                     Seen::NoCopy => ranges.orphan(index, record, entry),
                 }
-||||||| 0a4356653
-        let mut stage = crate::timeline::span("the heap pass: begun, or done here");
-        if crate::host::aside::on() {
-            let at = std::ptr::from_ref(heap) as usize;
-            list.refreshes_coming(move || {
-                crate::descriptor::with_heap(at, |heap| heap.host().map(|host| heap_buffer_pass(heap, host, frame)))
-                    .flatten()
-                    .unwrap_or_default()
-            });
-        } else {
-            for (shadow, from, to) in heap_buffer_pass(heap, host, frame) {
-                shadow.refresh(list, from, to - from);
-=======
-        let mut stage = crate::timeline::span("the heap pass: begun, or done here");
-        if crate::host::aside::on() {
-            let at = std::ptr::from_ref(heap) as usize;
-            list.refreshes_coming(move || {
-                crate::descriptor::with_heap(at, |heap| {
-                    // The list retains the original stride buffer. A newly
-                    // allocated heap at the same CPU address has another one.
-                    heap.host().filter(|h| h.strides_gpu() == Some(gpu)).map(|h| heap_buffer_pass(heap, h, frame))
-                })
-                    .flatten()
-                    .unwrap_or_default()
-            });
-        } else {
-            for (shadow, from, to) in heap_buffer_pass(heap, host, frame) {
-                shadow.refresh(list, from, to - from);
->>>>>>> vicetay/main
             }
         }
-<<<<<<< HEAD
         for (n, &index) in slots.iter().enumerate().take(if wide { 0 } else { usize::MAX }) {
             ranges.forget(index);
             let Some(handle) = heap.handle(index) else {
@@ -3215,26 +3160,11 @@ impl State {
         HEAP_PASS_PARTS[4].fetch_add(spans.len() as u64, Ordering::Relaxed);
         let textures_began = std::time::Instant::now();
         if !crate::heap_worker::kick(heap) {
-            Self::heap_textures(Into::List(list), heap, host);
+            Self::heap_textures(Into::List(list), heap, host, None);
         }
         HEAP_PASS_PARTS[0].fetch_add(textures_began.elapsed().as_micros() as u64, Ordering::Relaxed);
-||||||| 0a4356653
         #[cfg(feature = "diagnostics")]
-        let refreshed = std::time::Instant::now();
-        stage.next("the heap pass: textures");
-        self.heap_textures(list, heap, host);
-        stage.end();
-        #[cfg(feature = "diagnostics")]
-        HEAP_SPLIT[2].fetch_add(refreshed.elapsed().as_nanos() as u64, Ordering::Relaxed);
-=======
-        #[cfg(feature = "diagnostics")]
-        let refreshed = std::time::Instant::now();
-        stage.next("the heap pass: textures");
-        let _ = self.heap_textures(list, heap, host, None);
-        stage.end();
-        #[cfg(feature = "diagnostics")]
-        HEAP_SPLIT[2].fetch_add(refreshed.elapsed().as_nanos() as u64, Ordering::Relaxed);
->>>>>>> vicetay/main
+        HEAP_SPLIT[2].fetch_add(textures_began.elapsed().as_nanos() as u64, Ordering::Relaxed);
         HEAP_BUFFER_PASSES.fetch_add(1, Ordering::Relaxed);
         HEAP_BUFFER_MICROS.fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
         static LOGGED: AtomicU64 = AtomicU64::new(0);
@@ -3254,7 +3184,6 @@ impl State {
         Some(gpu)
     }
 
-<<<<<<< HEAD
     /// [`State::heap_buffers`] for a shader that reads a descriptor's
     /// address as data: the GPU address of the host's table of the buffer
     /// views' title addresses by heap slot. The pass that readies the
@@ -3398,7 +3327,7 @@ impl State {
             shadow.refresh(list, *from, *to - *from);
         }
         let textures_began = std::time::Instant::now();
-        Self::heap_textures(Into::List(list), heap, host);
+        Self::heap_textures(Into::List(list), heap, host, None);
         HEAP_PASS_PARTS[0].fetch_add(textures_began.elapsed().as_micros() as u64, Ordering::Relaxed);
         HEAP_BUFFER_PASSES.fetch_add(1, Ordering::Relaxed);
         HEAP_BUFFER_MICROS.fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
@@ -3431,8 +3360,6 @@ impl State {
         }
     }
 
-||||||| 0a4356653
-=======
     /// The GPU address of the bound view heap's stride/kind table without
     /// running the bindless heap buffer/texture sweep (for shaders that only
     /// inspect descriptors already mirrored via their descriptor tables).
@@ -3591,7 +3518,6 @@ impl State {
                 .is_some_and(|(w, h, _)| w >= 512 && w == u64::from(h))
     }
 
->>>>>>> vicetay/main
     /// Runs the pass that uploads textures picked by index
     /// ([`State::heap_textures`]) where nothing has asked for it yet
     /// ([`early_budgets`]): once a frame for a few milliseconds, at the

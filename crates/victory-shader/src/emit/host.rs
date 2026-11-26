@@ -1085,19 +1085,15 @@ pub enum View<'a> {
     UintTextureArrayUav(u32, u32, u32),
     /// A typed RGBA16F buffer UAV of this many elements, zeroed.
     HalfUav(u32),
-<<<<<<< HEAD
     /// The same buffer viewed as R16G16B16A16_UINT: what a translated
     /// program that moves halves is shown ([`super::HostShader::half_views`]).
     HalfUintUav(u32),
-||||||| 0a4356653
-=======
     /// A typed buffer UAV pre-filled with `data` (`format`, bytes per element).
     TypedUav {
         data: &'a [u32],
         format: DXGI_FORMAT,
         elem_bytes: u32,
     },
->>>>>>> vicetay/main
     /// A constant buffer of these dwords.
     Cbv(&'a [u32]),
     /// A buffer SRV over these dwords.
@@ -1521,35 +1517,6 @@ impl Host {
                         )?;
                         uavs.push((b, None, n, rb));
                     }
-<<<<<<< HEAD
-                    View::TextureUav(..)
-                    | View::UintTextureUav(..)
-                    | View::Uint2TextureUav(..)
-                    | View::Uint4TextureUav(..)
-                    | View::TextureArrayUav(..)
-                    | View::UintTextureArrayUav(..) => {
-                        // (width, height, slices, words per texel)
-                        let (w, h, slices, words) = match *v {
-                            View::TextureUav(w, h) => (w, h, 1, 4),
-                            View::UintTextureUav(w, h) => (w, h, 1, 1),
-                            View::Uint2TextureUav(w, h) => (w, h, 1, 2),
-                            View::Uint4TextureUav(w, h) => (w, h, 1, 4),
-                            View::TextureArrayUav(w, h, n) => (w, h, n, 4),
-                            View::UintTextureArrayUav(w, h, n) => (w, h, n, 1),
-                            _ => unreachable!(),
-                        };
-                        let format = match words {
-                            1 => DXGI_FORMAT_R32_UINT,
-                            2 => DXGI_FORMAT_R32G32_UINT,
-                            _ if matches!(*v, View::Uint4TextureUav(..)) => DXGI_FORMAT_R32G32B32A32_UINT,
-                            _ => DXGI_FORMAT_R32G32B32A32_FLOAT,
-                        };
-                        let mut desc =
-                            texture_as(w, h, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, format);
-                        desc.DepthOrArraySize = slices as u16;
-||||||| 0a4356653
-                    View::TextureUav(w, h) => {
-=======
                     View::TypedUav {
                         data,
                         format,
@@ -1590,8 +1557,31 @@ impl Host {
                         )?;
                         uavs.push((b, None, n, rb));
                     }
-                    View::TextureUav(w, h) => {
->>>>>>> vicetay/main
+                    View::TextureUav(..)
+                    | View::UintTextureUav(..)
+                    | View::Uint2TextureUav(..)
+                    | View::Uint4TextureUav(..)
+                    | View::TextureArrayUav(..)
+                    | View::UintTextureArrayUav(..) => {
+                        // (width, height, slices, words per texel)
+                        let (w, h, slices, words) = match *v {
+                            View::TextureUav(w, h) => (w, h, 1, 4),
+                            View::UintTextureUav(w, h) => (w, h, 1, 1),
+                            View::Uint2TextureUav(w, h) => (w, h, 1, 2),
+                            View::Uint4TextureUav(w, h) => (w, h, 1, 4),
+                            View::TextureArrayUav(w, h, n) => (w, h, n, 4),
+                            View::UintTextureArrayUav(w, h, n) => (w, h, n, 1),
+                            _ => unreachable!(),
+                        };
+                        let format = match words {
+                            1 => DXGI_FORMAT_R32_UINT,
+                            2 => DXGI_FORMAT_R32G32_UINT,
+                            _ if matches!(*v, View::Uint4TextureUav(..)) => DXGI_FORMAT_R32G32B32A32_UINT,
+                            _ => DXGI_FORMAT_R32G32B32A32_FLOAT,
+                        };
+                        let mut desc =
+                            texture_as(w, h, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, format);
+                        desc.DepthOrArraySize = slices as u16;
                         let t = make(
                             D3D12_HEAP_TYPE_DEFAULT,
                             &desc,

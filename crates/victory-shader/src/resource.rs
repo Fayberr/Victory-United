@@ -2350,18 +2350,8 @@ impl Tracer<'_> {
         let [Operand::Vector { reg, .. }, lane] = v.src[..] else {
             return None;
         };
-<<<<<<< HEAD
         let lane = lane_of(lane, self.p.wave64)?;
-        self.spilled(inst.read(Reg::V(reg))?, lane, &mut Vec::new())
-||||||| 0a4356653
-        self.spilled(inst.read(Reg::V(reg))?, lane_of(lane)?, &mut Vec::new())
-=======
-        let lane = lane_of(lane)?;
-        if lane >= if self.p.wave64 { 64 } else { 32 } {
-            return None;
-        }
         self.spilled(inst.read(Reg::V(reg))?, lane, block, &mut Vec::new())
->>>>>>> vicetay/main
             .ok()
             .flatten()
     }
@@ -2408,20 +2398,8 @@ impl Tracer<'_> {
         if inst.name() != "v_writelane_b32" || !plain_lane(w) {
             return Err(());
         }
-<<<<<<< HEAD
         if lane_of(*at, self.p.wave64).ok_or(())? != lane {
-            return self.spilled(inst.read(Reg::V(reg)).ok_or(())?, lane, seen);
-||||||| 0a4356653
-        if lane_of(*at).ok_or(())? != lane {
-            return self.spilled(inst.read(Reg::V(reg)).ok_or(())?, lane, seen);
-=======
-        let written = lane_of(*at).ok_or(())?;
-        if written >= if self.p.wave64 { 64 } else { 32 } {
-            return Err(());
-        }
-        if written != lane {
             return self.spilled(inst.read(Reg::V(reg)).ok_or(())?, lane, block, seen);
->>>>>>> vicetay/main
         }
         match *value {
             Operand::Scalar { code, .. } if code != NULL => {
