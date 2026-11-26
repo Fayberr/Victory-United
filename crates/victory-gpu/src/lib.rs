@@ -39,29 +39,20 @@ mod cores;
 pub mod descriptor;
 pub mod device;
 #[cfg(windows)]
-<<<<<<< HEAD
 mod drvwatch;
 #[cfg(windows)]
 mod fpsbox;
 #[cfg(windows)]
 mod spread;
 #[cfg(windows)]
-||||||| a66ac212
-=======
-mod ambient;
-#[cfg(windows)]
-mod cores;
-#[cfg(windows)]
 mod placement;
 #[cfg(windows)]
->>>>>>> klbf/beta-2
 mod draw;
 pub mod dxgi;
 #[cfg(windows)]
 pub mod external;
 pub mod fence;
 pub mod frame;
-<<<<<<< HEAD
 #[cfg(all(windows, feature = "diagnostics"))]
 mod book;
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -72,38 +63,26 @@ mod fx;
 pub mod framelog;
 #[cfg(windows)]
 mod heap_worker;
-||||||| a66ac212
-=======
 pub mod frametime;
->>>>>>> klbf/beta-2
 #[cfg(windows)]
 mod host;
 #[cfg(windows)]
-<<<<<<< HEAD
 mod over;
 #[cfg(windows)]
-||||||| a66ac212
-=======
 mod overlay;
 #[cfg(windows)]
 mod pixels;
 #[cfg(windows)]
 mod screenshot;
-#[cfg(windows)]
->>>>>>> klbf/beta-2
 mod indirect;
 #[cfg(windows)]
 mod inplace;
-<<<<<<< HEAD
 #[cfg(windows)]
 mod land;
-||||||| a66ac212
-=======
 #[cfg(windows)]
 mod port;
 #[cfg(windows)]
 pub mod port_descriptors;
->>>>>>> klbf/beta-2
 pub mod list;
 #[cfg(windows)]
 mod memcopy;
@@ -123,17 +102,11 @@ mod popwatch;
 pub mod precompile;
 #[cfg(windows)]
 mod primitive;
-<<<<<<< HEAD
 #[cfg(windows)]
 mod ranges;
-#[cfg(all(windows, feature = "diagnostics"))]
-mod profile;
-||||||| a66ac212
-=======
 // (ours) the sampling profiler of byartesao/victory-giga-fork (VICTORY_PROFILE=1)
 #[cfg(all(windows, feature = "diagnostics"))]
 mod profile;
->>>>>>> klbf/beta-2
 pub mod query;
 #[cfg(windows)]
 mod present_trace;
@@ -157,29 +130,15 @@ mod sampler;
 #[cfg(windows)]
 pub mod shader_cache;
 #[cfg(windows)]
-<<<<<<< HEAD
-||||||| a66ac212
-mod memory;
-#[cfg(windows)]
-=======
-mod memory;
-#[cfg(windows)]
 mod ramline;
 #[cfg(windows)]
->>>>>>> klbf/beta-2
 mod shadow;
-<<<<<<< HEAD
 #[cfg(windows)]
 mod stamp;
-#[cfg(windows)]
-mod tiles;
-||||||| a66ac212
-=======
 #[cfg(windows)]
 mod windowup;
 #[cfg(windows)]
 mod tiles;
->>>>>>> klbf/beta-2
 pub mod signature;
 mod switch;
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -199,8 +158,6 @@ mod upload;
 pub mod titlemem;
 #[cfg(windows)]
 mod watch;
-#[cfg(windows)]
-mod texback;
 
 #[cfg(windows)]
 pub use host::on_failure;
@@ -223,18 +180,11 @@ pub use census::title_memory_reserved;
 pub use inplace::{title_memory_freeing, title_memory_section, title_memory_section_gone, title_memory_view};
 #[cfg(windows)]
 pub use watch::{
-<<<<<<< HEAD
-    kernel_writing, title_memory_allocated, title_memory_committed, title_memory_freed,
-    title_memory_reading, title_memory_remapped, title_memory_remapping, title_memory_splitting,
+    Remapping, kernel_writing, notify_view_writes, title_memory_allocated, title_memory_committed,
+    title_memory_freed, title_memory_reading, title_memory_reading_range, title_memory_remapped,
+    title_memory_remapping, title_memory_remapping_range, title_memory_splitting,
     title_memory_unmapping, title_memory_written, title_pages_changed, title_pages_told,
-    writing as kernel_will_write,
-||||||| a66ac212
-    title_memory_reading, title_memory_remapped, title_memory_remapping, writing as kernel_will_write,
-=======
-    Remapping, notify_view_writes, title_memory_reading, title_memory_reading_range, title_memory_remapped,
-    title_memory_remapping, title_memory_remapping_range, title_memory_written, writing as kernel_will_write,
-    written_through_view,
->>>>>>> klbf/beta-2
+    writing as kernel_will_write, written_through_view,
 };
 
 /// (ours) How many threads of this crate are inside a write-watch asking and inside a
