@@ -1155,15 +1155,7 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
             crate::resource::buffer_bytes(dst),
             crate::resource::buffer_bytes(src),
         ) {
-<<<<<<< HEAD
             buffer_copy(this, list, to, from, a.min(b) as usize);
-||||||| c7daeea5
-            list.defer_copy(to, from, a.min(b) as usize);
-=======
-            if !gpu_buffer_copy(list, to, from, a.min(b) as usize) {
-                list.defer_copy(to, from, a.min(b) as usize);
-            }
->>>>>>> integ/vertex
         }
     }
     #[cfg(not(windows))]
@@ -1792,45 +1784,15 @@ extern "system" fn driver_hint(_: This, _feature: u64, _value: u64) -> u64 {
     0
 }
 
-<<<<<<< HEAD
 /// `DispatchX(x, y, z, flags)`: a dispatch with console flags, of which the
 /// host follows one: the counts are threads, not groups (`draw.rs`
 /// `THREAD_DIMENSIONS`; the ray-tracing structure builder dispatches this way).
 extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
     count_dispatch();
-||||||| c7daeea5
-/// `DispatchX(x, y, z, flags)`: a dispatch with console flags, which the
-/// host has no use for (the ray-tracing builder dispatches this way).
-extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, _flags: u32) {
-=======
-/// `DispatchX(x, y, z, flags)`: a compute dispatch with console
-/// `COMPUTE_DISPATCH_INITIATOR` flags (bit 5, `0x20`, is
-/// `USE_THREAD_DIMENSIONS`: `(x, y, z)` are raw thread counts rather than
-/// thread-group counts).
-extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
->>>>>>> integ/vertex
     #[cfg(windows)]
-<<<<<<< HEAD
     with_state(this, |list, s| s.dispatch(list, x, y, z, flags));
-||||||| c7daeea5
-    state::dispatch(this, x, y, z);
-=======
-    state::dispatch_x(this, x, y, z, flags);
->>>>>>> integ/vertex
     #[cfg(not(windows))]
-<<<<<<< HEAD
     let _ = (this, x, y, z, flags);
-||||||| c7daeea5
-    {
-        let _ = (this, x, y, z);
-        count_dispatch();
-    }
-=======
-    {
-        let _ = (this, x, y, z, flags);
-        count_dispatch();
-    }
->>>>>>> integ/vertex
 }
 
 /// `BeginQuery`/`EndQuery(heap, type, index)`: queries are answered when
