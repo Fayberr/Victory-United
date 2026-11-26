@@ -17400,22 +17400,6 @@ impl<'a> Lower<'a> {
             }
             Some(_) => return Err(name),
         };
-<<<<<<< HEAD
-        // Byte and 16-bit accesses: bits, and whether a load sign-extends.
-        let narrow = match name {
-            "buffer_load_ubyte" | "buffer_store_byte" => Some((8, false)),
-            "buffer_load_sbyte" => Some((8, true)),
-            "buffer_load_ushort" | "buffer_store_short" => Some((16, false)),
-            "buffer_load_sshort" => Some((16, true)),
-            _ => None,
-        };
-        // d16: two 16-bit channels per VGPR, low half first (buffer and
-        // tbuffer formats alike).
-        let d16 = name.contains("_format_d16_");
-||||||| merged common ancestors
-        // d16: two 16-bit channels per VGPR, low half first.
-        let d16 = name.starts_with("buffer_") && name.contains("_format_d16_");
-=======
         let sub_load = name.strip_prefix("buffer_load_").and_then(subword_load);
         let sub_store = match name {
             "buffer_store_byte" | "buffer_store_byte_d16_hi" => Some(8),
@@ -17425,20 +17409,13 @@ impl<'a> Lower<'a> {
         // d16: two 16-bit channels per VGPR, low half first (buffer and
         // tbuffer formats alike).
         let d16 = name.contains("_format_d16_");
->>>>>>> belobug/main
         let plain = name.replace("_format_d16_", "_format_");
         let (typed, count) = match plain
             .strip_prefix("buffer_load_")
             .or(plain.strip_prefix("buffer_store_"))
             .or(plain.strip_prefix("tbuffer_load_"))
         {
-<<<<<<< HEAD
-            _ if atomic.is_some() || narrow.is_some() => (false, 1),
-||||||| merged common ancestors
-            _ if atomic.is_some() => (false, 1),
-=======
             _ if atomic.is_some() || sub_load.is_some() || sub_store.is_some() => (false, 1),
->>>>>>> belobug/main
             Some("dword") => (false, 1),
             Some("dwordx2") => (false, 2),
             Some("dwordx3") => (false, 3),
@@ -17475,7 +17452,6 @@ impl<'a> Lower<'a> {
             .copied()
             .ok_or("an untracked buffer")?;
         let used = self.used_kind(src);
-<<<<<<< HEAD
         // Sixteen bits a channel through a view of a table: the bits go as
         // they are, as unsigned integers, and the host is told, which shows
         // the shader a 16-bit float view there as its unsigned twin
@@ -17493,10 +17469,6 @@ impl<'a> Lower<'a> {
         if let Some(place) = place {
             self.half_views.insert(place);
         }
-        let (base, extra) = self.built_offset(src)?;
-||||||| merged common ancestors
-        let (base, extra) = self.built_offset(src)?;
-=======
         let stride = used.map_or(0, |u| u.stride);
         if self.by_address(src)
             && let Fields::Buffer { rsrc, .. } = &inst.fields
@@ -17518,7 +17490,6 @@ impl<'a> Lower<'a> {
         } else {
             self.built_offset(src)?
         };
->>>>>>> belobug/main
         if base != 0 {
             let b = self.s.m.i32(base);
             off = self.s.m.bin(c, Bin::Add, off, b);
@@ -17588,27 +17559,10 @@ impl<'a> Lower<'a> {
             }
             return Ok(());
         }
-<<<<<<< HEAD
-        if self.root_address(src).is_some() {
-            // Title memory by address: the byte in the host copy from here on.
-            if let Some(element) = index {
-                if used.is_none_or(|u| u.stride != 1) {
-                    return Err("an indexed access through a root view by address");
-                }
-                off = self.s.m.bin(c, Bin::Add, element, off);
-                index = None;
-            }
-            if let Some((_, byte)) = self.root_memory(src, off, guard, store || atomic.is_some()) {
-                off = byte;
-            }
-        }
-        let c = self.cur;
-||||||| merged common ancestors
-=======
         // A dword access by index through a descriptor built in code: the
         // stride is the code's own, so the element becomes a byte offset in
         // the raw root view.
-        let (index, off) = match index {
+        let (mut index, mut off) = match index {
             Some(i) if !typed && format.is_none() => match self.built_element(src, i, off)? {
                 Some(byte) => (None, byte),
                 // Structured buffers of 16-byte multiples are raw views of
@@ -17625,109 +17579,38 @@ impl<'a> Lower<'a> {
             },
             x => (x, off),
         };
->>>>>>> belobug/main
+        if self.root_address(src).is_some() {
+            // Title memory by address: the byte in the host copy from here on.
+            if let Some(element) = index {
+                if used.is_none_or(|u| u.stride != 1) {
+                    return Err("an indexed access through a root view by address");
+                }
+                off = self.s.m.bin(c, Bin::Add, element, off);
+                index = None;
+            }
+            if let Some((_, byte)) = self.root_memory(src, off, guard, store || atomic.is_some()) {
+                off = byte;
+            }
+        }
+        let c = self.cur;
         let uav = store || atomic.is_some() || used.is_some_and(|u| u.kind == ResourceType::Uav);
         let mut u = if uav { 0x1000 } else { 0 };
         if uav && !typed && self.entry(src).is_some_and(|e| self.coherent.contains(&e)) {
             u |= 0x4000;
         }
         let iu = self.s.m.undef(self.s.t.i32);
-<<<<<<< HEAD
-        if let Some((bits, signed)) = narrow {
-            // Below a dword: raw buffers are read and written in dwords on
-            // 4 bytes, so the dword that holds the value is read and
-            // shifted, or changed with two atomic operations that touch
-            // only the value's own bits (other lanes may write the rest of
-            // the dword at the same time). A 16-bit value at a dword's
-            // last byte continues in the next dword.
-            let byte = match index {
-                None => off,
-                Some(index) if used.is_some_and(|u| u.stride == 1) => {
-                    self.s.m.bin(c, Bin::Add, index, off)
-                }
-                Some(_) => return Err("a byte or 16-bit buffer access by index"),
-            };
-            let h = self.handle(site, src, false, (11 | u, 0))?;
-            let k3 = self.s.m.i32(3);
-            let within = self.s.m.bin(c, Bin::And, byte, k3);
-            let aligned = self.s.m.bin(c, Bin::Sub, byte, within);
-            let shift = self.s.m.bin(c, Bin::Shl, within, k3);
-            let four = self.s.m.i32(4);
-            let next = self.s.m.bin(c, Bin::Add, aligned, four);
-            let ones = self.s.m.i32(if bits == 8 { 0xff } else { 0xffff });
-            let zero = self.s.m.i32(0);
-            let k8 = self.s.m.i32(8);
-            let straddles = self.s.m.cmp(c, pred::EQ, within, k3);
-            if !store {
-                let mask = self.s.m.i8(1);
-                let align = self.s.m.i32(4);
-                let dword = |l: &mut Self, at: V| {
-                    let r = l.s.op(
-                        c,
-                        "rawBufferLoad.f32",
-                        Attr::ReadOnly,
-                        l.s.t.res_ret,
-                        139,
-                        &[h, at, iu, mask, align],
-                    );
-                    let f = l.s.m.extract(c, r, 0);
-                    l.as_int(f)
-                };
-                let low = dword(self, aligned);
-                let mut x = self.s.m.bin(c, Bin::LShr, low, shift);
-                if bits == 16 {
-                    let high = dword(self, next);
-                    let high = self.s.m.bin(c, Bin::Shl, high, k8);
-                    let high = self.s.m.select(c, straddles, high, zero);
-                    x = self.s.m.bin(c, Bin::Or, x, high);
-                }
-                x = self.s.m.bin(c, Bin::And, x, ones);
-                if signed {
-                    let up = self.s.m.i32(32 - bits);
-                    x = self.s.m.bin(c, Bin::Shl, x, up);
-                    x = self.s.m.bin(c, Bin::AShr, x, up);
-                }
-                let Some(Operand::Vector { reg, .. }) = *data else {
-                    return Err("a buffer result");
-                };
-                self.write(inst, Reg::V(reg), x, guard);
-                return Ok(());
-            }
-            let d = data.as_ref().ok_or("buffer store data")?;
-            let v = self.vgprs(inst, d, 1)?[0];
-            let v = self.s.m.bin(c, Bin::And, v, ones);
-            let all = self.s.m.i32(u32::MAX);
-            let clear = self.s.m.bin(c, Bin::Shl, ones, shift);
-            let keep = self.s.m.bin(c, Bin::Xor, clear, all);
-            let set = self.s.m.bin(c, Bin::Shl, v, shift);
-            let keep_next = self.s.m.i32(0xffff_ff00);
-            let set_next = self.s.m.bin(c, Bin::LShr, v, k8);
-            let (and, or) = (self.s.m.i32(1), self.s.m.i32(2));
-            let i32t = self.s.t.i32;
-            let at = self.begin_guarded(guard);
-            for (op, x) in [(and, keep), (or, set)] {
-                let args = [h, op, aligned, iu, iu, x];
-                self.s
-                    .op(self.cur, "atomicBinOp.i32", Attr::NoUnwind, i32t, 78, &args);
-            }
-            if bits == 16 {
-                let second = self.begin_guarded(Some(straddles));
-                for (op, x) in [(and, keep_next), (or, set_next)] {
-                    let args = [h, op, next, iu, iu, x];
-                    self.s
-                        .op(self.cur, "atomicBinOp.i32", Attr::NoUnwind, i32t, 78, &args);
-                }
-                self.end_guarded(second, &[]);
-            }
-            self.end_guarded(at, &[]);
-            return Ok(());
-        }
-||||||| merged common ancestors
-=======
         if sub_load.is_some() || sub_store.is_some() {
             let data = data.as_ref().ok_or("buffer sub-dword data")?;
             let Operand::Vector { reg, .. } = *data else {
                 return Err("buffer sub-dword data");
+            };
+            // A raw buffer (stride 1) addressed by index: the index is the byte.
+            let index = match index {
+                Some(i) if stride == 1 => {
+                    off = self.s.m.bin(c, Bin::Add, i, off);
+                    None
+                }
+                x => x,
             };
             let h = if index.is_some() {
                 if stride < 4 || !stride.is_multiple_of(4) {
@@ -17768,7 +17651,6 @@ impl<'a> Lower<'a> {
             }
             return Ok(());
         }
->>>>>>> belobug/main
         if let Some(op) = atomic {
             let returns = matches!(inst.fields, Fields::Buffer { cache, .. } if cache.glc);
             if op == "csub" && !returns {
@@ -17912,7 +17794,7 @@ impl<'a> Lower<'a> {
                         self.nan_guard(f, false)
                     });
                 }
-<<<<<<< HEAD
+                args.resize(3 + 4, if halves { self.s.m.i32(0) } else { self.s.m.f32(0) });
                 (
                     69,
                     if halves {
@@ -17921,12 +17803,6 @@ impl<'a> Lower<'a> {
                         "bufferStore.f32"
                     },
                 )
-||||||| merged common ancestors
-                (69, "bufferStore.f32")
-=======
-                args.resize(3 + 4, self.s.m.f32(0));
-                (69, "bufferStore.f32")
->>>>>>> belobug/main
             } else {
                 match index {
                     // A raw buffer (stride 1) written by index: the index is the byte.
@@ -19158,7 +19034,6 @@ impl<'a> Lower<'a> {
         for (v, b, i) in std::mem::take(&mut self.data_phis) {
             let phi = &p.blocks[b].phis[i];
             let bit = phi.reg == Reg::Scc;
-<<<<<<< HEAD
             // A join of numbers with dead registers (`dead`): the paths that bring those
             // never read the result, so they bring zero. Not for a join that is itself a
             // lane mask (a ballot gives that one as data).
@@ -19170,8 +19045,6 @@ impl<'a> Lower<'a> {
                     .args
                     .iter()
                     .any(|a| matches!(self.vals.get(a), Some(Val::I32(_))));
-||||||| merged common ancestors
-=======
             // A register initialized only on one branch may carry a dead
             // descriptor dword left over from earlier register reuse on the
             // other branch (guarded by a separate predicate). Only treat a
@@ -19184,13 +19057,11 @@ impl<'a> Lower<'a> {
                     .enumerate()
                     .filter(|&(_, &q)| self.tail[q].is_some())
                     .any(|(n, _)| matches!(self.vals.get(&phi.args[n]), Some(Val::I32(_))));
->>>>>>> belobug/main
             let mut incoming = Vec::new();
             for (n, &q) in p.blocks[b].preds.iter().enumerate() {
                 let Some(qb) = self.tail[q] else { continue };
                 let qb = self.edges.get(&(q, b)).copied().unwrap_or(qb);
                 let arg = phi.args[n];
-<<<<<<< HEAD
                 if self.read_phis.contains(&phi.value) && !self.vals.contains_key(&arg) {
                     let _ = self.lazy_barycentric(arg);
                     // A root parameter nothing read before the join (user
@@ -19202,30 +19073,13 @@ impl<'a> Lower<'a> {
                         self.vals.insert(arg, val);
                     }
                 }
-                let x = match (self.vals.get(&arg).copied(), bit) {
-||||||| merged common ancestors
-                let x = match (self.vals.get(&arg).copied(), bit) {
-=======
-                if self.read_phis.contains(&phi.value) && !self.vals.contains_key(&arg) {
-                    let _ = self.lazy_barycentric(arg);
-                }
-                // A root parameter no instruction read.
-                if !self.vals.contains_key(&arg)
-                    && let Some(&(param, dword)) = self.params.get(&arg)
-                    && self.read_phis.contains(&phi.value)
-                {
-                    let val = self.user(param, dword);
-                    self.vals.insert(arg, val);
-                }
                 // An edge from outside a loop takes the loop's final value.
                 let looked = match self.finals.get(&arg) {
                     Some(&(f, h)) if !self.loop_bodies[&h].contains(&q) => Some(f),
                     _ => self.vals.get(&arg).copied(),
                 };
                 let x = match (looked, bit) {
->>>>>>> belobug/main
                     (Some(Val::I32(x)), false) | (Some(Val::Bit(x)), true) => x,
-<<<<<<< HEAD
                     (Some(Val::Missing(_)) | None, false)
                         if numbers && self.dead(arg, &mut Vec::new()) =>
                     {
@@ -19270,8 +19124,6 @@ impl<'a> Lower<'a> {
                             Err(why) => return Err(Stop::Retry(phi.value, why)),
                         }
                     }
-||||||| merged common ancestors
-=======
                     (Some(Val::Missing(why)), false)
                         if has_data
                             && matches!(
@@ -19282,7 +19134,6 @@ impl<'a> Lower<'a> {
                     {
                         self.s.m.i32(0)
                     }
->>>>>>> belobug/main
                     (Some(Val::Bit(_)), false) if self.read_phis.contains(&phi.value) => {
                         return Err(Stop::Retry(phi.value, "an SCC joined with SGPR values"));
                     }
@@ -19334,52 +19185,10 @@ impl<'a> Lower<'a> {
         for (phi, incoming) in std::mem::take(&mut self.counters).into_values() {
             self.s.m.set_phi(phi, incoming);
         }
-<<<<<<< HEAD
-||||||| merged common ancestors
-        while let Some((v, b, i)) = self.pending_masks.pop() {
-            let phi = &p.blocks[b].phis[i];
-            let offset = p.blocks[b].offset;
-            let mut incoming = Vec::new();
-            for (n, &q) in p.blocks[b].preds.iter().enumerate() {
-                let Some(qb) = self.tail[q] else { continue };
-                let qb = self.edges.get(&(q, b)).copied().unwrap_or(qb);
-                let m =
-                    *self.x.st.masks.get(&phi.args[n]).ok_or_else(|| {
-                        unsupported(offset, "a lane-mask join of an untracked mask")
-                    })?;
-                let x = self.boolean(m, qb).map_err(|w| unsupported(offset, w))?;
-                incoming.push((x, qb));
-            }
-            self.s.m.set_phi(v, incoming);
-        }
-=======
-        while let Some((v, b, i)) = self.pending_masks.pop() {
-            let phi = &p.blocks[b].phis[i];
-            let offset = p.blocks[b].offset;
-            let mut incoming = Vec::new();
-            for (n, &q) in p.blocks[b].preds.iter().enumerate() {
-                let Some(qb) = self.tail[q] else { continue };
-                let qb = self.edges.get(&(q, b)).copied().unwrap_or(qb);
-                // Console flow: every lane arrives by every edge, so a join
-                // also takes masks that are constants or built from scalars.
-                let arg = &phi.args[n];
-                // shortcut: a plain scalar on the edge is the register in
-                // another use, taken for a mask no lane is in; right as long
-                // as the program does not read the join after that edge.
-                let x = match self.x.st.masks.get(arg).or_else(|| self.x.st.others.get(arg)) {
-                    Some(&m) => self.boolean(m, qb).map_err(|w| unsupported(offset, w))?,
-                    None => self.s.m.bool(false),
-                };
-                incoming.push((x, qb));
-            }
-            self.s.m.set_phi(v, incoming);
-        }
->>>>>>> belobug/main
         Ok(())
     }
 }
 
-<<<<<<< HEAD
 /// The DXIL interpolation mode of a kind of barycentrics (none for the
 /// pull model).
 fn interp_mode(kind: Barycentric) -> Option<u8> {
@@ -19394,10 +19203,6 @@ fn interp_mode(kind: Barycentric) -> Option<u8> {
     })
 }
 
-||||||| merged common ancestors
-=======
-/// The DXIL interpolation mode of a kind of barycentrics (none for the
-/// pull model).
 /// The host's limit on a mesh shader's vertex plus primitive outputs
 /// (DXC's `kMaxMSOutputTotalBytes`).
 const MAX_MESH_OUTPUT_BYTES: u32 = 32768;
@@ -19489,19 +19294,6 @@ pub(super) fn settle_position_mode(inputs: &mut [SigElement]) {
     }
 }
 
-fn interp_mode(kind: Barycentric) -> Option<u8> {
-    Some(match kind {
-        Barycentric::PerspectiveCenter => 2,
-        Barycentric::PerspectiveCentroid => 3,
-        Barycentric::PerspectiveSample => 6,
-        Barycentric::LinearCenter => 4,
-        Barycentric::LinearCentroid => 5,
-        Barycentric::LinearSample => 7,
-        Barycentric::PerspectivePullModel => return None,
-    })
-}
-
->>>>>>> belobug/main
 #[cfg(test)]
 mod tests {
     use super::super::container::SigElement;
