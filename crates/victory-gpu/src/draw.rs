@@ -157,12 +157,7 @@ thread_local! {
     /// While `State::early_textures` runs the texture pass: the
     /// milliseconds and the bytes that run may take, in place of the
     /// pass's own per frame.
-<<<<<<< HEAD
     static PASS_BUDGET: std::cell::Cell<Option<(u64, u64, bool)>> = const { std::cell::Cell::new(None) };
-||||||| 9c184b35b
-    static PASS_BUDGET: std::cell::Cell<Option<(u64, u64)>> = const { std::cell::Cell::new(None) };
-=======
-    static PASS_BUDGET: std::cell::Cell<Option<(u64, u64)>> = const { std::cell::Cell::new(None) };
     /// For the run of the texture pass `State::bake_sources_pass` makes
     /// before a draw of the title's skin bake: the title slots that draw
     /// samples and that wait in the queue. That run serves them alone,
@@ -178,7 +173,6 @@ thread_local! {
     /// ([`bake_tables`]), by the shader's hash.
     static BAKE_TABLES: std::cell::RefCell<std::collections::HashMap<String, Option<BakeTables>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
->>>>>>> origin/exp/fork-head
 }
 
 /// The milliseconds of every frame the pass that uploads textures picked
@@ -1326,20 +1320,12 @@ fn root_view(list: &HostList, address: u64, srv: bool) -> Option<u64> {
         crate::book::root(gpu, len);
         return Some(gpu);
     }
-<<<<<<< HEAD
-    list.fill_scratch(address as *const u8, len)
-||||||| 9c184b35b
-    let (gpu, to) = list.scratch(len)?;
-    list.defer_fill(to, address as *const u8, len as usize);
-    Some(gpu)
-=======
     if crate::host::list_reuse() {
         return list.fill_scratch(address as *const u8, len);
     }
     let (gpu, to) = list.scratch(len)?;
     list.defer_fill(to, address as *const u8, len as usize);
     Some(gpu)
->>>>>>> origin/exp/fork-head
 }
 
 macro_rules! once {
@@ -3214,7 +3200,7 @@ impl State {
                 PASS_SOURCED.set([0; 4]);
                 // No budget of the frame's: the run serves the sources
                 // alone, within their own bytes.
-                PASS_BUDGET.set(Some((0, 0)));
+                PASS_BUDGET.set(Some((0, 0, true)));
                 Self::heap_textures(Into::List(list), heap, host);
                 PASS_BUDGET.set(None);
                 PASS_SOURCES.set(None);
@@ -3652,12 +3638,6 @@ impl State {
         }
         let mut served = true;
         for (index, write) in due {
-<<<<<<< HEAD
-            if SPENT.load(Ordering::Relaxed) >= bytes_at_most || began.elapsed() > span {
-                served = false;
-||||||| 9c184b35b
-            if SPENT.load(Ordering::Relaxed) >= bytes_at_most || began.elapsed() > span {
-=======
             // A run for a bake draw's own ends at its own bytes, not at the
             // frame's budget or time.
             if only {
@@ -3666,7 +3646,7 @@ impl State {
                     break;
                 }
             } else if SPENT.load(Ordering::Relaxed) >= bytes_at_most || began.elapsed() > span {
->>>>>>> origin/exp/fork-head
+                served = false;
                 break;
             }
             let ahead = matches!(into, Into::Ahead(_));
@@ -3707,19 +3687,13 @@ impl State {
             // first look for the rest of the run. The look reads 48 KiB;
             // only a changed texture is uploaded again.
             // `VICTORY_HEAP_RECHECK=0`: uploaded once, as before.
-<<<<<<< HEAD
             // One found changed by such a look is looked at in the next frame
-            // again: the textures left that change unnoticed are ones the
-            // title paints all the time through another view of their pages
-            // (all their blocks are shown at other addresses too), and each
-            // was shown four frames late, over and over.
+            // again (`VICTORY_RECHECK_SOON=1`, [`recheck_soon`]): the
+            // textures left that change unnoticed are ones the title paints
+            // all the time through another view of their pages (all their
+            // blocks are shown at other addresses too), and each was shown
+            // four frames late, over and over.
             let mut again_in = RECHECK_FRAMES[0];
-||||||| 9c184b35b
-=======
-            // One found changed by such a look is looked at again in the
-            // next frame with `VICTORY_RECHECK_SOON=1` ([`recheck_soon`]).
-            let mut again_in = RECHECK_FRAMES[0];
->>>>>>> origin/exp/fork-head
             if let Some((at, len, print, looks, uploaded)) = host.texture_slot_checked(index) {
                 if crate::texture::fingerprint(at, len) == print {
                     HEAP_TEXTURES_RECHECKED[0].fetch_add(1, Ordering::Relaxed);
@@ -3758,23 +3732,11 @@ impl State {
                 }
             }
             let mut partly = None;
-<<<<<<< HEAD
             let mut there = None;
             if let Some(View::Placed(false, resource, desc)) = heap.handle(index).and_then(crate::descriptor::view) {
-||||||| 9c184b35b
-            if let Some(View::Placed(false, resource, desc)) = heap.handle(index).and_then(crate::descriptor::view) {
-=======
-            if let Some((View::Placed(false, resource, desc), _)) = &record {
->>>>>>> origin/exp/fork-head
                 let address = u64::from(desc[10]) | u64::from(desc[11]) << 32;
-<<<<<<< HEAD
                 let first = crate::resource::first_mip(&desc);
                 let len = crate::resource::placed_bytes_from(&resource, first).unwrap_or(1);
-||||||| 9c184b35b
-                let len = crate::resource::placed_bytes(&resource).unwrap_or(1);
-=======
-                let len = crate::resource::placed_bytes(resource).unwrap_or(1);
->>>>>>> origin/exp/fork-head
                 let mapped = crate::texture::mapped_bytes(address as *const u8, len as usize);
                 if mapped == 0 {
                     if only {
