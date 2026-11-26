@@ -475,13 +475,7 @@ pub(crate) fn wanted(n: u64) -> bool {
     // cutscene (its shots do not fall on the same frame numbers from run to
     // run, so single frames cannot be compared between runs).
     let first = WORLD.load(std::sync::atomic::Ordering::Relaxed);
-<<<<<<< HEAD
     let in_world = world_on() && first != u64::MAX && n > first && (n - first) % world_every() < 2;
-||||||| a66ac212
-    let in_world = world_on() && first != u64::MAX && n > first && (n - first) % 8 == 0;
-=======
-    let in_world = world_on() && first != u64::MAX && n > first && (n - first) % 8 < 2;
->>>>>>> klbf/beta-2
     folder().is_some() && (n.is_power_of_two() || listed(n) || before_world || in_world)
 }
 
@@ -535,23 +529,10 @@ fn encode(w: u32, h: u32, raw: &[u8]) -> Vec<u8> {
     header.extend(h.to_be_bytes());
     header.extend([8, 2, 0, 0, 0]); // 8-bit RGB
     chunk(&mut png, b"IHDR", &header);
-<<<<<<< HEAD
     let mut compressed = vec![0u8; zlib_rs::compress_bound(raw.len())];
     let (idat, rc) = zlib_rs::compress_slice(&mut compressed, raw, zlib_rs::DeflateConfig::new(3));
     debug_assert_eq!(rc, zlib_rs::ReturnCode::Ok);
     chunk(&mut png, b"IDAT", idat);
-||||||| a66ac212
-    chunk(
-        &mut png,
-        b"IDAT",
-        &miniz_oxide::deflate::compress_to_vec_zlib(&raw, 3),
-    );
-=======
-    let mut compressed = vec![0u8; zlib_rs::compress_bound(raw.len())];
-    let (idat, rc) = zlib_rs::compress_slice(&mut compressed, &raw, zlib_rs::DeflateConfig::new(3));
-    debug_assert_eq!(rc, zlib_rs::ReturnCode::Ok);
-    chunk(&mut png, b"IDAT", idat);
->>>>>>> klbf/beta-2
     chunk(&mut png, b"IEND", &[]);
     png
 }
@@ -601,7 +582,6 @@ pub(crate) fn read_back(
     list: &ID3D12GraphicsCommandList,
     texture: &ID3D12Resource,
 ) -> Option<(ID3D12Resource, D3D12_PLACED_SUBRESOURCE_FOOTPRINT)> {
-<<<<<<< HEAD
     read_back_of(device, list, texture, 0)
 }
 
@@ -613,20 +593,6 @@ pub(crate) fn read_back_of(
     texture: &ID3D12Resource,
     sub: u32,
 ) -> Option<(ID3D12Resource, D3D12_PLACED_SUBRESOURCE_FOOTPRINT)> {
-||||||| a66ac212
-=======
-    read_back_of(device, list, texture, 0)
-}
-
-/// As [`read_back`], of subresource `sub` (the stencil plane of a
-/// one-level, one-slice depth-stencil texture is subresource 1).
-fn read_back_of(
-    device: &ID3D12Device,
-    list: &ID3D12GraphicsCommandList,
-    texture: &ID3D12Resource,
-    sub: u32,
-) -> Option<(ID3D12Resource, D3D12_PLACED_SUBRESOURCE_FOOTPRINT)> {
->>>>>>> klbf/beta-2
     let mut footprint = D3D12_PLACED_SUBRESOURCE_FOOTPRINT::default();
     let mut total = 0;
     // SAFETY: a live texture; outputs for one subresource.
