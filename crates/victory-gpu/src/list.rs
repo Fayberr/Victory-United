@@ -1784,31 +1784,13 @@ extern "system" fn driver_hint(_: This, _feature: u64, _value: u64) -> u64 {
     0
 }
 
-<<<<<<< HEAD
 /// `DispatchX(x, y, z, flags)`: a dispatch with console flags, of which the
 /// host follows one: the counts are threads, not groups (`draw.rs`
 /// `THREAD_DIMENSIONS`; the ray-tracing structure builder dispatches this way).
 extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
     count_dispatch();
-||||||| 085ee7c4
-/// `DispatchX(x, y, z, flags)`: a dispatch with console flags, which the
-/// host has no use for (the ray-tracing builder dispatches this way).
-extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, _flags: u32) {
-=======
-/// `DispatchX(x, y, z, flags)`: keep console flags so thread-count dispatches
-/// (`flags & 0x20`, used by the ray-tracing builder) convert to group counts
-/// and populate `USER_DISPATCH_THREADS_X`.
-extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
-    count_dispatch();
->>>>>>> vitoriabr/main
     #[cfg(windows)]
-<<<<<<< HEAD
     with_state(this, |list, s| s.dispatch(list, x, y, z, flags));
-||||||| 085ee7c4
-    state::dispatch(this, x, y, z);
-=======
-    state::dispatch_with_flags(this, x, y, z, Some(flags));
->>>>>>> vitoriabr/main
     #[cfg(not(windows))]
     let _ = (this, x, y, z, flags);
 }
@@ -2122,20 +2104,11 @@ mod state {
     }
     pub(super) extern "system" fn dispatch(this: This, x: u32, y: u32, z: u32) {
         super::count_dispatch();
-<<<<<<< HEAD
         with_state(this, |list, s| s.dispatch(list, x, y, z, 0));
     }
     pub(super) fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
         super::count_dispatch();
         with_state(this, |list, s| s.dispatch_x(list, x, y, z, flags));
-||||||| 085ee7c4
-        with_state(this, |list, s| s.dispatch(list, x, y, z));
-=======
-        dispatch_with_flags(this, x, y, z, None);
-    }
-    pub(super) fn dispatch_with_flags(this: This, x: u32, y: u32, z: u32, flags: Option<u32>) {
-        with_state(this, |list, s| s.dispatch(list, x, y, z, flags));
->>>>>>> vitoriabr/main
     }
     /// `DispatchMesh(x, y, z)` (the PC method of List6); the title's mesh
     /// programs take `x` groups only.
@@ -2783,7 +2756,6 @@ mod tests {
         assert_eq!(release(list), 0);
         assert_eq!(release(allocator), 0);
     }
-<<<<<<< HEAD
 
     #[test]
     fn barrier_batches_split_before_duplicate_resource_transitions() {
@@ -3038,31 +3010,4 @@ mod tests {
             assert_eq!(release(object), 0);
         }
     }
-||||||| 085ee7c4
-=======
-
-    /// An offset near `u64::MAX` must not overflow and write outside the
-    /// query destination buffer.
-    #[test]
-    fn resolve_queries_rejects_overflowing_offset() {
-        let null = std::ptr::null();
-        let mut allocator = null;
-        assert_eq!(
-            create_allocator(null, 0, &ALLOCATOR_IIDS[0], &mut allocator),
-            S_OK
-        );
-        let mut list = null;
-        assert_eq!(
-            create_list(null, 0, 0, allocator, null, &LIST_IIDS[1], &mut list),
-            S_OK
-        );
-        let buffer = crate::resource::test_buffer(64);
-        // Used to overflow `offset + count * 8` (panic in debug, wrap in release).
-        resolve_queries(list, null, 0, 0, 2, buffer, u64::MAX - 8);
-        let release = |o: This| slot::<extern "system" fn(This) -> u32>(o, 0x10)(o);
-        for object in [buffer, list, allocator] {
-            assert_eq!(release(object), 0);
-        }
-    }
->>>>>>> vitoriabr/main
 }
