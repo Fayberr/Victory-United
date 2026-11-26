@@ -1600,7 +1600,6 @@ unsafe fn second_plane(planes: u32, parameters: *const Plane, first: This) -> Op
     (!resource.is_null() && resource != first).then_some(resource)
 }
 
-<<<<<<< HEAD
 
 /// Diagnostics: the title's present is over.
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -1635,8 +1634,7 @@ fn show(texture: &windows::Win32::Graphics::Direct3D12::ID3D12Resource, state: u
     let _ = (shown, what.resource);
 }
 
-||||||| c7daeea5
-=======
+
 #[cfg(test)]
 mod plane_tests {
     use super::*;
@@ -1682,7 +1680,6 @@ mod plane_tests {
     }
 }
 
->>>>>>> integ/vertex
 /// Diagnostics: logs a presented frame that is black after one that was
 /// not, with what was presented and how many draws ran since.
 #[cfg(all(windows, feature = "diagnostics"))]

@@ -4068,13 +4068,7 @@ static LET_GO: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 #[cfg(feature = "diagnostics")]
 pub(crate) fn windows() -> [u64; 3] {
     let asked: u64 = {
-<<<<<<< HEAD
-        let loose = LOOSE.write().unwrap_or_else(|e| e.into_inner());
-||||||| c7daeea5
-        let loose = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-=======
         let loose = LOOSE.read().unwrap_or_else(|e| e.into_inner());
->>>>>>> integ/vertex
         loose
             .values()
             .map(|s| {
@@ -4098,13 +4092,7 @@ pub(crate) fn windows() -> [u64; 3] {
 #[cfg(feature = "diagnostics")]
 pub(crate) fn window_use() -> [u64; 8] {
     let mut out = [0u64; 8];
-<<<<<<< HEAD
-    let loose = LOOSE.write().unwrap_or_else(|e| e.into_inner());
-||||||| c7daeea5
-    let loose = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-=======
     let loose = LOOSE.read().unwrap_or_else(|e| e.into_inner());
->>>>>>> integ/vertex
     for s in loose.values() {
         let copied = s.copied.lock().unwrap_or_else(|e| e.into_inner());
         let pages = copied.copied_count() as u64;
@@ -4183,13 +4171,7 @@ pub(crate) fn let_go_idle() {
 #[cfg(feature = "diagnostics")]
 pub(crate) fn memory() -> [u64; 6] {
     let (windows, window_bytes) = {
-<<<<<<< HEAD
-        let loose = LOOSE.write().unwrap_or_else(|e| e.into_inner());
-||||||| c7daeea5
-        let loose = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-=======
         let loose = LOOSE.read().unwrap_or_else(|e| e.into_inner());
->>>>>>> integ/vertex
         // Each copy once: a window may stand under several keys.
         let mut seen = std::collections::HashSet::new();
         let bytes: u64 = loose
@@ -4263,7 +4245,6 @@ impl Shadow {
         self.watched.load(Ordering::Relaxed) == VIEW_GUARDED
     }
 
-<<<<<<< HEAD
     /// Whether a submission asks the kernel about the copy's ranges ahead:
     /// not of memory that is not watched, nor of view memory, which the
     /// kernel would refuse (and with it the ranges asked about together).
@@ -4272,8 +4253,6 @@ impl Shadow {
         watched != NOT_WATCHED && (watched != GUARDED || !crate::watch::light())
     }
 
-||||||| c7daeea5
-=======
     /// Where the copy's byte for a title address lies on the CPU and how
     /// many follow it, of a copy shaders use in place (diagnostics; a copy
     /// in the card's memory has only its staging there).
@@ -4286,7 +4265,7 @@ impl Shadow {
         // SAFETY: `at` is inside the copy.
         Some((unsafe { self.data.add(at as usize) }.cast_const(), self.len - at))
     }
->>>>>>> integ/vertex
+
     /// The copy's own number (see the field).
     pub(crate) fn id(&self) -> u64 {
         self.id
@@ -4369,12 +4348,8 @@ impl Shadow {
             used: AtomicU64::new(crate::host::moment()),
             asked: [AtomicU64::new(u64::MAX), AtomicU64::new(0)],
             unsized_asks: AtomicU64::new(0),
-<<<<<<< HEAD
             written: Default::default(),
-||||||| c7daeea5
-=======
             stamp: crate::stamp::Stamp::default(),
->>>>>>> integ/vertex
             id: {
                 static NEXT: AtomicU64 = AtomicU64::new(1);
                 NEXT.fetch_add(1, Ordering::Relaxed)
@@ -5010,12 +4985,8 @@ impl Shadow {
             return false;
         }
         if self.watched.load(Ordering::Relaxed) == NOT_WATCHED {
-<<<<<<< HEAD
             note_stale(0);
-||||||| c7daeea5
-=======
             MERGE_WHY[0].fetch_add(1, Ordering::Relaxed);
->>>>>>> integ/vertex
             return true;
         }
         // The declared ranges overlap (views of the title's whole heap from
@@ -5031,24 +5002,15 @@ impl Shadow {
             // of view memory, which is guarded and not write-watched, and
             // those were all of run 99's cases: the flights were settled
             // 4-5 times a frame for "0 pages looked at".
-<<<<<<< HEAD
             let Some((now, written)) = crate::watch::writes(a, e, true) else {
                 note_stale(1);
-||||||| c7daeea5
-            let Some((now, written)) = crate::watch::writes(a, e, true) else {
-=======
-            let mut written = WRITTEN.take();
-            let Some(now) = crate::watch::writes_into(a, e, true, &mut written) else {
-                WRITTEN.set(written);
                 MERGE_WHY[1].fetch_add(1, Ordering::Relaxed);
->>>>>>> integ/vertex
                 return true;
             };
             let stale: Vec<usize> = {
                 let copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
                 stale_pages_in(base, &copied.at, a, e, &written)
             };
-<<<<<<< HEAD
             if stale.is_empty() {
                 continue;
             }
@@ -5069,6 +5031,7 @@ impl Shadow {
             };
             if held == 0 {
                 note_stale(3);
+                MERGE_WHY[3].fetch_add(1, Ordering::Relaxed);
                 return true;
             }
             // A page's part in the range, compared and put in: the runs it
@@ -5089,7 +5052,10 @@ impl Shadow {
                     let runs = unsafe { self.merge_page_under_writes(lo, hi - lo, held as *mut u8, &left) };
                     match runs {
                         Ok(runs) => *done[i].lock().unwrap_or_else(|e| e.into_inner()) = runs,
-                        Err(()) => over.store(true, Ordering::Relaxed),
+                        Err(()) => {
+                            MERGE_WHY[2].fetch_add(1, Ordering::Relaxed);
+                            over.store(true, Ordering::Relaxed);
+                        }
                     }
                 }
             };
@@ -5104,137 +5070,12 @@ impl Shadow {
             let mut taken = Vec::new();
             for (i, runs) in done.into_iter().enumerate() {
                 let Some(runs) = runs.into_inner().unwrap_or_else(|e| e.into_inner()) else {
-||||||| c7daeea5
-            for page in stale {
-                let (lo, hi) = ((page * PAGE).max(a), ((page + 1) * PAGE).min(e));
-                if lo >= hi {
-=======
-            WRITTEN.set(written);
-            for page in stale {
-                let (lo, hi) = ((page * PAGE).max(a), ((page + 1) * PAGE).min(e));
-                if lo >= hi {
->>>>>>> integ/vertex
                     continue;
-<<<<<<< HEAD
                 };
                 let (lo, hi) = ((stale[i] * PAGE).max(a), ((stale[i] + 1) * PAGE).min(e));
                 MERGED[1].fetch_add(runs.len() as u64, Ordering::Relaxed);
                 MERGED[2].fetch_add(runs.iter().map(|r| r.1 as u64).sum(), Ordering::Relaxed);
                 self.card_changed_runs(runs.into_iter().map(|(r, m)| (lo - start + r, lo - start + r + m)));
-||||||| c7daeea5
-                }
-                let n = hi - lo;
-                let title = &mut title[..n];
-                // The lock of the copy's reference (the snapshot, or the
-                // CPU's side of a copy in the card's memory), from before
-                // title memory is read until the title's bytes are in: with
-                // the copy-back on its own thread ([`relay`]) that thread
-                // puts what the card wrote into title memory and into the
-                // reference under the same lock, and a page read before
-                // such a merge and compared after it would take the card's
-                // bytes for the title's.
-                let mut before = self.before.lock().unwrap_or_else(|e| e.into_inner());
-                // A page that is not there is left as it is, and looked at
-                // again next time.
-                if !crate::host::read_into(lo as *const u8, title) {
-                    continue;
-                }
-                MERGED[0].fetch_add(1, Ordering::Relaxed);
-                let at = lo - start;
-                if self.card.is_some() {
-                    // SAFETY: inside the mapping of the copy's CPU side,
-                    // which only the submitting thread writes.
-                    let held = unsafe { std::slice::from_raw_parts_mut(self.data.add(at), n) };
-                    let runs = joined_over(changed_runs(title, held), merge_gap());
-                    if runs.len() > *runs_left {
-                        return true;
-                    }
-                    *runs_left -= runs.len();
-                    for (r, m) in runs {
-                        held[r..r + m].copy_from_slice(&title[r..r + m]);
-                        self.card_changed(at + r, at + r + m);
-                        MERGED[1].fetch_add(1, Ordering::Relaxed);
-                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
-                    }
-                } else {
-                    let Some(snapshot) = before.as_mut() else {
-                        return true;
-                    };
-                    // SAFETY: the snapshot's allocation holds the copy's
-                    // bytes at the copy's offsets (`writing`), and these
-                    // are in a declared range.
-                    let held = unsafe { std::slice::from_raw_parts_mut(snapshot.as_mut_ptr().add(at), n) };
-                    for (r, m) in changed_runs(title, held) {
-                        // SAFETY: inside the copy's mapping. The card may be
-                        // writing the copy beside these bytes; they are
-                        // written here and nothing around them.
-                        unsafe { std::ptr::copy_nonoverlapping(title.as_ptr().add(r), self.data.add(at + r), m) };
-                        held[r..r + m].copy_from_slice(&title[r..r + m]);
-                        MERGED[1].fetch_add(1, Ordering::Relaxed);
-                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
-                    }
-                }
-                drop(before);
-=======
-                }
-                let n = hi - lo;
-                let title = &mut title[..n];
-                // The lock of the copy's reference (the snapshot, or the
-                // CPU's side of a copy in the card's memory), from before
-                // title memory is read until the title's bytes are in: with
-                // the copy-back on its own thread ([`relay`]) that thread
-                // puts what the card wrote into title memory and into the
-                // reference under the same lock, and a page read before
-                // such a merge and compared after it would take the card's
-                // bytes for the title's.
-                let mut before = self.before.lock().unwrap_or_else(|e| e.into_inner());
-                // A page that is not there is left as it is, and looked at
-                // again next time.
-                if !crate::host::read_into(lo as *const u8, title) {
-                    continue;
-                }
-                MERGED[0].fetch_add(1, Ordering::Relaxed);
-                let at = lo - start;
-                if self.card.is_some() {
-                    // SAFETY: inside the mapping of the copy's CPU side,
-                    // which only the submitting thread writes.
-                    let held = unsafe { std::slice::from_raw_parts_mut(self.data.add(at), n) };
-                    let mut runs = joined_over(changed_runs(title, held), merge_gap());
-                    if merge_dwords() {
-                        runs = dword_runs(runs, lo, n);
-                    }
-                    if runs.len() > *runs_left {
-                        MERGE_WHY[2].fetch_add(1, Ordering::Relaxed);
-                        return true;
-                    }
-                    *runs_left -= runs.len();
-                    for (r, m) in runs {
-                        held[r..r + m].copy_from_slice(&title[r..r + m]);
-                        self.card_changed(at + r, at + r + m);
-                        MERGED[1].fetch_add(1, Ordering::Relaxed);
-                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
-                    }
-                } else {
-                    let Some(snapshot) = before.as_mut() else {
-                        MERGE_WHY[3].fetch_add(1, Ordering::Relaxed);
-                        return true;
-                    };
-                    // SAFETY: the snapshot's allocation holds the copy's
-                    // bytes at the copy's offsets (`writing`), and these
-                    // are in a declared range.
-                    let held = unsafe { std::slice::from_raw_parts_mut(snapshot.as_mut_ptr().add(at), n) };
-                    for (r, m) in changed_runs(title, held) {
-                        // SAFETY: inside the copy's mapping. The card may be
-                        // writing the copy beside these bytes; they are
-                        // written here and nothing around them.
-                        unsafe { std::ptr::copy_nonoverlapping(title.as_ptr().add(r), self.data.add(at + r), m) };
-                        held[r..r + m].copy_from_slice(&title[r..r + m]);
-                        MERGED[1].fetch_add(1, Ordering::Relaxed);
-                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
-                    }
-                }
-                drop(before);
->>>>>>> integ/vertex
                 // Taken, if the range holds all of the page that is in the
                 // copy; else the rest of it is the refresh's, which notes
                 // only whole pages, and the page is looked at again.
@@ -5645,8 +5486,20 @@ impl Shadow {
             runs.push(((first * PAGE).max(from), ((last + 1) * PAGE).min(to), known));
         }
         let runs = by_parts(runs, &again_at, &crate::watch::parts_written(&again_at));
-<<<<<<< HEAD
-        let bytes = self.take_all(runs);
+        // Ours' several threads for the long runs; theirs' compare for the
+        // runs the copy took before, when the refresh compares.
+        let mut whole: Vec<(usize, usize, bool)> = Vec::new();
+        for (a, b, known) in runs {
+            if compare && known {
+                compared.push((a, b));
+            } else {
+                whole.push((a, b, known));
+            }
+        }
+        bytes += self.take_all(whole);
+        if !compared.is_empty() {
+            bytes += self.copy_changed_runs(&compared);
+        }
         if crate::watch::light() {
             // All of the range is in the copy as of this asking.
             let mut ranged = self.ranged.lock().unwrap_or_else(|e| e.into_inner());
@@ -5654,22 +5507,10 @@ impl Shadow {
             if to - from >= ranged[1].1 - ranged[1].0 {
                 ranged[1] = (from, to, now);
             }
-||||||| c7daeea5
-        let mut bytes = 0;
-        for (a, b, _) in runs {
-            bytes += self.copy(a, b);
-=======
-        for (a, b, known) in runs {
-            take(a, b, !known);
-        }
-        if !compared.is_empty() {
-            bytes += self.copy_changed_runs(&compared);
->>>>>>> integ/vertex
         }
         bytes
     }
 
-<<<<<<< HEAD
     /// [`Shadow::take`] of `runs` (from, to, known), on several threads if
     /// they are long: the big heap's copy has some 4 MB of them in each of
     /// 14 refreshes a frame, on one thread while the others had nothing.
@@ -5831,8 +5672,6 @@ impl Shadow {
         to - from
     }
 
-||||||| c7daeea5
-=======
     /// [`Shadow::copy`] of pages the copy took before, with
     /// [`refresh_compare`]: title memory in `runs` (each `[from, to)`, cut
     /// to the buffer) is read and compared with the copy, and only the 4 KiB
@@ -5895,7 +5734,6 @@ impl Shadow {
         bytes + taken
     }
 
->>>>>>> integ/vertex
     /// Copies title memory `[from, to)`, cut to the buffer, into the copy.
     fn copy(&self, from: usize, to: usize) -> usize {
         #[cfg(feature = "diagnostics")]
@@ -6309,25 +6147,9 @@ impl Shadow {
         let skip: Vec<(usize, usize)> = {
             let dirty = card.dirty.lock().unwrap_or_else(|e| e.into_inner());
             let sent = card.sent.lock().unwrap_or_else(|e| e.into_inner());
-<<<<<<< HEAD
             let mut skip: Vec<(usize, usize)> = dirty.iter().copied().filter(|&(a, b)| a < at + n && b > at).collect();
             sent.near(fetched_after, at, at + n, &mut skip);
             skip
-||||||| c7daeea5
-            dirty
-                .iter()
-                .copied()
-                .chain(sent.iter().filter(|s| s.2 > fetched_after).map(|s| (s.0, s.1)))
-                .filter(|&(a, b)| a < at + n && b > at)
-                .collect()
-=======
-            dirty
-                .iter()
-                .copied()
-                .filter(|&(a, b)| a < at + n && b > at)
-                .chain(sent.iter().filter(|s| s.0 > fetched_after).flat_map(|s| sent_over(&s.1, at, at + n).iter().copied()))
-                .collect()
->>>>>>> integ/vertex
         };
         let was = title.clone();
         let mut changed = false;
@@ -6819,17 +6641,8 @@ pub(crate) fn in_place_let_go(at: u64, len: u64) -> u64 {
 /// bytes, false) and the windows outside buffers that have a copy (start,
 /// bytes, true).
 pub(crate) fn spans() -> Vec<(u64, u64, bool)> {
-<<<<<<< HEAD
     let mut spans: Vec<(u64, u64, bool)> = buffers_read().iter().map(|(key, entry)| (key.0, entry.end - key.0, false)).collect();
-    let loose = LOOSE.write().unwrap_or_else(|e| e.into_inner());
-||||||| c7daeea5
-    let mut spans: Vec<(u64, u64, bool)> = buffers_read().iter().map(|(key, entry)| (key.0, entry.end - key.0, false)).collect();
-    let loose = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-=======
-    let mut spans: Vec<(u64, u64, bool)> =
-        buffers_shared().iter().map(|(key, entry)| (key.0, entry.end - key.0, false)).collect();
     let loose = LOOSE.read().unwrap_or_else(|e| e.into_inner());
->>>>>>> integ/vertex
     spans.extend(loose.keys().map(|&(start, len)| (start, len, true)));
     spans
 }
@@ -7222,13 +7035,7 @@ fn fine() -> bool {
 /// which is copied once for each.
 #[cfg(feature = "diagnostics")]
 pub(crate) fn window_cover() -> u64 {
-<<<<<<< HEAD
-    let loose = LOOSE.write().unwrap_or_else(|e| e.into_inner());
-||||||| c7daeea5
-    let loose = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-=======
     let loose = LOOSE.read().unwrap_or_else(|e| e.into_inner());
->>>>>>> integ/vertex
     cover(loose.keys().copied())
 }
 
@@ -7330,21 +7137,9 @@ pub(crate) fn by_address(start: u64, len: u64) -> Option<Arc<Shadow>> {
 }
 
 /// Copies of title memory outside buffers, by (start, length).
-<<<<<<< HEAD
-static LOOSE: std::sync::RwLock<BTreeMap<(u64, u64), Arc<Shadow>>> = std::sync::RwLock::new(BTreeMap::new());
-||||||| c7daeea5
-static LOOSE: Mutex<BTreeMap<(u64, u64), Arc<Shadow>>> = Mutex::new(BTreeMap::new());
-=======
 /// Read shared by the asks that find their window there, as [`BUFFERS`] is.
 static LOOSE: RwLock<BTreeMap<(u64, u64), Arc<Shadow>>> = RwLock::new(BTreeMap::new());
->>>>>>> integ/vertex
 
-<<<<<<< HEAD
-fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Shadow>> {
-||||||| c7daeea5
-fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Shadow>> {
-    let mut map = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-=======
 fn loose(
     address: u64,
     end: u64,
@@ -7352,10 +7147,8 @@ fn loose(
     any: bool,
     range: Option<&ExactRange<'_>>,
 ) -> Option<(Arc<Shadow>, bool)> {
->>>>>>> integ/vertex
     let (cell, _) = window_of(address, end, WINDOW);
     let named = window_of(address, end, if unsized_ask { WINDOW } else { window() });
-<<<<<<< HEAD
     // Under the lock, with the handing out: see `let_go_idle`.
     let note = |shadow: &Shadow| {
         // (Read first: the lines are shared by all recording threads.)
@@ -7373,39 +7166,6 @@ fn loose(
             shadow.unsized_asks.fetch_add(1, Ordering::Relaxed);
         }
     };
-    // The window is there already (nearly always): readers share the lock.
-    if !(unsized_ask && tails()) && !(any && fine() && !unsized_ask) {
-        let map = LOOSE.read().unwrap_or_else(|e| e.into_inner());
-        if let Some(shadow) = map.get(&named) {
-            note(shadow);
-            return Some(shadow.clone());
-        }
-    }
-    let mut map = LOOSE.write().unwrap_or_else(|e| e.into_inner());
-    let (start, len) = if unsized_ask && tails() {
-        let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
-        longest_tail(there, address, end).unwrap_or_else(|| tail_of(address, end))
-    } else if any && fine() && !unsized_ask {
-        // The windows that begin in the ask's cell at or below the ask (one
-        // that begins in a cell below and reaches this far is passed over:
-        // the ask then makes its own).
-        let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
-        holder(there, address, end).unwrap_or(named)
-    } else {
-        named
-||||||| c7daeea5
-    let (start, len) = if unsized_ask && tails() {
-        let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
-        longest_tail(there, address, end).unwrap_or_else(|| tail_of(address, end))
-    } else if any && fine() && !unsized_ask {
-        // The windows that begin in the ask's cell at or below the ask (one
-        // that begins in a cell below and reaches this far is passed over:
-        // the ask then makes its own).
-        let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
-        holder(there, address, end).unwrap_or(named)
-    } else {
-        named
-=======
     // The window the ask takes, among those `map` holds.
     let pick = |map: &BTreeMap<(u64, u64), Arc<Shadow>>| {
         if unsized_ask && tails() {
@@ -7419,28 +7179,6 @@ fn loose(
             holder(there, address, end).unwrap_or(named)
         } else {
             named
-        }
->>>>>>> integ/vertex
-    };
-<<<<<<< HEAD
-||||||| c7daeea5
-    // Under the lock, with the handing out: see `let_go_idle`.
-    let note = |shadow: &Shadow| {
-        shadow.used.store(crate::host::moment(), Ordering::Relaxed);
-        shadow.asked[0].fetch_min(address, Ordering::Relaxed);
-        shadow.asked[1].fetch_max(end, Ordering::Relaxed);
-        if unsized_ask {
-            shadow.unsized_asks.fetch_add(1, Ordering::Relaxed);
-        }
-    };
-=======
-    // Under the lock, with the handing out: see `let_go_idle`.
-    let note = |shadow: &Shadow| {
-        shadow.used.store(crate::host::moment(), Ordering::Relaxed);
-        shadow.asked[0].fetch_min(address, Ordering::Relaxed);
-        shadow.asked[1].fetch_max(end, Ordering::Relaxed);
-        if unsized_ask {
-            shadow.unsized_asks.fetch_add(1, Ordering::Relaxed);
         }
     };
     // A window that is there (nearly every ask): under the shared lock.
@@ -7461,7 +7199,6 @@ fn loose(
     if let Some(own) = exact_for(range, address - start) {
         return Some((own, true));
     }
->>>>>>> integ/vertex
     if let Some(shadow) = map.get(&(start, len)) {
         note(shadow);
         return Some((shadow.clone(), false));
@@ -7609,12 +7346,9 @@ pub(crate) fn exact(address: u64, len: u64) -> Option<Arc<Shadow>> {
     Some(shadow)
 }
 
-<<<<<<< HEAD
 /// Copies of single views' bytes made since the start.
 pub(crate) static OWN_MADE: AtomicU64 = AtomicU64::new(0);
 
-||||||| c7daeea5
-=======
 /// Every host copy of title memory there is now, as (first address, end,
 /// the copy's number): the title buffers', the windows' outside buffers
 /// and the single views' own ([`exact`]).
@@ -7642,9 +7376,9 @@ pub(crate) fn held_elsewhere(copies: &[(usize, usize, u64)], own: u64, ranges: &
     joined(parts)
 }
 
-/// The copies in the card's memory, alive now.
+/// The copies in the card's memory, alive now (ours' [`carded_copies`]).
 pub(crate) fn carded_now() -> Vec<Arc<Shadow>> {
-    CARDED.lock().unwrap_or_else(|e| e.into_inner()).values().filter_map(std::sync::Weak::upgrade).collect()
+    carded_copies()
 }
 
 #[cfg(test)]
@@ -7665,7 +7399,6 @@ mod held_elsewhere_tests {
     }
 }
 
->>>>>>> integ/vertex
 /// With the frame line: the buffer views that got a copy of their own
 /// bytes ([`exact`]), per frame over `frames`, and the copies kept now.
 /// Nothing while there are none.
@@ -7893,26 +7626,14 @@ mod card_merge_tests {
                 staging: staging.clone(),
                 before: Mutex::new(None),
                 dirty: Mutex::default(),
-<<<<<<< HEAD
                 sent: Mutex::new(super::SentRuns::of(&[(title_byte, title_byte + 1, 7)])),
-||||||| c7daeea5
-                sent: Mutex::new(vec![(title_byte, title_byte + 1, 7)]),
-=======
-                sent: Mutex::new(vec![(7, vec![(title_byte, title_byte + 1)])]),
->>>>>>> integ/vertex
                 queued: std::sync::atomic::AtomicBool::new(false),
                 // 0: no card bytes counted (`Drop` takes them off again).
                 size: 0,
             });
             // As `card_dirty` with the mark set by the old-way fetch.
             if let Some(card) = &shadow.card {
-<<<<<<< HEAD
                 card.sent.lock().unwrap().forget(mark);
-||||||| c7daeea5
-                card.sent.lock().unwrap().retain(|s| s.2 > mark);
-=======
-                card.sent.lock().unwrap().retain(|s| s.0 > mark);
->>>>>>> integ/vertex
             }
             // Flight 6's slot: the card's bytes behind its lists, before send 7.
             let mut slot = content.clone();
