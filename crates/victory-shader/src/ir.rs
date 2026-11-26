@@ -22,16 +22,9 @@ use crate::ShaderError;
 use crate::gfx10::{self, Fields, Flow, Instruction, Operand};
 
 /// One register dword. Scalar codes as in [`Operand::Scalar`]: 0-105 SGPRs,
-<<<<<<< HEAD
 /// 106/107 VCC, 108-123 trap temporaries, 124 M0, 126/127 EXEC. Codes from
-/// [`PARKED`] up are scalars the compiler parked in VGPR lanes (`unspill`):
-/// no machine instruction names them.
-||||||| merged common ancestors
-/// 106/107 VCC, 108-123 trap temporaries, 124 M0, 126/127 EXEC.
-=======
-/// 106/107 VCC, 108-123 trap temporaries, 124 M0, 126/127 EXEC, 128 and up
-/// SGPRs spilled to VGPR lanes (see `unspill`).
->>>>>>> belobug/main
+/// [`PARKED`] up (128 and up) are scalars the compiler spilled into VGPR
+/// lanes (`unspill`): no machine instruction names them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Reg {
     S(u8),
@@ -180,10 +173,7 @@ pub fn build(code: &[u8], wave64: bool, vgprs: u16) -> Result<Program, ShaderErr
     }
     leaders.sort_unstable();
     leaders.dedup();
-<<<<<<< HEAD
     let parked = unspill(&mut list, &flows, &leaders, wave64, lanes, vgprs);
-||||||| merged common ancestors
-=======
     // When the first instruction is a loop header, give SSA a separate
     // entry edge to carry the initial register values into its phis.
     let preheader = usize::from(
@@ -191,7 +181,6 @@ pub fn build(code: &[u8], wave64: bool, vgprs: u16) -> Result<Program, ShaderErr
             .iter()
             .any(|flow| matches!(flow, Flow::Jump(0) | Flow::Branch(0))),
     );
->>>>>>> belobug/main
     let block_at = |offset: usize| {
         leaders
             .binary_search(&offset)
@@ -224,16 +213,8 @@ pub fn build(code: &[u8], wave64: bool, vgprs: u16) -> Result<Program, ShaderErr
     let next_offsets: Vec<Option<usize>> = (0..list.len())
         .map(|i| list.get(i + 1).map(|n| n.offset))
         .collect();
-<<<<<<< HEAD
     for (n, ((machine, flow), next)) in list.into_iter().zip(flows).zip(next_offsets).enumerate() {
-        let b = leaders.partition_point(|&l| l <= machine.offset) - 1;
-||||||| merged common ancestors
-    for ((machine, flow), next) in list.into_iter().zip(flows).zip(next_offsets) {
-        let b = leaders.partition_point(|&l| l <= machine.offset) - 1;
-=======
-    for ((machine, flow), next) in list.into_iter().zip(flows).zip(next_offsets) {
         let b = leaders.partition_point(|&l| l <= machine.offset) - 1 + preheader;
->>>>>>> belobug/main
         let name = machine.name().ok_or(ShaderError::Unsupported {
             offset: machine.offset,
             what: "unknown opcode",
@@ -285,13 +266,9 @@ pub fn build(code: &[u8], wave64: bool, vgprs: u16) -> Result<Program, ShaderErr
             });
         }
     }
-    if !wave64 {
-        unspill(&mut blocks);
-    }
     link(&mut blocks);
     split_irreducible(&mut blocks)?;
 
-<<<<<<< HEAD
     Ok(rename(blocks, wave64, vgprs))
 }
 
@@ -707,27 +684,8 @@ fn unspill(
 
 /// Rename register reads and writes after changing edges in a reducible graph.
 fn rename(mut blocks: Vec<Block>, wave64: bool, vgprs: u16) -> Program {
-||||||| merged common ancestors
-=======
-    Ok(rename(blocks, wave64, vgprs))
-}
-
-/// Rename register reads and writes after changing edges in a reducible graph.
-fn rename(mut blocks: Vec<Block>, wave64: bool, vgprs: u16) -> Program {
->>>>>>> belobug/main
     let order = reverse_postorder(&blocks);
-    let (mut live_in, mut live_out) = liveness(&blocks, &order);
-    // A spilled SGPR that some path reads before any write is zero there.
-    let unset: Vec<Inst> = members(&live_in[0])
-        .filter_map(|reg| match reg {
-            Reg::S(c) if SPILLS.contains(&c) => Some(zero(c, blocks[0].offset)),
-            _ => None,
-        })
-        .collect();
-    if !unset.is_empty() {
-        blocks[0].insts.splice(0..0, unset);
-        (live_in, live_out) = liveness(&blocks, &order);
-    }
+    let (live_in, live_out) = liveness(&blocks, &order);
     let mut values = 0u32;
     let mut new_value = || {
         values += 1;
@@ -789,7 +747,6 @@ fn rename(mut blocks: Vec<Block>, wave64: bool, vgprs: u16) -> Program {
         vgprs,
         blocks,
         inputs,
-<<<<<<< HEAD
     }
 }
 
@@ -1268,58 +1225,12 @@ pub(crate) fn without_skips(p: &Program, deep: bool) -> Option<Program> {
     link(&mut blocks);
     split_irreducible(&mut blocks).ok()?;
     Some(rename(blocks, p.wave64, p.vgprs))
-||||||| merged common ancestors
-    })
-=======
-    }
-}
-
-/// Duplicate a join for each proven (predecessor, join, destination) edge.
-/// The instructions still execute on that path and define fresh SSA values.
-pub(crate) fn thread_edges(
-    p: &Program,
-    edges: &[(usize, usize, usize)],
-) -> Result<Program, ShaderError> {
-    let mut blocks = p.blocks.clone();
-    for block in &mut blocks {
-        block.phis.clear();
-    }
-    for &(pred, join, dest) in edges {
-        let mut copy = blocks[join].clone();
-        copy.exit = Exit::Jump(dest);
-        let target = blocks.len();
-        match &mut blocks[pred].exit {
-            Exit::Jump(t) => *t = target,
-            Exit::Branch { taken, not_taken } => {
-                if *taken == join {
-                    *taken = target;
-                }
-                if *not_taken == join {
-                    *not_taken = target;
-                }
-            }
-            _ => unreachable!("threading an incoming edge"),
-        }
-        blocks.push(copy);
-    }
-    link(&mut blocks);
-    split_irreducible(&mut blocks)?;
-    Ok(rename(blocks, p.wave64, p.vgprs))
->>>>>>> belobug/main
 }
 
 /// Placeholder before renaming.
 const NONE: Value = Value(u32::MAX);
-<<<<<<< HEAD
 /// Scalar codes 0-255 (from [`PARKED`] up: parked scalars), SCC, VGPRs 0-255.
 const REGS: usize = 256 + 1 + 256;
-||||||| merged common ancestors
-/// SGPR codes 0-127, SCC, VGPRs 0-255.
-const REGS: usize = 128 + 1 + 256;
-=======
-/// SGPR codes 0-255, SCC, VGPRs 0-255.
-const REGS: usize = 256 + 1 + 256;
->>>>>>> belobug/main
 type RegSet = [u64; REGS.div_ceil(64)];
 
 fn index(reg: Reg) -> usize {
@@ -1363,130 +1274,6 @@ fn members(set: &RegSet) -> impl Iterator<Item = Reg> + '_ {
         }
         bits = set[word];
     })
-}
-
-/// Scalar codes of spilled SGPRs.
-const SPILLS: std::ops::Range<u8> = 128..254;
-
-/// SOP1 opcode.
-const S_MOV_B32: u16 = 3;
-
-/// The VGPR and lane of a `v_writelane_b32` (`true`) or `v_readlane_b32`
-/// (`false`) of a constant lane.
-fn spill(inst: &Inst) -> Option<(u8, u32, bool)> {
-    let Fields::Valu(v) = &inst.fields else {
-        return None;
-    };
-    let write = match inst.name() {
-        "v_writelane_b32" => true,
-        "v_readlane_b32" => false,
-        _ => return None,
-    };
-    let vector = if write { v.dst.as_ref() } else { v.src.first() };
-    let (Some(&Operand::Vector { reg, .. }), Some(&Operand::Const(c @ 128..=159))) =
-        (vector, v.src.get(1))
-    else {
-        return None;
-    };
-    Some((reg, u32::from(c) - 128, write))
-}
-
-/// Compilers out of SGPRs keep some in lanes of VGPRs they use for nothing
-/// else. Each such lane becomes a scalar register of its own and its reads
-/// and writes become `s_mov_b32`, so that what it holds (a lane mask, say)
-/// is followed like any scalar. 32-lane waves only: 64-lane masks are pairs,
-/// moved together.
-fn unspill(blocks: &mut [Block]) {
-    let mut used = [false; 256];
-    for inst in blocks.iter().flat_map(|b| &b.insts) {
-        // Of a lane access, the spilled register itself is no other use.
-        let own = spill(inst).map(|s| Reg::V(s.0));
-        // An M0-relative read (`v_movrels_b32`) names every VGPR from its base
-        // up; the compiler indexes a small array with it, never the lanes it
-        // parks scalars in, so it does not make those VGPRs ordinary ones.
-        // (Relative writes still do.)
-        let relative_read = inst.name() == "v_movrels_b32";
-        let n_reads = inst.reads.len();
-        for (k, &(reg, _)) in inst.reads.iter().chain(&inst.writes).enumerate() {
-            if relative_read && k < n_reads && matches!(reg, Reg::V(_)) {
-                continue;
-            }
-            if let Reg::V(v) = reg
-                && Some(reg) != own
-            {
-                used[usize::from(v)] = true;
-            }
-        }
-    }
-    let mut lanes: Vec<(u8, u32)> = Vec::new();
-    for inst in blocks.iter().flat_map(|b| &b.insts) {
-        if let Some((reg, lane, _)) = spill(inst)
-            && !used[usize::from(reg)]
-            && !lanes.contains(&(reg, lane))
-        {
-            lanes.push((reg, lane));
-        }
-    }
-    // All lanes of a register or none.
-    while lanes.len() > SPILLS.len() {
-        let Some(&(reg, _)) = lanes.last() else { break };
-        lanes.retain(|l| l.0 != reg);
-    }
-    for inst in blocks.iter_mut().flat_map(|b| &mut b.insts) {
-        let Some((reg, lane, write)) = spill(inst) else {
-            continue;
-        };
-        let Some(at) = lanes.iter().position(|&l| l == (reg, lane)) else {
-            continue;
-        };
-        let Fields::Valu(v) = &inst.fields else {
-            continue;
-        };
-        let slot = SPILLS.start + at as u8;
-        let operand = Operand::Scalar { code: slot, dwords: 1 };
-        let (dst, src) = if write {
-            (Some(operand), v.src[0])
-        } else {
-            (v.dst, operand)
-        };
-        let slot = (Reg::S(slot), NONE);
-        if write {
-            inst.reads.clear();
-            // Only fails out of bounds, which `effects` checked.
-            let mut regs = Vec::new();
-            let _ = add_regs(&src, 1, &mut regs);
-            inst.reads.extend(regs.into_iter().map(|r| (r, NONE)));
-            inst.writes = vec![slot];
-        } else {
-            inst.reads = vec![slot];
-        }
-        inst.machine.encoding = gfx10::Encoding::Sop1;
-        inst.machine.opcode = S_MOV_B32;
-        inst.fields = Fields::Sop {
-            dst,
-            src: vec![src],
-            imm: None,
-        };
-    }
-}
-
-/// `s_mov_b32 code, 0` at `offset`.
-fn zero(code: u8, offset: usize) -> Inst {
-    Inst {
-        machine: Instruction {
-            offset,
-            encoding: gfx10::Encoding::Sop1,
-            opcode: S_MOV_B32,
-            words: Vec::new(),
-        },
-        fields: Fields::Sop {
-            dst: Some(Operand::Scalar { code, dwords: 1 }),
-            src: vec![Operand::Const(128)],
-            imm: None,
-        },
-        reads: Vec::new(),
-        writes: vec![(Reg::S(code), NONE)],
-    }
 }
 
 /// `outs` is sorted by register, and holds every register live out.
