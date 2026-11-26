@@ -37,14 +37,9 @@ fn host_gpu_failed(what: &str) -> ! {
     unreachable!("the process has ended")
 }
 
-<<<<<<< HEAD
 #[cfg(windows)]
 pub use victory_gpu::precompile;
 
-/// The offline warm-up: see `victory_gpu::shader_cache::warm`.
-||||||| a26859fc
-/// The offline warm-up: see `victory_gpu::shader_cache::warm`.
-=======
 /// Translates `container` into the cache ([`use_shader_cache`]) ahead of
 /// any run: whether it was there already, or why it does not translate.
 pub fn precompile(container: &[u8]) -> Result<bool, String> {
@@ -59,13 +54,11 @@ pub fn precompile(container: &[u8]) -> Result<bool, String> {
     }
 }
 
-/// The fork's offline warm-up (`victory translate --warm`), by
-/// [`precompile`]: whether it was translated now.
->>>>>>> avatar/main
+/// The offline warm-up: see `victory_gpu::shader_cache::warm`.
 pub fn warm_shader(container: &[u8]) -> Result<bool, String> {
     #[cfg(windows)]
     {
-        victory_gpu::shader_cache::precompile(container).map(|was_there| !was_there)
+        victory_gpu::shader_cache::warm(container)
     }
     #[cfg(not(windows))]
     {
