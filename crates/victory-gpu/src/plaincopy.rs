@@ -54,7 +54,6 @@ core::arch::global_asm!(
     "    mov rdi, r10",
     "    xor eax, eax",
     "    ret",
-<<<<<<< HEAD
     "victory_write_guarded:",
     "    mov r9, rsi",
     "    mov r10, rdi",
@@ -72,31 +71,6 @@ core::arch::global_asm!(
     "    mov rdi, r10",
     "    xor eax, eax",
     "    ret",
-||||||| 465b94f5
-=======
-    // The same again, so that a fault says by its place which side of the
-    // copy is title memory.
-    ".globl victory_write_guarded",
-    ".globl victory_write_guarded_at",
-    ".globl victory_write_guarded_fault",
-    "victory_write_guarded:",
-    "    mov r9, rsi",
-    "    mov r10, rdi",
-    "    mov rdi, rcx",
-    "    mov rsi, rdx",
-    "    mov rcx, r8",
-    "victory_write_guarded_at:",
-    "    rep movsb",
-    "    mov rsi, r9",
-    "    mov rdi, r10",
-    "    mov eax, 1",
-    "    ret",
-    "victory_write_guarded_fault:",
-    "    mov rsi, r9",
-    "    mov rdi, r10",
-    "    xor eax, eax",
-    "    ret",
->>>>>>> vertex/main
 );
 
 #[cfg(target_arch = "x86_64")]
@@ -104,17 +78,9 @@ unsafe extern "C" {
     fn victory_copy_guarded(to: *mut u8, from: *const u8, len: usize) -> u32;
     static victory_copy_guarded_at: u8;
     static victory_copy_guarded_fault: u8;
-<<<<<<< HEAD
     fn victory_write_guarded(to: *mut u8, from: *const u8, len: usize) -> u32;
     static victory_write_guarded_at: u8;
     static victory_write_guarded_fault: u8;
-||||||| 465b94f5
-=======
-
-    fn victory_write_guarded(to: *mut u8, from: *const u8, len: usize) -> u32;
-    static victory_write_guarded_at: u8;
-    static victory_write_guarded_fault: u8;
->>>>>>> vertex/main
 }
 
 /// Whether copies of title memory into host memory are made in place
@@ -224,7 +190,6 @@ fn install() {
         // SAFETY: the system passes the exception being dispatched and the
         // context it will continue with.
         let (r, context) = unsafe { (&*(*info).ExceptionRecord, &mut *(*info).ContextRecord) };
-<<<<<<< HEAD
         // Only at our own copy/write instructions.
         if context.Rip == (&raw const victory_copy_guarded_at) as u64 {
             const READ: usize = 0;
@@ -244,35 +209,6 @@ fn install() {
                 context.Rip = (&raw const victory_write_guarded_fault) as u64;
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
-||||||| 465b94f5
-        // Only at the copy's own instruction.
-        if context.Rip != (&raw const victory_copy_guarded_at) as u64 {
-            return EXCEPTION_CONTINUE_SEARCH;
-        }
-        const READ: usize = 0;
-        let read = r.NumberParameters >= 1 && r.ExceptionInformation[0] == READ;
-        let gone = (r.ExceptionCode == EXCEPTION_ACCESS_VIOLATION || r.ExceptionCode == EXCEPTION_IN_PAGE_ERROR) && read;
-        if gone || r.ExceptionCode == EXCEPTION_GUARD_PAGE {
-            context.Rip = (&raw const victory_copy_guarded_fault) as u64;
-            return EXCEPTION_CONTINUE_EXECUTION;
-=======
-        // Only at the copies' own instructions, and only an access to the
-        // side that is title memory.
-        const READ: usize = 0;
-        const WRITE: usize = 1;
-        let (access, out) = if context.Rip == (&raw const victory_copy_guarded_at) as u64 {
-            (READ, (&raw const victory_copy_guarded_fault) as u64)
-        } else if context.Rip == (&raw const victory_write_guarded_at) as u64 {
-            (WRITE, (&raw const victory_write_guarded_fault) as u64)
-        } else {
-            return EXCEPTION_CONTINUE_SEARCH;
-        };
-        let ours = r.NumberParameters >= 1 && r.ExceptionInformation[0] == access;
-        let gone = (r.ExceptionCode == EXCEPTION_ACCESS_VIOLATION || r.ExceptionCode == EXCEPTION_IN_PAGE_ERROR) && ours;
-        if gone || r.ExceptionCode == EXCEPTION_GUARD_PAGE {
-            context.Rip = out;
-            return EXCEPTION_CONTINUE_EXECUTION;
->>>>>>> vertex/main
         }
         EXCEPTION_CONTINUE_SEARCH
     }
@@ -304,7 +240,6 @@ fn guarded(_: *mut u8, _: *const u8, _: usize) -> bool {
     false
 }
 
-<<<<<<< HEAD
 /// Copies `len` bytes from host memory `from` into title memory `to` in place;
 /// false if a destination page is not mapped or not writable.
 #[cfg(target_arch = "x86_64")]
@@ -320,52 +255,13 @@ fn guarded_write(_: *mut u8, _: *const u8, _: usize) -> bool {
     false
 }
 
-fn write_on() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| on() && std::env::var_os("VICTORY_WRITE_PLAIN").is_none_or(|v| v != "0"))
-}
-
 /// Writes made in place, their bytes, and the writes that met an unmapped or
 /// read-only destination page (falling back to the kernel's write).
 static WRITE_COUNT: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
-/// With [`on`] (and `VICTORY_WRITE_PLAIN!=0`): writes host memory at `from`
-/// into title memory at `to` in place; false if disabled or a destination page
-/// is not writable (caller falls back to `NtWriteVirtualMemory`).
-pub(crate) fn write(to: *mut u8, from: *const u8, len: usize) -> bool {
-    if !write_on() {
-        return false;
-    }
-    let whole = guarded_write(to, from, len);
-    if whole {
-        WRITE_COUNT[0].fetch_add(1, Relaxed);
-        WRITE_COUNT[1].fetch_add(len as u64, Relaxed);
-    } else {
-        WRITE_COUNT[2].fetch_add(1, Relaxed);
-    }
-    whole
-}
-
-||||||| 465b94f5
-=======
-/// [`guarded`] the other way: `from` is memory of `len` bytes that is ours,
-/// `to` may be anything.
-#[cfg(target_arch = "x86_64")]
-fn guarded_write(to: *mut u8, from: *const u8, len: usize) -> bool {
-    install();
-    // SAFETY: the source is the caller's; a destination page that cannot be
-    // written ends the copy with 0 instead of a fault ([`install`]).
-    unsafe { victory_write_guarded(to, from, len) != 0 }
-}
-
-#[cfg(not(target_arch = "x86_64"))]
-fn guarded_write(_: *mut u8, _: *const u8, _: usize) -> bool {
-    false
-}
-
-/// With [`write_on`]: copies host memory at `from` into title memory at
-/// `to`; false if it is off or a page could not be written (the caller then
-/// writes through the kernel, all of it again).
+/// With [`write_on`]: writes host memory at `from` into title memory at `to`
+/// in place; false if it is off or a destination page is not writable (the
+/// caller then writes through the kernel, all of it again).
 pub(crate) fn write(to: *mut u8, from: *const u8, len: usize) -> bool {
     if !write_on() {
         return false;
@@ -374,11 +270,14 @@ pub(crate) fn write(to: *mut u8, from: *const u8, len: usize) -> bool {
     WROTE[if whole { 0 } else { 2 }].fetch_add(1, Relaxed);
     if whole {
         WROTE[1].fetch_add(len as u64, Relaxed);
+        WRITE_COUNT[0].fetch_add(1, Relaxed);
+        WRITE_COUNT[1].fetch_add(len as u64, Relaxed);
+    } else {
+        WRITE_COUNT[2].fetch_add(1, Relaxed);
     }
     whole
 }
 
->>>>>>> vertex/main
 /// With [`on`]: copies title memory at `from` into host memory at `to`;
 /// false if it is off or a source page was not there (the caller then
 /// copies through the kernel, as before).
