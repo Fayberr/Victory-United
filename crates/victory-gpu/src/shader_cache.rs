@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 //! Translated shaders kept on disk (decision 0003): offline warm-up and title
 //! execution share the same shader cache, under the configured cache folder.
 //! A key includes the console container, translator sources (the BLAKE3 of
@@ -6,19 +5,6 @@
 //! and the host wave width and descriptor-heap limit used by the emitter, so a
 //! changed translator or host never serves an old translation. Entries go
 //! through `victory-pipeline`'s content-addressed cache, which writes them
-||||||| a66ac212
-//! Translated shaders kept on disk (decision 0003): under the configured
-//! cache folder, keyed by the container's content and by the VIctory build
-//! that translated it (the BLAKE3 of our executable), so a rebuilt
-//! translator never serves an old translation. Entries go through
-//! `victory-pipeline`'s content-addressed cache, which writes them
-=======
-//! Translated shaders kept on disk (decision 0003): under the configured
-//! cache folder, keyed by the container's content and by the translator
-//! that translated it (its source fingerprint and settings, see `build`), so
-//! a changed translator never serves an old translation. Entries go through
-//! `victory-pipeline`'s content-addressed cache, which writes them
->>>>>>> klbf/beta-2
 //! atomically; an entry that does not read back is translated again.
 //! Translated DXIL and deterministic unsupported results are persisted.
 //! Runtime pipelines can use the translation even when the cache cannot store
@@ -88,15 +74,29 @@ pub(crate) fn counts() -> (u64, u64) {
     (HITS.load(Ordering::Relaxed), MISSES.load(Ordering::Relaxed))
 }
 
-<<<<<<< HEAD
 /// What identifies a translation beside its container: the translator
 /// (the BLAKE3 of its sources, `build.rs`), the settings it runs with, and
 /// what it was told of the host. Not our executable: a rebuild of anything
 /// else used to translate every shader again.
+/// `VICTORY_SHADER_CACHE_KEY=exe` restores the old key (the executable's hash).
 fn build() -> [u8; 32] {
     // The view heap's null slot differs by host GPU: a translation cached
     // without the clamp must not be served (`host_settings` below).
     crate::descriptor::host::probe_view_limit();
+    static EXE: OnceLock<Option<[u8; 32]>> = OnceLock::new();
+    let exe = EXE.get_or_init(|| {
+        if std::env::var_os("VICTORY_SHADER_CACHE_KEY").is_some_and(|v| v == "exe") {
+            match std::env::current_exe().and_then(std::fs::read) {
+                Ok(bytes) => Some(*blake3::hash(&bytes).as_bytes()),
+                Err(e) => {
+                    tracing::warn!(error = %e, "cannot read our executable; keying on the translator");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    });
     static FIXED: OnceLock<Vec<u8>> = OnceLock::new();
     let fixed = FIXED.get_or_init(|| {
         let limit = victory_shader::emit::loop_limit();
@@ -132,78 +132,18 @@ fn build() -> [u8; 32] {
             bytes.push(b'=');
             if let Some(value) = std::env::var_os(name) {
                 bytes.extend_from_slice(value.as_encoded_bytes());
-||||||| a66ac212
-/// What identifies this build: the BLAKE3 of our executable file and of
-/// the translation settings it runs with (the loop limit, which a
-/// diagnostics build can change at run time).
-fn build() -> &'static [u8; 32] {
-    static BUILD: OnceLock<[u8; 32]> = OnceLock::new();
-    BUILD.get_or_init(|| {
-        let exe = std::env::current_exe().and_then(std::fs::read);
-        let limit = victory_shader::emit::loop_limit();
-        if limit != victory_shader::emit::DEFAULT_LOOP_LIMIT {
-            tracing::warn!(
-                limit,
-                "VICTORY_SHADER_LOOP_LIMIT: translated loops stop sooner"
-            );
-        }
-        match exe {
-            Ok(mut bytes) => {
-                bytes.extend_from_slice(&limit.to_le_bytes());
-                // Which group barriers wait is part of the translation too.
-                bytes.push(victory_shader::emit::group_sync());
-                *blake3::hash(&bytes).as_bytes()
             }
-            Err(e) => {
-                // Without it no entry can be trusted: a fresh key per run.
-                tracing::warn!(error = %e, "cannot read our executable; shader cache unused");
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default();
-                *blake3::hash(&now.as_nanos().to_le_bytes()).as_bytes()
-=======
-/// What identifies the translation, besides the container: the shader
-/// crate's fingerprint (its source, every switch it reads, the host facts the
-/// device gave it, the loop limit, barrier waits and clean-up passes) and
-/// this file's encoding of the result. Not the whole executable any more: a
-/// rebuild that leaves the translator alone keeps its translations (each new
-/// build used to translate the title's thousands of shaders again, which kept
-/// the first minutes of every test run short of pipelines).
-/// `VICTORY_SHADER_CACHE_KEY=exe` restores the old key (the executable's hash).
-/// Worked out per lookup, so a translation made before the device said its
-/// wave size is never filed under the later key.
-fn build() -> [u8; 32] {
-    static WARNED: std::sync::Once = std::sync::Once::new();
-    let limit = victory_shader::emit::loop_limit();
-    if limit != victory_shader::emit::DEFAULT_LOOP_LIMIT {
-        WARNED.call_once(|| tracing::warn!(limit, "VICTORY_SHADER_LOOP_LIMIT: translated loops stop sooner"));
-    }
-    static EXE: OnceLock<Option<[u8; 32]>> = OnceLock::new();
-    let exe = EXE.get_or_init(|| {
-        if std::env::var_os("VICTORY_SHADER_CACHE_KEY").is_some_and(|v| v == "exe") {
-            match std::env::current_exe().and_then(std::fs::read) {
-                Ok(bytes) => Some(*blake3::hash(&bytes).as_bytes()),
-                Err(e) => {
-                    tracing::warn!(error = %e, "cannot read our executable; keying on the translator");
-                    None
-                }
->>>>>>> klbf/beta-2
-            }
-<<<<<<< HEAD
             bytes.push(0);
-||||||| a66ac212
-=======
-        } else {
-            None
->>>>>>> klbf/beta-2
         }
-<<<<<<< HEAD
         // And which clean-up passes ran over the translated code.
         bytes.extend_from_slice(&victory_shader::emit::shader_opt().to_le_bytes());
         bytes
     });
     let mut hash = blake3::Hasher::new();
     hash.update(fixed);
+    if let Some(exe) = exe {
+        hash.update(exe);
+    }
     for value in victory_shader::emit::host_settings() {
         hash.update(&value.to_le_bytes());
     }
@@ -238,42 +178,11 @@ pub fn precompile(container: &[u8]) -> Result<bool, String> {
     host_shader(container)?;
     // (Counts other threads' misses too: the caller only adds them up.)
     Ok(MISSES.load(Ordering::Relaxed) == misses)
-||||||| a66ac212
-    })
-=======
-    });
-    // (Neptune) The view heap's null slot is part of the translation (it differs by host
-    // GPU): found before it goes into the key, so that no translation is made without it.
-    crate::descriptor::host::probe_view_limit();
-    let mut h = blake3::Hasher::new();
-    h.update(b"victory shader cache key 2\0");
-    if let Some(exe) = exe {
-        h.update(exe);
-    }
-    h.update(&victory_shader::emit::translation_fingerprint());
-    h.update(include_bytes!("shader_cache.rs"));
-    *h.finalize().as_bytes()
-}
-
-/// The offline warm-up (`victory translate --warm`): `container` is
-/// translated into the cache unless it is there already. `Ok(true)`: it
-/// was translated now. Needs [`use_shader_cache`] and the same host facts
-/// the run will have (`victory_shader::emit::translation_fingerprint`).
-pub fn warm(container: &[u8]) -> Result<bool, String> {
-    let cache = CACHE.get().ok_or("no shader cache")?;
-    let ran = AtomicBool::new(false);
-    let translate = |c: &[u8]| {
-        ran.store(true, Ordering::Relaxed);
-        victory_shader::emit::translate(c).map_err(|e| e.to_string())
-    };
-    cached(cache, &build(), container, translate).map(|_| ran.load(Ordering::Relaxed))
->>>>>>> klbf/beta-2
 }
 
 /// The translation of a console shader container, from the cache when
 /// there is one.
 pub(crate) fn host_shader(container: &[u8]) -> Result<HostShader, String> {
-<<<<<<< HEAD
     host_shader_cached(container).map(|(shader, _)| shader)
 }
 
@@ -411,17 +320,6 @@ fn exposure_stub(container: &[u8]) -> Option<HostShader> {
             tracing::warn!(%hash, error = %e, "exposure stand-in does not translate either");
             None
         }
-||||||| a66ac212
-    let translate = |c: &[u8]| victory_shader::emit::translate(c).map_err(|e| e.to_string());
-    match CACHE.get() {
-        Some(cache) => cached(cache, build(), container, translate),
-        None => translate(container),
-=======
-    let translate = |c: &[u8]| victory_shader::emit::translate(c).map_err(|e| e.to_string());
-    match CACHE.get() {
-        Some(cache) => cached(cache, &build(), container, translate),
-        None => translate(container),
->>>>>>> klbf/beta-2
     }
 }
 
