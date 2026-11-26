@@ -3010,8 +3010,6 @@ fn spare_most() -> u64 {
         mb.and_then(|v| v.trim().parse::<u64>().ok()).map_or(SPARE_MOST, |mb| mb << 20)
     })
 }
-    })
-}
 
 /// A list is done with `chunks` (it was reset after its submissions ran,
 /// or dropped): kept for the next list, or freed past [`spare_most`] and
@@ -9367,7 +9365,6 @@ impl HostList {
             None => deferred.back_wanted.push(target),
             Some(_) => {}
         }
-        }
     }
     /// Before the list closes: the textures its shaders wrote that are copied
     /// back go into read-back buffers ([`crate::texback::record`]).
@@ -10385,7 +10382,7 @@ impl HostList {
         read: (usize, usize),
         fill: impl Fn(usize) + Send + 'static,
     ) -> Option<ID3D12Resource> {
-        let chunk = take_chunk(host()?, size)?;
+        let (chunk, size) = take_chunk(host()?, size)?;
         let source = chunk.buffer.clone();
         let destination = chunk.data;
         let mut deferred = self.deferred();
