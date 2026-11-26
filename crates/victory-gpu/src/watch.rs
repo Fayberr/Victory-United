@@ -2646,7 +2646,7 @@ fn protect_here(g: &mut Guards, from: usize, to: usize) {
         // (Asked here, before the questions below: it is this block's.)
         #[cfg(feature = "diagnostics")]
         let error = std::io::Error::last_os_error();
-        let end = uncommitted_end(block).min(to);
+        let end = g.uncommitted.end(block).min(to);
         #[cfg(feature = "diagnostics")]
         tally(9, 1);
         if end > block {
