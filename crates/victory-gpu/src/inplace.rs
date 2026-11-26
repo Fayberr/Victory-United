@@ -1844,7 +1844,6 @@ mod tests {
             drop(rig);
             drop(placed);
             // Half of it decommitted: turned down, the host not asked.
-<<<<<<< HEAD
             // The heap lets go of the pages a moment after its last
             // reference, if the adapter is busy with other tests' work.
             let gone = (0..500).any(|_| {
@@ -1856,18 +1855,6 @@ mod tests {
             });
             assert!(gone, "the heap keeps the pages");
             assert!(matches!(place_part(&device, start, len), Err(None)));
-||||||| merged common ancestors
-            assert_ne!(mem::VirtualFree(base.add(2 * K64).cast(), K64, mem::MEM_DECOMMIT), 0);
-            assert!(matches!(place_part(&device, start, len), Err(None)));
-=======
-            // Some software adapters (the CI runner's) release the heap later
-            // still; the refusal itself is `private_whole`'s, tested above.
-            if mem::VirtualFree(base.add(2 * K64).cast(), K64, mem::MEM_DECOMMIT) != 0 {
-                assert!(matches!(place_part(&device, start, len), Err(None)));
-            } else {
-                eprintln!("decommit refused while the heap is released: {}", std::io::Error::last_os_error());
-            }
->>>>>>> vibr/main
             mem::VirtualFree(base.cast(), 0, mem::MEM_RELEASE);
         }
     }
