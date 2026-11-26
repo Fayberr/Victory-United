@@ -15,13 +15,9 @@
 //! (directly indexed views are not known per draw); plane 0 is uploaded
 //! (every mip and array slice), depth and stencil planes are not.
 
-<<<<<<< HEAD
 pub(crate) mod ahead;
 
-||||||| merged common ancestors
-=======
 use std::cell::RefCell;
->>>>>>> belobug/main
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -46,32 +42,15 @@ pub(crate) struct Staging {
     /// Its part of the buffer, if that is shared.
     _slot: Option<crate::texpool::Slot>,
     /// Its bytes.
-<<<<<<< HEAD
     #[cfg(feature = "diagnostics")]
     total: u64,
-||||||| merged common ancestors
-    #[cfg(feature = "diagnostics")]
-    size: u64,
-=======
-    size: u64,
-    /// The [`USES`] count at its last use: the least recently used go
-    /// first when staging buffers pass [`budget`].
-    used: AtomicU64,
->>>>>>> belobug/main
     data: *mut u8,
     footprints: Vec<D3D12_PLACED_SUBRESOURCE_FOOTPRINT>,
     rows: Vec<u32>,
     row_sizes: Vec<u64>,
     layout: victory_formats::texture::Layout,
-<<<<<<< HEAD
-    /// Mips per array slice, of the title's texture.
-||||||| merged common ancestors
-    /// Mips per array slice.
-=======
     /// Mips per array slice, and the title's larger ones left out.
->>>>>>> belobug/main
     mips: u32,
-<<<<<<< HEAD
     /// The first of them that is read and uploaded
     /// (`crate::resource::held_only`), the one the host copy begins at, and
     /// the bytes of title memory read.
@@ -91,13 +70,11 @@ pub(crate) struct Staging {
     once: std::sync::atomic::AtomicBool,
     /// The staging buffer's bytes (counted in `STAGED` while it lives).
     bytes: u64,
-||||||| merged common ancestors
-=======
+    /// The title's largest mips, which the staging buffer does not hold
+    /// ([`crate::resource::skipped_mips`]).
     skip: u32,
->>>>>>> belobug/main
     memory: *const u8,
     last: Mutex<Last>,
-<<<<<<< HEAD
     /// Whether the staging buffer was detiled since a submitted list last
     /// uploaded it, and whether one has uploaded it at all: a list records
     /// the upload only then. (Every list that sampled a title texture
@@ -145,6 +122,13 @@ pub(crate) struct Staging {
     base: u64,
     /// That range, given back when the staging and its spare are gone.
     piece: Option<Piece>,
+    /// The runtime wrote the memory since it was last looked at.
+    rewritten: std::sync::atomic::AtomicBool,
+    /// Set once `GetWriteWatch` reports this texture is not in write-watched
+    /// memory (physical-page views), skipping the syscall on every frame.
+    not_watched: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    gpu_uploads: std::sync::atomic::AtomicU64,
 }
 
 /// A staging buffer nothing holds: the buffer, where it is mapped, where
@@ -374,16 +358,6 @@ fn spare_most() -> u64 {
     *MOST.get_or_init(|| {
         std::env::var("VICTORY_STAGING_POOL_MB").ok().and_then(|v| v.trim().parse::<u64>().ok()).map_or(SPARE_MOST.0, |mb| mb << 20)
     })
-||||||| merged common ancestors
-=======
-    /// The runtime wrote the memory since it was last looked at.
-    rewritten: std::sync::atomic::AtomicBool,
-    /// Set once `GetWriteWatch` reports this texture is not in write-watched
-    /// memory (physical-page views), skipping the syscall on every frame.
-    not_watched: std::sync::atomic::AtomicBool,
-    #[cfg(test)]
-    gpu_uploads: std::sync::atomic::AtomicU64,
->>>>>>> belobug/main
 }
 
 /// What a texture's staging buffer holds: the hash of the memory detiled
@@ -392,7 +366,6 @@ fn spare_most() -> u64 {
 struct Last {
     hash: Option<Digest>,
     asked: u64,
-<<<<<<< HEAD
     /// The frame a partly mapped texture was last read in.
     partial: Option<u64>,
     motion: Motion,
@@ -412,6 +385,10 @@ struct Last {
     /// (after reddxd-byte/ShakiraRED-dt c2271e5). The asking failed at every
     /// check, with the write-watch journal locked over it.
     unwatched: bool,
+    /// How often in a row it had not changed, and the frame to look at it
+    /// next in.
+    still: u32,
+    next: u64,
 }
 
 /// Probe a changed texture on its next check; only repeated changes keep
@@ -475,14 +452,6 @@ const HOT_FRAMES: u64 = 64;
 fn hot_textures() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_TEXTURE_HOT").is_none_or(|v| v != "0"))
-||||||| merged common ancestors
-    read: Vec<u8>,
-=======
-    /// How often in a row it had not changed, and the frame to look at it
-    /// next in.
-    still: u32,
-    next: u64,
->>>>>>> belobug/main
 }
 
 // SAFETY: the staging mapping is written only at submission, under
@@ -491,21 +460,12 @@ unsafe impl Send for Staging {}
 // SAFETY: as above.
 unsafe impl Sync for Staging {}
 
-impl Drop for Staging {
-    fn drop(&mut self) {
-        // Retire the upload buffer and its texpool slot so an in-flight GPU
-        // submission or async copy cannot fault on freed staging memory.
-        crate::host::retire((self.buffer.clone(), self._slot.take()));
-    }
-}
-
 /// Textures found changed since they were uploaded: by chance (looked at
 /// again when their turn came), and because the runtime wrote them.
 pub(crate) static CHANGED: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 
 static STAGING: Mutex<Option<HashMap<usize, Arc<Staging>>>> = Mutex::new(None);
 
-<<<<<<< HEAD
 /// The buffer a texture the host writes is copied through into the texture
 /// of a view the title placed in its memory in another format
 /// ([`alias`]): every level of every layer as each of the two formats lays
@@ -1021,20 +981,17 @@ pub(crate) fn let_go_idle() {
     }
 }
 
-||||||| merged common ancestors
-=======
-/// Bytes of the staging buffers in [`STAGING`]. They live in upload heaps,
-/// that is in host memory counted against the commit limit, one the size
-/// of each texture ever sampled (all mips and slices): without a bound,
-/// loading the world commits gigabytes of them.
-static STAGED: AtomicU64 = AtomicU64::new(0);
-
-/// Bytes of the texture staging buffers kept.
+/// Bytes of the staging buffers in [`STAGING`], for the memory line. They
+/// live in upload heaps, that is in host memory counted against the commit
+/// limit, one the size of each texture ever sampled (all mips and slices):
+/// without a bound, loading the world commits gigabytes of them.
 pub(crate) fn staged_bytes() -> u64 {
-    STAGED.load(Ordering::Relaxed)
+    use std::sync::atomic::Ordering::Relaxed;
+    STAGED[1].load(Relaxed)
 }
 
-/// Texture uses so far: the clock of [`Staging::used`].
+/// Texture uses so far: the clock of [`Staging::used`] where the staging
+/// is made (ours stores `crate::host::moment` there instead).
 static USES: AtomicU64 = AtomicU64::new(0);
 
 /// The staging bytes kept before the least recently used buffers no list
@@ -1054,8 +1011,9 @@ fn budget() -> u64 {
 /// Releases the least recently used staging buffers no list holds until
 /// those kept fit [`budget`] with `more` bytes on top.
 fn evict(map: &mut HashMap<usize, Arc<Staging>>, more: u64) {
+    use std::sync::atomic::Ordering::Relaxed;
     let budget = budget();
-    if STAGED.load(Ordering::Relaxed) + more <= budget {
+    if STAGED[1].load(Relaxed) + more <= budget {
         return;
     }
     // Some more than needed: looking at all of them takes a while.
@@ -1065,17 +1023,17 @@ fn evict(map: &mut HashMap<usize, Arc<Staging>>, more: u64) {
     let mut idle: Vec<(u64, usize, u64)> = map
         .iter()
         .filter(|(_, s)| Arc::strong_count(s) == 1)
-        .map(|(&k, s)| (s.used.load(Ordering::Relaxed), k, s.size))
+        .map(|(&k, s)| (s.used.load(Relaxed), k, s.bytes))
         .collect();
     idle.sort_unstable();
     let mut freed = 0u64;
     let mut count = 0usize;
     for (_, key, size) in idle {
-        if STAGED.load(Ordering::Relaxed) + more <= budget {
+        if STAGED[1].load(Relaxed) + more <= budget {
             break;
         }
         map.remove(&key);
-        STAGED.fetch_sub(size, Ordering::Relaxed);
+        STAGED[1].fetch_sub(size, Relaxed);
         freed += size;
         count += 1;
     }
@@ -1083,7 +1041,7 @@ fn evict(map: &mut HashMap<usize, Arc<Staging>>, more: u64) {
         tracing::debug!(
             count,
             freed_mib = freed >> 20,
-            kept_mib = STAGED.load(Ordering::Relaxed) >> 20,
+            kept_mib = STAGED[1].load(Relaxed) >> 20,
             "texture staging buffers released"
         );
     }
@@ -1094,8 +1052,6 @@ thread_local! {
     /// thread, as large as the largest texture it read.
     static SCRATCH: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
-
->>>>>>> belobug/main
 /// Textures the host GPU wrote by a copy or resolve: their contents are on
 /// the host, not in title memory, which stays as it was.
 static HOST_WRITTEN: Mutex<Option<std::collections::HashSet<usize>>> = Mutex::new(None);
@@ -1190,10 +1146,9 @@ pub(crate) fn rewritten(resource: usize) {
 /// The title released a resource.
 pub(crate) fn forget(resource: usize) {
     let mut map = STAGING.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(map) = map.as_mut()
-        && let Some(s) = map.remove(&resource)
-    {
-        STAGED.fetch_sub(s.size, Ordering::Relaxed);
+    if let Some(map) = map.as_mut() {
+        // Its drop takes it out of `STAGED` (and keeps its buffer spare).
+        map.remove(&resource);
     }
     let mut set = HOST_WRITTEN.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(set) = set.as_mut() {
@@ -1216,13 +1171,39 @@ pub(crate) fn title_written(texture: &ID3D12Resource) -> bool {
     unsafe { texture.GetDesc() }.Flags.0 & TARGET_DEPTH_UNORDERED == 0
 }
 
-<<<<<<< HEAD
 /// Records, once per list, the copy of `resource`'s staging buffer into
 /// its host copy, and the detiling that refreshes the staging buffer at
 /// submission if the memory changed. Leaves the texture in the copy
 /// destination state.
 pub(crate) fn upload(list: &HostList, resource: This, _texture: &ID3D12Resource) {
     upload_from(list, resource, 0);
+}
+
+/// Textures a bindless slot began to view, to upload before anything of the
+/// next submission runs: every list reads the slot, not only the one whose
+/// recording made it.
+static FIRST: Mutex<Vec<(Arc<Staging>, Arc<crate::resource::HostTexture>)>> = Mutex::new(Vec::new());
+
+/// A bindless slot views `resource` from now on.
+pub(crate) fn upload_first(resource: This, texture: &ID3D12Resource) {
+    let host_written = HOST_WRITTEN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|set| set.contains(&(resource as usize)));
+    if host_written {
+        return;
+    }
+    if let Some(copy) = crate::resource::host_copy(resource)
+        && let Some(staging) = staging(resource, &copy, 0)
+    {
+        FIRST.lock().unwrap_or_else(|e| e.into_inner()).push((staging, copy));
+    }
+}
+
+/// The textures of [`upload_first`] since the last call.
+pub(crate) fn take_first() -> Vec<(Arc<Staging>, Arc<crate::resource::HostTexture>)> {
+    std::mem::take(&mut *FIRST.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 thread_local! {
@@ -1301,46 +1282,6 @@ pub(crate) struct Digest(u128);
 /// what lies there is another texture's. (After victory-amd 4436f8f1.)
 pub(crate) fn upload_from(list: &HostList, resource: This, first: u32) {
     let first = if crate::resource::held_only() { first } else { 0 };
-||||||| merged common ancestors
-/// Records, once per list, the copy of `resource`'s staging buffer into
-/// its host copy, and the detiling that refreshes the staging buffer at
-/// submission if the memory changed. Leaves the texture in the copy
-/// destination state.
-pub(crate) fn upload(list: &HostList, resource: This, texture: &ID3D12Resource) {
-=======
-/// Textures a bindless slot began to view, to upload before anything of the
-/// next submission runs: every list reads the slot, not only the one whose
-/// recording made it.
-static FIRST: Mutex<Vec<(Arc<Staging>, Arc<crate::resource::HostTexture>)>> = Mutex::new(Vec::new());
-
-/// A bindless slot views `resource` from now on.
-pub(crate) fn upload_first(resource: This, texture: &ID3D12Resource) {
-    let host_written = HOST_WRITTEN
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-        .is_some_and(|set| set.contains(&(resource as usize)));
-    if host_written {
-        return;
-    }
-    if let Some(copy) = crate::resource::host_copy(resource)
-        && let Some(staging) = staging(resource, texture)
-    {
-        FIRST.lock().unwrap_or_else(|e| e.into_inner()).push((staging, copy));
-    }
-}
-
-/// The textures of [`upload_first`] since the last call.
-pub(crate) fn take_first() -> Vec<(Arc<Staging>, Arc<crate::resource::HostTexture>)> {
-    std::mem::take(&mut *FIRST.lock().unwrap_or_else(|e| e.into_inner()))
-}
-
-/// Registers a title-written texture with `list` (once per list) so that at
-/// submission time its staging buffer is checked for CPU modifications and,
-/// only when its contents changed (including first upload), copied into its
-/// host texture on the list's prelude command list.
-pub(crate) fn upload(list: &HostList, resource: This, texture: &ID3D12Resource) {
->>>>>>> belobug/main
     let host_written = HOST_WRITTEN
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -1351,7 +1292,6 @@ pub(crate) fn upload(list: &HostList, resource: This, texture: &ID3D12Resource) 
     if host_written {
         return;
     }
-<<<<<<< HEAD
     // Once a list for each first level; not again for one that the list's
     // upload of larger ones held too.
     if !list.first_use(1 << 63 | (resource as usize) << 4 | first as usize & 15) {
@@ -1361,17 +1301,8 @@ pub(crate) fn upload(list: &HostList, resource: This, texture: &ID3D12Resource) 
         return;
     }
     let Some(copy) = crate::resource::host_copy(resource) else {
-||||||| merged common ancestors
-    let Some(staging) = staging(resource, texture) else {
-=======
-    let Some(copy) = crate::resource::host_copy(resource) else {
         return;
     };
-    let Some(staging) = staging(resource, texture) else {
->>>>>>> belobug/main
-        return;
-    };
-<<<<<<< HEAD
     let texture = &copy.texture;
     ahead::listed(&copy);
     let Some(staging) = staging(resource, &copy, first) else {
@@ -1702,67 +1633,6 @@ pub(crate) fn card_writes(list: &HostList, resource: This, texture: &ID3D12Resou
         step.ran.store(true, std::sync::atomic::Ordering::Relaxed);
         step.on_demand.card_wrote(levels, memory);
     });
-||||||| merged common ancestors
-    const COPY_DEST: u32 = 0x400;
-    crate::list::ensure_state(list, resource, COPY_DEST);
-    // The staging buffer lives as long as `staging`, which the deferred
-    // refresh below holds until the list is reset.
-    for (i, footprint) in staging.footprints.iter().enumerate() {
-        #[cfg(feature = "diagnostics")]
-        {
-            let f = footprint.Footprint;
-            // SAFETY: live resources.
-            let (gpu, d) = unsafe { (staging.buffer.GetGPUVirtualAddress(), texture.GetDesc()) };
-            let len = u64::from(f.RowPitch) * u64::from(staging.rows[i]) * u64::from(f.Depth);
-            list.note_read(
-                || {
-                    format!(
-                        "texture upload {resource:?} ({}x{}x{} f{} mips {}) sub {i} of {} from staging {gpu:#x}+{:#x}: offset {:#x} {}x{}x{} pitch {}",
-                        d.Width,
-                        d.Height,
-                        d.DepthOrArraySize,
-                        d.Format.0,
-                        d.MipLevels,
-                        staging.footprints.len(),
-                        staging.size,
-                        footprint.Offset,
-                        f.Width,
-                        f.Height,
-                        f.Depth,
-                        f.RowPitch
-                    )
-                },
-                (gpu + footprint.Offset, len),
-            );
-        }
-        let to = D3D12_TEXTURE_COPY_LOCATION {
-            // SAFETY: a borrowed pointer the location never releases.
-            pResource: unsafe { std::mem::transmute_copy(texture) },
-            Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-            Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 {
-                SubresourceIndex: i as u32,
-            },
-        };
-        let from = D3D12_TEXTURE_COPY_LOCATION {
-            // SAFETY: as above.
-            pResource: unsafe { std::mem::transmute_copy(&staging.buffer) },
-            Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
-            Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 {
-                PlacedFootprint: *footprint,
-            },
-        };
-        // SAFETY: an open list; both locations name live resources.
-        unsafe { list.list.CopyTextureRegion(&to, 0, 0, 0, &from, None) };
-    }
-    // Once per submission however many of its lists sample the texture.
-    list.defer_texture(staging);
-=======
-    // Once per submission however many of its lists sample the texture;
-    // `copy` keeps the host texture alive even if the title releases it
-    // before submission, and `CopyTextureRegion` is only recorded onto the
-    // prelude when `staging.refresh()` reports dirty contents.
-    list.defer_texture(staging, copy);
->>>>>>> belobug/main
 }
 
 impl Staging {
