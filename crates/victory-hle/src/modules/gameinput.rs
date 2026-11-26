@@ -1967,7 +1967,6 @@ mod host {
         }
 
         fn keys(&mut self) -> Vec<KeyState> {
-<<<<<<< HEAD
             let focus = self.focus();
             self.cursor(focus);
             #[cfg(feature = "diagnostics")]
@@ -1979,16 +1978,6 @@ mod host {
             #[cfg(not(feature = "diagnostics"))]
             let mut down = Vec::new();
             if focus || anywhere() {
-||||||| merged common ancestors
-            #[cfg(feature = "diagnostics")]
-            let mut down = scripted();
-            #[cfg(not(feature = "diagnostics"))]
-            let mut down = Vec::new();
-            if focused() {
-=======
-            let mut down = scripted();
-            if focused() {
->>>>>>> vibr/main
                 // Left/right modifier keys only, as devices report them; no
                 // mouse buttons (below 0x08; `mouse` has them).
                 let held: Vec<u8> = (0x08..=0xFE_u8)

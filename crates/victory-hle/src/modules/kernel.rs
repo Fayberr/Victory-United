@@ -846,7 +846,6 @@ mod tests {
         assert_eq!(&small, &[b'C', b':', b'\\', 0]);
     }
 
-<<<<<<< HEAD
     /// The host clears the last error when the name fits (titles tell a
     /// truncated name from a whole one by it, also after a call that
     /// filled the buffer exactly); a title image's name does the same.
@@ -914,53 +913,6 @@ mod tests {
         unsafe { assert_eq!((*__p___argc(), (**__p___argv()).is_null()), (1, false)) };
     }
 
-||||||| merged common ancestors
-    /// The host clears the last error when the name fits (titles tell a
-    /// truncated name from a whole one by it, also after a call that
-    /// filled the buffer exactly); a title image's name does the same.
-    #[cfg(windows)]
-    #[test]
-    fn a_module_name_that_fits_clears_the_last_error() {
-        use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
-        // SAFETY: reads this thread's last error.
-        let last_error = || unsafe { GetLastError() };
-        // SAFETY: sets this thread's last error.
-        let stale = || unsafe { SetLastError(ERROR_INSUFFICIENT_BUFFER) };
-        let (mut wide, mut narrow) = ([0u16; 512], [0u8; 512]);
-
-        // What the host does, for one of its own modules.
-        let kernel32 = host::get_module_handle_w(w("kernel32.dll").as_ptr());
-        stale();
-        assert_ne!(GetModuleFileNameW(kernel32, wide.as_mut_ptr(), 512), 0);
-        assert_eq!(last_error(), 0, "the host, wide");
-        stale();
-        assert_ne!(GetModuleFileNameA(kernel32, narrow.as_mut_ptr(), 512), 0);
-        assert_eq!(last_error(), 0, "the host, narrow");
-
-        let base = 0x7200_0000_0000;
-        runtime::set_image_path(base, std::path::Path::new(r"C:\title\game.exe"));
-        let module = base as *mut c_void;
-        // Too small: the error says so, as before.
-        // SAFETY: this thread's last error.
-        unsafe { SetLastError(0) };
-        assert_eq!(GetModuleFileNameW(module, wide.as_mut_ptr(), 4), 4);
-        assert_eq!(last_error(), ERROR_INSUFFICIENT_BUFFER);
-        // Then with room, the way titles grow their buffer until it fits.
-        assert_eq!(GetModuleFileNameW(module, wide.as_mut_ptr(), 512), 17);
-        assert_eq!(last_error(), 0, "a title image, wide");
-        stale();
-        assert_eq!(GetModuleFileNameA(module, narrow.as_mut_ptr(), 512), 17);
-        assert_eq!(last_error(), 0, "a title image, narrow");
-        // An exact fit is whole too (17 characters and the NUL).
-        stale();
-        assert_eq!(GetModuleFileNameA(module, narrow.as_mut_ptr(), 18), 17);
-        assert_eq!(last_error(), 0);
-        assert_eq!(GetModuleFileNameA(module, narrow.as_mut_ptr(), 17), 17);
-        assert_eq!(last_error(), ERROR_INSUFFICIENT_BUFFER);
-    }
-
-=======
->>>>>>> vibr/main
     fn w(text: &str) -> Vec<u16> {
         text.encode_utf16().chain(Some(0)).collect()
     }
@@ -1033,7 +985,6 @@ mod tests {
         assert!(!runtime.is_null());
         assert_eq!(GetModuleHandleW(w("XGameRuntime.dll").as_ptr()), runtime);
     }
-<<<<<<< HEAD
 
     /// A trailing dot means the name has no extension: no `.dll` is added.
     #[test]
@@ -1065,23 +1016,4 @@ mod tests {
             assert_eq!(last, ERROR_INSUFFICIENT_BUFFER);
         }
     }
-||||||| merged common ancestors
-
-    /// No buffer: nothing written, the error says it was too small.
-    #[test]
-    fn a_title_image_name_into_no_buffer() {
-        let base = 0x7300_0000_0000;
-        runtime::set_image_path(base, std::path::Path::new(r"C:\title\game.exe"));
-        let module = base as *mut c_void;
-        assert_eq!(GetModuleFileNameW(module, std::ptr::null_mut(), 0), 0);
-        assert_eq!(GetModuleFileNameA(module, std::ptr::null_mut(), 0), 0);
-        #[cfg(windows)]
-        {
-            // SAFETY: reads this thread's last error.
-            let last = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-            assert_eq!(last, ERROR_INSUFFICIENT_BUFFER);
-        }
-    }
-=======
->>>>>>> vibr/main
 }
