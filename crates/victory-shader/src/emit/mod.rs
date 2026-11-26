@@ -782,9 +782,9 @@ fn widen(
     }
     // (two host waves for a console wave: see [`lower::with_loop_exits`])
     if native.wave64 && lower::host_max_wave() == 32 {
-        return lower::with_loop_exits(|| widen_from(c, native, p, why));
+        return lower::with_loop_exits(|| widen_from(c, native, p, why, active_loop_only));
     }
-    widen_from(c, native, p, why)
+    widen_from(c, native, p, why, active_loop_only)
 }
 
 fn widen_from(
@@ -792,6 +792,7 @@ fn widen_from(
     native: &NativeProgram,
     p: &ir::Program,
     why: bool,
+    active_loop_only: bool,
 ) -> Result<(HostShader, Option<u32>), ShaderError> {
     let mut wide = std::collections::HashSet::new();
     // The scalar branches the two host waves take as one ([`lower::with_agreed`]): every one

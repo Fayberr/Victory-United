@@ -644,73 +644,12 @@ extern "system" fn execute(this: This, count: u32, lists: *const This) {
     }
 }
 
-/// A present plane as the title describes it (the console's
-/// `D3D12XBOX_PRESENT_PLANE_PARAMETERS`): frame token, the plane's
-/// resources, and how the display shows them. A present names its planes
-/// bottom first: the display scales each to the screen and blends it over
-/// the ones before it. (The whole description, so that a plane after the
-/// first is found where it is.)
+/// The start of a present plane: frame token, then the plane's resources.
 #[repr(C)]
-#[derive(Clone, Copy)]
 pub(crate) struct Plane {
     token: u64,
     count: u32,
     resources: *const This,
-    /// Per resource, the part of it that is shown (left, top, right,
-    /// bottom); null: all of it.
-    parts: *const [u32; 4],
-    /// Where on the screen the plane goes; null: over all of it.
-    placement: *const [u32; 4],
-    color_space: u32,
-    scale_filter: u32,
-    extended_count: u32,
-    extended: *const This,
-    flags: u32,
-}
-const _: () = assert!(size_of::<Plane>() == 0x48);
-
-/// A value of plain data read from title memory; `None` if it cannot be
-/// read there.
-#[cfg(windows)]
-fn peek<T: Copy>(at: *const T) -> Option<T> {
-    let mut value = std::mem::MaybeUninit::<T>::uninit();
-    // SAFETY: the bytes of `value`, all written before it is read.
-    let bytes =
-        unsafe { std::slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), size_of::<T>()) };
-    // SAFETY: every byte was read into; plain data.
-    (!at.is_null() && crate::host::read_into(at.cast(), bytes)).then(|| unsafe { value.assume_init() })
-}
-
-/// The planes of a present that can be shown, bottom first: each one's
-/// first resource and the part of it the title wants shown. None if the
-/// first plane has no resource; a later plane counts only if its resource
-/// is an object of the same kind as the first's (the same method table),
-/// so a plane that does not read as one is left out and not followed.
-///
-/// shortcut: a plane's first resource only (more are the views of a
-/// stereo display), and at most four planes; the console has two.
-#[cfg(windows)]
-fn shown(planes: u32, plane_parameters: *const Plane) -> Vec<(This, Option<[u32; 4]>)> {
-    let read = |i: usize| {
-        let plane = peek(plane_parameters.wrapping_add(i))?;
-        let resource = peek(plane.resources).filter(|r| plane.count > 0 && !r.is_null())?;
-        Some((resource, peek(resource.cast::<usize>())?, peek(plane.parts)))
-    };
-    let Some((first, kind, part)) = (planes > 0).then(|| read(0)).flatten() else {
-        return Vec::new();
-    };
-    let over = (1..planes.min(4) as usize).filter_map(read).filter(|plane| plane.1 == kind);
-    std::iter::once((first, part)).chain(over.map(|(resource, _, part)| (resource, part))).collect()
-}
-
-/// The host state the lists recorded so far leave a title texture in
-/// (looked at, not changed).
-#[cfg(windows)]
-fn state_of(resource: This) -> u32 {
-    const COPY_SOURCE: u32 = 0x800;
-    let state = crate::resource::host_transition(resource, COPY_SOURCE).map_or(COPY_SOURCE, |(_, before)| before);
-    crate::resource::host_transition(resource, state);
-    state
 }
 /// Retail PresentX adds source-rectangle and destination pointers, a color
 /// space and seven option words after the common prefix. Older callers pass
@@ -1023,8 +962,6 @@ extern "system" fn present(
             crate::capture::dump_targets(frame);
         }
     }
-    // A present of several planes (Series S: the world and the interface)
-    // runs the way below, which composes them.
     #[cfg(windows)]
     if behind::on() && !this.is_null() {
         const COPY_SOURCE: u32 = 0x800;
@@ -1067,9 +1004,6 @@ extern "system" fn present(
         frame_ends();
         return S_OK;
     }
-    // Each plane that has a host texture, in the state the lists leave it
-    // in; nothing without the first. One plane is shown as before; several
-    // are composed (`crate::host::Host::present_planes`).
     #[cfg(windows)]
     if planes > 0
         // SAFETY: the title passes `planes` plane descriptions.
@@ -1081,11 +1015,6 @@ extern "system" fn present(
         && let Some(texture) = crate::resource::host_resource(resource)
         && let Some(host) = crate::host::host()
     {
-        // With the queues' line on, what was given them so far is sent
-        // before the planes are read.
-        if behind::on() {
-            behind::drain();
-        }
         const COPY_SOURCE: u32 = 0x800;
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
@@ -1154,19 +1083,6 @@ fn show_planes(
     let shown = host.present_planes(texture, state, overlay, what.frame);
     #[cfg(feature = "diagnostics")]
     blinks(what.frame, what.resource as This, state, shown);
-    #[cfg(not(feature = "diagnostics"))]
-    let _ = (shown, what.resource);
-}
-
-/// Shows several planes, bottom first, composed in our window.
-#[cfg(windows)]
-fn show_planes(planes: &[crate::host::Shown], what: Shown) {
-    let Some(host) = crate::host::host() else {
-        return;
-    };
-    let shown = host.present_planes(planes, what.frame);
-    #[cfg(feature = "diagnostics")]
-    blinks(what.frame, what.resource as This, planes[0].1, shown);
     #[cfg(not(feature = "diagnostics"))]
     let _ = (shown, what.resource);
 }
