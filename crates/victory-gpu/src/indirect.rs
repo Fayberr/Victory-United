@@ -2077,14 +2077,11 @@ void main() {
                 warp.list.SetComputeRootShaderResourceView(1, now_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(2, hashes_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(3, differs_gpu);
-<<<<<<< HEAD
                 warp.list.SetComputeRootUnorderedAccessView(4, inline_gpu);
+                // Both compares take a group of 64 threads to a piece now, so
+                // a group a piece; `groups` was for the thread-a-piece form.
+                let _ = groups;
                 warp.list.Dispatch(PIECES, 1, 1);
-||||||| 9c184b35
-                warp.list.Dispatch(PIECES.div_ceil(64), 1, 1);
-=======
-                warp.list.Dispatch(groups(PIECES), 1, 1);
->>>>>>> fork/main
             }
             warp.submit_and_wait();
             // SAFETY: as above.
@@ -4006,19 +4003,12 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         for i in 0..RECORDS as usize {
             let rec = &out_words[i * 6..(i + 1) * 6];
             if rec[0] == (1 << 22) && rec[1] == 16 {
-<<<<<<< HEAD
-                // Which two is the order of the atomics (the second group's can
-                // win on WARP): never the one that is no draw.
-                assert!(i != 0, "the record that is no draw must run empty (record {i})");
-||||||| 9c184b35
-                assert!(i == 1 || i == 2, "the first two real draws fit the budget");
-=======
-                // WHICH two draws keep the budget is the order the card
-                // runs the threads in, which nothing fixes (the software
-                // device gave another two in five runs of seven): only how
-                // many is the clamp's to say, below.
+                // Which two draws keep the budget is the order the card runs
+                // the threads in, which nothing fixes (the software device
+                // gave another two in five runs of seven; the second group's
+                // can win on WARP): never the one that is no draw, and only
+                // how many is the clamp's to say, below.
                 assert_ne!(i, 0, "the record that is no draw charges nothing and is not kept as one");
->>>>>>> fork/main
                 kept += 1;
             } else {
                 assert_eq!((rec[0], rec[1]), (0, 0), "excess draw must be zeroed");
@@ -5165,15 +5155,8 @@ void work() {
         heap_pairs: [[Option<ID3D12DescriptorHeap>; 2]; 2],
         tables: [D3D12_GPU_DESCRIPTOR_HANDLE; 2],
         targets: [D3D12_CPU_DESCRIPTOR_HANDLE; 2],
-<<<<<<< HEAD
         /// Kept with its twin; only the tested one is bound after the clear.
         _depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
-||||||| 9c184b35
-        depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
-=======
-        /// Kept beside `depth_tested` (the view the rig clears through when it is made).
-        _depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
->>>>>>> fork/main
         depth_tested: D3D12_CPU_DESCRIPTOR_HANDLE,
         stamps: ID3D12QueryHeap,
         back: ID3D12Resource,
