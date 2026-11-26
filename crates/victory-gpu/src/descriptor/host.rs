@@ -1335,7 +1335,13 @@ struct Waiting {
     /// Bytes of its memory that were mapped when it was last uploaded
     /// without all of it there; 0: not uploaded yet.
     mapped: u64,
-<<<<<<< HEAD
+    /// When the slot first waited for this (`crate::host::now_ms`), for
+    /// `crate::texlate`: kept over writes until it is brought up to date;
+    /// and whether it waited for its memory meanwhile.
+    since: u64,
+    waited: bool,
+    /// When a look last found its memory away (or no more of it): 0 none.
+    away: u64,
 }
 
 /// A title slot whose texture was uploaded whole, and is looked at again:
@@ -1361,26 +1367,6 @@ const RECHECK_FRAMES: [u64; 5] = [4, 12, 40, 120, 400];
 thread_local! {
     /// This thread is inside [`HostHeap::publish`].
     static PUBLISHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-||||||| 85d564167
-    /// For a slot uploaded whole and looked at again
-    /// ([`TextureQueue::recheck`]): where its memory is (address, bytes),
-    /// the fingerprint it had at the upload, how many looks found it
-    /// unchanged, and the frame of the upload. A fingerprint of 0: none.
-    checked: (u64, u64, u64, u8, u64),
-=======
-    /// For a slot uploaded whole and looked at again
-    /// ([`TextureQueue::recheck`]): where its memory is (address, bytes),
-    /// the fingerprint it had at the upload, how many looks found it
-    /// unchanged, and the frame of the upload. A fingerprint of 0: none.
-    checked: (u64, u64, u64, u8, u64),
-    /// When the slot first waited for this (`crate::host::now_ms`), for
-    /// `crate::texlate`: kept over writes until it is brought up to date;
-    /// and whether it waited for its memory meanwhile.
-    since: u64,
-    waited: bool,
-    /// When a look last found its memory away (or no more of it): 0 none.
-    away: u64,
->>>>>>> avatar/main
 }
 
 /// The queue of title slots whose texture view waits to be brought up to
@@ -1464,14 +1450,9 @@ impl TextureQueue {
         }
         self.writes += 1;
         let write = self.writes;
-<<<<<<< HEAD
         self.rechecks.remove(&index);
-        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0 });
-||||||| 85d564167
-        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, checked: (0, 0, 0, 0, 0) });
-=======
         let (since, waited, away) = self.kept(index);
-        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, checked: (0, 0, 0, 0, 0), since, waited, away });
+        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, since, waited, away });
     }
 
     /// What a slot written again keeps of its wait.
@@ -1486,7 +1467,6 @@ impl TextureQueue {
     /// when a look last found that away.
     fn since(&self, index: u32) -> Option<(u64, bool, u64)> {
         self.slots.get(&index).map(|w| (w.since, w.waited || w.looks > 0 || w.mapped > 0, w.away))
->>>>>>> avatar/main
     }
 
     fn remove(&mut self, index: u32) {
@@ -1655,15 +1635,9 @@ impl TextureQueue {
         self.writes += 1;
         let write = self.writes;
         let due = self.slots.get(&index).map_or(due, |w| w.due.min(due));
-<<<<<<< HEAD
         self.rechecks.remove(&index);
-        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0 });
-||||||| 85d564167
-        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, checked: (0, 0, 0, 0, 0) });
-=======
         let (since, waited, away) = self.kept(index);
-        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, checked: (0, 0, 0, 0, 0), since, waited, away });
->>>>>>> avatar/main
+        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, since, waited, away });
     }
 
     /// Bytes of slot `index`'s memory that were mapped at its last upload
@@ -2128,14 +2102,9 @@ impl HostHeap {
         };
         let raw = if sampler { 0 } else { victory_shader::emit::raw_views() };
         let extra = if sampler { 0 } else { dynamic_slots(count, null) };
-<<<<<<< HEAD
         if !sampler {
             tracing::info!(count, extra, null, "view heap: the title's slots, dynamic slots, the null slot");
         }
-        let (heap, count, size) = if null == 0 {
-||||||| 85d564167
-        let (heap, count, size) = if null == 0 {
-=======
         let (heap, count, size) = if sampler {
             let fitted = count.min(SAMPLERS - 1);
             match make(SAMPLERS) {
@@ -2146,7 +2115,6 @@ impl HostHeap {
                 }
             }
         } else if null == 0 {
->>>>>>> avatar/main
             match make(count + extra) {
                 Ok(heap) => (heap, count, count + extra),
                 Err(e) => {
@@ -4615,22 +4583,8 @@ impl HostHeap {
                     self.record_tiled(index, &view, tiled);
                     self.keep(index, kept);
                 }
-<<<<<<< HEAD
                 self.quick_is(index, if later { 0 } else { key });
                 drop(_held);
-||||||| 85d564167
-                let late = Some(crate::frame::current());
-                let flip = Flip { after, heap: std::ptr::from_ref(self) as usize, index, handle, key, late };
-                FLIPS.lock().unwrap_or_else(|e| e.into_inner()).push(flip);
-                NEW_LATER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                drop(held);
-=======
-                let late = Some(crate::frame::current());
-                let flip = Flip { after, heap: std::ptr::from_ref(self) as usize, index, handle, key, late, asked: crate::host::now_ms() };
-                FLIPS.lock().unwrap_or_else(|e| e.into_inner()).push(flip);
-                NEW_LATER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                drop(held);
->>>>>>> avatar/main
                 self.unmake_stale(index, stale);
                 Some(view)
             } else if self.tiled_stale(index) {
@@ -6983,7 +6937,6 @@ fn null_view(at: D3D12_CPU_DESCRIPTOR_HANDLE) {
 mod tests {
     use super::*;
 
-<<<<<<< HEAD
     use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
     use windows::core::Interface;
 
@@ -7485,8 +7438,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         );
     }
 
-||||||| 85d564167
-=======
     /// Every host sampler heap backs all 2,048 hardware descriptors and
     /// reserves slot 2,047 as a null sentinel so `umin(index, 2047)` in
     /// `victory-shader` never reads past smaller title sampler heaps.
@@ -7501,8 +7452,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert_eq!(unsafe { full.heap.GetDesc().NumDescriptors }, 2048);
         assert_eq!(full.count, 2047);
     }
-
->>>>>>> avatar/main
     /// A view of a host copy that begins at a later level shows the same
     /// levels of it.
     #[test]
