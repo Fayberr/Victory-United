@@ -1099,15 +1099,11 @@ impl Drop for Heap {
                 .retain(|&page, _| page < start || page >= end);
         }
         heaps.retain(|&(_, _, h)| h != at);
-<<<<<<< HEAD
         drop(heaps);
         if let Some(Some(host)) = self.host.get() {
             crate::memory::forget_heap(host);
         }
-||||||| 85d564167
-=======
         crate::port_descriptors::let_go(self.start);
->>>>>>> avatar/main
     }
 }
 
