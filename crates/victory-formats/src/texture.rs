@@ -659,6 +659,7 @@ impl Layout {
             alignment: block_bytes,
             first_tail_mip,
             mips,
+            pattern,
             pipes,
             pipe_bank_xor: if d.swizzle.xor() { pipe_bank_xor } else { 0 },
             flips,

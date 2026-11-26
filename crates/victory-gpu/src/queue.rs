@@ -898,30 +898,6 @@ extern "system" fn present(
     plane_parameters: *const Plane,
     _parameters: *const u8,
 ) -> HRESULT {
-    #[cfg(windows)]
-    let presenting = std::time::Instant::now();
-    let hr = present_now(this, planes, plane_parameters);
-    #[cfg(windows)]
-    {
-        crate::framelog::add(crate::framelog::T::PresentUs, presenting.elapsed().as_micros() as u64);
-        crate::framelog::frame();
-        #[cfg(feature = "diagnostics")]
-        crate::fence::pace::frame();
-    }
-    hr
-}
-
-fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESULT {
-    #[cfg(windows)]
-    let presenting = std::time::Instant::now();
-    #[cfg(all(windows, feature = "diagnostics"))]
-    crate::copystat::present_begins();
-    #[cfg(all(windows, feature = "diagnostics"))]
-    crate::profile::frame();
-    // With `present_behind`: the frame is shown by our thread, behind what
-    // the queue holds, and nothing is run or waited for here.
-    #[cfg(windows)]
-    let sent_behind = present_behind() && send_behind(this, planes, plane_parameters);
     #[cfg(not(windows))]
     let _ = this;
     #[cfg(all(windows, feature = "diagnostics"))]

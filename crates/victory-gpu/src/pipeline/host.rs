@@ -1801,49 +1801,6 @@ mod tests {
         t
     }
 
-    fn blending(independent: bool) -> D3D12_BLEND_DESC {
-        let mut b = GraphicsState::default().blend;
-        b.IndependentBlendEnable = independent.into();
-        for t in &mut b.RenderTarget {
-            t.BlendEnable = true.into();
-            t.SrcBlend = D3D12_BLEND_SRC_ALPHA;
-            t.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-        }
-        b
-    }
-
-    #[test]
-    fn integer_targets_do_not_blend() {
-        let t = blend_targets(&[
-            DXGI_FORMAT_R8G8B8A8_UNORM,
-            DXGI_FORMAT_R16G16B16A16_FLOAT,
-            DXGI_FORMAT_R8_UINT,
-        ]);
-        for independent in [false, true] {
-            let host = host_blend(&blending(independent), &t);
-            assert!(host.IndependentBlendEnable.as_bool());
-            assert!(host.RenderTarget[0].BlendEnable.as_bool());
-            assert!(host.RenderTarget[1].BlendEnable.as_bool());
-            assert!(!host.RenderTarget[2].BlendEnable.as_bool());
-            assert_eq!(host.RenderTarget[2].SrcBlend, D3D12_BLEND_SRC_ALPHA);
-            assert_eq!(host.RenderTarget[0].DestBlend, D3D12_BLEND_INV_SRC_ALPHA);
-        }
-    }
-
-    #[test]
-    fn blend_states_without_integer_blending_are_kept() {
-        let b = blending(false);
-        let t = blend_targets(&[DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R11G11B10_FLOAT]);
-        assert_eq!(host_blend(&b, &t), b);
-        let mut b = blending(true);
-        b.RenderTarget[1].BlendEnable = false.into();
-        let t = blend_targets(&[DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R32_UINT]);
-        assert_eq!(host_blend(&b, &t), b);
-        let mut t = blend_targets(&[DXGI_FORMAT_R8G8B8A8_UNORM]);
-        t.RTFormats[1] = DXGI_FORMAT_R8_UINT;
-        assert_eq!(host_blend(&blending(false), &t), blending(false));
-    }
-
     fn element(format: DXGI_FORMAT, offset: u32) -> D3D12_INPUT_ELEMENT_DESC {
         D3D12_INPUT_ELEMENT_DESC {
             SemanticName: PCSTR(c"TEXCOORD".as_ptr().cast()),

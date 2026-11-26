@@ -3174,7 +3174,7 @@ impl State {
             return;
         }
         let builder = crate::pipeline::is_builder(self.pipeline as This);
-        let thread_group = (builder && flags.unwrap_or(0) & 0x20 != 0)
+        let thread_group = (builder && flags & 0x20 != 0)
             .then(|| p.stages[0].translated().compute_threads)
             .flatten();
         let threads = [x, y, z];

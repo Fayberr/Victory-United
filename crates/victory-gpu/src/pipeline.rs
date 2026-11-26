@@ -402,7 +402,7 @@ pub(crate) fn builder_runs() -> bool {
                 );
             }
         }
-        let missing: Vec<String> = missing_pipelines.iter().map(make::hashes).collect();
+        let missing: Vec<String> = missing_pipelines.iter().map(|p| make::hashes(p)).collect();
         tracing::warn!(
             missing = missing.len(),
             of = b.pipelines.len(),

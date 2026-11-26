@@ -5558,15 +5558,6 @@ impl Host {
         }
         LINE_MOVED.notify_all();
         LINE_LANDED.notify_all();
-        // Only now: release the declared ranges from `pending`, after
-        // `line.written` no longer names them and every waiter has been
-        // woken. Before this point a concurrent refresh could see the range
-        // as free while the merge was still writing title memory, leaving
-        // the title with stale or unmapped bytes (the 0xc0000005 crashes
-        // during loading with VICTORY_RELAY=2).
-        for (shadow, ranges) in &backs {
-            shadow.copy_back_done(ranges);
-        }
     }
 
     /// After a submission ran, for copies in the card's memory: the pieces
@@ -7194,6 +7185,19 @@ impl HostList {
             deferred.back_wanted.push(target);
         }
     }
+    /// Before the list closes: the textures its shaders wrote that are copied
+    /// back go into read-back buffers ([`crate::texback::record`]).
+    fn textures_back(&self) {
+        const COPY_SOURCE: u32 = 0x800;
+        let wanted = std::mem::take(&mut self.deferred().back_wanted);
+        for target in wanted {
+            self.settle(&target.copy, COPY_SOURCE);
+            if let Some(back) = crate::texback::record(&self.list, target) {
+                self.deferred().texture_backs.push(back);
+            }
+        }
+    }
+
     /// The draw or dispatch just prepared is recorded: the twins it writes
     /// now hold what their depth textures lack.
     pub(crate) fn twins_written(&self) {

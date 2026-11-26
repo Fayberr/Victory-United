@@ -4855,6 +4855,7 @@ impl Shadow {
                 before: Mutex::default(),
                 dirty: Mutex::default(),
                 sent: Mutex::default(),
+                masked: Default::default(),
                 touched: Default::default(),
                 size: len.next_multiple_of(PIECE as u64),
             });
@@ -5011,7 +5012,8 @@ mod land_tests {
             before: Mutex::default(),
             dirty: Mutex::default(),
             sent: Mutex::default(),
-                touched: Default::default(),
+            masked: Default::default(),
+            touched: Default::default(),
             size: len as u64,
         });
         Some(shadow)
@@ -5655,6 +5657,7 @@ pub(crate) fn by_address(start: u64, len: u64) -> Option<Arc<Shadow>> {
         before: Mutex::default(),
         dirty: Mutex::default(),
         sent: Mutex::default(),
+        masked: Default::default(),
         touched: Default::default(),
         size: len,
     });
@@ -6115,6 +6118,7 @@ mod card_merge_tests {
                         (sent, std::sync::Arc::new(bits(&[(8, 9), (title_byte, title_byte + 1), (LEN - 1, LEN)]))),
                     ],
                 }),
+                touched: Default::default(),
                 size: 0,
             });
             let mut slot = content.clone();

@@ -129,7 +129,6 @@ pub(crate) mod flags {
     pub const ATOMIC_HEAP64: u64 = 1 << 32;
     pub const RESOURCE_HEAP: u64 = 1 << 30;
     pub const SAMPLER_HEAP: u64 = 1 << 31;
-    pub const ROVS: u64 = 1 << 18;
 }
 
 pub(crate) struct Types {
