@@ -1675,7 +1675,6 @@ void main() {
         event: HANDLE,
         clamp: Clamp,
         worker: Clamp,
-<<<<<<< HEAD
         /// Last, so given up last.
         _turn: std::sync::MutexGuard<'static, ()>,
     }
@@ -1689,15 +1688,10 @@ void main() {
     pub(crate) fn warp_turn() -> std::sync::MutexGuard<'static, ()> {
         static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
         TURN.lock().unwrap_or_else(|e| e.into_inner())
-||||||| 085ee7c4
-=======
-        _serial: std::sync::MutexGuard<'static, ()>,
->>>>>>> vitoriabr/main
     }
 
     impl WarpHarness {
         fn new() -> Option<Self> {
-<<<<<<< HEAD
             Self::on(true)
         }
 
@@ -1705,14 +1699,6 @@ void main() {
         fn on(software: bool) -> Option<Self> {
             let turn = warp_turn();
             // SAFETY: plain DXGI query and D3D12 test harness setup.
-||||||| 085ee7c4
-            // SAFETY: plain DXGI WARP query and D3D12 test harness setup.
-=======
-            let serial = crate::host::WARP_SERIAL
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            // SAFETY: plain DXGI WARP query and D3D12 test harness setup.
->>>>>>> vitoriabr/main
             unsafe {
                 let factory: IDXGIFactory4 =
                     CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)).ok()?;
@@ -1754,12 +1740,7 @@ void main() {
                     event,
                     clamp,
                     worker,
-<<<<<<< HEAD
                     _turn: turn,
-||||||| 085ee7c4
-=======
-                    _serial: serial,
->>>>>>> vitoriabr/main
                 })
             }
         }
@@ -2028,14 +2009,8 @@ void main() {
                 warp.list.SetComputeRootShaderResourceView(1, now_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(2, hashes_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(3, differs_gpu);
-<<<<<<< HEAD
                 warp.list.SetComputeRootUnorderedAccessView(4, inline_gpu);
                 warp.list.Dispatch(PIECES, 1, 1);
-||||||| 085ee7c4
-                warp.list.Dispatch(PIECES.div_ceil(64), 1, 1);
-=======
-                warp.list.Dispatch(groups(PIECES), 1, 1);
->>>>>>> vitoriabr/main
             }
             warp.submit_and_wait();
             // SAFETY: as above.
@@ -4075,17 +4050,10 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         for i in 0..RECORDS as usize {
             let rec = &out_words[i * 6..(i + 1) * 6];
             if rec[0] == (1 << 22) && rec[1] == 16 {
-<<<<<<< HEAD
                 // Which two is the order of the atomics (the second group's can
                 // win on WARP): never the one that is no draw.
                 assert!(i != 0, "the record that is no draw must run empty (record {i})");
-                kept += 1;
-||||||| 085ee7c4
-                assert!(i == 1 || i == 2, "the first two real draws fit the budget");
-                kept += 1;
-=======
                 kept.push(i);
->>>>>>> vitoriabr/main
             } else {
                 assert_eq!((rec[0], rec[1]), (0, 0), "excess draw must be zeroed");
                 zeroed += 1;
@@ -5238,15 +5206,8 @@ void work() {
         heap_pairs: [[Option<ID3D12DescriptorHeap>; 2]; 2],
         tables: [D3D12_GPU_DESCRIPTOR_HANDLE; 2],
         targets: [D3D12_CPU_DESCRIPTOR_HANDLE; 2],
-<<<<<<< HEAD
         /// Kept with its twin; only the tested one is bound after the clear.
         _depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
-||||||| 085ee7c4
-        depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
-=======
-        #[allow(dead_code)]
-        depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
->>>>>>> vitoriabr/main
         depth_tested: D3D12_CPU_DESCRIPTOR_HANDLE,
         stamps: ID3D12QueryHeap,
         back: ID3D12Resource,
