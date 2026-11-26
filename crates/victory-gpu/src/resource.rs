@@ -1879,7 +1879,6 @@ pub(crate) fn card_accounting(room: bool, due: [u64; 5], never: Vec<(u64, u64)>,
     }
 }
 
-<<<<<<< HEAD
 /// Whether LRU texture eviction from descriptor heaps under VRAM pressure is
 /// enabled (on by default; `VICTORY_TEXTURE_EVICT=0` disables it).
 #[cfg(windows)]
@@ -1888,8 +1887,6 @@ fn evict_enabled() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_TEXTURE_EVICT").is_none_or(|v| v != "0"))
 }
 
-||||||| 465b94f5
-=======
 /// Whether two half-open byte ranges share a byte: `[a_start, a_start +
 /// a_len)` and `[b_start, b_start + b_len)`. A range of no bytes shares
 /// none, and the ranges end at the last address there is.
@@ -1908,7 +1905,6 @@ fn sweeping() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_TEXTURE_SWEEP").is_none_or(|v| v != "0"))
 }
 
->>>>>>> vertex/main
 /// Lets go of the host copies of textures the title fills that nothing
 /// names any more: placed textures were never released (one host texture
 /// per address and description ever viewed: 18,639 of them, 2.5 GB, after
@@ -3348,22 +3344,12 @@ static PLACED_RAW: std::sync::Mutex<std::collections::BTreeSet<(u64, [u32; 14])>
 #[cfg(windows)]
 static PLACED_TWINS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-<<<<<<< HEAD
 /// See [`PLACED_TWINS`]. Read by the diagnostics' memory report only.
 #[cfg(all(windows, feature = "diagnostics"))]
-||||||| 465b94f5
-/// See [`PLACED_TWINS`].
-#[cfg(windows)]
-=======
-/// See [`PLACED_TWINS`].
-#[cfg(windows)]
-#[cfg_attr(not(feature = "diagnostics"), allow(dead_code))]
->>>>>>> vertex/main
 pub(crate) fn placed_filler_twins() -> u64 {
     PLACED_TWINS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-<<<<<<< HEAD
 /// Width, height and format of texture `this` (`None` for a buffer), for
 /// `crate::texback`'s kinds.
 #[cfg(windows)]
@@ -3396,39 +3382,6 @@ pub(crate) fn title_texture(this: This) -> Option<(victory_formats::texture::Lay
     Some((plane.layout.clone(), r.data() as usize, t.size as usize))
 }
 
-||||||| 465b94f5
-=======
-/// Width, height and format of texture `this` (`None` for a buffer), for
-/// `crate::texback`'s kinds.
-#[cfg(windows)]
-pub(crate) fn texture_kind(this: This) -> Option<(u64, u32, u32)> {
-    if this.is_null() {
-        return None;
-    }
-    let r = resource(this);
-    (r.desc.dimension != BUFFER).then_some((r.desc.width, r.desc.height, r.desc.format))
-}
-
-/// Texture `this`'s console layout (one plane), where it lies in title
-/// memory and the bytes that layout takes, for `crate::texback`; `None` for
-/// a buffer or a texture with planes.
-#[cfg(windows)]
-pub(crate) fn title_texture(this: This) -> Option<(victory_formats::texture::Layout, usize, usize)> {
-    if this.is_null() {
-        return None;
-    }
-    let r = resource(this);
-    if r.desc.dimension == BUFFER {
-        return None;
-    }
-    let t = texture_layout(&r.desc)?;
-    let [plane] = &t.planes[..] else {
-        return None;
-    };
-    Some((plane.layout.clone(), r.data() as usize, t.size as usize))
-}
-
->>>>>>> vertex/main
 /// The bytes of title memory a texture with the resource description
 /// `desc` (as words) takes where the title placed it; `None` for a buffer
 /// and for a description without a size.
@@ -3769,7 +3722,6 @@ mod tests {
     use super::*;
     use crate::object::slot;
 
-<<<<<<< HEAD
     #[test]
     fn a8_unorm_is_not_in_the_r8_typeless_family() {
         // DXGI_FORMAT values: 60 R8_TYPELESS, 61 R8_UNORM, 62 R8_UINT,
@@ -3786,8 +3738,6 @@ mod tests {
         assert_eq!(family(66), 66);
     }
 
-||||||| 465b94f5
-=======
     /// Views of a host copy without its largest level keep their texels:
     /// a view of title level 0 alone shows host level 0 (title level 1),
     /// one of levels 3 and 4 shows host levels 2 and 3, all levels stay all.
@@ -3806,7 +3756,6 @@ mod tests {
         assert_eq!(shifted(0, 3, 2, 1.0), (3, 2, 1.0));
     }
 
->>>>>>> vertex/main
     type Release = extern "system" fn(This) -> u32;
     type Map = extern "system" fn(This, u32, *const c_void, *mut *mut u8) -> HRESULT;
     type Address = extern "system" fn(This) -> u64;
