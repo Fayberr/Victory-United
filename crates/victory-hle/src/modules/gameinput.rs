@@ -629,12 +629,7 @@ impl State {
         let pads = if one_pad {
             let base = pads.into_iter().flatten().reduce(merged);
             let mut one: [Option<PadState>; PADS + 1] = [None; PADS + 1];
-            one[FALLBACK] = match (base, self.controls.is_none()) {
-                (Some(pad), true) => Some(merged(pad, fallback(&keys))),
-                (Some(pad), false) => Some(pad),
-                (None, true) => Some(fallback(&keys)),
-                (None, false) => None,
-            };
+            one[FALLBACK] = base;
             one
         } else {
             let mut all: [Option<PadState>; PADS + 1] = [None; PADS + 1];
@@ -705,7 +700,13 @@ impl State {
             // input joins whichever pad there is.
             None => {
                 let base = match (self.one_pad, first) {
-                    (true, _) => host,
+                    // One pad: the folded host pads and the player's own keys.
+                    (true, _) => {
+                        let layout = binds::layout(|vk| pressed(&self.keys, &self.mouse, vk));
+                        let pad = fallback(&self.keys, &self.mouse, &layout);
+                        let keys = self.unseen.add(pad, now);
+                        Some(host.map_or(keys, |pad| merged(pad, keys)))
+                    }
                     (false, Some(i)) => pads[i],
                     (false, None) => {
                         let layout = binds::layout(|vk| pressed(&self.keys, &self.mouse, vk));
@@ -2232,12 +2233,8 @@ mod host {
         if HINT.is_completed() {
             return;
         }
-        let used = super::binds::Binds::read(super::binds::DEFAULT)
-            .0
-            .walk
-            .iter()
-            .map(|b| b.0)
-            .chain(*b"WASDIJKLZC");
+        let binds = super::binds::Binds::read(super::binds::DEFAULT);
+        let used = binds.0.walk.iter().map(|b| b.0).chain(*b"WASDIJKLZC");
         // SAFETY: plain queries.
         if used.into_iter().any(|vk| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0) {
             HINT.call_once(|| {

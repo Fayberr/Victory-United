@@ -349,7 +349,7 @@ impl Shader {
     /// Whether the program walks the ray-tracing structures: its code has
     /// an `image_bvh_intersect_ray` or `image_bvh64_intersect_ray`. Looked
     /// at once, when a dispatch first asks.
-    fn walks(&self) -> bool {
+    pub(crate) fn walks(&self) -> bool {
         *self.walks.get_or_init(|| container_walks(&self.container))
     }
 }

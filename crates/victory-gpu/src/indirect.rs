@@ -4475,7 +4475,7 @@ void main(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID) {
                         assert_eq!(batch::Table::new(table_ptr, 0, [1, 0, 0, 0]).place(1, 0, 2), Some(0));
                     } else {
                         let to = (&dst, D3D12_RESOURCE_STATE_COMMON);
-                        assert!(record_clamp_as(&gpu.clamp, &gpu.list, to, budget_gpu, (&src, 0), None, (2, 12, 1), false));
+                        assert!(record_clamp_as(&gpu.clamp, &gpu.list, to, budget_gpu, (&src, 0), None, (2, 12, 1), 0));
                     }
                     gpu.list.SetComputeRootSignature(&worker.root);
                     gpu.list.SetPipelineState(&worker.pso);
@@ -4594,7 +4594,7 @@ void main(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID) {
                         (&src, offset),
                         None,
                         (*kind, stride, 1),
-                        false,
+                        0,
                     ));
                 }
                 // SAFETY: an open list; the records are readable as arguments.
@@ -4759,7 +4759,7 @@ void main(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID) {
                 let mut table = batch::Table::default();
                 for i in 0..EXECUTIONS {
                     if run == 0 {
-                        assert!(record_clamp_as(&gpu.clamp, &gpu.list, (&dst, state), budget_gpu, (&src, u64::from(i % 2048) * 32), None, (2, 12, 1), false));
+                        assert!(record_clamp_as(&gpu.clamp, &gpu.list, (&dst, state), budget_gpu, (&src, u64::from(i % 2048) * 32), None, (2, 12, 1), 0));
                     } else if i % run == 0 {
                         let k = u64::from(i / run) * batch::TABLE;
                         batch::record(&pass, &gpu.list, (&dst, state), budget_gpu, [src_gpu; 4], tables_gpu + k);

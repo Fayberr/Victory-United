@@ -7131,7 +7131,7 @@ impl Host {
 
     /// [`Host::execute_late`] of parts of submissions in one: another begins
     /// at each place of `order` in `parts` ([`joins`]).
-    pub(crate) fn execute_parts(&self, lists: Vec<crate::list::Detached>, order: Vec<usize>, parts: &[usize]) {
+    pub(crate) fn execute_parts(&self, mut lists: Vec<crate::list::Detached>, mut order: Vec<usize>, parts: &[usize]) {
         if order.is_empty() {
             crate::list::recycle(lists, &order);
             return;
@@ -9778,7 +9778,7 @@ impl HostList {
             .copies
             .iter()
             .filter_map(|step| match step {
-                Step::Texture(staging) => Some(staging.clone()),
+                Step::Texture { staging, .. } => Some(staging.clone()),
                 _ => None,
             })
             .collect();

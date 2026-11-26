@@ -232,7 +232,7 @@ fn a_piece_waits_for_a_change_of_mapping() {
     }
     let (began, wait) = std::sync::mpsc::channel();
     let change = std::thread::spawn(move || {
-        let _changing = crate::watch::title_memory_remapping();
+        let _changing = crate::watch::title_memory_remapping(at, 100);
         began.send(()).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(50));
         // SAFETY: the reservation's first page.

@@ -875,7 +875,7 @@ impl TableSlots {
 
 /// Remapped table offsets, with inline room for small sets.
 #[derive(Default)]
-struct MadeTables {
+pub(crate) struct MadeTables {
     inline: [(u8, u32); 8],
     len: usize,
     overflow: Vec<(u8, u32)>,
@@ -891,7 +891,7 @@ impl MadeTables {
         }
     }
 
-    fn iter(&self) -> impl Iterator<Item = &(u8, u32)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &(u8, u32)> {
         self.inline[..self.len].iter().chain(self.overflow.iter())
     }
 }
@@ -2103,7 +2103,7 @@ impl State {
             let memory = if t.host.root_srvs.contains(&victory_shader::emit::SLOT_MEMORY) {
                 // The structure builder off: what its structures' walkers
                 // would read is not a structure (`memory::empty`).
-                let unbuilt = t.walks && !crate::pipeline::builder_live() && !crate::memory::walks_unbuilt();
+                let unbuilt = stage.shader.walks() && !crate::pipeline::builder_live() && !crate::memory::walks_unbuilt();
                 // Only through a store by address: what it stores through
                 // views is declared with them.
                 let use_ = if crate::pipeline::is_builder(self.pipeline as This) || writes && t.stores_by_address {
@@ -3523,7 +3523,7 @@ impl State {
             return;
         }
         let t = p.stages[0].translated();
-        let Some(([gx, gy, gz], partial)) = dispatch_dimensions([x, y, z], t.threads, flags) else {
+        let Some(([gx, gy, gz], partial)) = dispatch_dimensions([x, y, z], t.threads.unwrap_or([0; 3]), flags) else {
             return;
         };
         if partial != [0; 3]
@@ -4127,7 +4127,7 @@ impl State {
     /// afresh as well, with that view in the unsigned format of the same
     /// layout (`descriptor::host::half_view`): the title's own slot keeps
     /// the title's format for the shaders that read it as floats.
-    fn tables(
+    pub(crate) fn tables(
         &mut self,
         list: &HostList,
         used: &[UsedResource],
@@ -4307,10 +4307,10 @@ impl State {
                     }
                 }
                 for k in selected {
-                    if layout.entries.iter().any(|u| u.table_offset_dwords / 8 == k) {
+                    if layout.entries.iter().any(|u| u.table_offset_dwords / 8 == *k) {
                         continue;
                     }
-                    let handle = table + u64::from(k) * 32;
+                    let handle = table + u64::from(*k) * 32;
                     if let Some(view) = crate::descriptor::view(handle)
                         && let Some(kind) = view_kind(&view)
                     {

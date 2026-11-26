@@ -1764,6 +1764,16 @@ enum PageCommitment {
     Existing,
 }
 
+/// Holds title memory against reads in place for what a group of page
+/// changes touches (views reaching out of it included), until it is mapped.
+fn remapping_range(physical: &Physical, ops: &[Op]) -> (usize, usize) {
+    let range = ops.iter().fold(None, |range: Option<(usize, usize)>, op| {
+        Some(range.map_or((op.at, op.at + PAGE), |(lo, hi)| (lo.min(op.at), hi.max(op.at + PAGE))))
+    });
+    let (from, to) = range.map_or((0, 0), |(lo, hi)| reach(physical, lo, hi - lo));
+    (from, to - from)
+}
+
 /// [`map_alias`] of many ranges, in order.
 pub fn map_aliases(ranges: &[(u64, u64, u64)]) -> bool {
     let _costed = Costed::begin(None);
@@ -1800,7 +1810,8 @@ pub fn map_aliases(ranges: &[(u64, u64, u64)]) -> bool {
             ops.push(Op::new(to, slice.flatten()));
             at += 1;
         }
-        let _changing = victory_gpu::title_memory_remapping();
+        let (from, len) = remapping_range(&physical, &ops);
+        let _changing = victory_gpu::title_memory_remapping(from, len);
         ok &= change(&mut physical, ops);
     }
     ok
@@ -1838,7 +1849,8 @@ fn scatter(wanted: &[(usize, usize)]) -> bool {
         if let Some(costed) = &mut costed {
             costed.pages = Some(ops.len());
         }
-        let _changing = victory_gpu::title_memory_remapping();
+        let (from, len) = remapping_range(&physical, &ops);
+        let _changing = victory_gpu::title_memory_remapping(from, len);
         ok &= change(&mut physical, ops);
     }
     ok

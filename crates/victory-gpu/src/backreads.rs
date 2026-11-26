@@ -290,13 +290,25 @@ fn valid(seen: &Seen) -> Option<(u32, u32)> {
     Some((touched[..pages].iter().filter(|&&t| t).count() as u32, pages as u32))
 }
 
+/// The title addresses the stretch at `from..to` of the page takes in
+/// every view of `shown`: from the first view's start to the last one's
+/// end, as (at, bytes).
+fn span(shown: &[usize], from: usize, to: usize) -> Option<(usize, usize)> {
+    let lo = shown.iter().copied().min()?;
+    let hi = shown.iter().copied().max()?;
+    Some((lo + from, hi - lo + (to - from)))
+}
+
 /// Takes the stretch's 4 KiB pages out of the working set at every title
 /// address of the page; false, with nothing done, while the runtime
 /// changes a mapping.
 fn trim(shown: &[usize], from: usize, to: usize) -> bool {
     use windows_sys::Win32::System::Memory::VirtualUnlock;
+    let Some((at, len)) = span(shown, from, to) else {
+        return true;
+    };
     // No mapping changes until the addresses have been used.
-    let Some(_still) = crate::watch::title_memory_reading_now() else {
+    let Some(_still) = crate::watch::title_memory_reading_now(at, len) else {
         return false;
     };
     for &base in shown {
@@ -318,7 +330,9 @@ fn judge(seen: &Seen) -> Judged {
         && seen.clean
         && (!crate::watch::clean(seen.page) || crate::watch::stamp(seen.page) > seen.stamp);
     let looked = if seen.trimmed {
-        match crate::watch::title_memory_reading_now() {
+        let reading = span(&seen.shown, seen.from, seen.to)
+            .and_then(|(at, len)| crate::watch::title_memory_reading_now(at, len));
+        match reading {
             Some(_still) => valid(seen),
             None => None,
         }

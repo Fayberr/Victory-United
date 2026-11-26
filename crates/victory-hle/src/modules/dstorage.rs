@@ -965,7 +965,7 @@ impl Lanes {
             .filter_map(|(&id, l)| Some((l.clock, l.reads.front()?.0, id)))
             .min()?;
         let lane = self.lanes.get_mut(&id)?;
-        let &(seq, ref read) = lane.reads.front()?;
+        let &(seq, ref read, _) = lane.reads.front()?;
         let staging = staging_bytes(&read.request);
         if self.staged > 0 && self.staged + staging > self.staging {
             self.starved = true;

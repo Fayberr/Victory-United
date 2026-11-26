@@ -292,7 +292,7 @@ fn staging_buffer_alone(host: &crate::host::Host, total: u64) -> Option<(ID3D12R
         // (Counted as made: the frame log's "staging N made" is then the
         // buffers of a run without the pool too.)
         SPARE_STATS[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return host.upload_buffer(total).map(|(buffer, data)| (buffer, data, 0, 0, None));
+        return host.upload_buffer(total).map(|(buffer, data)| (buffer, data, 0, false, None));
     }
     let spare = {
         let mut all = SPARE.lock().unwrap_or_else(|e| e.into_inner());
@@ -2788,7 +2788,7 @@ mod title_memory_tests {
                 ),
                 object::S_OK
             );
-            let upload = staging(image, resource::host_resource(image).unwrap(), 0).unwrap();
+            let upload = staging(image, &resource::host_copy(image).unwrap(), 0).unwrap();
             let (at, size) = staged_memory(image).unwrap();
             assert_eq!(at, address);
             let cropped = drop > 0 && slices == 1;
@@ -2803,13 +2803,13 @@ mod title_memory_tests {
             );
             assert_eq!(size, expected, "refresh source bytes with {slices} slices");
             assert_eq!(
-                staged(image).unwrap().0,
+                staged(image, false).unwrap().0,
                 title.size,
                 "original title budget"
             );
             let mut last = Last::default();
             let refresh = |last: &mut Last| {
-                assert_eq!(upload.refresh_unlocked(last, size as usize), size as usize);
+                assert_eq!(upload.refresh_unlocked(last, size as usize, 0), size as usize);
             };
             refresh(&mut last);
             let original = last.hash;

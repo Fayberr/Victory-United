@@ -1182,8 +1182,10 @@ pub(crate) fn put_beside(block: usize, weight: u32, put: impl FnOnce(usize)) -> 
         return Beside::Full;
     }
     // No mapping changes until all is told: a view of the page that came
-    // after the look at them would not be.
-    let Some(_reading) = title_memory_reading_now() else {
+    // after the look at them would not be. Over all of title memory, as this
+    // path holds it whole: what is written is a view of the block's page at
+    // an address of its own, known only after the look.
+    let Some(_reading) = title_memory_reading_now(0, usize::MAX) else {
         return Beside::Cannot;
     };
     let Some((page, shown)) = crate::inplace::beside_page(block * BLOCK) else {
@@ -1436,6 +1438,53 @@ impl Blocks {
         for block in blocks {
             self.insert(block);
         }
+    }
+
+    /// The bits of `range`'s blocks in word `word`.
+    fn mask(word: usize, range: &std::ops::Range<usize>) -> u64 {
+        let low = word * 64;
+        let (from, to) = (range.start.max(low), range.end.min(low + 64));
+        if from >= to {
+            return 0;
+        }
+        (u64::MAX >> (64 - (to - from))) << (from - low)
+    }
+
+    /// Takes `bits` of word `word` out of the set.
+    fn clear(&mut self, word: usize, bits: u64) {
+        if let Some(piece) = self.0.get_mut(&(word / Blocks::WORDS)) {
+            piece[word % Blocks::WORDS] &= !bits;
+        }
+    }
+
+    fn extend(&mut self, range: std::ops::Range<usize>) {
+        if range.is_empty() {
+            return;
+        }
+        for word in range.start / 64..=(range.end - 1) / 64 {
+            let bits = Self::mask(word, &range);
+            let piece = self.0.entry(word / Blocks::WORDS).or_insert_with(|| Box::new([0; Blocks::WORDS]));
+            piece[word % Blocks::WORDS] |= bits;
+        }
+    }
+
+    /// Every word holding bits, by number, with the bits.
+    fn words(&self) -> impl Iterator<Item = (usize, u64)> + '_ {
+        self.0.iter().flat_map(|(&piece, words)| {
+            let base = piece * Blocks::WORDS;
+            words.iter().enumerate().filter(|&(_, bits)| *bits != 0).map(move |(k, &bits)| (base + k, bits))
+        })
+    }
+
+    /// Whether every block of `range` is in the set.
+    fn holds(&self, range: std::ops::Range<usize>) -> bool {
+        if range.is_empty() {
+            return true;
+        }
+        (range.start / 64..=(range.end - 1) / 64).all(|word| {
+            let mask = Self::mask(word, &range);
+            self.word(word) & mask == mask
+        })
     }
 
     /// Those of `range`, in order.
@@ -2148,7 +2197,12 @@ fn guard(start: usize, end: usize, known: bool) -> Option<Vec<usize>> {
     // other thread asks about it: `ASKING`); what the runtime tells meanwhile
     // takes the block out of the set, and it is looked at as any other.
     let unsure: Vec<usize> = {
-        let g = guards_timed();
+        let mut g = guards_timed();
+        // What the runtime told of ordinary commits, and the shares of the
+        // holes and of the clean blocks that are due a look this frame.
+        apply_changed(&mut g);
+        holes_due(&mut g);
+        views_due(&mut g);
         if g.clean.range(first..last).count() == last - first && !BESIDE.any(first, last) {
             // Nothing written, mapped or new since the range was last taken.
             #[cfg(feature = "diagnostics")]
@@ -2684,7 +2738,7 @@ fn holes_due(g: &mut Guards) {
     g.due_frame = frame;
     let turn = frame as usize % every;
     let Guards { absent, clean, .. } = g;
-    for (&word, &bits) in &absent.0 {
+    for (word, bits) in absent.words() {
         if word % every == turn {
             clean.clear(word, bits);
         }
@@ -2739,8 +2793,12 @@ fn due_bits(clean: &Blocks, absent: &Blocks, every: usize, turn: usize) -> Vec<(
     clean
         .0
         .iter()
-        .filter(|&(&word, _)| word % every == turn)
-        .map(|(&word, &bits)| (word, bits & !absent.0.get(&word).copied().unwrap_or(0)))
+        .flat_map(|(&piece, words)| {
+            let base = piece * Blocks::WORDS;
+            words.iter().enumerate().map(move |(k, &bits)| (base + k, bits))
+        })
+        .filter(|&(word, _)| word % every == turn)
+        .map(|(word, bits)| (word, bits & !absent.word(word)))
         .filter(|&(_, bits)| bits != 0)
         .collect()
 }
@@ -3552,7 +3610,7 @@ fn allocation_end(at: usize, inside: usize) -> usize {
 
 /// Tells what keeps track of what title memory shows; the guards, with no
 /// block of the range known unmapped.
-fn title_memory_changed(at: usize, len: usize) -> std::sync::MutexGuard<'static, Guards> {
+fn title_memory_changed(at: usize, len: usize) -> std::sync::RwLockWriteGuard<'static, Guards> {
     // A placed texture there arrives, goes or changes with no descriptor
     // written.
     crate::descriptor::host::remapped(at, len);
@@ -3852,14 +3910,10 @@ mod tests {
 
     /// Threads that write pages and ask at the same time, about ranges that
     /// overlap: each sees its own write in every answer that follows it,
-    /// whichever thread's asking cleared the kernel's bit (with
-    /// `VICTORY_WATCH_APART=1` the askings go side by side).
+    /// whichever thread's asking cleared the kernel's bit.
     #[test]
     fn askings_side_by_side_lose_no_write() {
         const PAGES: usize = 16;
-        // A second asking between an answer and its entry would find the
-        // kernel's bits cleared and the journal not told yet.
-        let _ = WIDEN.set(300);
         // SAFETY: a fresh write-watched allocation, freed at the end.
         let p = unsafe {
             VirtualAlloc(std::ptr::null(), PAGES * PAGE, MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH, PAGE_READWRITE)
@@ -3868,7 +3922,6 @@ mod tests {
         std::thread::scope(|s| {
             for t in 0..8usize {
                 s.spawn(move || {
-                    let mut written = Vec::new();
                     for i in 0..300usize {
                         let page = (t * 2 + i) % PAGES;
                         // SAFETY: committed pages of ours.
@@ -3876,8 +3929,7 @@ mod tests {
                         // A range that holds the page, of one to six pages.
                         let len = 1 + (i + t) % 6;
                         let from = page.saturating_sub(i % len).min(PAGES - len);
-                        let now = writes_into(p + from * PAGE, p + (from + len) * PAGE, false, &mut written)
-                            .expect("watched");
+                        let (now, written) = writes(p + from * PAGE, p + (from + len) * PAGE, false).expect("watched");
                         let mine = p / PAGE + page;
                         assert!(
                             written.iter().any(|&(q, w)| q == mine && w <= now),
@@ -4150,7 +4202,7 @@ mod tests {
         ask();
         assert!((0..3).all(known) == holes);
         {
-            let _changing = title_memory_remapping();
+            let _changing = title_memory_remapping(p, BLOCK);
             title_memory_unmapping(p, BLOCK);
             ask();
             assert!(!known(0) && !guards().held.contains(p / BLOCK));
@@ -4183,7 +4235,7 @@ mod tests {
         let at = view.Value as usize;
         assert_ne!(at, 0);
         assert!(writes(at, at + BLOCK, true).is_some());
-        let changing = title_memory_remapping();
+        let changing = title_memory_remapping(at, BLOCK);
         title_memory_unmapping(at, BLOCK);
         assert!(writes(at, at + BLOCK, true).is_some());
         {
@@ -4961,7 +5013,8 @@ mod tests {
         // a store that meets one opens the block, as before.
         let mut kept = 0;
         let quiet = || {
-            while title_memory_reading_now().is_none() {
+            // Any change of mapping, anywhere: as the one lock held all of it.
+            while title_memory_reading_now(0, usize::MAX).is_none() {
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
         };
@@ -5156,7 +5209,7 @@ mod tests {
         let pages: Vec<usize> = (0..3).map(|k| one / PAGE + k).collect();
         assert_eq!(guard(one, one + SIZE), Some(pages.clone()));
         assert_eq!(guard(one, one + SIZE), Some(Vec::new()));
-        let changing = title_memory_remapping();
+        let changing = title_memory_remapping(two, SIZE);
         title_memory_splitting(two, SIZE);
         title_memory_unmapping(two, SIZE);
         for _ in 0..2 {
@@ -5714,7 +5767,7 @@ mod many_askers_tests {
                         assert!(number > last[asked], "page {page}, through a new view: {number} is not after {}", last[asked]);
                         last[asked] = now.max(last[asked]);
                         {
-                            let _changing = super::title_memory_remapping();
+                            let _changing = super::title_memory_remapping(one, PAGE);
                             super::title_memory_unmapping(one, PAGE);
                             unsafe { UnmapViewOfFile(MEMORY_MAPPED_VIEW_ADDRESS { Value: one as *mut _ }) };
                         }
@@ -5762,7 +5815,7 @@ mod many_askers_tests {
                                 }
                                 continue;
                             }
-                            let reading = (next(3) == 0).then(super::title_memory_reading);
+                            let reading = (next(3) == 0).then(|| super::title_memory_reading(word, 8));
                             how = usize::from(reading.is_some());
                             let beside = reading.as_ref().and_then(|_| crate::inplace::beside(word, 8));
                             if let Some(to) = beside {

@@ -1854,11 +1854,6 @@ fn spin(there: impl Fn() -> bool) {
     }
 }
 
-/// How many threads are kept for [`wide`].
-fn wide_threads() -> usize {
-    std::thread::available_parallelism().map_or(4, |n| n.get() / 4).clamp(2, 6)
-}
-
 /// How many threads are kept for [`wide`] (`VICTORY_WIDE_THREADS`; a quarter
 /// of the processor's, 2 to 6, unless set). The fork whose switch this is
 /// (reddxd-byte/ShakiraRED-dt c2271e5) keeps half of them, 2 to 12; the
@@ -2006,26 +2001,24 @@ fn wide_apart(mut jobs: Vec<Job>) {
         return;
     }
     let workers = workers();
-    let left = Arc::new((Mutex::new(jobs.len()), std::sync::Condvar::new()));
+    let group = Arc::new(JobGroup {
+        left: std::sync::atomic::AtomicUsize::new(jobs.len()),
+        lock: Mutex::new(()),
+        done: std::sync::Condvar::new(),
+    });
     {
         let mut queue = workers.jobs.lock().unwrap_or_else(|e| e.into_inner());
-        for job in jobs {
-            let left = left.clone();
-            queue.push_back(Box::new(move || {
-                job();
-                let mut n = left.0.lock().unwrap_or_else(|e| e.into_inner());
-                *n -= 1;
-                if *n == 0 {
-                    left.1.notify_all();
-                }
-            }));
-        }
+        workers.there.fetch_add(jobs.len(), Ordering::AcqRel);
+        queue.extend(jobs.into_iter().map(|run| QueuedJob { run, group: group.clone() }));
     }
     workers.more.notify_all();
     own();
-    let mut n = left.0.lock().unwrap_or_else(|e| e.into_inner());
-    while *n > 0 {
-        n = left.1.wait(n).unwrap_or_else(|e| e.into_inner());
+    if group.left.load(Ordering::Acquire) != 0 {
+        let guard = group.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = group
+            .done
+            .wait_while(guard, |_| group.left.load(Ordering::Acquire) != 0)
+            .unwrap_or_else(|e| e.into_inner());
     }
 }
 
@@ -3205,9 +3198,9 @@ unsafe fn take_changed(at: usize, to: usize, held: *mut u8, out: &mut Taken) {
 mod merge_tests {
     use super::{
         CHUNK, PAGE, PIECE, SNAPS, Taken, WIDE_COMPARE_JOB, back_piece, changed_chunks,
-        changed_dword_runs, changed_runs, changed_runs_bytes, changed_runs_wide,
-        dword_runs, give_back, join_runs, pooled, put_changed, take_changed, take_snapshots,
-        word_runs,
+        changed_dword_runs, changed_runs, changed_runs_bytes, changed_runs_wide, changed_stretches,
+        compare_jobs, dword_runs, give_back, join_runs, pooled, put_changed, take_changed,
+        take_snapshots, word_runs,
     };
 
     /// Runs with fewer bytes between them than the gap become one, from the
@@ -3457,7 +3450,7 @@ mod merge_tests {
         put_changed(at, &[0; 64], &[3; 64]);
         let (began, wait) = std::sync::mpsc::channel();
         let change = std::thread::spawn(move || {
-            let _changing = crate::watch::title_memory_remapping();
+            let _changing = crate::watch::title_memory_remapping(at, 64);
             began.send(()).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(50));
             // SAFETY: the reservation's first page.
@@ -5547,7 +5540,7 @@ impl Shadow {
                 // refresh lie apart.
                 let held = unsafe { std::slice::from_raw_parts_mut(self.data.add(at - start), n) };
                 let was = crate::host::upcheck::on().then(|| held.to_vec());
-                let runs = if whole { vec![(0, n)] } else { dword_runs(at, held, title, 0) };
+                let runs = if whole { vec![(0, n)] } else { changed_dword_runs(at, held, title, 0) };
                 for &(a, len) in &runs {
                     held[a..a + len].copy_from_slice(&title[a..a + len]);
                     self.changed(at - start + a, at - start + a + len);
@@ -7139,7 +7132,7 @@ fn loose(
         let shadow = Arc::new(shadow);
         note(&shadow);
         map.insert((start, len), shadow.clone());
-        return Some(shadow);
+        return Some((shadow, false));
     }
     let (buffer, data) = host()?.shared_buffer(len)?;
     crate::host::name(&buffer, || format!("title memory {start:#x}+{len:#x}"));
