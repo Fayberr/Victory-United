@@ -1232,21 +1232,13 @@ fn emit_program(
     for e in &mut prims {
         e.interp = 1;
     }
-    // A mesh group's id arrives multiplied by max(threads, vertices,
-    // primitives) (the code divides by that); the thread count is in PSV0
-    // from runtime info version 2 on.
-    // shortcut: older containers fall back to the group's lane count, right
-    // when the HLSL group fills its waves (the title's do).
     let mesh_stride = match &native.io {
-        crate::native::StageIo::Ms(ms) => {
-            let psv = c.part(FourCC::PSV0).map(|p| p.data);
-            let threads = psv
-                .filter(|d| crate::dxbc::u32_at(d, 0).is_ok_and(|n| n >= 48))
-                .and_then(|d| crate::dxbc::u32_at(d, 4 + 36).ok());
-            threads.map_or(ms.threads, |t| {
-                t.max(ms.max_vertices).max(ms.max_primitives)
-            })
-        }
+        crate::native::StageIo::Ms(ms) => mesh_stride(
+            c.part(FourCC::PSV0).map(|p| p.data),
+            ms.threads,
+            ms.max_vertices,
+            ms.max_primitives,
+        ),
         _ => 0,
     };
     let l = lower::lower(&lower::Parts {
@@ -3698,5 +3690,51 @@ mod barycentric_tests {
         let [e0, e1] = exp_mrt0(4);
         let words = [0xC812_0000, e0, e1, S_ENDPGM];
         assert!(pixel(&words, PERSP_CENTER).is_err());
+    }
+}
+
+/// A mesh group's id arrives multiplied by max(threads, vertices, primitives) (the code divides
+/// by that). The HLSL thread count is X * Y * Z of PSV0's runtime info from version 2 on: only X
+/// was read, so a group of 8 x 8 threads with 32 vertices and primitives took 32 for 64; and
+/// without the runtime info the outputs were left out of the maximum (after upstream VIctory
+/// #3304).
+// shortcut: older containers fall back to the group's lane count, right when the HLSL group
+// fills its waves (the title's do).
+fn mesh_stride(psv: Option<&[u8]>, lanes: u32, max_vertices: u32, max_primitives: u32) -> u32 {
+    let threads = psv
+        .filter(|d| crate::dxbc::u32_at(d, 0).is_ok_and(|n| n >= 48))
+        .and_then(|d| {
+            let [x, y, z] = [36, 40, 44].map(|at| crate::dxbc::u32_at(d, 4 + at).ok());
+            x?.checked_mul(y?)?.checked_mul(z?).filter(|&n| n > 0)
+        })
+        .unwrap_or(lanes);
+    threads.max(max_vertices).max(max_primitives)
+}
+
+#[cfg(test)]
+mod mesh_stride_tests {
+    use super::mesh_stride;
+
+    /// The runtime info of a PSV0 part, version 2, with the group's three thread counts.
+    fn psv(x: u32, y: u32, z: u32) -> Vec<u8> {
+        let mut d = vec![0u8; 4 + 48];
+        d[..4].copy_from_slice(&48u32.to_le_bytes());
+        for (at, v) in [(40, x), (44, y), (48, z)] {
+            d[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        d
+    }
+
+    #[test]
+    fn mesh_stride_takes_every_thread_dimension_and_the_outputs() {
+        // 8 x 8 threads, 32 vertices and primitives: 64, not 32
+        assert_eq!(mesh_stride(Some(&psv(8, 8, 1)), 64, 32, 32), 64);
+        assert_eq!(mesh_stride(Some(&psv(4, 4, 4)), 64, 16, 16), 64);
+        // one dimension, outputs larger
+        assert_eq!(mesh_stride(Some(&psv(128, 1, 1)), 128, 64, 126), 128);
+        assert_eq!(mesh_stride(Some(&psv(32, 1, 1)), 32, 64, 126), 126);
+        // no runtime info (or zeroed counts): the lane count, still against the outputs
+        assert_eq!(mesh_stride(None, 32, 64, 126), 126);
+        assert_eq!(mesh_stride(Some(&psv(0, 0, 0)), 32, 16, 16), 32);
     }
 }
