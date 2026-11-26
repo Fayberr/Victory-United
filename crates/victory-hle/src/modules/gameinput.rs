@@ -61,82 +61,13 @@ const DEVICES: usize = PADS + 2;
 const HISTORY: usize = 256;
 const POLL: Duration = Duration::from_millis(8);
 
-<<<<<<< HEAD
 const TAB: u8 = 0x09;
-||||||| a66ac212
-/// The keyboard's stand-in gamepad (virtual key, button); README lists it.
-/// Sticks: W/A/S/D left, I/J/K/L right; triggers Z and C.
-const FALLBACK_BUTTONS: [(u8, u32); 14] = [
-    (0x1B, MENU), // Esc
-    (0x09, VIEW), // Tab
-    (0x0D, A),    // Enter
-    (0x08, B),    // Backspace
-    (b'X', X),
-    (b'Y', Y),
-    (0x26, UP), // arrows
-    (0x28, DOWN),
-    (0x25, LEFT),
-    (0x27, RIGHT),
-    (b'Q', LEFT_SHOULDER),
-    (b'E', RIGHT_SHOULDER),
-    (b'F', LEFT_STICK),
-    (b'H', RIGHT_STICK),
-];
 
-/// A gamepad reading: triggers 0 to 1, sticks -1 to 1 (up positive).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct PadState {
-    buttons: u32,
-    left_trigger: f32,
-    right_trigger: f32,
-    left_x: f32,
-    left_y: f32,
-    right_x: f32,
-    right_y: f32,
-}
-=======
-/// (Neptune) The key that is the stand-in pad's A: the space bar (it was Enter).
-const A_KEY: u8 = 0x20;
-
-/// The keyboard's stand-in gamepad (virtual key, button); README lists it.
-/// Sticks: W/A/S/D left, I/J/K/L right; triggers Z and C.
-const FALLBACK_BUTTONS: [(u8, u32); 18] = [
-    // (Neptune) Shift pushes the left stick in, Ctrl the right one (either
-    // side's key; devices report the sided keys only).
-    (0xA0, LEFT_STICK),
-    (0xA1, LEFT_STICK),
-    (0xA2, RIGHT_STICK),
-    (0xA3, RIGHT_STICK),
-    (0x1B, MENU), // Esc
-    (0x09, VIEW), // Tab
-    (A_KEY, A),   // Space
-    (0x08, B),    // Backspace
-    (b'X', X),
-    (b'Y', Y),
-    (0x26, UP), // arrows
-    (0x28, DOWN),
-    (0x25, LEFT),
-    (0x27, RIGHT),
-    (b'Q', LEFT_SHOULDER),
-    (b'E', RIGHT_SHOULDER),
-    (b'F', LEFT_STICK),
-    (b'H', RIGHT_STICK),
-];
-
-/// A gamepad reading: triggers 0 to 1, sticks -1 to 1 (up positive).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct PadState {
-    buttons: u32,
-    left_trigger: f32,
-    right_trigger: f32,
-    left_x: f32,
-    left_y: f32,
-    right_x: f32,
-    right_y: f32,
-}
->>>>>>> klbf/beta-2
+/// (Neptune) The key that is the stand-in pad's A: Enter, which the default
+/// key layout gives A (`A = Shift, Enter`); theirs had made it the space
+/// bar, which our layout gives X. `VICTORY_AUTO_A` presses this key for the
+/// title's "press A" screens.
+const A_KEY: u8 = 0x0D;
 
 /// One key held down: scan code (0xE0xx when extended), character, key.
 #[repr(C)]
@@ -170,7 +101,6 @@ trait Source: Send {
     fn rumble(&mut self, slot: usize, low: u16, high: u16);
 }
 
-<<<<<<< HEAD
 /// How many current readings the title has taken: what a [`Latch`] counts
 /// its looks by.
 static LOOKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -208,74 +138,8 @@ impl Latch {
             if !self.held.iter().any(|h| h.0 == id) {
                 self.held.push((id, looks, now));
             }
-||||||| a66ac212
-fn fallback(keys: &[KeyState]) -> PadState {
-    let on = |vk: u8| {
-        if keys.iter().any(|k| k.virtual_key == vk) {
-            1.0
-        } else {
-            0.0
-=======
-/// The mouse as the stand-in pad reads it (Neptune): the right button is
-/// the left trigger, the left button the right trigger, and movement the
-/// right stick (-1 to 1, up positive).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct Mouse {
-    left: bool,
-    right: bool,
-    x: f32,
-    y: f32,
-}
-
-/// The host's mouse; nothing where there is none.
-fn mouse() -> Mouse {
-    #[cfg(windows)]
-    {
-        host::mouse()
-    }
-    #[cfg(not(windows))]
-    {
-        Mouse::default()
-    }
-}
-
-fn fallback(keys: &[KeyState], mouse: Mouse) -> PadState {
-    let on = |vk: u8| {
-        if keys.iter().any(|k| k.virtual_key == vk) {
-            1.0
-        } else {
-            0.0
->>>>>>> klbf/beta-2
         }
-<<<<<<< HEAD
         self.held.iter().map(|h| h.0).collect()
-||||||| a66ac212
-    };
-    PadState {
-        buttons: FALLBACK_BUTTONS
-            .iter()
-            .filter(|(vk, _)| on(*vk) != 0.0)
-            .fold(0, |all, (_, bit)| all | bit),
-        left_trigger: on(b'Z'),
-        right_trigger: on(b'C'),
-        left_x: on(b'D') - on(b'A'),
-        left_y: on(b'W') - on(b'S'),
-        right_x: on(b'L') - on(b'J'),
-        right_y: on(b'I') - on(b'K'),
-=======
-    };
-    PadState {
-        buttons: FALLBACK_BUTTONS
-            .iter()
-            .filter(|(vk, _)| on(*vk) != 0.0)
-            .fold(0, |all, (_, bit)| all | bit),
-        left_trigger: f32::max(on(b'Z'), f32::from(u8::from(mouse.right))),
-        right_trigger: f32::max(on(b'C'), f32::from(u8::from(mouse.left))),
-        left_x: on(b'D') - on(b'A'),
-        left_y: on(b'W') - on(b'S'),
-        right_x: (on(b'L') - on(b'J') + mouse.x).clamp(-1.0, 1.0),
-        right_y: (on(b'I') - on(b'K') + mouse.y).clamp(-1.0, 1.0),
->>>>>>> klbf/beta-2
     }
 }
 
@@ -796,7 +660,6 @@ impl State {
             c.feed(&held, counts);
             c.set_script(script_pad.unwrap_or_default());
         }
-<<<<<<< HEAD
         self.script = script_pad;
         self.host_pads = pads;
         self.one_pad = one_pad;
@@ -805,13 +668,6 @@ impl State {
         self.publish(devices, now, None, &mut events);
         let mut keys = keys;
         keys.extend(script);
-||||||| a66ac212
-        let fallback = (!any_pad).then(|| Value::Pad(fallback(&keys)));
-        self.update(devices, FALLBACK, fallback, now, &mut events);
-=======
-        let fallback = (!any_pad).then(|| Value::Pad(fallback(&keys, mouse())));
-        self.update(devices, FALLBACK, fallback, now, &mut events);
->>>>>>> klbf/beta-2
         self.update(devices, KEYBOARD, Some(Value::Keys(keys)), now, &mut events);
         events
     }
@@ -2216,17 +2072,9 @@ mod host {
     }
 
     /// Debugging aid: `VICTORY_KEYS=<seconds>:<key>,...` holds each key for
-<<<<<<< HEAD
     /// 0.2 s that long after input starts (`<from>-<to>:<key>`: all that
     /// time), with or without focus. A key is a
-    /// letter, a digit, or `Enter`, `Esc`, `Tab`, `Back`, `Up`, `Down`,
-||||||| a66ac212
-    /// 0.2 s that long after input starts, with or without focus. A key is a
-    /// letter, a digit, or `Enter`, `Esc`, `Tab`, `Back`, `Up`, `Down`,
-=======
-    /// 0.2 s that long after input starts, with or without focus. A key is a
     /// letter, a digit, or `Space`, `Enter`, `Esc`, `Tab`, `Back`, `Up`, `Down`,
->>>>>>> klbf/beta-2
     /// `Left`, `Right` (the stand-in pad's table maps them to buttons).
     #[cfg(feature = "diagnostics")]
     fn scripted() -> Vec<u8> {
@@ -2266,7 +2114,6 @@ mod host {
             .collect()
     }
 
-<<<<<<< HEAD
     /// Debugging aid: `VICTORY_KBM_SCRIPT=<seconds>:<key>[*<hold seconds>],...`
     /// plays keyboard and mouse input into the controls layer as if held
     /// (with or without focus or capture). A key is a `[controls]` key name
@@ -2284,146 +2131,6 @@ mod host {
             Key(u8),
             Mouse(f64, f64),
             Wheel(i32),
-||||||| a66ac212
-    /// The foreground window is one of ours (the title's or our fallback).
-    fn focused() -> bool {
-        let mut process = 0;
-        // SAFETY: plain queries; a null window gives process 0.
-        unsafe {
-            GetWindowThreadProcessId(GetForegroundWindow(), &mut process);
-            process == GetCurrentProcessId()
-=======
-    /// The mouse for the stand-in pad. The pointer is the user's own, and
-    /// gives the pad nothing, until a click on the picture (or F9) takes
-    /// it: from then the buttons are the triggers and its movement since
-    /// the last reading is a stick (smoothed over a few readings;
-    /// `VICTORY_MOUSE` scales it, default 1), and it is hidden and put back
-    /// at the picture's middle after each reading. F9 lets it go, and so
-    /// does the window losing focus; it is not taken again before the next
-    /// click on the picture.
-    pub(super) fn mouse() -> Mouse {
-        use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering::Relaxed};
-        use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            CallWindowProcW, GWLP_WNDPROC, GetCursorPos, GetWindowInfo, GetWindowLongPtrW, SetCursor,
-            SetCursorPos, SetWindowLongPtrW, WINDOWINFO, WNDPROC,
-        };
-        /// The pointer is taken: the window shows no cursor over its picture.
-        static TAKEN: AtomicBool = AtomicBool::new(false);
-        /// The window whose procedure `hidden` stands before, and that procedure.
-        static BEFORE: [AtomicIsize; 2] = [AtomicIsize::new(0), AtomicIsize::new(0)];
-        /// Stands before the window's own procedure: no cursor over the
-        /// picture while the pointer is taken.
-        unsafe extern "system" fn hidden(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESULT {
-            const WM_SETCURSOR: u32 = 0x20;
-            const HTCLIENT: isize = 1;
-            // SAFETY: no cursor is a valid cursor; `BEFORE[1]` is the procedure the
-            // window had, stored before ours was set.
-            unsafe {
-                if message == WM_SETCURSOR && TAKEN.load(Relaxed) && (l & 0xffff) == HTCLIENT {
-                    SetCursor(std::ptr::null_mut());
-                    return 1;
-                }
-                let own: WNDPROC = std::mem::transmute::<isize, WNDPROC>(BEFORE[1].load(Relaxed));
-                CallWindowProcW(own, hwnd, message, w, l)
-            }
-        }
-        struct Held {
-            taken: bool,
-            f9: bool,
-            fresh: bool,
-            /// The left button at the last reading.
-            left: bool,
-            /// The click that took the pointer is still held: no trigger pull.
-            click: bool,
-            x: f32,
-            y: f32,
-        }
-        static HELD: std::sync::Mutex<Held> = std::sync::Mutex::new(Held {
-            taken: false,
-            f9: false,
-            fresh: true,
-            left: false,
-            click: false,
-            x: 0.0,
-            y: 0.0,
-        });
-        static SCALE: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| {
-            std::env::var("VICTORY_MOUSE").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(1.0)
-        });
-        let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
-        if !focused() {
-            (held.taken, held.fresh, held.x, held.y) = (false, true, 0.0, 0.0);
-            (held.left, held.click) = (false, false);
-            TAKEN.store(false, Relaxed);
-            return Mouse::default();
-        }
-        // SAFETY: plain queries, a pointer move inside our own window, and our
-        // procedure set before that window's own, which it calls.
-        unsafe {
-            let f9 = GetAsyncKeyState(0x78) < 0;
-            if f9 && !held.f9 {
-                (held.taken, held.fresh, held.x, held.y) = (!held.taken, true, 0.0, 0.0);
-            }
-            held.f9 = f9;
-            let hwnd = GetForegroundWindow();
-            let mut info: WINDOWINFO = std::mem::zeroed();
-            info.cbSize = size_of::<WINDOWINFO>() as u32;
-            let mut at = POINT { x: 0, y: 0 };
-            if GetWindowInfo(hwnd, &mut info) == 0 || GetCursorPos(&mut at) == 0 {
-                TAKEN.store(false, Relaxed);
-                return Mouse::default();
-            }
-            let picture = info.rcClient;
-            let (left, right) = (GetAsyncKeyState(0x01) < 0, GetAsyncKeyState(0x02) < 0);
-            if !held.taken {
-                TAKEN.store(false, Relaxed);
-                let over =
-                    at.x >= picture.left && at.x < picture.right && at.y >= picture.top && at.y < picture.bottom;
-                let clicked = left && !held.left && over;
-                held.left = left;
-                if !clicked {
-                    return Mouse::default();
-                }
-                (held.taken, held.fresh, held.click, held.x, held.y) = (true, true, true, 0.0, 0.0);
-            }
-            held.left = left;
-            held.click &= left;
-            let left = left && !held.click;
-            if !TAKEN.swap(true, Relaxed) && BEFORE[0].load(Relaxed) == 0 {
-                let own = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
-                if own != 0 {
-                    BEFORE[1].store(own, Relaxed);
-                    BEFORE[0].store(hwnd as isize, Relaxed);
-                    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, hidden as *const () as usize as isize);
-                }
-            }
-            let middle = ((picture.left + picture.right) / 2, (picture.top + picture.bottom) / 2);
-            // (the first reading after it is taken: where the pointer was says nothing)
-            let (dx, dy) = if held.fresh { (0, 0) } else { (at.x - middle.0, at.y - middle.1) };
-            held.fresh = false;
-            SetCursorPos(middle.0, middle.1);
-            // About 8 pixels a reading (1000 a second) is the stick at its end.
-            const GAIN: f32 = 0.025;
-            held.x = held.x * 0.8 + dx as f32 * GAIN * *SCALE;
-            held.y = held.y * 0.8 + dy as f32 * GAIN * *SCALE;
-            Mouse {
-                left,
-                right,
-                x: held.x.clamp(-1.0, 1.0),
-                y: (-held.y).clamp(-1.0, 1.0),
-            }
-        }
-    }
-
-    /// The foreground window is one of ours (the title's or our fallback).
-    fn focused() -> bool {
-        let mut process = 0;
-        // SAFETY: plain queries; a null window gives process 0.
-        unsafe {
-            GetWindowThreadProcessId(GetForegroundWindow(), &mut process);
-            process == GetCurrentProcessId()
->>>>>>> klbf/beta-2
         }
 
         pub(super) struct Script {
@@ -2844,13 +2551,7 @@ mod tests {
         register(hub, KEYBOARD_KIND, 2, &log);
         assert_eq!(*log.lock().unwrap(), [(KEYBOARD, STATUS_CONNECTED, 0)]);
 
-<<<<<<< HEAD
         let keys = vec![key(b'W'), key(0x0D), key(b'L'), key(b'O')];
-||||||| a66ac212
-        let keys = vec![key(b'W'), key(0x0D), key(b'L'), key(b'C')];
-=======
-        let keys = vec![key(b'W'), key(A_KEY), key(b'L'), key(b'C')];
->>>>>>> klbf/beta-2
         host.lock().unwrap().keys = keys.clone();
         hub.poll();
         let r = current(hub, KEYBOARD_KIND, KEYBOARD).unwrap();
