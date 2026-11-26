@@ -1490,7 +1490,7 @@ fn fill_plane(
     bytes: usize,
     pitch: usize,
 ) {
-    let _pin = crate::watch::title_memory_reading();
+    let _pin = crate::watch::title_memory_reading(at, len);
     // SAFETY: the list owns this full upload allocation until its GPU work completes.
     let out = unsafe { std::slice::from_raw_parts_mut(dst as *mut u8, bytes) };
     let mip = &layout.mips[0];
@@ -3193,6 +3193,7 @@ mod title_memory_tests {
             judged: [const { std::sync::atomic::AtomicU64::new(0) }; 2],
             waiting: std::sync::atomic::AtomicU64::new(0),
             pooled: 0,
+            exact: std::sync::atomic::AtomicBool::new(false),
             base: 0,
             piece: None,
         };

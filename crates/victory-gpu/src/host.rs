@@ -1083,7 +1083,7 @@ fn timed(step: &Step) -> bool {
     match step {
         Step::Copy(..) | Step::Fill(..) => true,
         Step::Run(..) | Step::Host(..) => cfg!(feature = "diagnostics"),
-        Step::Refresh(..) | Step::GpuWrite(..) | Step::Texture { .. } | Step::Tiles(_) | Step::Placed(_) => false,
+        Step::Refresh(..) | Step::GpuWrite(..) | Step::Texture { .. } | Step::Tiles(_) | Step::Placed(_) | Step::Plane(..) => false,
     }
 }
 
@@ -13177,7 +13177,6 @@ struct Presenter {
     ahead: Vec<(HostList, u64)>,
     hwnd: HWND,
     meter: Meter,
-    composer: Option<crate::compose::Composer>,
     #[cfg(feature = "diagnostics")]
     panel: panel::Panel,
 }
@@ -13674,10 +13673,13 @@ impl Host {
         frame: u64,
         over: Option<(&ID3D12Resource, u32)>,
     ) -> Option<bool> {
-        self.present_planes(texture, state, over, frame)
+        let showing = std::time::Instant::now();
+        let shown = self.present_now(texture, state, frame, over);
+        crate::framelog::add(crate::framelog::T::PresentShowUs, showing.elapsed().as_micros() as u64);
+        shown
     }
 
-    /// Presents a base plane and an optional overlay.
+    /// Backwards compatibility if needed.
     pub(crate) fn present_planes(
         &self,
         texture: &ID3D12Resource,
@@ -13685,39 +13687,21 @@ impl Host {
         overlay: Option<(&ID3D12Resource, u32)>,
         frame: u64,
     ) -> Option<bool> {
-        let showing = std::time::Instant::now();
-        let shown = self.present_now(texture, state, overlay, frame);
-        crate::framelog::add(crate::framelog::T::PresentShowUs, showing.elapsed().as_micros() as u64);
-        shown
+        self.present(texture, state, frame, overlay)
     }
 
     fn present_now(
         &self,
         texture: &ID3D12Resource,
         state: u32,
-        overlay: Option<(&ID3D12Resource, u32)>,
         frame: u64,
+        over: Option<(&ID3D12Resource, u32)>,
     ) -> Option<bool> {
         // SAFETY: a live resource.
         let desc = unsafe { texture.GetDesc() };
-        let planes = overlay.and_then(|(over, over_state)| {
-            // SAFETY: a live overlay resource.
-            let over_desc = unsafe { over.GetDesc() };
-            Some((
-                over,
-                D3D12_RESOURCE_STATES(over_state as i32),
-                crate::compose::view(&desc)?,
-                crate::compose::view(&over_desc)?,
-            ))
-        });
-        let format = if planes.is_some() {
-            DXGI_FORMAT_R8G8B8A8_UNORM
-        } else {
-            let Some(format) = swap_format(desc.Format) else {
-                tracing::warn!(format = desc.Format.0, "cannot present this format");
-                return None;
-            };
-            format
+        let Some(format) = swap_format(desc.Format) else {
+            tracing::warn!(format = desc.Format.0, "cannot present this format");
+            return None;
         };
         let (width, height) = (desc.Width as u32, desc.Height);
         let mut presenter = self.presenter.lock().unwrap_or_else(|e| e.into_inner());
@@ -13730,18 +13714,7 @@ impl Host {
                 }
             };
         }
-        let state_u32 = state;
         let p = presenter.as_mut()?;
-        if planes.is_some() && p.composer.is_none() {
-            match crate::compose::Composer::new(self, format) {
-                Ok(c) => p.composer = Some(c),
-                Err(e) => {
-                    tracing::warn!(error = %e, "two-plane composer not made; showing base plane only");
-                    drop(presenter);
-                    return self.present_planes(texture, state_u32, None, frame);
-                }
-            }
-        }
         if (p.width, p.height, p.format) != (width, height, format) {
             // Presents sent ahead hold back buffers until they have run.
             settle_now(WHY_SYNC);
@@ -13752,9 +13725,6 @@ impl Host {
             };
             match resized {
                 Ok(()) => {
-                    if p.format != format {
-                        p.composer = None;
-                    }
                     (p.width, p.height, p.format) = (width, height, format);
                     tracing::info!(
                         width,
@@ -13771,18 +13741,8 @@ impl Host {
                 }
             }
         }
-        if planes.is_some() && p.composer.is_none() {
-            match crate::compose::Composer::new(self, format) {
-                Ok(c) => p.composer = Some(c),
-                Err(e) => {
-                    tracing::warn!(error = %e, "two-plane composer not made after resize; showing base plane only");
-                    drop(presenter);
-                    return self.present_planes(texture, state_u32, None, frame);
-                }
-            }
-        }
-        let state = D3D12_RESOURCE_STATES(state_u32 as i32);
-        // SAFETY: our swap chain, list and live source texture(s).
+        let state = D3D12_RESOURCE_STATES(state as i32);
+        // SAFETY: our swap chain, list and a live source texture.
         unsafe {
             let index = p.swap_chain.GetCurrentBackBufferIndex();
             let Ok(back) = p.swap_chain.GetBuffer::<ID3D12Resource>(index) else {
@@ -13811,152 +13771,65 @@ impl Host {
                 None => &p.copy,
             };
             copy.reset();
-            copy.keep(texture);
             let list = &copy.list;
-            let composed = if let Some((over, over_state, base_fmt, over_fmt)) = planes {
-                copy.keep(over);
-                if let Some(composer) = p.composer.as_mut() {
-                    let mut pre = Vec::with_capacity(3);
-                    if state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE {
-                        pre.push(transition(texture, state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
-                    }
-                    if over_state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE {
-                        pre.push(transition(over, over_state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
-                    }
-                    pre.push(transition(&back, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
-                    list.ResourceBarrier(&pre);
-                    let compose_slot = slot.map_or(0, |i| i + 1);
-                    if let Err(err) = composer.record(
-                        self,
-                        compose_slot,
-                        list,
-                        [(texture, base_fmt), (over, over_fmt)],
-                        &back,
-                        (width, height),
-                    ) {
-                        copy.close();
-                        drop(back);
-                        drop(presenter);
-                        tracing::warn!(%err, "could not record display composite; presenting the base plane");
-                        return self.present_planes(texture, state_u32, None, frame);
-                    }
-                    static ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-                    if !ONCE.swap(true, Ordering::Relaxed) {
-                        tracing::info!(
-                            frame,
-                            width,
-                            height,
-                            base_format = base_fmt.0,
-                            overlay_format = over_fmt.0,
-                            "display output: compositing two planes (overlay active)"
-                        );
-                    }
-                    let mut post = Vec::with_capacity(3);
-                    if state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE {
-                        post.push(transition(texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, state));
-                    }
-                    if over_state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE {
-                        post.push(transition(over, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, over_state));
-                    }
-                    post.push(transition(
-                        &back,
-                        D3D12_RESOURCE_STATE_RENDER_TARGET,
-                        D3D12_RESOURCE_STATE_COPY_DEST,
-                    ));
-                    list.ResourceBarrier(&post);
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-            if !composed {
-                let base_to_copy = transition(texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE);
-                let back_to_copy = transition(
+            let laid = over.and_then(|(ui, ui_state)| {
+                crate::compose::record(&self.device, list, texture, ui, ui_state)
+            });
+            if let Some(laid) = &laid {
+                copy.keep(laid);
+            }
+            list.ResourceBarrier(&[
+                transition(texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE),
+                transition(
                     &back,
                     D3D12_RESOURCE_STATE_PRESENT,
                     D3D12_RESOURCE_STATE_COPY_DEST,
-                );
-                let pre = [base_to_copy, back_to_copy];
-                list.ResourceBarrier(&pre[usize::from(state == D3D12_RESOURCE_STATE_COPY_SOURCE)..]);
-                list.CopyResource(&back, texture);
-            }
-            // Draw the frame rate on the back buffer, leaving the title's plane intact.
+                ),
+            ]);
+            list.CopyResource(&back, laid.as_ref().unwrap_or(texture));
+            // The frame rate, into the corner of what is shown (not of the
+            // title's own frame, which the lines below read back).
             crate::fpsbox::draw(self, list, &back, (width, height, format));
-            let traced = crate::present_trace::on().then(|| {
-                let copy_source = D3D12_RESOURCE_STATE_COPY_SOURCE;
-                let moved = composed && !state.contains(copy_source);
-                if moved {
-                    list.ResourceBarrier(&[transition(texture, state, copy_source)]);
-                }
-                let trace = crate::present_trace::record(&self.device, list, texture);
-                if moved {
-                    list.ResourceBarrier(&[transition(texture, copy_source, state)]);
-                }
-                trace
-            }).flatten();
-            #[cfg(feature = "diagnostics")]
-            let capture = crate::capture::wanted(frame)
-                .then(|| {
-                    if composed {
-                        list.ResourceBarrier(&[transition(
-                            &back,
-                            D3D12_RESOURCE_STATE_COPY_DEST,
-                            D3D12_RESOURCE_STATE_COPY_SOURCE,
-                        )]);
-                        let res = crate::capture::read_back(&self.device, list, &back);
-                        list.ResourceBarrier(&[transition(
-                            &back,
-                            D3D12_RESOURCE_STATE_COPY_SOURCE,
-                            D3D12_RESOURCE_STATE_COPY_DEST,
-                        )]);
-                        res
-                    } else {
-                        crate::capture::read_back(&self.device, list, texture)
-                    }
-                })
+            let traced = crate::present_trace::on()
+                .then(|| crate::present_trace::record(&self.device, list, texture))
                 .flatten();
             #[cfg(feature = "diagnostics")]
-            let probe = if slot.is_some() || composed {
-                None
-            } else {
-                crate::capture::probe(&self.device, list, texture)
-            };
+            let capture = crate::capture::wanted(frame)
+                .then(|| crate::capture::read_back(&self.device, list, texture))
+                .flatten();
             #[cfg(feature = "diagnostics")]
-            let watched = if composed {
-                None
-            } else {
-                crate::popwatch::take(&self.device, list, texture)
-            };
+            let probe = if slot.is_some() { None } else { crate::capture::probe(&self.device, list, texture) };
+            #[cfg(feature = "diagnostics")]
+            let watched = crate::popwatch::take(&self.device, list, texture);
             #[cfg(feature = "diagnostics")]
             p.panel.draw(self, copy, &back, (width, height), format);
             #[cfg(not(feature = "diagnostics"))]
             let _ = frame;
-            // The overlay can still be drawn over the copy when the base
-            // plane cannot be sampled by the two-plane compositor.
+            // The present's second plane, if it has one (e.g. Series S HUD
+            // plane over game plane), goes over the copy (`crate::over`):
+            // the back buffer is a target meanwhile.
             let readable = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-            let over = overlay.filter(|_| !composed).and_then(|(plane, was)| {
-                let format = crate::compose::view(&plane.GetDesc())?;
+            let over = over.and_then(|(plane, was)| {
+                // SAFETY: a live resource.
+                let format = swap_format(plane.GetDesc().Format)?;
                 Some((plane, D3D12_RESOURCE_STATES(was as i32), format))
             });
+            let mut drawn = false;
             if let Some((plane, was, plane_format)) = over {
-                copy.keep(plane);
-                let mut barriers = Vec::with_capacity(3);
-                if state != D3D12_RESOURCE_STATE_COPY_SOURCE {
-                    barriers.push(transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state));
-                }
-                barriers.push(transition(
-                    &back,
-                    D3D12_RESOURCE_STATE_COPY_DEST,
-                    D3D12_RESOURCE_STATE_RENDER_TARGET,
-                ));
-                let moved = !was.contains(readable);
+                let mut barriers = vec![
+                    transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state),
+                    transition(
+                        &back,
+                        D3D12_RESOURCE_STATE_COPY_DEST,
+                        D3D12_RESOURCE_STATE_RENDER_TARGET,
+                    ),
+                ];
+                let moved = was.0 & readable.0 == 0;
                 if moved {
                     barriers.push(transition(plane, was, readable));
                 }
                 list.ResourceBarrier(&barriers);
-                crate::over::record(
+                drawn = crate::over::record(
                     &self.device,
                     list,
                     &back,
@@ -13975,17 +13848,16 @@ impl Host {
                 }
                 list.ResourceBarrier(&barriers);
             } else {
-                let barriers = [
+                list.ResourceBarrier(&[
                     transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state),
                     transition(
                         &back,
                         D3D12_RESOURCE_STATE_COPY_DEST,
                         D3D12_RESOURCE_STATE_PRESENT,
                     ),
-                ];
-                let base_restored = composed || state == D3D12_RESOURCE_STATE_COPY_SOURCE;
-                list.ResourceBarrier(&barriers[usize::from(base_restored)..]);
+                ]);
             }
+            let _ = drawn;
             copy.close();
             let mut sent = 0;
             let flown = match slot {
@@ -14094,7 +13966,6 @@ impl Host {
                 ahead: Vec::new(),
                 hwnd,
                 meter: Meter::new(),
-                composer: None,
                 #[cfg(feature = "diagnostics")]
                 panel: panel::Panel::new(),
             })

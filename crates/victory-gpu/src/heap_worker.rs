@@ -276,7 +276,7 @@ fn worker() {
             let heap = heap.heap();
             if let Some(host) = heap.host() {
                 let mut batch = Batch::new(heap);
-                crate::draw::State::heap_textures(crate::draw::Into::Ahead(&mut batch), heap, host);
+                crate::draw::State::heap_textures(crate::draw::Into::Ahead(&mut batch), heap, host, None);
             }
         }
         STATS[0].fetch_add(started.elapsed().as_nanos() as u64, Relaxed);

@@ -2809,7 +2809,7 @@ impl HostHeap {
         slots.dedup();
         slots.retain(|&slot| !self.tabled_lately(slot, frame));
         let mut textures = self.textures.lock().unwrap_or_else(|e| e.into_inner());
-        slots.retain(|slot| textures.slots.get(slot).is_none_or(|w| w.mapped > 0 || w.checked.2 != 0));
+        slots.retain(|slot| textures.slots.get(slot).is_none_or(|w| w.mapped > 0 || textures.rechecks.contains_key(slot)));
         for &slot in &slots {
             textures.changed(slot, frame, frame);
         }
@@ -3361,7 +3361,7 @@ impl HostHeap {
                 self.quick_is(index, 0);
                 self.clear_twin(index);
                 self.made.set(index, key);
-                self.keep(index, kept);
+                self.keep(index, kept.kept);
                 (true, stale)
             } else {
                 (false, stale)

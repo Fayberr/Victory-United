@@ -10,6 +10,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use victory_shader::resource::RootIndexedView;
 use victory_shader::{ResourceType, RootType, UsedResource};
 
 use crate::descriptor::View;
@@ -235,7 +236,7 @@ static BAKE_UPLOAD: std::sync::Mutex<Option<BakeList>> = std::sync::Mutex::new(N
 /// Pending descriptor publications for a synchronous bake upload pass: slots
 /// stay on `neutral()` (or their previous compatible view) until the dedicated
 /// upload list has finished executing on the host GPU.
-struct BakeSync {
+pub(crate) struct BakeSync {
     publish: Vec<(u32, u64, u64)>,
     keep: Vec<std::sync::Arc<crate::resource::HostTexture>>,
 }
@@ -3598,7 +3599,7 @@ impl State {
                     }
                     BAKE_SERVED.store(0, Ordering::Relaxed);
                     PASS_BUDGET.set(Some((left, 2 << 30, true)));
-                    served = self.heap_textures(bake_list, heap, host, Some(&mut sync));
+                    served = Self::heap_textures(Into::List(bake_list), heap, host, Some(&mut sync));
                     PASS_BUDGET.set(None);
                 }
                 crate::texture::BAKING.set(false);
@@ -3653,7 +3654,7 @@ impl State {
         };
         EARLY_TEXTURE_PASSES[0].fetch_add(1, Ordering::Relaxed);
         PASS_BUDGET.set(Some((budget.0, budget.1, false)));
-        let _ = self.heap_textures(list, heap, host, None);
+        let _ = Self::heap_textures(Into::List(list), heap, host, None);
         PASS_BUDGET.set(None);
     }
 
@@ -4168,9 +4169,9 @@ impl State {
                         let _ = host.mirror(index, handle, true);
                     }
                     // Its bytes are in, or on the way there in a list before.
-                    if late && texture.is_some_and(crate::pool::fresh) && !crate::texture::ahead::there(resource) {
+                    if late && crate::pool::fresh(texture) && !crate::texture::ahead::there(resource) {
                         if let Some(handle) = heap.handle(index) {
-                            host.texture_slot_show_after(list, index, handle);
+                            show_after(&mut into, index, handle);
                         }
                     } else {
                         at_once();
@@ -4223,7 +4224,7 @@ impl State {
                     Into::List(list) => readable(list, sampled.kind, view),
                     Into::Ahead(batch) => {
                         let Some(list) = batch.list() else {
-                            return;
+                            return false;
                         };
                         readable(list, sampled.kind, view);
                         if let (Some(handle), Some((_, key))) = (heap.handle(index), &record) {
@@ -5358,7 +5359,7 @@ impl State {
             // which may lie over slots shaders pick by index, only the ones
             // the shader names.)
             if let Some(title) = title_first {
-                for k in (0..n).filter(|&k| n <= 64 || group.entry(k).is_some()) {
+                for k in (0..n).filter(|&k| n <= 64 || entries.iter().any(|u| u.table_offset_dwords / 8 == k)) {
                     host.slot_tabled(title + k);
                 }
             }
@@ -5386,8 +5387,7 @@ impl State {
                         }
                         _ => None,
                     }
-                        .map(|u| u.kind)
-                        .or_else(|| selected.binary_search(&k).ok().and(listed.kind));
+                    .or_else(|| selected.binary_search(&k).ok().and(listed.kind));
                     let was = (listed.ready, listed.tabled);
                     if let Some(kind) = kind {
                         let tested = TESTED_DEPTH.get();

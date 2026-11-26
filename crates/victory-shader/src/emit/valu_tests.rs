@@ -3039,7 +3039,7 @@ fn halves_go_through_a_table_as_they_are_and_name_their_views() {
         let stride_words = [8 | super::VIEW_INTEGER; 2];
         let mut roots = vec![(0, Root::Constants(ud))];
         if shader.root_srvs.contains(&super::SLOT_TABLE_STRIDES) {
-            roots.push((1, Root::View { srv: true, data: &stride_words }));
+            roots.push((1, Root::View { srv: true, data: stride_words.to_vec() }));
         }
         let out = host
             .dispatch(

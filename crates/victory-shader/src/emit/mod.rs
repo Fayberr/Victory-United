@@ -889,7 +889,7 @@ fn emit_forms(
         }
         if wide_last {
             let deep_on = std::env::var_os("VICTORY_WAVE_DEEP_SKIPS").is_none_or(|v| v != "0");
-            let deep = if deep_on { form(ir::without_skips(p, true)) } else { None };
+            let deep = if deep_on { form("without skips, scalars followed", ir::without_skips(p, true)) } else { None };
             let bases = [
                 deep.as_ref().map(|f| &f.0),
                 forms[1].1.as_ref().map(|f| &f.0),
@@ -897,7 +897,7 @@ fn emit_forms(
                 Some(p),
             ];
             if let Some(base) = bases.into_iter().flatten().next() {
-                let again = widen(c, native, base, why);
+                let again = widen(c, native, base, why, false);
                 report("wave-wide branches (last)", &again);
                 if done(&again) {
                     return again;
