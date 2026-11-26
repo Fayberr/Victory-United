@@ -1660,7 +1660,6 @@ fn signature(part: &[u8]) -> Result<Vec<container::SigElement>, ShaderError> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(windows)]
     use super::Target;
     use super::bitcode::Attr;
     use super::lower::LOOP_LIMIT;
