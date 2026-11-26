@@ -836,13 +836,20 @@ fn boxed(kind: u32, pipeline: This, thin: bool) -> Box<List> {
         newer: [0; 256],
         uploads: Default::default(),
         #[cfg(windows)]
-        host: crate::host::host().filter(|_| !thin).and_then(|h| match h.new_list() {
-            Ok(list) => Some(list),
-            Err(e) => {
-                tracing::warn!(error = %e, "no host command list");
-                None
-            }
-        }),
+        #[allow(clippy::arc_with_non_send_sync)] // see `Submitted`
+        host: std::cell::UnsafeCell::new(
+            crate::host::host()
+                .filter(|_| !thin)
+                .and_then(|h| match h.new_list() {
+                    Ok(list) => Some(Arc::new(list)),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "no host command list");
+                        None
+                    }
+                }),
+        ),
+        #[cfg(windows)]
+        parts: Default::default(),
         #[cfg(windows)]
         state: {
             let mut state = crate::draw::State::default();
