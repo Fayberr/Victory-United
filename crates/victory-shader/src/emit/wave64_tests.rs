@@ -127,7 +127,7 @@ fn lowered_counted(
     let res = resource::track(p, &native.layout, native.stage, Some(&st)).expect("resource::track");
     let io = io::raise(p, native).expect("io::raise");
     let was = lower::TEST_HOST_WAVE.replace(Some(host_wave));
-    let lowered = lower::lower_with_thread_limit(&lower::Parts {
+    let lowered = lower::lower_counted(&lower::Parts {
         native,
         p,
         st: &st,
