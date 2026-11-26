@@ -147,9 +147,14 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
 pub(crate) struct Translated {
     pub(crate) host: victory_shader::emit::HostShader,
     /// A compute program's threads in a group.
+    // (The draw side's resolution of its dispatch hunk reads `threads` or
+    // `compute_threads`, whichever name it kept.)
+    #[allow(dead_code)]
     pub(crate) threads: Option<[u32; 3]>,
-    /// The same group size under the name the present-side dispatch path
-    /// reads (`Translated::compute_threads` in `draw.rs`).
+    /// The same group size under the name the draw side reads it
+    /// (`Translated::compute_threads` in `draw.rs`); the draw side's own
+    /// resolution keeps one of the two names.
+    #[allow(dead_code)]
     pub(crate) compute_threads: Option<[u32; 3]>,
     pub(crate) used: Vec<victory_shader::UsedResource>,
     pub(crate) tables: crate::draw::TablePlan,
@@ -163,8 +168,12 @@ pub(crate) struct Translated {
     pub(crate) picks: std::sync::atomic::AtomicU8,
     /// Per [`Translated::used`] entry: a store or atomic names that buffer
     /// descriptor. Empty when the code is not known.
+    // (`draw.rs` reads this when it keeps the per-descriptor write list; its
+    // other resolution reads [`Translated::tables`] instead.)
+    #[allow(dead_code)]
     pub(crate) used_written: Vec<bool>,
     /// A buffer store whose descriptor could not be matched to `used`.
+    #[allow(dead_code)]
     pub(crate) write_unknown: bool,
 }
 
