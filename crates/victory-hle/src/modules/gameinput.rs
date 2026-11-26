@@ -1942,7 +1942,6 @@ mod host {
             }
             self.empty_until[slot] = None;
             let mut pad = convert(&state.Gamepad);
-<<<<<<< HEAD
             // A button tapped between two of the title's looks stays down
             // until it has looked.
             let down: Vec<u32> = (0..32).filter(|bit| pad.buttons & (1 << bit) != 0).collect();
@@ -1951,42 +1950,21 @@ mod host {
                 .report(&down, looks, Instant::now())
                 .into_iter()
                 .fold(0, |all, bit| all | (1 << bit));
-            // The scripted keys (`VICTORY_KEYS`) also press the first
-            // pad's buttons, by the stand-in pad's table: with a real pad
-            // connected the stand-in is not there, and a title that listens
-            // to the pad (the title's start screen) saw nothing.
-            #[cfg(feature = "diagnostics")]
-||||||| 0a4356653
-            // The scripted keys (`VICTORY_KEYS`) also press the first
-            // pad's buttons, by the stand-in pad's table: with a real pad
-            // connected the stand-in is not there, and a title that listens
-            // to the pad (the title's start screen) saw nothing.
-            #[cfg(feature = "diagnostics")]
-=======
             // The scripted keys (`VICTORY_KEYS_FILE` and `VICTORY_KEYS`)
             // also press the first pad's buttons, by the stand-in pad's
             // table: with a real pad connected the stand-in is not there,
             // and a title that listens to the pad (the title's start screen)
             // saw nothing.
->>>>>>> vicetay/main
             if slot == 0 {
-<<<<<<< HEAD
-                for vk in scripted() {
-                    for (key, part) in super::binds::layout(|_| false) {
-                        if let (true, super::Part::Button(button)) = (key == vk, part) {
-                            pad.buttons |= button;
-                        }
-||||||| 0a4356653
-                for vk in scripted() {
-                    if let Some(&(_, button)) = super::FALLBACK_BUTTONS.iter().find(|(key, _)| *key == vk) {
-                        pad.buttons |= button;
-=======
                 let mut asked = asked_keys();
                 asked.extend(scripted());
-                for vk in asked {
-                    if let Some(&(_, button)) = super::FALLBACK_BUTTONS.iter().find(|(key, _)| *key == vk) {
-                        pad.buttons |= button;
->>>>>>> vicetay/main
+                if !asked.is_empty() {
+                    for (key, part) in super::binds::layout(|_| false) {
+                        if let super::Part::Button(button) = part
+                            && asked.contains(&key)
+                        {
+                            pad.buttons |= button;
+                        }
                     }
                 }
             }
@@ -1994,29 +1972,13 @@ mod host {
         }
 
         fn keys(&mut self) -> Vec<KeyState> {
-<<<<<<< HEAD
             let focus = self.focus();
             self.cursor(focus);
-            #[cfg(feature = "diagnostics")]
-            let mut down = {
-                let mut down = scripted();
-                down.extend(self.kbm.keys(&self.counts));
-                down
-            };
-            #[cfg(not(feature = "diagnostics"))]
-            let mut down = Vec::new();
-            if focus || anywhere() {
-||||||| 0a4356653
-            #[cfg(feature = "diagnostics")]
-            let mut down = scripted();
-            #[cfg(not(feature = "diagnostics"))]
-            let mut down = Vec::new();
-            if focused() {
-=======
             let mut down = asked_keys();
             down.extend(scripted());
-            if focused() {
->>>>>>> vicetay/main
+            #[cfg(feature = "diagnostics")]
+            down.extend(self.kbm.keys(&self.counts));
+            if focus || anywhere() {
                 // Left/right modifier keys only, as devices report them; no
                 // mouse buttons (below 0x08; `mouse` has them).
                 let held: Vec<u8> = (0x08..=0xFE_u8)

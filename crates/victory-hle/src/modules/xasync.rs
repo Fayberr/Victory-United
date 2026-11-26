@@ -686,15 +686,6 @@ fn complete_call(call: &Call, block: *mut AsyncBlock, result: HRESULT, required_
     if result < 0 || required_size == 0 {
         release(block);
     }
-<<<<<<< HEAD
-    size.store(required_size, Ordering::Release);
-    status.store(result as u32 as usize, Ordering::Release);
-    *lock(&call.done) = true;
-||||||| 0a4356653
-    size.store(required_size, Ordering::Release);
-    status.store(result as u32 as usize, Ordering::Release);
-    *done = true;
-=======
     // The status shows and the call is over under one hold of `done`: a title
     // that sees the result may begin another call on the block at once, and
     // `XAsyncBegin`, which takes `done` too, then finds this one over.
@@ -706,7 +697,6 @@ fn complete_call(call: &Call, block: *mut AsyncBlock, result: HRESULT, required_
         tests::publishing();
         *done = true;
     }
->>>>>>> vicetay/main
     call.finished.notify_all();
     if routine.is_some() {
         let task = Task::new(block.cast(), complete);

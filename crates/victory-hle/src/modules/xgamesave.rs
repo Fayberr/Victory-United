@@ -216,21 +216,11 @@ fn load(dir: &Path) -> std::io::Result<Option<(String, String, Vec<String>, bool
 }
 
 /// The container's newest readable committed version, if any. Removes what
-<<<<<<< HEAD
 /// a crash left: unfinished versions, and versions older than that one
 /// (what cannot be removed now is left for a later call).
-/// An unreadable newer folder (a stray, or a broken manifest) is neither
-/// taken nor removed, and never costs the version below it.
-||||||| 0a4356653
-/// a crash left: unfinished versions, and versions older than that one.
-/// An unreadable newer folder (a stray, or a broken manifest) is neither
-/// taken nor removed, and never costs the version below it.
-=======
-/// a crash left: unfinished versions, and versions older than that one.
 /// An unreadable newer folder (a stray, a broken manifest, or a blob gone
 /// missing) is neither taken nor removed, and never costs the version below
 /// it.
->>>>>>> vicetay/main
 fn current(dir: &Path) -> std::io::Result<Option<Version>> {
     let mut committed = Vec::new();
     let mut highest = 0;
@@ -263,14 +253,6 @@ fn current(dir: &Path) -> std::io::Result<Option<Version>> {
         let Some((name, display, blobs, intact)) = load(&version)? else {
             continue;
         };
-<<<<<<< HEAD
-        // Older versions are removed as far as that goes: a file another
-        // program holds without letting it be deleted (a virus scanner, a
-        // backup in progress) fails the removal, and returning that error
-        // made the container unreadable and every save of it fail for as
-        // long as the file was held.
-||||||| 0a4356653
-=======
         if !intact {
             damaged.get_or_insert(Version {
                 dir: version,
@@ -281,7 +263,11 @@ fn current(dir: &Path) -> std::io::Result<Option<Version>> {
             });
             continue;
         }
->>>>>>> vicetay/main
+        // Older versions are removed as far as that goes: a file another
+        // program holds without letting it be deleted (a virus scanner, a
+        // backup in progress) fails the removal, and returning that error
+        // made the container unreadable and every save of it fail for as
+        // long as the file was held.
         for old in &committed[at + 1..] {
             let path = dir.join(format!("v{old}"));
             if let Err(e) = std::fs::remove_dir_all(&path) {

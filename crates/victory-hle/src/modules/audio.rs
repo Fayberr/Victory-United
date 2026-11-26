@@ -557,30 +557,9 @@ fn fill(context: Context, voice: &mut Voice) {
     if size == 0 {
         return;
     }
-<<<<<<< HEAD
     while context.field(1, 31, 1) == 1
         && (voice.pcm.len() >= SAMPLES_PER_BLOCK || (voice.drained && !voice.pcm.is_empty()))
     {
-||||||| 0a4356653
-    while context.field(1, 31, 1) == 1 {
-        if voice.pcm.len() < SAMPLES_PER_BLOCK && !decode(context, voice) {
-            return;
-        }
-=======
-    while context.field(1, 31, 1) == 1 {
-        // A skipped frame or an input boundary can advance the decoder without
-        // producing samples. Publish only complete blocks, except the final
-        // padded tail. Limit empty steps so a broken looping voice cannot hold
-        // its lock or stall other voices for the whole decoding pass.
-        for _ in 0..8 {
-            if voice.pcm.len() >= SAMPLES_PER_BLOCK || !decode(context, voice) {
-                break;
-            }
-        }
-        if voice.pcm.is_empty() || (voice.pcm.len() < SAMPLES_PER_BLOCK && !voice.ended) {
-            return;
-        }
->>>>>>> vicetay/main
         // The write block is the title's too: taken modulo the ring before
         // the first write, which would otherwise land past the ring's end.
         let write = context.field(0, 27, 5) % size;
@@ -610,63 +589,12 @@ fn fill(context: Context, voice: &mut Voice) {
 /// Decodes the next frame of the current input into `voice.pcm`; false
 /// when there is nothing to decode until the title gives more input.
 fn decode(context: Context, voice: &mut Voice) -> bool {
-<<<<<<< HEAD
-||||||| 0a4356653
-    if voice.ended {
-        return false;
-    }
-=======
-    let valid = context.field(0, 20, 2);
-    if voice.ended {
-        // The title can refill either input while the context stays enabled.
-        // Flush the previous tail once and leave the ring idle until a valid
-        // buffer is published. The decoder resets its overlap when flushed.
-        if valid == 0 {
-            return false;
-        }
-        voice.ended = false;
-        if context.field(2, 26, 5) == INPUT_INVALID {
-            context.set_field(2, 26, 6, 0);
-        }
-    }
->>>>>>> vicetay/main
     let channels = context.channels();
     let mut current = context.field(4, 31, 1);
-<<<<<<< HEAD
     let valid = context.field(0, 20, 2);
     if valid == 0 {
         if voice.drained {
             return false;
-||||||| 0a4356653
-    let valid = context.field(0, 20, 2);
-    if valid & (1 << current) == 0 {
-        if valid & (1 << (1 - current)) == 0 {
-            // Out of input: the overlap tail, then nothing.
-            if let Some(decoder) = &mut voice.decoder {
-                let mut tail = Vec::new();
-                decoder.flush(&mut tail);
-                voice.pcm.extend(tail);
-            }
-            voice.ended = true;
-            voice.trace.ended_ms = Some(voice.trace.since.elapsed().as_millis());
-            context.set_field(2, 26, 5, INPUT_INVALID);
-            context.set_field(2, 31, 1, 1);
-            return !voice.pcm.is_empty();
-=======
-    if valid & (1 << current) == 0 {
-        if valid & (1 << (1 - current)) == 0 {
-            // Out of input: the overlap tail, then nothing.
-            if let Some(decoder) = &mut voice.decoder {
-                let mut tail = Vec::new();
-                decoder.flush(&mut tail);
-                voice.pcm.extend(tail);
-            }
-            voice.ended = true;
-            voice.trace.ended_ms = Some(voice.trace.since.elapsed().as_millis());
-            context.set_field(2, 26, 5, INPUT_INVALID);
-            context.set_field(2, 31, 1, 1);
-            return !voice.pcm.is_empty();
->>>>>>> vicetay/main
         }
         // Out of input: the overlap tail, then nothing until the title
         // gives more (a streaming title that refilled late, or a sound

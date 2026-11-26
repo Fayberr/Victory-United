@@ -124,19 +124,10 @@ pub extern "system" fn CreateWindowExW(
     instance: HINSTANCE,
     param: *const c_void,
 ) -> HWND {
-<<<<<<< HEAD
     let top = parent.is_null();
-    let (ex_style, x, y) = hide(parent, ex_style, x, y);
+    let (ex_style, style, (x, y, width, height)) = place(ex_style, style, parent, x, y, width, height);
     // SAFETY: the title's own arguments, forwarded (a top-level window
     // made message-only).
-||||||| 0a4356653
-    let (x, y, width, height) = fit(parent, x, y, width, height);
-    // SAFETY: the title's own arguments, forwarded (the size fitted).
-=======
-    let (ex_style, style, (x, y, width, height)) = place(ex_style, style, parent, x, y, width, height);
-    // SAFETY: the title's own arguments, forwarded (the size fitted, or the
-    // window made full screen).
->>>>>>> vicetay/main
     let hwnd = unsafe {
         wm::CreateWindowExW(
             ex_style,
@@ -175,19 +166,10 @@ pub extern "system" fn CreateWindowExA(
     instance: HINSTANCE,
     param: *const c_void,
 ) -> HWND {
-<<<<<<< HEAD
     let top = parent.is_null();
-    let (ex_style, x, y) = hide(parent, ex_style, x, y);
+    let (ex_style, style, (x, y, width, height)) = place(ex_style, style, parent, x, y, width, height);
     // SAFETY: the title's own arguments, forwarded (a top-level window
     // made message-only).
-||||||| 0a4356653
-    let (x, y, width, height) = fit(parent, x, y, width, height);
-    // SAFETY: the title's own arguments, forwarded (the size fitted).
-=======
-    let (ex_style, style, (x, y, width, height)) = place(ex_style, style, parent, x, y, width, height);
-    // SAFETY: the title's own arguments, forwarded (the size fitted, or the
-    // window made full screen).
->>>>>>> vicetay/main
     let hwnd = unsafe {
         wm::CreateWindowExA(
             ex_style,
@@ -211,7 +193,6 @@ pub extern "system" fn CreateWindowExA(
     hwnd
 }
 
-<<<<<<< HEAD
 /// `VICTORY_HIDDEN_WINDOW=1`: the title's top-level window is made off the
 /// screens (right of the virtual desktop), out of the taskbar and never
 /// activated by a click, for unattended runs on a machine in use. The swap
@@ -231,8 +212,6 @@ fn hide(parent: HWND, ex_style: u32, x: i32, y: i32) -> (u32, i32, i32) {
     (ex_style | wm::WS_EX_TOOLWINDOW | wm::WS_EX_NOACTIVATE, right + 64, 0)
 }
 
-||||||| 0a4356653
-=======
 /// Where a window the title makes goes: full screen ([`full_screen`]), or
 /// fitted to the screen ([`fit`]); with the styles it gets.
 fn place(
@@ -244,6 +223,10 @@ fn place(
     width: i32,
     height: i32,
 ) -> (u32, u32, (i32, i32, i32, i32)) {
+    let (hidden_style, hidden_x, hidden_y) = hide(parent, ex_style, x, y);
+    if (hidden_style, hidden_x, hidden_y) != (ex_style, x, y) {
+        return (hidden_style, style, (hidden_x, hidden_y, width, height));
+    }
     let fitted = fit(parent, x, y, width, height);
     // SAFETY: plain queries of the primary monitor's size.
     let screen = unsafe { (wm::GetSystemMetrics(wm::SM_CXSCREEN), wm::GetSystemMetrics(wm::SM_CYSCREEN)) };
@@ -275,6 +258,8 @@ static FULL_SCREEN: AtomicBool = AtomicBool::new(false);
 /// not now. The swap chain stretches to either.
 fn toggle_full_screen(hwnd: HWND) {
     let Some(windowed) = *WINDOWED.lock().unwrap_or_else(|e| e.into_inner()) else { return };
+    let stand_in = stand_in_of(hwnd);
+    let hwnd = if stand_in.is_null() { hwnd } else { stand_in };
     let full = FULL_SCREEN.load(std::sync::atomic::Ordering::Relaxed);
     // SAFETY: queries of the title's window and the monitor it is on.
     let monitor = unsafe {
@@ -337,7 +322,6 @@ fn full_screen(ex_style: u32, style: u32, parented: bool, screen: (i32, i32)) ->
     Some((ex_style & !frame, wm::WS_POPUP | (style & kept), (0, 0, screen.0, screen.1)))
 }
 
->>>>>>> vicetay/main
 /// A console title sizes its window to its render target (
 /// the title: 3840x2160 on a Series X), which can exceed the host's screen.
 /// A top-level window larger than the work area is shrunk to fit, keeping
@@ -611,23 +595,21 @@ extern "system" fn window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-<<<<<<< HEAD
     // A user close (close button, Alt+F4, window or taskbar menu), or
     // another program's (Task Manager's "end task", a script): a console
     // title never sees either. A WM_CLOSE that reached the title's procedure
     // destroyed its window, and the title waited for frames until it aborted
     // itself or hung.
-    if closes(message, wparam) {
-||||||| 0a4356653
-    // A user close (close button, Alt+F4, window or taskbar menu); a
-    // console title never sees one, nor a WM_CLOSE from it.
-    if message == wm::WM_SYSCOMMAND && wparam & 0xFFF0 == wm::SC_CLOSE as usize {
-=======
-    // A user close (close button, Alt+F4, window or taskbar menu); a
-    // console title never sees one, nor a WM_CLOSE from it.
-    if message == wm::WM_SYSCOMMAND && wparam & 0xFFF0 == wm::SC_CLOSE as usize {
+    if switches_full_screen(message, wparam, lparam) || message == wm::WM_CLOSE {
+        // The title's message-only window can still receive synthetic
+        // input and close requests. Its visible peer identifies it.
+        let stand_in = stand_in_of(hwnd);
+        if !stand_in.is_null() && unsafe { wm::IsWindowVisible(stand_in) } != 0 {
+            let _ = TITLE_WINDOW.compare_exchange(0, hwnd as usize, Ordering::Relaxed, Ordering::Relaxed);
+        }
+    }
+    if closes(message, wparam) && message != wm::WM_CLOSE {
         note_close("SC_CLOSE");
->>>>>>> vicetay/main
         end_title("window closed", Box::new(|| {}));
         return 0;
     }
