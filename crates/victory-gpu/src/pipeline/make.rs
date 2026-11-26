@@ -365,13 +365,10 @@ struct Queue {
     /// [`SCREEN_WORKERS`] take.
     screen: VecDeque<Arc<Pending>>,
     early: VecDeque<Arc<Pending>>,
-<<<<<<< HEAD
     /// Those of the early ones known to take long, and how many of them are
     /// being made ([`slow_limit`]).
     slow: VecDeque<Arc<Pending>>,
     slow_now: usize,
-||||||| 085ee7c4c
-=======
     /// Depth-only / shadow-map prewarmed pipelines: rebuilt ahead of other
     /// early pipelines while no draw is actively requesting one.
     early_depth: VecDeque<Arc<Pending>>,
@@ -382,7 +379,6 @@ struct Queue {
     /// Requested compute pipelines (lighting resolve, tonemap, post-processing):
     /// compiled ahead of mesh pipelines so the 3D screen lights up quickly.
     requested_compute: VecDeque<Arc<Pending>>,
->>>>>>> origin/exp/vitoriabr-head
     requested: VecDeque<Arc<Pending>>,
 }
 
@@ -402,15 +398,11 @@ impl Queue {
         Self {
             screen: VecDeque::new(),
             early: VecDeque::new(),
-<<<<<<< HEAD
             slow: VecDeque::new(),
             slow_now: 0,
-||||||| 085ee7c4c
-=======
             early_depth: VecDeque::new(),
             requested_graphics: VecDeque::new(),
             requested_compute: VecDeque::new(),
->>>>>>> origin/exp/vitoriabr-head
             requested: VecDeque::new(),
         }
     }
@@ -427,18 +419,9 @@ impl Queue {
             return None;
         }
         p.queue_state.store(priority, Ordering::Relaxed);
-<<<<<<< HEAD
         if priority == REQUESTED && p.screen && screens_first() {
             self.screen.push_back(p.clone());
         } else if priority == REQUESTED {
-            self.requested.push_back(p.clone());
-        } else if slow {
-            self.slow.push_back(p.clone());
-||||||| 085ee7c4c
-        if priority == REQUESTED {
-            self.requested.push_back(p.clone());
-=======
-        if priority == REQUESTED {
             if is_vertex_graphics(p) {
                 self.requested_graphics.push_back(p.clone());
             } else if is_compute(p) {
@@ -446,16 +429,16 @@ impl Queue {
             } else {
                 self.requested.push_back(p.clone());
             }
+        } else if slow {
+            self.slow.push_back(p.clone());
         } else if p.graphics.as_ref().is_some_and(|state| state.writes_depth_only()) {
             self.early_depth.push_back(p.clone());
->>>>>>> origin/exp/vitoriabr-head
         } else {
             self.early.push_back(p.clone());
         }
         Some(prev == NOT_QUEUED)
     }
 
-<<<<<<< HEAD
     fn pop(&mut self, screens_only: bool, slow_limit: usize) -> Option<Arc<Pending>> {
         // An early entry can have been promoted and claimed already.
         let unclaimed = |list: &mut VecDeque<Arc<Pending>>| {
@@ -463,7 +446,17 @@ impl Queue {
         };
         let mut p = self.screen.pop_front();
         if p.is_none() && !screens_only {
-            p = self.requested.pop_front().or_else(|| unclaimed(&mut self.early));
+            p = self
+                .requested_graphics
+                .pop_front()
+                .or_else(|| self.requested_compute.pop_front())
+                .or_else(|| self.requested.pop_front());
+            if p.is_none() {
+                p = unclaimed(&mut self.early_depth);
+            }
+            if p.is_none() {
+                p = unclaimed(&mut self.early);
+            }
             if p.is_none() && self.slow_now < slow_limit {
                 p = unclaimed(&mut self.slow);
                 if let Some(p) = &p {
@@ -473,26 +466,6 @@ impl Queue {
             }
         }
         let p = p?;
-||||||| 085ee7c4c
-    fn pop(&mut self) -> Option<Arc<Pending>> {
-        let p = self.requested.pop_front().or_else(|| {
-            // An early entry can have been promoted and claimed already.
-            std::iter::from_fn(|| self.early.pop_front())
-                .find(|p| p.queue_state.load(Ordering::Relaxed) == EARLY)
-        })?;
-=======
-    fn pop(&mut self) -> Option<Arc<Pending>> {
-        let p = self
-            .requested_graphics
-            .pop_front()
-            .or_else(|| self.requested_compute.pop_front())
-            .or_else(|| self.requested.pop_front())
-            .or_else(|| {
-                // An early entry can have been promoted and claimed already.
-                std::iter::from_fn(|| self.early_depth.pop_front().or_else(|| self.early.pop_front()))
-                    .find(|p| p.queue_state.load(Ordering::Relaxed) == EARLY)
-            })?;
->>>>>>> origin/exp/vitoriabr-head
         p.queue_state.store(MAKING, Ordering::Relaxed);
         Some(p)
     }
