@@ -39,7 +39,8 @@ mask. The diagnostics build logs every frame and saves every 16th frame.
   character, with no white or black blocks. Some detail is missing: the game's ray-traced light is
   not built by default, and [Vice-Tay's list of known problems](https://github.com/TaynanGT/Vice-Tay#known-problems)
   was not checked here.
-- **Stability:** not shown yet. The 7 and the 10 minute runs ended without a crash or GPU hang. A 25 minute run
+- **Stability:** not shown yet. The 7 minute run ended normally and the 10 minute run (stopped by us at about
+  10 minutes) had no crash or GPU hang up to then. A 25 minute run
   of the same build (same program, same switches) did not hold: about 100 seconds in the frames became very
   slow, about 0.1 frames a second for the remaining 24 minutes, with the picture still lit and no crash. The
   log shows the game waiting for the card to finish filling upload memory. The cause is not known; the two
