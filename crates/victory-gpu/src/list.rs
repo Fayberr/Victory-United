@@ -936,7 +936,6 @@ extern "system" fn barrier(this: This, count: u32, barriers: *const Barrier) -> 
         if !host.is_empty() {
             use windows::Win32::Graphics::Direct3D12::D3D12_RESOURCE_BARRIER;
             const _: () = assert!(size_of::<Barrier>() == size_of::<D3D12_RESOURCE_BARRIER>());
-<<<<<<< HEAD
             for_barrier_batches(&host, |batch| {
                 // SAFETY: the same layout; borrowed resource pointers, never
                 // released through this slice.
@@ -947,31 +946,8 @@ extern "system" fn barrier(this: This, count: u32, barriers: *const Barrier) -> 
                     )
                 };
                 // SAFETY: an open list and live resources.
-                unsafe { list.list.ResourceBarrier(batch) };
+                unsafe { list.list.barriers(batch) };
             });
-||||||| e2a28ec7
-            // SAFETY: the same layout; borrowed resource pointers, never
-            // released through this slice.
-            let host = unsafe {
-                std::slice::from_raw_parts(
-                    host.as_ptr().cast::<D3D12_RESOURCE_BARRIER>(),
-                    host.len(),
-                )
-            };
-            // SAFETY: an open list and live resources.
-            unsafe { list.list.ResourceBarrier(host) };
-=======
-            // SAFETY: the same layout; borrowed resource pointers, never
-            // released through this slice.
-            let host = unsafe {
-                std::slice::from_raw_parts(
-                    host.as_ptr().cast::<D3D12_RESOURCE_BARRIER>(),
-                    host.len(),
-                )
-            };
-            // SAFETY: an open list and live resources.
-            unsafe { list.list.barriers(host) };
->>>>>>> avatar/main
         }
     }
     0
