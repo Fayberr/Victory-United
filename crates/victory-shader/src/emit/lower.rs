@@ -7741,7 +7741,7 @@ impl<'a> Lower<'a> {
         if !super::shader::constant_marks() {
             return Ok(None);
         }
-        let Some(word) = self.slot_word(src)? else {
+        let Some(word) = self.slot_word(src, false)? else {
             return Ok(None);
         };
         let mark = self.s.m.i32(super::shader::SLOT_STRIDE_CONSTANT);
