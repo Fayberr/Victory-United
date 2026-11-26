@@ -2628,7 +2628,6 @@ mod tests {
         assert_eq!(movrels.read(Reg::V(4)), movreld.write(Reg::V(4)));
         assert!(build(&code, false, 4).is_err(), "v4 is past 4 VGPRs");
     }
-<<<<<<< HEAD
 
     #[test]
     fn unspill_tracks_the_full_scalar_destination_field() {
@@ -2885,8 +2884,6 @@ mod tests {
         assert_eq!(exit.insts[0].read(Reg::S(1)), Some(next_s1));
         assert_eq!(exit.insts[0].read(Reg::S(2)), Some(lp_s2));
     }
-||||||| merged common ancestors
-=======
 
     #[test]
     fn relative_reads_keep_vgpr_writes_unless_m0_proves_them_disjoint() {
@@ -3002,5 +2999,4 @@ mod tests {
             .count();
         assert_eq!(restores, 2);
     }
->>>>>>> vibr/main
 }
