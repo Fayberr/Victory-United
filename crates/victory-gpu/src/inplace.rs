@@ -1309,6 +1309,23 @@ pub(crate) fn tick() {
     }
 }
 
+pub(crate) fn views_between(start: usize, end: usize) -> Vec<(usize, usize)> {
+    if start >= end {
+        return Vec::new();
+    }
+    let v = views();
+    let mut out = Vec::new();
+    if let Some((&base, &(bytes, _, _))) = v.views.range(..=start).next_back()
+        && base + bytes > start
+    {
+        out.push((base, bytes));
+    }
+    for (&base, &(bytes, _, _)) in v.views.range(start.saturating_add(1)..end) {
+        out.push((base, bytes));
+    }
+    out
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

@@ -23,8 +23,12 @@ mod lightprobe;
 mod texlate;
 #[cfg(windows)]
 mod texstore;
+#[cfg(windows)]
+mod backreads;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod capture;
+#[cfg(windows)]
+mod cardmeter;
 #[cfg(windows)]
 mod compose;
 pub mod console;
@@ -37,14 +41,24 @@ mod cores;
 pub mod descriptor;
 pub mod device;
 #[cfg(windows)]
+mod drvwatch;
+#[cfg(windows)]
+mod fpsbox;
+#[cfg(windows)]
+mod stats;
+#[cfg(windows)]
 mod draw;
 pub mod dxgi;
 pub mod fence;
-#[cfg(windows)]
-mod fpsbox;
 pub mod frame;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod book;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod heap_pass;
+#[cfg(windows)]
+pub mod framelog;
+#[cfg(windows)]
+mod heap_worker;
 #[cfg(windows)]
 mod host;
 #[cfg(windows)]
@@ -66,6 +80,8 @@ pub mod object;
 pub mod pipeline;
 #[cfg(windows)]
 mod picked;
+#[cfg(windows)]
+mod plaincopy;
 #[cfg(windows)]
 mod pool;
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -92,6 +108,8 @@ pub mod shader_cache;
 mod memory;
 #[cfg(windows)]
 mod shadow;
+#[cfg(all(windows, feature = "diagnostics"))]
+mod shot;
 #[cfg(windows)]
 mod tiles;
 pub mod signature;
@@ -136,7 +154,7 @@ pub fn frames_begun() -> u64 {
 pub use inplace::{title_memory_freeing, title_memory_section, title_memory_section_gone, title_memory_view};
 #[cfg(windows)]
 pub use watch::{
-    kernel_writing, title_memory_allocated, title_memory_freed, title_memory_reading, title_memory_remapped,
-    title_memory_remapping, title_memory_splitting, title_memory_unmapping, title_memory_written,
+    kernel_writing, title_memory_allocated, title_memory_committed, title_memory_freed, title_memory_reading,
+    title_memory_remapped, title_memory_remapping, title_memory_splitting, title_memory_unmapping, title_memory_written,
     writing as kernel_will_write,
 };

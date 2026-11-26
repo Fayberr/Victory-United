@@ -34,6 +34,30 @@ use std::time::{Duration, Instant};
 
 use super::Shader;
 use super::host::{GraphicsState, HostPipeline, TargetFormats};
+/// `VICTORY_DENY_PIPELINES=<16-hex shader hash>,...` (off unless set): the
+/// hash of a shader of `shaders` that is listed there. Such a pipeline is
+/// never built (no driver compile) and counts as refused, so its draws and
+/// dispatches are dropped. Unlike `VICTORY_SKIP_PIPELINES`, in release builds too.
+fn denied(shaders: &[Arc<Shader>]) -> Option<&str> {
+    static LIST: OnceLock<Vec<String>> = OnceLock::new();
+    let list = LIST.get_or_init(|| {
+        std::env::var("VICTORY_DENY_PIPELINES")
+            .unwrap_or_default()
+            .split(',')
+            .map(|h| h.trim().to_ascii_lowercase())
+            .filter(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+            .collect()
+    });
+    if list.is_empty() {
+        return None;
+    }
+    shaders.iter().find(|s| list.contains(&s.hash)).map(|s| s.hash.as_str())
+}
+
+/// The shaders of `p` (for logs).
+pub(crate) fn shaders(p: &Pending) -> &[Arc<Shader>] {
+    &p.shaders
+}
 
 /// What a host pipeline is made from, and the host pipeline once made.
 pub(crate) struct Pending {
@@ -57,10 +81,15 @@ pub(crate) struct Pending {
     /// LOCAL: how long draws have waited for it so far, in microseconds
     /// ([`wait_once`]).
     waited_us: AtomicU64,
-    /// LOCAL (fxceless a35c557393): the formats its state declares (zeros
-    /// without a graphics state), and the same shaders and state for other
-    /// formats bound at a draw ([`for_formats`]): a chain, one link per set.
+    /// Whether the made pipeline has gone to a draw or dispatch yet
+    /// (`crate::host::first_use`: for a device removal's report).
+    handed: AtomicBool,
+    /// The formats its state declares for what a draw draws into (zeros
+    /// without a graphics state).
     pub(crate) formats: TargetFormats,
+    /// The same shaders and state for other formats, bound at a draw
+    /// ([`for_formats`]): a chain from the title's pipeline, one link per
+    /// set of formats met, never shortened.
     variant: OnceLock<Arc<Pending>>,
     /// First title frame in which a recording thread waited on this pipeline
     /// (`u64::MAX`: never waited yet). Caps waiting to one frame per pipeline
@@ -153,6 +182,7 @@ impl Pending {
             used: AtomicBool::new(false),
             waited_us: AtomicU64::new(0),
             waited_frame: AtomicU64::new(u64::MAX),
+            handed: AtomicBool::new(false),
         }
     }
 
@@ -168,6 +198,10 @@ impl Pending {
     fn make(&self) {
         self.made.get_or_init(|| {
             let _building = crate::timeline::span("pipeline: build a host pipeline");
+            if let Some(hash) = denied(&self.shaders) {
+                tracing::warn!(hash, shaders = ?self.shaders, "pipeline not built: its shader is in VICTORY_DENY_PIPELINES");
+                return None;
+            }
             let began = Instant::now();
             let made = HostPipeline::new(&self.shaders, self.graphics.as_deref());
             super::library::note_time(&self.key, began.elapsed().as_millis() as u64);
@@ -327,7 +361,16 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
             wait(p, frame);
         }
     }
-    p.made.get()?.as_ref()
+    let made = p.made.get()?.as_ref();
+    // The first time the made pipeline goes to a draw or dispatch: noted
+    // for a device removal's report (one load a call after that).
+    if let Some(host) = made
+        && !p.handed.load(Ordering::Relaxed)
+        && !p.handed.swap(true, Ordering::Relaxed)
+    {
+        crate::host::first_use(&host.name);
+    }
+    made
 }
 
 /// Makes `p` on this thread if it is not made yet (waiting for a worker
@@ -769,6 +812,30 @@ mod tests {
             std::thread::yield_now();
         }
         assert!(matches!(p.made.get(), Some(None)));
+    }
+
+    /// A draw into other formats than its pipeline declares finds the
+    /// pipeline for them, which exists once per set of formats and is
+    /// queued by its first draw like any other.
+    #[test]
+    fn a_pipeline_for_bound_formats_is_made_once() {
+        // The title's pipeline declares one render target, format 24.
+        let p = Arc::new(Pending::new(Vec::new(), Some(Box::new(GraphicsState::declaring(24)))));
+        assert_eq!(p.formats, [24, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let g = p.graphics.as_deref().unwrap();
+        let (a, b) = ([26, 0, 0, 0, 0, 0, 0, 0, 0], [28, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let first = variant(&p, g, &a);
+        assert_eq!(first.formats, a);
+        assert_ne!(first.key, p.key);
+        assert!(Arc::ptr_eq(first, variant(&p, g, &a)));
+        let second = variant(&p, g, &b);
+        assert_eq!(second.formats, b);
+        assert!(!Arc::ptr_eq(first, second));
+        assert_ne!(second.key, first.key);
+        assert!(Arc::ptr_eq(first, variant(&p, g, &a)));
+        assert!(Arc::ptr_eq(second, variant(&p, g, &b)));
+        assert_eq!(first.queue_state.load(Ordering::Relaxed), NOT_QUEUED);
+        assert_eq!(p.queue_state.load(Ordering::Relaxed), NOT_QUEUED);
     }
 
     #[test]

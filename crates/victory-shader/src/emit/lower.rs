@@ -1418,6 +1418,32 @@ fn lds_meetings(p: &crate::ir::Program, st: &Structured, all: &[bool]) -> Option
         for r in (0..n).filter(|&r| reads[r] && writes[r]).collect::<Vec<_>>() {
             let blocks: Vec<usize> = (0..n).filter(|&b| !all[b] && find(&mut region, b) == r).collect();
             if !(flags_on && lds_flag_region(p, st, &blocks)) {
+                if std::env::var_os("VICTORY_WAVE_WHY").is_some() {
+                    let mut list = Vec::new();
+                    for &b in &blocks {
+                        for i in &p.blocks[b].insts {
+                            let name = i.name();
+                            if !matches!(i.fields, Fields::Ds { .. }) || name.starts_with("ds_swizzle") || name.contains("permute") {
+                                continue;
+                            }
+                            let addr = match &i.fields {
+                                Fields::Ds { addr: Some(Operand::Vector { reg, .. }), offset0, offset1, .. } => {
+                                    let made = i.read(Reg::V(*reg)).and_then(|v| {
+                                        p.blocks
+                                            .iter()
+                                            .flat_map(|bl| &bl.insts)
+                                            .find(|x| x.writes.iter().any(|w| w.1 == v))
+                                            .map(|x| format!("{:#x} {}", x.machine.offset, x.name()))
+                                    });
+                                    format!("v{reg} off {offset0}/{offset1} made by {}", made.as_deref().unwrap_or("an input or a phi"))
+                                }
+                                _ => "no address".to_string(),
+                            };
+                            list.push(format!("{:#x} {name} [{addr}]", i.machine.offset));
+                        }
+                    }
+                    eprintln!("WAVE64-LDS region with reads and writes: {}", list.join("; "));
+                }
                 return None;
             }
         }
@@ -3113,6 +3139,7 @@ impl<'a> Lower<'a> {
 
     fn run(mut self, counted: bool) -> Result<Lowered, Stop> {
         let p = self.x.p;
+        self.halves_only = self.places_read_as_halves();
         if counted {
             // Before anything else, so that wave counts, reads of the first
             // lane and stores know only the lanes that run.
@@ -3171,6 +3198,18 @@ impl<'a> Lower<'a> {
         self.cur = self.s.entry;
         self.find_sections();
         self.inputs()?;
+        // A compute program that reads its group id x may run spread across
+        // z (`USER_DISPATCH_SPREAD`). Not a spilled one (the builder's
+        // stages, near the root signature's 64 dwords), nor one whose first
+        // block is a loop header (its counter sits in the entry block).
+        if self.x.native.stage == HwStage::Cs
+            && self.user_first() == 0
+            && !self.counters.contains_key(&order[0])
+            && self.x.io.inputs.iter().any(|&(_, i)| i == Input::GroupId(0))
+        {
+            self.cs_spread_prologue();
+            self.block[order[0]] = Some(self.cur);
+        }
         if let Some(mesh) = self.s.mesh {
             self.mesh_prologue(mesh).map_err(|w| unsupported(0, w))?;
             self.block[order[0]] = Some(self.cur);
@@ -3436,6 +3475,50 @@ impl<'a> Lower<'a> {
     }
 
     /// A component of a compute thread or group id, read in the entry block.
+    /// A dispatch the host spread across z (`USER_DISPATCH_SPREAD`): the
+    /// group id as the title asked it, `(x + z * row, y, 0)`, for every input
+    /// that reads it, and the groups past the asked count leave before the
+    /// body (whole groups: no barrier is split). `row` 0: as dispatched.
+    /// The entry block ends here; the first block's code goes to the next.
+    /// (After upstream VIctory pull request #2312.)
+    fn cs_spread_prologue(&mut self) {
+        use super::shader::USER_DISPATCH_SPREAD;
+        let row = self.host_word(RootType::Other(USER_DISPATCH_SPREAD), 0, 0);
+        let asked = self.host_word(RootType::Other(USER_DISPATCH_SPREAD), 0, 1);
+        let Val::I32(gx) = self.compute_id("groupId.i32", 94, 0) else {
+            unreachable!()
+        };
+        let Val::I32(gz) = self.compute_id("groupId.i32", 94, 2) else {
+            unreachable!()
+        };
+        let e = self.s.entry;
+        let zero = self.s.m.i32(0);
+        let unspread = self.s.m.cmp(e, pred::EQ, row, zero);
+        let mul = self.s.m.bin(e, Bin::Mul, gz, row);
+        let spread_x = self.s.m.bin(e, Bin::Add, gx, mul);
+        let eff_x = self.s.m.select(e, unspread, gx, spread_x);
+        let eff_z = self.s.m.select(e, unspread, gz, zero);
+        let in_x = self.s.m.cmp(e, pred::IULT, eff_x, asked);
+        let keep = self.s.m.bin(e, Bin::Or, unspread, in_x);
+        let io_inputs: HashMap<Value, Input> = self.x.io.inputs.iter().copied().collect();
+        for (&v, &inp) in &io_inputs {
+            match inp {
+                Input::GroupId(0) => {
+                    self.vals.insert(v, Val::I32(eff_x));
+                }
+                Input::GroupId(2) => {
+                    self.vals.insert(v, Val::I32(eff_z));
+                }
+                _ => {}
+            }
+        }
+        let body = self.s.m.new_block();
+        let ret = self.s.m.new_block();
+        self.s.m.terminate(ret, Term::Ret);
+        self.s.m.terminate(e, Term::CondBr(keep, body, ret));
+        self.cur = body;
+    }
+
     fn compute_id(&mut self, name: &str, opcode: u32, c: u8) -> Val {
         let (entry, c) = (self.s.entry, self.s.m.i32(u32::from(c)));
         Val::I32(
@@ -9880,6 +9963,10 @@ impl<'a> Lower<'a> {
                         let m = self.s.m.bin(c, Bin::Mul, a, bb);
                         self.s.m.bin(c, Bin::Add, m, acc)
                     }
+                    // On RDNA 2 the legacy encoding decodes as fused
+                    // (`v_fma_legacy_f32`) and flushes its sources; the
+                    // zero-factor rule of the legacy multiply comes with it
+                    // (`legacy_fmad` flushes them itself).
                     _ => self.legacy_fmad(a, bb, acc),
                 };
                 float(self, r)
@@ -9892,6 +9979,7 @@ impl<'a> Lower<'a> {
             }
             "v_mad_legacy_f32" => {
                 let (a, bb, cc) = (f(self, 0)?, f(self, 1)?, f(self, 2)?);
+                let (a, bb, cc) = (self.ftz(a), self.ftz(bb), self.ftz(cc));
                 let r = self.legacy_fmad(a, bb, cc);
                 float(self, r)
             }
@@ -10755,33 +10843,43 @@ impl<'a> Lower<'a> {
             return Err("a 16-bit result outside a VGPR");
         };
         let mut high = v.opsel >> 3 & 1 != 0;
-        // SDWA: the word written, the other one kept (preserve) or zero
-        // (pad; a sign extension above the high word adds nothing).
+        // SDWA: the word written, the other one kept (preserve), bit 15
+        // copied upward (sext: dst_unused 1 with WORD_0), or zero (pad; a sign
+        // extension above the high word or a whole dword adds nothing). The
+        // reserved dst_unused 3 is refused. (Upstream VIctory #3124: a 16-bit
+        // -1 written with sext came out as 0x0000FFFF.)
         let mut keep = true;
+        let mut sext = false;
         if let Some(sd) = v.sdwa {
             match (sd.dst_sel, sd.dst_unused) {
                 (4, 2) => {}
                 (5, 2) => high = true,
-                (4 | 6, _) => keep = false,
-                (5, _) => (high, keep) = (true, false),
+                (4, 1) => (keep, sext) = (false, true),
+                (4, 0) | (6, 0..=2) => keep = false,
+                (5, 0 | 1) => (high, keep) = (true, false),
                 _ => return Err("an SDWA destination of a 16-bit operation"),
             }
         }
         let c = self.cur;
-        let old = match inst.read(Reg::V(reg)).map(|o| self.i32_of(o)) {
-            Some(Ok(o)) if keep => o,
-            _ => self.s.m.i32(0),
-        };
         let (k16, low) = (self.s.m.i32(16), self.s.m.i32(0xFFFF));
-        let x = self.s.m.bin(c, Bin::And, x, low);
-        let r = if high {
-            let o = self.s.m.bin(c, Bin::And, old, low);
-            let x = self.s.m.bin(c, Bin::Shl, x, k16);
-            self.s.m.bin(c, Bin::Or, o, x)
+        let r = if sext {
+            let t = self.s.m.bin(c, Bin::Shl, x, k16);
+            self.s.m.bin(c, Bin::AShr, t, k16)
         } else {
-            let keep = self.s.m.i32(0xFFFF_0000);
-            let o = self.s.m.bin(c, Bin::And, old, keep);
-            self.s.m.bin(c, Bin::Or, o, x)
+            let old = match inst.read(Reg::V(reg)).map(|o| self.i32_of(o)) {
+                Some(Ok(o)) if keep => o,
+                _ => self.s.m.i32(0),
+            };
+            let x = self.s.m.bin(c, Bin::And, x, low);
+            if high {
+                let o = self.s.m.bin(c, Bin::And, old, low);
+                let x = self.s.m.bin(c, Bin::Shl, x, k16);
+                self.s.m.bin(c, Bin::Or, o, x)
+            } else {
+                let keep = self.s.m.i32(0xFFFF_0000);
+                let o = self.s.m.bin(c, Bin::And, old, keep);
+                self.s.m.bin(c, Bin::Or, o, x)
+            }
         };
         self.write_placed(inst, Reg::V(reg), r, guard);
         Ok(())
@@ -12616,12 +12714,12 @@ impl<'a> Lower<'a> {
                 self.vgprs(inst, data.as_ref().ok_or("buffer store data")?, regs as u8)?;
             if d16 {
                 // Through a view of a table each half is stored as it is
-                // (`halves`, fxceless #927). Reached another way, d16 data
-                // is taken as f16, widened for the 32-bit float store;
-                // through a view of an integer format it is a 16-bit
-                // integer, zero- or sign-extended (VIctory 4243a96a: the face
-                // network keeps its halves in UINT views; its output was
-                // noise). Both `ResourceHeap` (`SLOT_STRIDES`) and `Table`
+                // (`halves`). Reached another way: d16 data is taken as f16,
+                // widened for the 32-bit float store; through a view of an
+                // integer format it is a 16-bit integer, zero- or
+                // sign-extended (VIctory 4243a96a: the face network keeps
+                // its halves in UINT views; its output was noise). Both
+                // `ResourceHeap` (`SLOT_STRIDES`) and `Table`
                 // (`SLOT_TABLE_STRIDES`, dynamic table snapshots included)
                 // populate the view-kind bits, while the handle stays a float
                 // one (`0x409`), whose raw bits RTX and WARP pass bit-exact

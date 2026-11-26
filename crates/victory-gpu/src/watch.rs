@@ -3623,6 +3623,53 @@ pub fn title_memory_reading_now() -> Option<Reading> {
     }
 }
 
+pub(crate) fn clean(page: usize) -> bool {
+    guards().clean.contains(page)
+}
+
+pub(crate) fn stamp(page: usize) -> u64 {
+    journal().notes.read(shard_of(page)).written.get(&page).copied().unwrap_or(0)
+}
+
+pub(crate) fn unchanged_known(start: usize, end: usize, base: usize, copied: &[u64]) -> bool {
+    if start >= end {
+        return false;
+    }
+    let (first, last) = (start / PAGE, end.div_ceil(PAGE));
+    let Some(taken) = first.checked_sub(base).and_then(|from| copied.get(from..last - base)) else {
+        return false;
+    };
+    if taken.contains(&0) {
+        return false;
+    }
+    let ahead = {
+        let j = journal();
+        if !j.notes.each(first, last, |page, write| write <= taken[page - first]) {
+            return false;
+        }
+        j.ahead.holds(first, last)
+    };
+    if ahead {
+        return true;
+    }
+    let g = guards();
+    let blocks = last - first;
+    g.protected.range(first..last).count() == blocks && g.clean.range(first..last).count() == blocks
+}
+
+pub fn title_memory_committed(at: usize, len: usize) {
+    if len == 0 || !known_holes() {
+        return;
+    }
+    let mut g = guards();
+    let (first, last) = (at / BLOCK, at.saturating_add(len).div_ceil(BLOCK));
+    let noted: Vec<usize> = g.held.range(first..last).collect();
+    for block in noted {
+        g.held.remove(block);
+        PUBLISHED.clear(block);
+    }
+}
+
 /// The runtime mapped title memory `[at, at + len)`: what it shows is new,
 /// so it is no longer guarded (nor known unmapped), and read-write.
 ///

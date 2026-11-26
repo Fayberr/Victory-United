@@ -132,6 +132,8 @@ struct Card {
     masked: Mutex<Masked>,
     /// The buffers' bytes (the title buffer's, rounded up to 64 KiB).
     size: u64,
+    /// The copy itself, for [`CHANGED`]: set once it is shared.
+    me: std::sync::OnceLock<std::sync::Weak<Shadow>>,
 }
 
 /// [`Card::masked`]: a bit for each such byte, by [`MASK_BLOCK`] of the
@@ -610,6 +612,52 @@ pub(crate) fn card_room_kept() -> u64 {
 /// The copies in the card's memory.
 static CARDED: Mutex<Vec<std::sync::Weak<Shadow>>> = Mutex::new(Vec::new());
 
+/// The copies in the card's memory whose CPU side changed since
+/// [`card_dirty`] last took their ranges: each is put here when its list of
+/// changed offsets goes from empty to not empty (`Shadow::card_changed`).
+///
+/// Why: [`card_dirty`] walked every copy in the card's memory at every
+/// submission, two locks each, to find the few that changed. With every
+/// title buffer's copy on the card (`VICTORY_CARD_BUFFERS_MIN_KB=64`) there
+/// are about 3,900 of them and 10 to 18 submissions a frame.
+static CHANGED: Mutex<Vec<std::sync::Weak<Shadow>>> = Mutex::new(Vec::new());
+
+/// Whether [`card_dirty`] takes the changed copies from [`CHANGED`]
+/// (`VICTORY_CARD_CHANGED_LIST=1`; `alt`: twenty seconds so, twenty the walk
+/// over every copy, in turn, each change said in the log). Off by default
+/// until a game run has carried it. Both give the same ranges of the same
+/// copies; the order of the copies may differ.
+fn changed_list() -> bool {
+    /// 0 the walk, 1 the list, 2 in turn.
+    static MODE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    match *MODE.get_or_init(|| match std::env::var("VICTORY_CARD_CHANGED_LIST").as_deref() {
+        Ok("1") => 1,
+        Ok("alt") => 2,
+        _ => 0,
+    }) {
+        0 => false,
+        1 => true,
+        _ => {
+            static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+            let on = (EPOCH.get_or_init(std::time::Instant::now).elapsed().as_secs() / 20) % 2 == 1;
+            static LAST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+            if LAST.swap(u8::from(on), Ordering::Relaxed) != u8::from(on) {
+                tracing::info!(
+                    "the changed copies in the card's memory are taken from a list from now (VICTORY_CARD_CHANGED_LIST=alt): {}",
+                    if on { "ON" } else { "off, every copy is walked as usual" }
+                );
+            }
+            on
+        }
+    }
+}
+
+/// Whether [`CHANGED`] is kept at all (the switch is set to `1` or `alt`).
+fn changed_kept() -> bool {
+    static KEPT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *KEPT.get_or_init(|| std::env::var("VICTORY_CARD_CHANGED_LIST").is_ok_and(|v| v == "1" || v == "alt"))
+}
+
 /// Since the last frame line: bytes copied to card sides and the ranges
 /// they were; pieces compared on the card, pieces fetched and their
 /// bytes; the waits for the card the fetches added and their microseconds.
@@ -628,7 +676,14 @@ pub(crate) fn card_stats() -> [u64; 10] {
     for (i, stat) in CARD_STATS.iter().enumerate() {
         out[i] = stat.swap(0, Ordering::Relaxed);
     }
-    out[7] = CARDED.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|w| w.strong_count() > 0).count() as u64;
+    out[7] = {
+        let mut carded = CARDED.lock().unwrap_or_else(|e| e.into_inner());
+        if changed_kept() {
+            // (The walk over every copy drops the ones that are gone.)
+            carded.retain(|w| w.strong_count() > 0);
+        }
+        carded.iter().filter(|w| w.strong_count() > 0).count() as u64
+    };
     out[8] = CARD_BYTES[0].load(Ordering::Relaxed)
         + WINDOW_CARD_BYTES.load(Ordering::Relaxed)
         + WINDOW_MAPPED_BYTES.load(Ordering::Relaxed);
@@ -918,6 +973,24 @@ impl SentRuns {
 /// be merged came after are dropped.
 pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)> {
     let mut out = Vec::new();
+    if changed_kept() {
+        // Taken either way: the walk takes every changed copy's ranges, so
+        // what the list holds then names copies with nothing left to take.
+        let changed = std::mem::take(&mut *CHANGED.lock().unwrap_or_else(|e| e.into_inner()));
+        if changed_list() {
+            let fetched = RELAY_FETCHED.load(Ordering::Acquire);
+            for weak in changed {
+                let Some(shadow) = weak.upgrade() else {
+                    continue;
+                };
+                let ranges = shadow.card.as_ref().map(|c| take_dirty(c, fetched, sent_as)).unwrap_or_default();
+                if !ranges.is_empty() {
+                    out.push((shadow, joined(ranges)));
+                }
+            }
+            return out;
+        }
+    }
     let mut carded = CARDED.lock().unwrap_or_else(|e| e.into_inner());
     let fetched = RELAY_FETCHED.load(Ordering::Acquire);
     carded.retain(|weak| {
@@ -928,16 +1001,7 @@ pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)
             .card
             .as_ref()
             .filter(|c| c.touched.swap(false, Ordering::AcqRel))
-            .map(|c| {
-                let mut dirty = c.dirty.lock().unwrap_or_else(|e| e.into_inner());
-                let ranges = joined(std::mem::take(&mut *dirty));
-                if relay() {
-                    let mut sent = c.sent.lock().unwrap_or_else(|e| e.into_inner());
-                    sent.forget(fetched);
-                    sent.note_joined(sent_as, ranges.clone());
-                }
-                ranges
-            })
+            .map(|c| take_dirty(c, fetched, sent_as))
             .unwrap_or_default();
         if !ranges.is_empty() {
             out.push((shadow, ranges));
@@ -1042,6 +1106,21 @@ pub(crate) fn send_copied(dst: usize, len: usize) {
 /// The copies in the card's memory (diagnostics: `crate::host::upcheck`).
 pub(crate) fn carded_copies() -> Vec<Arc<Shadow>> {
     CARDED.lock().unwrap_or_else(|e| e.into_inner()).iter().filter_map(std::sync::Weak::upgrade).collect()
+}
+
+
+/// Takes a copy's changed offsets for the send numbered `sent_as`
+/// ([`card_dirty`]); with [`relay`] they are noted as sent, and the notes of
+/// sends that every fetch still to be merged came after (`fetched`) go.
+fn take_dirty(c: &Card, fetched: u64, sent_as: u64) -> Vec<(usize, usize)> {
+    let mut dirty = c.dirty.lock().unwrap_or_else(|e| e.into_inner());
+    let ranges = joined(std::mem::take(&mut *dirty));
+    if relay() {
+        let mut sent = c.sent.lock().unwrap_or_else(|e| e.into_inner());
+        sent.forget(fetched);
+        sent.note_joined(sent_as, ranges.clone());
+    }
+    ranges
 }
 
 /// Ranges in order, those that overlap or touch as one.
@@ -1734,6 +1813,16 @@ const NOT_WATCHED: u8 = 2;
 /// Watched, not by the kernel but by the guards, when last asked about.
 const GUARDED: u8 = 3;
 
+/// [`Shadow::update_free`]'s counter (fps41 round 8): refreshes that copied
+/// nothing are also looked at for being known unchanged before asking
+/// (`VICTORY_REFRESH_COUNT=1`; off by default: the look takes the
+/// journal's and the guards' locks once more a refresh).
+#[cfg(feature = "diagnostics")]
+fn refresh_count() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_REFRESH_COUNT").is_some_and(|v| v == "1"))
+}
+
 // Fixed-size equality compiles to two SIMD comparisons on Windows x64.
 // Only the first or last unequal chunk needs a byte-wise search.
 const DIFF_CHUNK: usize = 32;
@@ -2366,11 +2455,24 @@ fn back_piece(
 /// compared, changed runs put in, and their bytes.
 static MERGED: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
+/// Why [`Shadow::merge_under_writes`] gave up (the flights are then
+/// settled whole, 64 to 94 ms each in run 282), since they were last
+/// taken: the copy's memory is not watched; the write tracking had no
+/// answer for the range; more changed runs than `VICTORY_MERGE_RUNS`
+/// leaves; a copy in PC memory without its snapshot.
+static MERGE_GAVE_UP: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+
+/// [`MERGE_GAVE_UP`], taken.
+pub(crate) fn merge_gave_up() -> [u64; 4] {
+    [0, 1, 2, 3].map(|i| MERGE_GAVE_UP[i].swap(0, Ordering::Relaxed))
+}
+
 /// Why [`Shadow::merge_under_writes`] last left the caller to wait.
 static STALE_WHY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn note_stale(why: usize) {
     STALE_WHY.store(why, Ordering::Relaxed);
+    MERGE_GAVE_UP[why.min(3)].fetch_add(1, Ordering::Relaxed);
 }
 
 /// [`STALE_WHY`] in words (diagnostics).
@@ -3430,19 +3532,20 @@ pub(crate) fn let_go_idle() {
         if map.is_empty() {
             return;
         }
+        let idle = |s: &Arc<Shadow>| {
+            Arc::strong_count(s) == 1
+                && crate::host::long_ago(s.used.load(Ordering::Relaxed), idle_ms, IDLE_FRAMES)
+                && crate::host::references(&s.buffer) == 1
+        };
         let mut eligible: Vec<(u64, (u64, u64), usize, u64)> = map
             .iter()
-            .filter(|(_, s)| {
-                Arc::strong_count(s) == 1
-                    && crate::host::long_ago(s.used.load(Ordering::Relaxed), idle_ms, IDLE_FRAMES)
-                    && crate::host::references(&s.buffer) == 1
-            })
+            .filter(|(_, s)| idle(s))
             .map(|(&key, s)| {
                 (s.used.load(Ordering::Relaxed), key, Arc::as_ptr(s) as usize, s.len)
             })
             .collect();
         eligible.sort_unstable_by_key(|&(used, _, _, _)| used);
-        let victims = if keep == u64::MAX {
+        let victims: Vec<usize> = if keep == u64::MAX {
             (0..eligible.len()).collect()
         } else {
             let entries: Vec<(u64, u64, usize)> = eligible
@@ -3451,7 +3554,17 @@ pub(crate) fn let_go_idle() {
                 .collect();
             window_victims(&entries, keep)
         };
-        victims.into_iter().filter_map(|i| map.remove(&eligible[i].1)).collect()
+        if !victims.is_empty() {
+            tables_changed();
+        }
+        let mut gone = Vec::new();
+        for i in victims {
+            let key = eligible[i].1;
+            if map.get(&key).is_some_and(&idle) {
+                gone.extend(map.remove(&key));
+            }
+        }
+        gone
     };
     if !gone.is_empty() {
         let (went, bytes) = (gone.len(), gone.iter().map(|s| s.len).sum::<u64>());
@@ -3638,6 +3751,10 @@ impl Shadow {
     /// before the submission (a copy per declared range and submission);
     /// a GPU-side dirty mask would save that if big ranges make it slow.
     pub(crate) fn gpu_writes(self: &Arc<Self>, list: &HostList, address: u64, len: u64) {
+        // The list's prelude takes no record of this copy from here on
+        // (`crate::indirect::gather_by_copy`); a copy in place is written
+        // by the shaders as any other.
+        list.gather_wrote(self.id);
         // In place the shaders write title memory itself: no snapshot, no
         // compare, nothing to copy back, and no wait on its account.
         // shortcut: another host copy of the same bytes (a title buffer
@@ -4434,11 +4551,46 @@ impl Shadow {
     /// shader writes.
     fn update_free(&self, from: usize, to: usize) -> usize {
         if self.watched.load(Ordering::Relaxed) != NOT_WATCHED {
+            // The light refresh (`VICTORY_LIGHT_REFRESH`): nothing of the
+            // range was written that the copy does not hold, and the
+            // journal says so with nothing asked.
+            if crate::watch::light() && self.nothing_new(from, to) {
+                self.refresh_check(from, to);
+                #[cfg(feature = "diagnostics")]
+                {
+                    use crate::copystat::{C, add};
+                    add(C::Checked, (to - from) as u64);
+                    add(C::Unchanged, (to - from) as u64);
+                }
+                return 0;
+            }
+            // The counter of fps41 round 8: copied nothing or something,
+            // and (with `VICTORY_REFRESH_COUNT=1`) whether it was known
+            // unchanged before asking. Looked at before the asking, which
+            // changes the guards and the journal.
+            #[cfg(feature = "diagnostics")]
+            let (asking, known) = (std::time::Instant::now(), refresh_count() && self.unchanged_known(from, to));
             if let Some((now, written)) = crate::watch::writes(from, to, true) {
                 // (A range whose blocks rest after a write has no guard now.)
                 let guarded = crate::watch::guarded(from, to) || self.watched.load(Ordering::Relaxed) == GUARDED;
                 self.watched.store(if guarded { GUARDED } else { 1 }, Ordering::Relaxed);
                 let copied = self.copy_stale(from, to, now, &written);
+                #[cfg(feature = "diagnostics")]
+                {
+                    use crate::copystat::{C, add};
+                    let us = asking.elapsed().as_micros() as u64;
+                    if copied == 0 {
+                        add(C::RefreshNone, 1);
+                        add(C::RefreshNoneUs, us);
+                        if known {
+                            add(C::RefreshKnown, 1);
+                            add(C::RefreshKnownUs, us);
+                        }
+                    } else {
+                        add(C::RefreshSome, 1);
+                        add(C::RefreshSomeUs, us);
+                    }
+                }
                 self.refresh_check(from, to);
                 #[cfg(feature = "diagnostics")]
                 {
@@ -4458,6 +4610,18 @@ impl Shadow {
         #[cfg(feature = "diagnostics")]
         crate::copystat::whole(from, to - from, started.elapsed().as_micros() as u64);
         to - from
+    }
+
+    /// Whether a refresh of `[from, to)` would copy nothing, known before
+    /// asking (`crate::watch::unchanged_known`); `false` for a copy not
+    /// known to be watched yet.
+    #[cfg_attr(not(feature = "diagnostics"), allow(dead_code))]
+    fn unchanged_known(&self, from: usize, to: usize) -> bool {
+        if self.watched.load(Ordering::Relaxed) != 1 {
+            return false;
+        }
+        let copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
+        crate::watch::unchanged_known(from, to, self.start as usize / PAGE, &copied)
     }
 
     /// Diagnostic (`VICTORY_REFRESH_CHECK=1`; off by default): after a
@@ -4802,6 +4966,7 @@ impl Shadow {
         }
         let mut dirty = card.dirty.lock().unwrap_or_else(|e| e.into_inner());
         dirty.reserve(most);
+        let first = dirty.is_empty();
         for (from, to) in runs {
             match dirty.last_mut() {
                 Some(last) if from <= last.1 && to >= last.0 => *last = (last.0.min(from), last.1.max(to)),
@@ -4810,6 +4975,16 @@ impl Shadow {
         }
         // (Under the lock: what takes the list sees it or finds it set.)
         card.touched.store(true, Ordering::Release);
+        drop(dirty);
+        // From none to some: [`card_dirty`] finds the copy in the list. (A
+        // copy changed again before its ranges are taken is in it already;
+        // one whose ranges the walk took may be in it with nothing to take.)
+        if first
+            && changed_kept()
+            && let Some(me) = card.me.get()
+        {
+            CHANGED.lock().unwrap_or_else(|e| e.into_inner()).push(me.clone());
+        }
     }
 
     /// Whether shaders were ever declared to write it.
@@ -5123,6 +5298,7 @@ impl Shadow {
                 masked: Default::default(),
                 touched: Default::default(),
                 size: len.next_multiple_of(PIECE as u64),
+                me: std::sync::OnceLock::new(),
             });
         }
         let shadow = Arc::new(shadow);
@@ -5280,6 +5456,7 @@ mod land_tests {
             masked: Default::default(),
             touched: Default::default(),
             size: len as u64,
+            me: std::sync::OnceLock::new(),
         });
         Some(shadow)
     }
@@ -5520,18 +5697,25 @@ fn buffers_read() -> std::sync::RwLockReadGuard<'static, BTreeMap<(u64, usize), 
 
 /// A title buffer exists at `start` (`len` bytes).
 pub(crate) fn register(resource: usize, start: u64, len: u64) {
-    buffers().insert(
+    let mut map = buffers();
+    map.insert(
         (start, resource),
         Entry {
             end: start + len,
             shadow: None,
         },
     );
+    // After the insert, with the table's lock still held ([`TABLES_CHANGED`];
+    // fork pull request #1245: said before it, a thread that asked between
+    // the two kept the old table's answer under the new count for good).
+    tables_changed();
 }
 
 /// The title released it; lists that still hold its copy keep it alive.
 pub(crate) fn unregister(resource: usize, start: u64) {
-    buffers().remove(&(start, resource));
+    let mut map = buffers();
+    tables_changed();
+    map.remove(&(start, resource));
 }
 
 /// The title buffer holding `address`, as (start, length), without making
@@ -5560,14 +5744,21 @@ pub(crate) fn in_place_let_go(at: u64, len: u64) -> u64 {
             .filter(|(key, shadow)| shadow.place.is_some() && key.0 + key.1 > at)
             .map(|(key, _)| *key)
             .collect();
+        if !keys.is_empty() {
+            tables_changed();
+        }
         gone.extend(keys.into_iter().filter_map(|key| map.remove(&key)));
     }
     {
         // As `lookup` finds a buffer: among the 256 that start below.
         let mut map = buffers();
-        for (_, entry) in map.range_mut(..(end, 0)).rev().take(256) {
-            if entry.end > at && entry.shadow.as_ref().is_some_and(|s| s.place.is_some()) {
-                gone.extend(entry.shadow.take());
+        let placed = |entry: &Entry| entry.end > at && entry.shadow.as_ref().is_some_and(|s| s.place.is_some());
+        if map.range(..(end, 0)).rev().take(256).any(|(_, entry)| placed(entry)) {
+            tables_changed();
+            for (_, entry) in map.range_mut(..(end, 0)).rev().take(256) {
+                if placed(entry) {
+                    gone.extend(entry.shadow.take());
+                }
             }
         }
     }
@@ -5620,6 +5811,60 @@ pub(crate) fn find_any(address: u64, len: u64) -> Option<Arc<Shadow>> {
     lookup(address, len, true)
 }
 
+/// Counts the changes of the tables [`lookup`] reads that can change what an
+/// ask finds: a buffer registered or released, a copy taken out of a table,
+/// a window made.
+static TABLES_CHANGED: AtomicU64 = AtomicU64::new(0);
+
+fn tables_changed() {
+    TABLES_CHANGED.fetch_add(1, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use super::{TABLES_CHANGED, buffers, register, unregister};
+    use std::sync::{Barrier, atomic::Ordering};
+    use std::time::{Duration, Instant};
+
+    /// A registration that waits for the table's lock has not counted yet:
+    /// who reads the old table reads it under the old count (fork pull
+    /// request #1245's test).
+    #[test]
+    fn a_pending_registration_invalidates_readers_of_the_old_table() {
+        // No card: the address of a stack slot is the key.
+        let slot = 0u64;
+        let start = (&raw const slot) as u64;
+        let resource = start as usize;
+        let table = buffers();
+        let initial = TABLES_CHANGED.load(Ordering::Acquire);
+        let ready = Barrier::new(2);
+        let observed = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                ready.wait();
+                register(resource, start, 8);
+            });
+            ready.wait();
+            // Time for a writer that counted before taking the lock to
+            // show it; a right one stays blocked all the while.
+            let deadline = Instant::now() + Duration::from_millis(50);
+            while TABLES_CHANGED.load(Ordering::Acquire) == initial && Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            let count = TABLES_CHANGED.load(Ordering::Acquire);
+            assert!(!table.contains_key(&(start, resource)));
+            drop(table);
+            count
+        });
+        let committed = TABLES_CHANGED.load(Ordering::Acquire);
+        unregister(resource, start);
+        assert_ne!(committed, observed, "the old table still has the current count");
+    }
+}
+
+/// Since the last frame line: asks answered from a thread's own memory of
+/// them, and asks that went to the tables.
+pub(crate) static LOOKUPS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+
 /// The copy [`find`] gives for a range inside a title buffer, if it was made.
 pub(crate) fn peek(address: u64, len: u64) -> Option<Arc<Shadow>> {
     let end = address.checked_add(len.max(1))?;
@@ -5628,8 +5873,12 @@ pub(crate) fn peek(address: u64, len: u64) -> Option<Arc<Shadow>> {
 
 fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
     let quick = quick_find();
-    if quick && let Some(shadow) = found(address, len) {
-        return Some(shadow);
+    if quick {
+        if let Some(shadow) = found(address, len) {
+            LOOKUPS[0].fetch_add(1, Ordering::Relaxed);
+            return Some(shadow);
+        }
+        LOOKUPS[1].fetch_add(1, Ordering::Relaxed);
     }
     let end = address.checked_add(len.max(1))?;
     {
@@ -5702,6 +5951,7 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
                     touched: Default::default(),
                     masked: Mutex::default(),
                     size,
+                    me: std::sync::OnceLock::new(),
                 };
                 (on_card, Some(card))
             }
@@ -5725,7 +5975,8 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
         let mut shadow = Shadow::new(buffer, data, gpu, key.0, len);
         shadow.card = card;
         let shadow = Arc::new(shadow);
-        if shadow.card.is_some() {
+        if let Some(card) = &shadow.card {
+            let _ = card.me.set(Arc::downgrade(&shadow));
             CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
         }
         entry.shadow = Some(shadow);
@@ -5931,6 +6182,7 @@ pub(crate) fn by_address(start: u64, len: u64) -> Option<Arc<Shadow>> {
         masked: Default::default(),
         touched: Default::default(),
         size: len,
+        me: std::sync::OnceLock::new(),
     });
     let shadow = Arc::new(shadow);
     CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
@@ -5991,6 +6243,7 @@ fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Sha
         let shadow = Arc::new(Shadow::placed(placed, start, len, true));
         note(&shadow);
         map.insert((start, len), shadow.clone());
+        tables_changed();
         return Some(shadow);
     }
     // One buffer in the card's memory, filled by the CPU through the bus.
@@ -6004,6 +6257,7 @@ fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Sha
         let shadow = Arc::new(shadow);
         note(&shadow);
         map.insert((start, len), shadow.clone());
+        tables_changed();
         return Some(shadow);
     }
     let (buffer, data) = host()?.shared_buffer(len)?;
@@ -6021,6 +6275,7 @@ fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Sha
                 touched: Default::default(),
                 masked: Mutex::default(),
                 size: len,
+                me: std::sync::OnceLock::new(),
             };
             (on_card, Some(card))
         }
@@ -6037,11 +6292,13 @@ fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Sha
     shadow.window = true;
     shadow.card = card;
     let shadow = Arc::new(shadow);
-    if shadow.card.is_some() {
+    if let Some(card) = &shadow.card {
+        let _ = card.me.set(Arc::downgrade(&shadow));
         CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
     }
     note(&shadow);
     map.insert((start, len), shadow.clone());
+    tables_changed();
     Some(shadow)
 }
 
@@ -6362,6 +6619,7 @@ mod card_merge_tests {
                 masked: Mutex::default(),
                 // 0: no card bytes counted (`Drop` takes them off again).
                 size: 0,
+                me: std::sync::OnceLock::new(),
             });
             // As `card_dirty` with the mark set by the old-way fetch.
             if let Some(card) = &shadow.card {
@@ -6411,6 +6669,7 @@ mod card_merge_tests {
                 }),
                 touched: Default::default(),
                 size: 0,
+                me: std::sync::OnceLock::new(),
             });
             let mut slot = content.clone();
             slot[shader_byte] ^= 0xc3;

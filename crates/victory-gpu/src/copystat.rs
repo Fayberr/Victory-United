@@ -132,8 +132,39 @@ pub(crate) enum C {
     WaitsForGroups,
     WaitsForBuffers,
     IndirectBounded,
+    /// `watch::writes` kernel askings that failed (the range is not
+    /// write-watched: view memory or not watchable).
+    WatchFailed,
+    /// `watch::writes` askings not made because the range's first block is
+    /// already known to be guarded view memory (no kernel call).
+    WatchKnownView,
+    /// Microseconds of the `watch::writes` askings whose kernel call failed
+    /// and fell to the guards: the failed call, the look at what the
+    /// memory is, the guards' walk.
+    WatchFailedUs,
+    /// Microseconds of the askings answered by the guards with no kernel
+    /// call (`WatchKnownView`).
+    WatchKnownUs,
+    /// Refreshes of a watched host copy's range (`Shadow::update_free`)
+    /// that copied nothing, and their microseconds (the asking included).
+    RefreshNone,
+    RefreshNoneUs,
+    /// The ones that copied something, and their microseconds.
+    RefreshSome,
+    RefreshSomeUs,
+    /// With `VICTORY_REFRESH_COUNT=1`: of the refreshes that copied
+    /// nothing, those known unchanged before asking
+    /// (`crate::watch::unchanged_known`), and their microseconds: what a
+    /// skip of them would take off at most.
+    RefreshKnown,
+    RefreshKnownUs,
+    /// Refreshes skipped as known unchanged (`VICTORY_REGION_SKIP`).
+    RefreshSkipped,
 }
-const COUNTERS: usize = 80;
+/// One past the last counter, following the enum (a fixed 80 was outrun by
+/// the refresh counters and ended run 324 with an index past the end).
+const COUNTERS: usize = C::RefreshSkipped as usize + 1;
+const _: () = assert!(COUNTERS <= 256, "the counters' array stays small");
 /// One of some sets of counters, each in lines of the processor's memory of
 /// its own: a set for all threads had them wait for each other's lines at
 /// every list call (what counts here is summed up for the log alone).
@@ -507,6 +538,22 @@ mod command_tests {
         );
         assert_eq!(command_key("texture upload 0x271b61c28b0 (2048x2048x1 f99 mips 10) sub 0"), "texture upload");
         assert_eq!(command_key("alias copy of 0x26f66aca780 into 0x26fbdc93890"), "alias copy");
+    }
+}
+
+#[cfg(test)]
+mod counter_tests {
+    /// Every counter has a slot: the last one too (run 324 ended with an
+    /// index past the end of a fixed-size array).
+    #[test]
+    fn the_last_counter_has_a_slot() {
+        use super::{C, COUNT, add};
+        use std::sync::atomic::Ordering::Relaxed;
+        let before: u64 = COUNT.iter().map(|b| b.0[C::RefreshSkipped as usize].load(Relaxed)).sum();
+        add(C::RefreshSkipped, 1);
+        add(C::RefreshKnownUs, 0);
+        let after: u64 = COUNT.iter().map(|b| b.0[C::RefreshSkipped as usize].load(Relaxed)).sum();
+        assert!(after > before);
     }
 }
 
@@ -1329,6 +1376,7 @@ pub(crate) fn log(frames: f64) {
         c[C::GpuWritesLeftOut as usize],
         mb(c[C::GpuWritesLeftOutBytes as usize]),
     );
+    crate::draw::tables_line(frames);
     let [together, written, mapped] =
         [0, 1, 2].map(|n| crate::watch::ALIASES[n].load(std::sync::atomic::Ordering::Relaxed));
     tracing::info!(
@@ -1501,6 +1549,28 @@ pub(crate) fn log(frames: f64) {
             longest as f64 / 1e3
         );
     }
+    tracing::info!(
+        "  write-watch askings per frame that failed in the kernel: {:.0} ({:.2} ms in all with their guard walks); \
+         not made because the range is known guarded view memory: {:.0} ({:.2} ms in all)",
+        c[C::WatchFailed as usize],
+        c[C::WatchFailedUs as usize] / 1e3,
+        c[C::WatchKnownView as usize],
+        c[C::WatchKnownUs as usize] / 1e3,
+    );
+    tracing::info!(
+        "  refreshes of watched host copies per frame: {:.0} copied nothing ({:.2} ms), {:.0} copied something \
+         ({:.2} ms); of those that copied nothing, {:.0} were known unchanged before asking ({:.2} ms; \
+         VICTORY_REFRESH_COUNT=1 looks: every block of the range read-only by our hand and clean, or the range \
+         asked ahead, and no page noted written since the copy took it); skipped as known unchanged \
+         (VICTORY_REGION_SKIP): {:.0}",
+        c[C::RefreshNone as usize],
+        c[C::RefreshNoneUs as usize] / 1e3,
+        c[C::RefreshSome as usize],
+        c[C::RefreshSomeUs as usize] / 1e3,
+        c[C::RefreshKnown as usize],
+        c[C::RefreshKnownUs as usize] / 1e3,
+        c[C::RefreshSkipped as usize],
+    );
     tracing::info!(
         "  waits for every earlier shader write, per frame: {:.0} for the title's barrier groups, {:.0} \
          for its barriers on buffers; {:.0} indirect commands bounded (a dispatch of ours between two \
