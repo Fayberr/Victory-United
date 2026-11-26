@@ -71,3 +71,12 @@ has a measured gain on VU yet; the matched run after this batch decides what sta
 Two earlier picks that were missing from this list: [AnyXboxX #279](https://github.com/LooperSalty/AnyXboxX/pull/279) (Skyfrye, clock read only for summed submission steps, `6d7989f9`) and a VIctory-7900XTX change that sorts changed runs stably and joins piece runs while building them (`589e7e0d`, author `local`).
 
 Looked at and not taken this round (too large for one safe step, conflicting with code VU already has, or off by default upstream): victory-fork #1138, Marvisak #2349, the Flamingo submission-thread work, klbf `88354fb1`, VItoriaBr `9ceb7e72`.
+
+## Whole-branch merge: VIctory-7900XTX
+
+[VIctory-7900XTX](https://github.com/avatarmanz/VIctory-7900XTX) `e2a28ec7` (GPL-3.0, avatarmanz and
+contributors) was merged into this tree as a whole branch (`3588725d`, merged to `main` in `cce2ad11`),
+not as single picks. Its commits and authors are kept. About 560 conflict hunks were resolved by hand
+where both trees had changed the same lines; VU's own additions that the other branch did not have
+(for example the shader cache `warm` call) were kept. One 15 minute run of the merged build is in
+`docs/measurements.md`.

@@ -52,6 +52,13 @@ second 199 ms a frame (5.0 fps), at about 4,450 draws a frame in both. The part 
 was the heap buffers pass (106 ms to 72 ms). One run per build, no crash in either; details in
 `docs/measurements.md`.
 
+After that, the whole performance branch of VIctory-7900XTX was merged in (`3588725d`, listed in
+`PROVENANCE.md`). One 15 minute run of that build in the same room, same machine and settings:
+the last 20 settled five-second reports (4,300 to 4,700 draws a frame) had a median of 103 ms a
+frame (9.7 fps), at about 4,330 draws; the median over the whole run was 9.3 fps. No crash. It is
+one run, not a paired one: the 5.0 fps figure above came from a 6 minute run, so the two are
+not an exact like-for-like comparison. Details in `docs/measurements.md`.
+
 ## Build
 
 You need Windows 11, a recent GPU driver, the Rust toolchain from `rust-toolchain.toml` and your

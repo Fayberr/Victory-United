@@ -46,3 +46,21 @@ built left out; in this run none did).
   the slower run had played less game time.
 - Not measured: more than one run per build, any other machine, a long run of the candidate,
   and the picture compared pixel for pixel.
+
+## 2026-11-26, avatar merge: `3588725d`, one 15 minute run
+
+- Machine, console profile, scripted keys and environment switches: as in the entries above. Same
+  game data seed and a fresh shader and pipeline cache. Release build with diagnostics logging.
+- Build: `3588725d` (VU `main` with the whole performance branch of VIctory-7900XTX `e2a28ec7`
+  merged in; conflicts resolved by hand, the tree compiles with and without the diagnostics
+  features), SHA-256 `F72F14297C8683682EBF00ADB40124539628AECE7959FEF2632AE4B5E06C7B81`.
+- Result: 112 five-second reports over the run. Median over all of them 9.3 fps (107 ms a
+  frame). Last 20 reports with 4,300 to 4,700 draws a frame: median 103 ms a frame (9.7 fps) at
+  4,328 draws; preparing 58 ms (copies 25 ms), copying back 25 ms, on the GPU 28 ms. The last
+  three reports show 98.5 to 101.7 ms (9.8 to 10.1 fps). Heap buffers pass about 20 ms (median
+  over the run), against 72 ms in the `ac63840d` run.
+- Ending: the script closed the game at its 15 minute deadline and had to end the process after
+  the close wait. No crash, panic or error line in the log, and no swap chain failure.
+- Not measured: a paired run against another build in this session (the 5.0 fps of `ac63840d`
+  and the 7.9 fps of VIctory-7900XTX `e2a28ec7` come from earlier runs of 6 minutes and longer),
+  more than one run, any other machine, any real save, player control in the room.
