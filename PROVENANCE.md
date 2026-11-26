@@ -18,5 +18,14 @@ picture after each.
 
 ## What has been taken since
 
-Nothing yet. Each change taken from another project is listed here with its source and author when
-it goes in.
+The `vibr/main` fold records [edsuuu/VI-BR-PORT](https://github.com/edsuuu/VI-BR-PORT)
+through `31b9a82fb260f9bad6acc41b47ec4e0571e8febb` (GPL-3.0-or-later). Its 25 new commits
+keep their original authors in the merge history. The new code joins adjacent GPU compare ranges,
+changes the small-card buffer defaults, makes skipping ray-only shadow passes opt-in, improves
+pipeline failure logs, and lets the air-light bound work with constant ambient light. The play
+profile also takes the buffer threshold and lighting settings.
+
+Existing local shader, descriptor and memory-mapping implementations were retained where they
+already contained these fixes or added later corrections. Upstream README claims, Brazil captions,
+title icons and the duplicate key-file reader were omitted. See [fold details](docs/fold-vibr.md)
+for the exact exclusions and switch defaults. This fold has no new game measurement.
