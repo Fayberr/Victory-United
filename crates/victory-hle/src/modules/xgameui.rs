@@ -104,6 +104,21 @@ extern "system" fn text_entry_result(
     put(used, written as u32)
 }
 
+/// The console's most characters for a text entry.
+const MAX_LENGTH: u32 = 1024;
+/// `XGameUiTextEntryInputScope::Password`.
+const PASSWORD: u32 = 31;
+
+/// The limit the console applies, as documented: the title's, at most
+/// 1024; 1024 for 0 and for a password, whatever the title asks.
+fn max_length_for(scope: u32, max: u32) -> u32 {
+    if max == 0 || scope == PASSWORD {
+        MAX_LENGTH
+    } else {
+        max.min(MAX_LENGTH)
+    }
+}
+
 /// At most `max` characters (0: no limit).
 fn limit(typed: &str, max: u32) -> String {
     match max {

@@ -403,39 +403,6 @@ fn scalar_quad_masks_pack_nibbles_and_set_scc() {
     });
 }
 
-#[test]
-fn scalar_quad_masks_pack_nibbles_and_set_scc() {
-    let pack_words = |opcode: u32| {
-        [
-            0xBE90_0000 | opcode << 8,   // s_quadmask s16, s0 (pairs for b64)
-            sop2(0x0a, 18, 129, 128),  // s_cselect_b32 s18, 1, 0
-            sop2(0x1e, 18, 18, 144),   // s_lshl_b32 s18, s18, 16
-            sop2(0x10, 16, 16, 18),    // s_or_b32 s16, s16, s18
-            vop1(1, 0, sgpr(16)),      // v_mov_b32 v0, s16
-        ]
-    };
-    let cases = [
-        ([0, 0, 0, 0], [0, 0]),
-        ([0x8000_0420, 0x0100_0001, 0, 0], [0x1_0086, 0x1_4186]),
-        ([0, 0x8000_0000, 0, 0], [0, 0x1_8000]),
-        ([u32::MAX, u32::MAX, 0, 0], [0x1_00ff, 0x1_ffff]),
-    ];
-    let inputs = cases.map(|(input, _)| input);
-    for (wide, opcode) in [0x2c, 0x2d].into_iter().enumerate() {
-        let shader = build_valu_cs(&pack_words(opcode));
-        run_cases(&shader, &inputs, |backend, i, _, got| {
-            assert_eq!(got, cases[i].1[wide], "{backend}, opcode {opcode:#x}");
-        });
-    }
-    let high = build_valu_cs(&[
-        0xBE90_2D00, // s_quadmask_b64 s[16:17], s[0:1]
-        vop1(1, 0, sgpr(17)),
-    ]);
-    run_cases(&high, &inputs, |backend, _, _, got| {
-        assert_eq!(got, 0, "{backend}: high dword");
-    });
-}
-
 fn is_f16_nan(bits: u16) -> bool {
     (bits & 0x7FFF) > 0x7C00
 }
@@ -482,25 +449,6 @@ fn f16_to_f32(bits: u16) -> f32 {
         _ => sign | ((u32::from(exp) + 112) << 23) | (u32::from(mant) << 13),
     };
     f32::from_bits(f32_bits)
-}
-
-/// MTBUF `op vdata, off, s[srsrc:srsrc+3], 0 format:format` (at byte 0).
-const fn mtbuf(op: u8, vdata: u8, srsrc: u8, format: u8) -> [u32; 2] {
-    [
-        0x3A << 26 | (format as u32 & 0x7F) << 19 | (op as u32 & 7) << 16,
-        0x80 << 24
-            | (op as u32 >> 3 & 1) << 21
-            | (srsrc as u32 >> 2 & 0x1F) << 16
-            | (vdata as u32) << 8,
-    ]
-}
-
-/// Stores `v1` to the buffer, then reads it back into `v0` with the tbuffer
-/// load `op` in buffer format `format`.
-fn tbuffer_load_of_v1(op: u8, format: u8) -> HostShader {
-    let mut body = buffer_store_dword(1, 8, 0).to_vec();
-    body.extend(mtbuf(op, 0, 8, format));
-    build_valu_cs(&body)
 }
 
 #[test]
@@ -578,59 +526,6 @@ fn tbuffer_d16_loads_of_16_bit_norms_round_once() {
     assert!(bad.is_empty(), "{} differ:
 {}", bad.len(), bad.join("
 "));
-}
-
-#[test]
-fn normalized_buffer_formats_load_their_ends_exactly() {
-    // tbuffer_load_format_x.
-    let x = 0;
-    // (format, dword stored, value loaded)
-    let cases: &[(u8, u32, f32)] = &[
-        (1, 0xFF, 1.0),   // 8_UNORM
-        (7, 0xFFFF, 1.0), // 16_UNORM
-        (2, 0x7F, 1.0),   // 8_SNORM: the top, the one above the lowest, the lowest
-        (2, 0x81, -1.0),
-        (2, 0x80, -1.0),
-        (8, 0x7FFF, 1.0), // 16_SNORM
-        (8, 0x8001, -1.0),
-        (8, 0x8000, -1.0),
-    ];
-    for &(format, stored, want) in cases {
-        let shader = tbuffer_load_of_v1(x, format);
-        run_cases(&shader, &[[stored, 0, 0, 0]], |backend, _, _, got| {
-            assert_eq!(
-                got,
-                want.to_bits(),
-                "{backend}: format {format} of {stored:#x} = {got:#010x}, want {want}",
-            );
-        });
-    }
-}
-
-#[test]
-fn tbuffer_d16_loads_pack_two_channels_per_dword() {
-    // tbuffer_load_format_d16_x and tbuffer_load_format_d16_xy.
-    let (x, xy) = (8, 9);
-    // (opcode, format, dword stored, dword loaded)
-    let cases: &[(u8, u8, u32, u32)] = &[
-        // 16_16_FLOAT: the f16 pair (1.0, 2.0) as it was stored.
-        (xy, 29, 0x4000_3C00, 0x4000_3C00),
-        // 16_16_UINT: the 16-bit integers as they were stored.
-        (xy, 27, 0xBEEF_1234, 0xBEEF_1234),
-        // 16_16_UNORM: 0.0 and 1.0, as f16.
-        (xy, 23, 0xFFFF_0000, 0x3C00_0000),
-        // 16_FLOAT, one channel: the high half is 0.
-        (x, 13, 0x4000_3C00, 0x0000_3C00),
-    ];
-    for &(op, format, stored, want) in cases {
-        let shader = tbuffer_load_of_v1(op, format);
-        run_cases(&shader, &[[stored, 0, 0, 0]], |backend, _, _, got| {
-            assert_eq!(
-                got, want,
-                "{backend}: d16 opcode {op} format {format} of {stored:#010x} = {got:#010x}, want {want:#010x}",
-            );
-        });
-    }
 }
 
 #[test]
@@ -2346,7 +2241,10 @@ fn try_build_image_store_cs(dmask: u8, d16: bool) -> Result<HostShader, crate::S
         root_cbvs: lowered.root_cbvs,
         root_srvs: lowered.root_srvs,
         root_uavs: lowered.root_uavs,
+        written_root_uavs: lowered.written_root_uavs,
+        writes_guest_memory: lowered.writes_guest_memory,
         root_indexed_views: res.root_indexed_views,
+        half_views: lowered.half_views,
     };
 
     if let Ok(mut v) = validator::Validator::load(validator::Validator::default_path().as_deref()) {
@@ -2525,7 +2423,10 @@ fn vs_rt_and_viewport_index_exports_validate_and_create_pso() {
             root_cbvs: lowered.root_cbvs,
             root_srvs: lowered.root_srvs,
             root_uavs: lowered.root_uavs,
+            written_root_uavs: lowered.written_root_uavs,
+            writes_guest_memory: lowered.writes_guest_memory,
             root_indexed_views: res.root_indexed_views,
+            half_views: lowered.half_views,
         };
         if let Ok(mut v) =
             validator::Validator::load(validator::Validator::default_path().as_deref())

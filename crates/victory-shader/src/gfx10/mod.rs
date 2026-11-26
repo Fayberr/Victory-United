@@ -633,7 +633,8 @@ mod tests {
             opcodes::GLOBAL,
             opcodes::SCRATCH,
         ] {
-            assert!(t.windows(2).all(|w| w[0].0 < w[1].0));
+            let e = t.entries();
+            assert!(e.windows(2).all(|w| w[0].0 < w[1].0));
         }
     }
 

@@ -35,6 +35,12 @@ impl Table {
         let row = *self.rows.get(usize::from(opcode))?;
         self.entries.get(usize::from(row)).map(|&(_, name)| name)
     }
+
+    /// The opcode entries, for the sortedness test in the parent module.
+    #[cfg(test)]
+    pub(super) fn entries(&self) -> &'static [(u16, &'static str)] {
+        self.entries
+    }
 }
 
 // One byte per possible opcode avoids repeated searches while keeping

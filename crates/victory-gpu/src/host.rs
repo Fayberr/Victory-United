@@ -4637,8 +4637,8 @@ fn queue_title_copies(runs: &[&HostList], written: &[(usize, usize)]) -> Option<
                     picked.push((l, i, dst, src, len));
                 }
                 Step::Copy(dst, src, len) => staying.extend([(dst, dst + len), (src, src + len)]),
-                Step::Fill(_, src, len) => staying.push((src, src + len)),
-                Step::Texture(ref staging, _) => {
+                Step::Fill(_, src, len, _) => staying.push((src, src + len)),
+                Step::Texture { ref staging, .. } => {
                     let (at, len) = staging.memory();
                     staying.push((at, at + len));
                 }
@@ -4726,7 +4726,7 @@ fn put_back(runs: &[&HostList], queued: &QueuedCopies) {
 fn staging_in_flight_at(runs: &[&HostList], finished: u64) -> bool {
     runs.iter().any(|list| {
         list.deferred().copies.iter().any(|step| {
-            matches!(step, Step::Texture(staging, _) if staging.in_flight() > finished)
+            matches!(step, Step::Texture { staging, .. } if staging.in_flight() > finished)
         })
     })
 }
@@ -4739,7 +4739,7 @@ fn staging_in_flight_at(runs: &[&HostList], finished: u64) -> bool {
 fn mark_staging_read(runs: &[&HostList], submission: u64) {
     for list in runs {
         for step in &list.deferred().copies {
-            if let Step::Texture(staging, true) = step {
+            if let Step::Texture { staging, uploads: true } = step {
                 staging.mark_in_flight(submission);
             }
         }
@@ -6375,7 +6375,7 @@ mod late_tests {
         crate::texture::upload(&list, resource, tex);
         assert!(!super::staging_in_flight_at(&[&list], 0));
         for step in &list.deferred().copies {
-            if let super::Step::Texture(staging, _) = step {
+            if let super::Step::Texture { staging, .. } = step {
                 staging.mark_in_flight(10);
             }
         }
@@ -6386,13 +6386,13 @@ mod late_tests {
         // unchanged texture records no copy, so its flight does not count
         // as reading the staging buffer.
         for step in &list.deferred().copies {
-            if let super::Step::Host(work) = step {
+            if let super::Step::Host(work, _) = step {
                 work();
             }
         }
         let later = host.new_list().expect("host list");
         crate::texture::upload(&later, resource, tex);
-        assert!(later.deferred().copies.iter().any(|s| matches!(s, super::Step::Texture(_, false))));
+        assert!(later.deferred().copies.iter().any(|s| matches!(s, super::Step::Texture { uploads: false, .. })));
         super::mark_staging_read(&[&later], 20);
         assert!(!super::staging_in_flight_at(&[&later], 10));
         super::mark_staging_read(&[&list], 20);
@@ -6421,12 +6421,12 @@ mod late_tests {
             .copies
             .iter()
             .find_map(|step| match step {
-                super::Step::Texture(staging, _) => Some(staging.clone()),
+                super::Step::Texture { staging, .. } => Some(staging.clone()),
                 _ => None,
             })
             .expect("a texture step");
         for step in &first.deferred().copies {
-            if let super::Step::Host(work) = step {
+            if let super::Step::Host(work, _) = step {
                 work();
             }
         }
@@ -6464,7 +6464,7 @@ mod late_tests {
             .copies
             .iter()
             .find_map(|step| match step {
-                super::Step::Texture(staging, _) => Some(staging.clone()),
+                super::Step::Texture { staging, .. } => Some(staging.clone()),
                 _ => None,
             })
             .expect("a texture step");
@@ -7464,18 +7464,22 @@ impl Host {
                         let all = unsafe { std::slice::from_raw_parts_mut(*data as *mut u8, bytes) };
                         crate::shadow::mask_fill(all, &stretches, &blocks);
                         if !dirty.iter().any(|(s, _)| Arc::ptr_eq(s, &shadow)) {
-                            dirty.push((shadow.clone(), Vec::new()));
+                            dirty.push((shadow.clone(), Default::default()));
                         }
                         merges.push((shadow, stretches));
                     }
                     _ => {
                         let runs = crate::shadow::mask_runs(&blocks);
                         match dirty.iter_mut().find(|(s, _)| Arc::ptr_eq(s, &shadow)) {
-                            Some((_, ranges)) => {
-                                ranges.extend(runs);
-                                *ranges = crate::shadow::joined(std::mem::take(ranges));
+                            Some((_, updates)) => {
+                                updates.upload.extend(runs);
+                                updates.upload = crate::shadow::joined(std::mem::take(&mut updates.upload));
                             }
-                            None => dirty.push((shadow, runs)),
+                            None => {
+                                let mut updates = crate::shadow::CardUpdates::default();
+                                updates.upload = crate::shadow::joined(runs);
+                                dirty.push((shadow, updates));
+                            }
                         }
                     }
                 }
@@ -7549,7 +7553,10 @@ impl Host {
         let mut up = None;
         // The bytes as they are now, whatever later submissions put there.
         let taking = crate::timeline::span("copies in the card's memory: taken");
-        let own = if send::own() { send::take(self, &dirty) } else { None };
+        // The bytes to send up, in the shape the send list's helpers take them.
+        let sending: Vec<(Arc<crate::shadow::Shadow>, Vec<(usize, usize)>)> =
+            dirty.iter().map(|(shadow, updates)| (shadow.clone(), updates.upload.clone())).collect();
+        let own = if send::own() { send::take(self, &sending) } else { None };
         taking.end();
         if !dirty.is_empty() {
             let Some(sync) = work.sync.pop().or_else(|| self.make_prelude()) else {
@@ -7570,7 +7577,7 @@ impl Host {
                     // Where the next range lies in the landing buffer.
                     let mut at = 0u64;
                     if upcheck::on() {
-                        looks = upcheck::record(self, list, &dirty);
+                        looks = upcheck::record(self, list, &sending);
                     }
                     // Every copy first, then one barrier call, then every
                     // pass: a wait between each copy and its pass had the
@@ -7585,7 +7592,7 @@ impl Host {
                             up = upq::send(self, &self.queue, &[(memory, 0, memory, used)], |_, _, _| {});
                         }
                         let from = up.as_ref().and_then(upq::Slot::bounce);
-                        own.record(self, list, &dirty, |shadow| looks.as_ref().is_some_and(|l| l.hold(shadow)), from);
+                        own.record(self, list, &sending, |shadow| looks.as_ref().is_some_and(|l| l.hold(shadow)), from);
                     }
                     // With `upq`: the PC's bytes come into a buffer of ours
                     // on the copy queue, and this list copies them from
@@ -7593,9 +7600,11 @@ impl Host {
                     if own.is_none() && looks.is_none() && upq::on() {
                         let sides: Vec<_> = dirty.iter().map(|(shadow, _)| shadow.card_sides()).collect();
                         let mut ranges: Vec<upq::Range<'_>> = Vec::new();
-                        for ((shadow, rs), side) in dirty.iter().zip(&sides) {
+                        for ((shadow, updates), side) in dirty.iter().zip(&sides) {
                             if let Some((staging, _, _)) = side {
-                                ranges.extend(rs.iter().map(|&(a, b)| (&shadow.buffer, a as u64, *staging, (b - a) as u64)));
+                                ranges.extend(
+                                    updates.upload.iter().map(|&(a, b)| (&shadow.buffer, a as u64, *staging, (b - a) as u64)),
+                                );
                             }
                         }
                         up = upq::send(self, &self.queue, &ranges, |i, bounce, at| {
@@ -7603,7 +7612,8 @@ impl Host {
                             list.CopyBufferRegion(card, offset, bounce, at, bytes);
                         });
                     }
-                    for (shadow, ranges) in &dirty {
+                    for (shadow, updates) in &dirty {
+                        let ranges = &updates.upload;
                         let Some((staging, before, _)) = shadow.card_sides() else {
                             continue;
                         };
@@ -7676,7 +7686,9 @@ impl Host {
                     list.SetComputeRootSignature(&work.root);
                     list.SetPipelineState(&work.pso);
                     list.SetComputeRootUnorderedAccessView(3, work.differs.0.GetGPUVirtualAddress());
-                    for (shadow, ranges) in &dirty {
+                    for (shadow, updates) in &dirty {
+                        let ranges = updates.hash_ranges();
+                        let ranges = &*ranges;
                         let Some((_, Some(before), _)) = shadow.card_sides() else {
                             continue;
                         };
@@ -14902,7 +14914,7 @@ impl Host {
                 .flatten();
             #[cfg(feature = "diagnostics")]
             let capture = crate::capture::wanted(frame)
-                .then(|| crate::capture::read_back(&self.device, list, seen))
+                .then(|| crate::capture::read_back(&self.device, list, texture))
                 .flatten();
             #[cfg(feature = "diagnostics")]
             let probe = if slot.is_some() { None } else { crate::capture::probe(&self.device, list, texture) };
@@ -15133,20 +15145,6 @@ pub(crate) fn legal_for(flags: u32, state: u32) -> u32 {
 }
 
 impl Host {
-    /// Whether the device is on Microsoft's software rasteriser: WARP, or
-    /// the Basic Render Driver a machine without a card (a CI runner) falls
-    /// back to, which DXGI does not always flag as software, so Microsoft's
-    /// vendor id counts too.
-    #[cfg(test)]
-    pub(crate) fn software(&self) -> bool {
-        const MICROSOFT: u32 = 0x1414;
-        // SAFETY: a plain query of the device's own adapter.
-        self.adapter
-            .as_ref()
-            .and_then(|a| unsafe { a.GetDesc1() }.ok())
-            .is_some_and(|d| d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 || d.VendorId == MICROSOFT)
-    }
-
     /// The card's memory as the system accounts it to this process, in
     /// bytes: the budget and the use of the card's own memory, then of the
     /// PC's memory shared with the card (where the system moves what does

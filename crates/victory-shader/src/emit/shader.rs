@@ -291,8 +291,6 @@ pub(crate) struct Shader {
     /// A pixel shader whose writes to views the console orders by primitive (POPS): its
     /// heap views written or read as UAVs are rasterizer-ordered views.
     pub ordered: bool,
-    /// Every UAV the shader opens is rasterizer ordered ([`Self::annotate`]).
-    pub rov: bool,
     /// Heap handles made with a non-uniform index.
     pub nonuniform_handles: u32,
     /// A pixel shader with a primitive-ordered section (console POPS): its
@@ -361,7 +359,6 @@ impl Shader {
             ordered: false,
             rov: false,
             nonuniform_handles: 0,
-            rov: false,
             discards: false,
             heap_uavs: false,
             threads: None,

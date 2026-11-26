@@ -769,7 +769,7 @@ fn translate(
         return;
     }
     if let Some(cache) = checks.cache {
-        match shader_cache::warm(cache, container_bytes) {
+        match shader_cache::warm_into(cache, container_bytes) {
             Ok(true) => t.cached += 1,
             Ok(false) => t.cache_hits += 1,
             Err(e) if checks.warm_only => return t.fail(e, example),
@@ -1211,7 +1211,7 @@ mod tests {
         // SAFETY: no other test in this binary touches the environment.
         unsafe { std::env::set_var("VICTORY_EMIT_DUMP", env!("CARGO_MANIFEST_DIR")) };
         let missing = std::env::temp_dir().join("victory-translate-no-such-dir");
-        let err = super::run(vec![missing], false, false, false, Some(1)).unwrap_err();
+        let err = super::run(vec![missing], false, false, false, false, false, None, Some(1)).unwrap_err();
         // SAFETY: as above; unset so a later test's `run` is not refused.
         unsafe { std::env::remove_var("VICTORY_EMIT_DUMP") };
         assert!(

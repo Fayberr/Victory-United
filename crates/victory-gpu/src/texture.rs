@@ -3110,7 +3110,7 @@ mod title_memory_tests {
                 }
             };
             fill(0);
-            let (buffer, data, pooled) = staging_buffer(host, total).expect("a staging buffer");
+            let (buffer, data, pooled, piece) = staging_buffer(host, total).expect("a staging buffer");
             STAGED[0].fetch_add(1, Ordering::Relaxed);
             STAGED[1].fetch_add(total, Ordering::Relaxed);
             let footprint = D3D12_PLACED_SUBRESOURCE_FOOTPRINT {
@@ -3130,10 +3130,17 @@ mod title_memory_tests {
                 data,
                 footprints: vec![footprint],
                 rows: vec![SIDE],
+                row_sizes: vec![pitch as u64],
                 layout: layout.clone(),
                 mips: 1,
                 first: 0,
+                level0: 0,
+                read: size,
+                first_mip: 0,
                 size,
+                serial: 0,
+                holds: Default::default(),
+                once: AtomicBool::new(false),
                 bytes: total,
                 mip_drop: 0,
                 memory,
@@ -3141,13 +3148,20 @@ mod title_memory_tests {
                 last: Mutex::default(),
                 dirty: AtomicBool::new(true),
                 uploaded: AtomicBool::new(false),
+                motion_copy: AtomicBool::new(false),
+                is_view: AtomicBool::new(false),
+                last_upload: AtomicU64::new(0),
                 used: AtomicU64::new(0),
+                expected: AtomicU64::new(0),
                 in_flight: AtomicU64::new(0),
                 on_demand: false,
+                has_detiled: AtomicBool::new(false),
                 detiled: AtomicU32::new(0),
                 judged: [const { AtomicU64::new(0) }; 2],
                 waiting: AtomicU64::new(0),
                 pooled,
+                base: piece.as_ref().map_or(0, |p| p.offset),
+                piece,
             };
             let expected = || {
                 let mut linear = vec![0u8; total as usize];
@@ -3532,7 +3546,9 @@ mod title_memory_tests {
             holds: Default::default(),
             once: std::sync::atomic::AtomicBool::new(false),
             bytes: size,
+            mip_drop: 0,
             memory: base,
+            guard_view: false,
             last: std::sync::Mutex::default(),
             dirty: std::sync::atomic::AtomicBool::new(false),
             uploaded: std::sync::atomic::AtomicBool::new(false),

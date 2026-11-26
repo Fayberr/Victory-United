@@ -80,7 +80,7 @@ pub fn run(paths: Vec<PathBuf>, strict: bool, list_missing: bool) -> Result<()> 
             {
                 Ok(info) => info,
                 Err(e) => {
-                    failed.push((path.to_path_buf(), e.to_string()));
+                    failed.push(format!("{}: {e}", path.display()));
                     continue;
                 }
             };
@@ -90,8 +90,8 @@ pub fn run(paths: Vec<PathBuf>, strict: bool, list_missing: bool) -> Result<()> 
     }
 
     println!("{images} images scanned, {} unreadable", failed.len());
-    for (p, e) in &failed {
-        println!("  skipped {}: {e}", p.display());
+    for e in &failed {
+        println!("  skipped {e}");
     }
     println!(
         "\n{:<56} {:>6} {:>6} {:>6} {:>8} {:>7}",

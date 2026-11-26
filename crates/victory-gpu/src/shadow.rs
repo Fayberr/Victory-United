@@ -5853,10 +5853,11 @@ impl Shadow {
         {
             let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
             for &(page, write) in &written {
-                let Some(at) = copied.get_mut(page.wrapping_sub(base)) else {
+                let index = page.wrapping_sub(base);
+                let Some(at) = copied.get(index) else {
                     continue;
                 };
-                if write == 0 || write <= *at {
+                if write == 0 || write <= at {
                     continue;
                 }
                 let (a, b) = ((page * PAGE).max(from), ((page + 1) * PAGE).min(to));
@@ -5864,7 +5865,7 @@ impl Shadow {
                     continue;
                 }
                 if (page * PAGE).max(start) >= from && ((page + 1) * PAGE).min(end) <= to {
-                    *at = now;
+                    copied.set(index, now);
                 }
                 match runs.last_mut() {
                     Some(last) if last.1 == a => last.1 = b,

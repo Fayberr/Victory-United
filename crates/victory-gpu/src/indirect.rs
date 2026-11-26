@@ -2102,8 +2102,8 @@ void main() {
                 warp.list.SetComputeRootUnorderedAccessView(3, differs_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(4, inline_gpu);
                 // Both compares take a group of 64 threads to a piece now, so
-                // a group a piece; `per_group` was for the thread-a-piece form.
-                let _ = per_group;
+                // a group a piece; `groups` was for the thread-a-piece form.
+                let _ = groups;
                 warp.list.Dispatch(PIECES, 1, 1);
             }
             warp.submit_and_wait();

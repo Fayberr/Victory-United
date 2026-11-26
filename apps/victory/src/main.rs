@@ -277,7 +277,7 @@ fn main() -> Result<()> {
             ..
         } => {
             apply_host_shader_overrides_from_env();
-            translate::run(paths, validate, pipelines, list, jobs)
+            translate::run(paths, validate, pipelines, list, write_cache, used_only, host_lanes, jobs)
         }
         Command::Precompile {
             paths,

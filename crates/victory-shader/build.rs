@@ -11,6 +11,7 @@ fn main() {
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
     let mut hasher = blake3::Hasher::new();
+    let mut switches = std::collections::BTreeSet::new();
     for (rel, full) in files {
         println!("cargo:rerun-if-changed={}", full.display());
         hasher.update(rel.as_bytes());
@@ -19,11 +20,25 @@ fn main() {
             .unwrap_or_else(|e| panic!("failed to read {}: {e}", full.display()));
         hasher.update(&(contents.len() as u64).to_le_bytes());
         hasher.update(&contents);
+        let text = String::from_utf8_lossy(&contents);
+        let mut rest = &text[..];
+        while let Some(at) = rest.find("\"VICTORY_") {
+            let tail = &rest[at + 1..];
+            let end = tail
+                .find(|c: char| !(c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'))
+                .unwrap_or(tail.len());
+            if tail[end..].starts_with('"') {
+                switches.insert(tail[..end].to_string());
+            }
+            rest = &tail[end..];
+        }
     }
     println!(
         "cargo:rustc-env=VICTORY_SHADER_SOURCE_HASH={}",
         hasher.finalize().to_hex()
     );
+    let joined: Vec<_> = switches.into_iter().collect();
+    println!("cargo:rustc-env=VICTORY_SHADER_SWITCHES={}", joined.join(","));
 }
 
 fn collect_rs(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {

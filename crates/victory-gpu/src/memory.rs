@@ -743,7 +743,6 @@ impl Memory {
         if whole {
             shadow.resend(base + from, base + to);
         }
-        Some(n)
     }
 
     /// The pages shaders found empty since the last frame.
@@ -1527,7 +1526,7 @@ pub(crate) fn take_dirty() {
     for page in pages {
         // SAFETY: inside the directory's mapping (the mask has no more bits
         // than the directory has entries).
-        let copy = unsafe { m.directory.1.add(page as usize * 2).read() } as usize;
+        let copy = unsafe { m.directory.0.add(page as usize * 2).read() } as usize;
         if (1..=m.copies.len()).contains(&copy) && m.dirty_pages.insert(page, (copy - 1, frame)).is_none() {
             m.dirty_changes += 1;
         }

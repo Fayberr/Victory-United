@@ -73,13 +73,6 @@ pub(crate) struct Shader {
     /// Whether it is the program [`crate::ambient`] follows.
     #[cfg(windows)]
     pub(crate) resolves_light: bool,
-    /// It draws the sky as the title reflects it ([`crate::ambient::SKY`]).
-    #[cfg(windows)]
-    pub(crate) draws_sky: bool,
-    /// It writes the title's reflections for the last time in a frame
-    /// ([`crate::ambient::REFLECTED`]).
-    #[cfg(windows)]
-    pub(crate) ends_reflections: bool,
     /// A pixel program of the title's decoration bake ([`bakes`]).
     #[cfg(windows)]
     pub(crate) bakes: bool,
@@ -178,10 +171,6 @@ impl Shader {
             walks: OnceLock::new(),
             #[cfg(windows)]
             resolves_light: bytes.windows(crate::ambient::PROGRAM.len()).any(|w| w == crate::ambient::PROGRAM),
-            #[cfg(windows)]
-            draws_sky: named(bytes, crate::ambient::SKY),
-            #[cfg(windows)]
-            ends_reflections: named(bytes, crate::ambient::REFLECTED),
             #[cfg(windows)]
             bakes: bakes(bytes),
         }
@@ -328,20 +317,6 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         picks: Default::default(),
         used_written,
         write_unknown,
-    })
-}
-
-/// Whether a console program has an image store or atomic (it writes a
-/// texture through unordered access), or code that does not decode.
-#[cfg(windows)]
-fn image_stores(program: &victory_shader::NativeProgram) -> bool {
-    use victory_shader::gfx10::{Encoding, decode};
-    let Ok(code) = decode(&program.code) else {
-        return true;
-    };
-    code.iter().any(|i| {
-        matches!(i.encoding, Encoding::Mimg)
-            && i.name().is_none_or(|n| n.contains("store") || n.contains("atomic"))
     })
 }
 

@@ -66,8 +66,6 @@ mod over;
 #[cfg(windows)]
 mod indirect;
 #[cfg(windows)]
-mod ambient;
-#[cfg(windows)]
 mod inplace;
 #[cfg(windows)]
 mod land;

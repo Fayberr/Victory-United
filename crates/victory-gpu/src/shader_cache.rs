@@ -708,20 +708,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cache = Cache::open(dir.path()).unwrap();
         let container = b"a console container".as_slice();
-        let fail = |_: &[u8]| Err::<HostShader, _>("unsupported".to_owned());
+        let fail = |_: &[u8]| Err::<HostShader, _>(ShaderError::NotDxbc);
         let ok = |_: &[u8]| Ok(shader());
-        let run = |build: &[u8; 32], last: &[u8; 32], translate: fn(&[u8]) -> Result<HostShader, String>| {
-            or_last_worked(&cache, last, container, cached(&cache, build, last, container, translate))
+        let run = |translate: fn(&[u8]) -> Result<HostShader, ShaderError>| {
+            cached(&cache, &LAST, [1, 1], container, translate, || true).0
         };
         // Nothing worked yet: the failure stands.
-        assert!(run(&[1; 32], &LAST, fail).is_err());
-        assert_eq!(run(&[1; 32], &LAST, ok), Ok(shader()));
-        // A later build that fails gets the earlier translation; without the
-        // fallback (the offline warm-up) the failure is reported.
-        assert_eq!(run(&[2; 32], &LAST, fail), Ok(shader()));
-        assert!(cached(&cache, &[2; 32], &LAST, container, fail).is_err());
-        // Other settings (another last key) do not.
-        assert!(run(&[2; 32], &[3; 32], fail).is_err());
+        assert!(run(fail).is_err());
+        assert_eq!(run(ok), Ok(shader()));
+        // A second look reads the entry the run that worked made, so a
+        // translator that fails later still gets that translation.
+        assert_eq!(run(fail), Ok(shader()));
     }
 
     #[test]
@@ -729,19 +726,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cache = Cache::open(dir.path()).unwrap();
         let container = b"a console container".as_slice();
-        let fail = |_: &[u8]| Err::<HostShader, _>("unsupported".to_owned());
+        let fail = |_: &[u8]| Err::<HostShader, _>(ShaderError::NotDxbc);
         let ok = |_: &[u8]| Ok(shader());
-        assert_eq!(warm_with(&cache, &[1; 32], &LAST, container, ok), Ok(true));
-        // Already there: not translated again.
-        assert_eq!(warm_with(&cache, &[1; 32], &LAST, container, fail), Ok(false));
-        // A run of that build reads it, and a later build that fails gets it.
-        assert_eq!(cached(&cache, &[1; 32], &LAST, container, fail), Ok(shader()));
-        let later = cached(&cache, &[2; 32], &LAST, container, fail);
-        assert_eq!(or_last_worked(&cache, &LAST, container, later), Ok(shader()));
-        // A failure reads as the converter's and stores nothing.
-        let failed = warm_with(&cache, &[3; 32], &LAST, b"other", fail);
-        assert_eq!(failed, Err("converter shader.dxil v1: unsupported".to_owned()));
-        assert!(cached(&cache, &[3; 32], &LAST, b"other", fail).is_err());
+        let run = |translate: fn(&[u8]) -> Result<HostShader, ShaderError>| {
+            cached(&cache, &LAST, [1, 1], container, translate, || true)
+        };
+        // The first look translates and stores; the next reads it back.
+        assert_eq!(run(ok), (Ok(shader()), CacheStatus::Stored));
+        assert_eq!(run(fail), (Ok(shader()), CacheStatus::Hit));
+        // A failure that is not the converter's reads as such and stores nothing.
+        let failed = cached(&cache, &[3; 32], [1, 1], b"other", fail, || true);
+        assert_eq!(failed.1, CacheStatus::Unstored);
     }
 
     fn shader() -> HostShader {

@@ -2004,6 +2004,8 @@ impl<'a> Lower<'a> {
         let mut bpermute_slot: Option<u32> = None;
         // a console wave64 program in host waves of 32: the LDS dword of `wave_base`'s counter
         let mut halves: Option<u32> = None;
+        let mut pairs: Option<u32> = None;
+        let mut borrowed = false;
         // (the mesh stage below assigns it before reading)
         let mut lds_dwords = 0;
         let paired = PAIRED.get() && x.native.wave64 && host_max_wave() == 32;
@@ -2014,8 +2016,6 @@ impl<'a> Lower<'a> {
             // threads in a row; the caller has checked that the console's waves are full
             let waves = cs.threads.iter().product::<u32>().div_ceil(64);
             s.threads = Some([32 * waves, 1, 1]);
-        let mut pairs: Option<u32> = None;
-        let mut borrowed = false;
             s.lds_dwords = cs.lds_bytes() / 4;
             if waves > 1 {
                 // `wave_base`'s counter: a dword past the program's LDS, or the program's
@@ -4481,6 +4481,7 @@ impl<'a> Lower<'a> {
             None => self.s.m.i32(0),
         };
         let (h, byte, page, copy) = self.memory_with_page(lo, hi, guard, true);
+        let c = self.cur;
         // DXIL's atomic operations: add 0, and 1, or 2, xor 3, signed
         // minimum 4 and maximum 5, unsigned 6 and 7, exchange 8.
         let simple = match op {
@@ -8228,10 +8229,6 @@ impl<'a> Lower<'a> {
         Ok(())
     }
 
-                    // (no rasterizer-ordered form: only heap views are ordered)
-                    (RootType::Descriptor, Some(ResourceType::Uav), 11 | 0x100b) if self.s.ordered => {
-                        Err("a root UAV of a pixel program ordered by primitive")
-                    }
     /// `s_load_dword*` from the program's constant table.
     fn code_smem(&mut self, inst: &Inst, a: Address) -> Result<(), Why> {
         let Fields::Smem {
@@ -12892,6 +12889,7 @@ impl<'a> Lower<'a> {
             // low 16 bits of an integer view's (see the stores above).
             let integer = if typed { self.integer_view(src)? } else { None };
             let k16 = self.s.m.i32(16);
+            let i32t = self.s.t.i32;
             for k in 0..count.div_ceil(2) {
                 let mut x = None;
                 for ch in (2 * k..(2 * k + 2).min(count)).rev() {

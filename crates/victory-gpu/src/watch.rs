@@ -3617,12 +3617,6 @@ pub fn title_memory_unmapping(at: usize, len: usize) {
         PUBLISHED.clear(block);
         PROTECTED.clear(block);
     }
-    let end = at.saturating_add(len);
-    let mut s = spans();
-    if s.changes.iter().any(|c| meet(c.1, c.2, at, end)) {
-        return None;
-    }
-    Some(Reading(Held::Bytes(s.read(at, end))))
 }
 
 /// The title is about to free or decommit memory of its own,
@@ -3765,7 +3759,7 @@ pub fn title_memory_committed(at: usize, len: usize) {
 /// or became writable concurrently.
 pub(crate) fn handle_write_fault(at: usize) -> bool {
     let mut g = guards();
-    if open(&mut g, at, at + 1) {
+    if open(&mut g, at, at + 1) != 0 {
         #[cfg(feature = "diagnostics")]
         crate::copystat::add(crate::copystat::C::GuardFaults, 1);
         crate::framelog::add(crate::framelog::T::GuardFaults, 1);

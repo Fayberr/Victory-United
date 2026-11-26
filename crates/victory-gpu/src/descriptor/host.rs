@@ -6017,7 +6017,7 @@ fn make_twinned(
     match view {
         View::NullConstant => {
             null_cbv(device, at);
-            Some(None)
+            Some(Built::plain(None))
         }
         &View::Constant(address, size) => {
             let size = constant_view_bytes(size).next_multiple_of(D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
@@ -6729,76 +6729,6 @@ pub(crate) static NULLS_SKIPPED: std::sync::atomic::AtomicU64 = std::sync::atomi
 fn null_skip() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_SYNC_NULL_SKIP").is_none_or(|v| v != "0"))
-}
-
-/// With `VICTORY_NULL_MAGENTA=1`, a 2D colour texture view that shows
-/// nothing yet shows magenta: on the screen, a texture that is not there is
-/// told from one whose contents are black. False if it is to be null.
-#[cfg(feature = "diagnostics")]
-fn magenta_for(desc: &[u32; 16], at: D3D12_CPU_DESCRIPTOR_HANDLE) -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*ON.get_or_init(|| std::env::var_os("VICTORY_NULL_MAGENTA").is_some_and(|v| v == "1")) {
-        return false;
-    }
-    // Block-compressed colour (BC1 to BC3, BC7) and 8-bit RGBA and BGRA.
-    let colour = matches!(desc[0], 27..=29 | 70..=78 | 87..=91 | 97..=99);
-    if desc[1] != D3D12_SRV_DIMENSION_TEXTURE2D.0 as u32 || !colour {
-        return false;
-    }
-    let (Some(host), Some(texture)) = (host(), magenta()) else {
-        return false;
-    };
-    // SAFETY: a slot of our heap and a live texture.
-    unsafe { host.device.CreateShaderResourceView(texture, None, at) };
-    true
-}
-
-/// One magenta texel, written by the processor.
-#[cfg(feature = "diagnostics")]
-fn magenta() -> Option<&'static ID3D12Resource> {
-    static TEXTURE: std::sync::OnceLock<Option<ID3D12Resource>> = std::sync::OnceLock::new();
-    TEXTURE
-        .get_or_init(|| {
-            let heap = D3D12_HEAP_PROPERTIES {
-                Type: D3D12_HEAP_TYPE_CUSTOM,
-                CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_WRITE_BACK,
-                MemoryPoolPreference: D3D12_MEMORY_POOL_L0,
-                ..Default::default()
-            };
-            let desc = D3D12_RESOURCE_DESC {
-                Dimension: D3D12_RESOURCE_DIMENSION_TEXTURE2D,
-                Width: 1,
-                Height: 1,
-                DepthOrArraySize: 1,
-                MipLevels: 1,
-                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
-                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-                ..Default::default()
-            };
-            let mut texture: Option<ID3D12Resource> = None;
-            // SAFETY: valid descriptions and an out pointer; the texel is
-            // written while nothing reads the texture.
-            unsafe {
-                host()?
-                    .device
-                    .CreateCommittedResource(
-                        &heap,
-                        D3D12_HEAP_FLAG_NONE,
-                        &desc,
-                        D3D12_RESOURCE_STATE_COMMON,
-                        None,
-                        &mut texture,
-                    )
-                    .ok()?;
-                let texture = texture?;
-                texture.Map(0, None, None).ok()?;
-                let texel = [255u8, 0, 255, 255];
-                texture.WriteToSubresource(0, None, texel.as_ptr().cast(), 4, 4).ok()?;
-                texture.Unmap(0, None);
-                Some(texture)
-            }
-        })
-        .as_ref()
 }
 
 /// A null view of the kind `view` is, for a slot whose view the host
@@ -9040,7 +8970,7 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         let placed = crate::resource::texture_at(addr, &rdesc).unwrap();
         let on_demand = crate::resource::host_tiled(placed).expect("expected tiled texture");
         let mask = ((1u32 << 11) - 1) & !0b111; // mips 3..10
-        let _ = on_demand.uploaded(mask, addr);
+        let _ = on_demand.uploaded(mask, addr, false);
         assert_eq!(on_demand.tiled().unwrap().first_shown(), Some(3));
         assert!(heap.tiled_stale(3));
 
@@ -9051,7 +8981,7 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         // 2) When mips 0..2 later arrive (`first_shown` -> Some(0)), calling
         //    `mirror()` alone (without `texture_views_remade()`) detects staleness
         //    and refreshes slot 3 in place!
-        let _ = on_demand.uploaded((1u32 << 11) - 1, addr);
+        let _ = on_demand.uploaded((1u32 << 11) - 1, addr, false);
         assert_eq!(on_demand.tiled().unwrap().first_shown(), Some(0));
         assert!(heap.tiled_stale(3));
         assert!(heap.mirror(3, handle, true).is_some());
