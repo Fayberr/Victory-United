@@ -51,13 +51,6 @@ cbuffer Record : register(b0) {
     uint args_offset;
     // Bit 0: a count buffer bounds the records. Bit 1: the records are a
     // window clamped ahead of their draws: one that asks for more than can
-<<<<<<< HEAD
-    // run is left empty and costs nothing.
-||||||| 9c184b35b
-    // run is left empty and costs nothing. Bit 2: the records are gathered
-    // (`gather`): record i lies in the source where word i of the table
-    // behind `count_buf` says (from `count_offset` on), and goes to slot i.
-=======
     // run is left empty and costs nothing. Bit 2: the records are gathered
     // (`gather`): record i lies in the source where word i of the table
     // behind `count_buf` says (from `count_offset` on), and goes to slot i.
@@ -67,7 +60,6 @@ cbuffer Record : register(b0) {
     // Bit 4, with bit 2: the table's first word is the number of records
     // (a window, `windowed`: the CPU adds records while the list is
     // recorded), the offsets follow it.
->>>>>>> origin/exp/fork-head
     uint has_count;
     uint count_offset;
 };
@@ -109,22 +101,12 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
     // and store nothing.
     bool active = id.x < eff_count;
     uint src_at = args_offset + id.x * stride;
-<<<<<<< HEAD
-||||||| 9c184b35b
-    // (A branch, not a select: without the bit the view behind `count_buf`
-    // is a count of four bytes, or the source itself, and is not read here.)
-    [branch]
-    if ((has_count & 4u) != 0) {
-        src_at = count_buf.Load(count_offset + id.x * 4u);
-    }
-=======
     // (A branch, not a select: without the bit the view behind `count_buf`
     // is a count of four bytes, or the source itself, and is not read here.)
     [branch]
     if ((has_count & 4u) != 0) {
         src_at = count_buf.Load(count_offset + (counted_table ? 4u : 0u) + id.x * 4u);
     }
->>>>>>> origin/exp/fork-head
     uint dst_at = id.x * stride;
     bool spread = (has_count & 8u) != 0;
     uint row = 0;
@@ -158,17 +140,6 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
         cost = count * instances;
         draw_counts = uint2(count, instances);
     } else if (active && kind == 2) {
-<<<<<<< HEAD
-        uint3 g = src_args.Load3(src_at);
-        // Up to WIDEST groups in x run as asked (`widest`).
-        g = min(g, uint3(g.x <= WIDEST ? WIDEST : 65535u, 65535u, 65535u));
-        // x * y fits 32 bits where it is looked at; the whole count may not.
-        if ((g.y != 0 && g.x > GROUPS / g.y) || (g.z != 0 && g.x * g.y > GROUPS / g.z)) {
-||||||| 9c184b35b
-        uint3 g = min(src_args.Load3(src_at), uint3(65535u, 65535u, 65535u));
-        // x * y fits 32 bits; the whole count may not.
-        if (g.z != 0 && g.x * g.y > GROUPS / g.z) {
-=======
         uint3 raw = src_args.Load3(src_at);
         // Diagnostics: what the record asked for before the clamp (one
         // dispatch runs at most 65,535 groups a dimension; run 200 saw
@@ -189,11 +160,12 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
             row = (raw.x + rows - 1u) / rows;
             g = uint3(row, raw.y, rows);
         } else {
-            g = min(raw, uint3(65535u, 65535u, 65535u));
+            // Up to WIDEST groups in x run as asked (`widest`); other
+            // cards, and y and z, stay at 65,535.
+            g = min(raw, uint3(raw.x <= WIDEST ? WIDEST : 65535u, 65535u, 65535u));
         }
-        // x * y fits 32 bits; the whole count may not.
-        if (g.z != 0 && g.x * g.y > GROUPS / g.z) {
->>>>>>> origin/exp/fork-head
+        // x * y fits 32 bits where it is looked at; the whole count may not.
+        if ((g.y != 0 && g.x > GROUPS / g.y) || (g.z != 0 && g.x * g.y > GROUPS / g.z)) {
             g = uint3(0, 0, 0);
         }
         cost = g.x * g.y * g.z * 64u;
@@ -668,261 +640,23 @@ fn record_clamp_with(
     true
 }
 
-<<<<<<< HEAD
 /// The batched clamp's pipeline ([`batch`]).
 fn batch_clamp() -> Option<&'static Clamp> {
     static CLAMP: std::sync::OnceLock<Option<Clamp>> = std::sync::OnceLock::new();
     CLAMP
-||||||| 9c184b35b
-/// The most records of one argument buffer gathered for a list
-/// ([`gather`]): a multiple of the clamp's 64 threads a group, so that the
-/// threads past the last record read inside the table.
-pub(crate) const GATHER_MOST: u32 = 4096;
-/// The widest record gathered: its slot in the scratch buffer.
-pub(crate) const GATHER_STRIDE: u32 = 32;
-
-/// The records of one argument buffer that a list's draws read, to be
-/// clamped in one pass before the list runs ([`gather`]): the buffer (a
-/// host copy, and its number), the records' kind and stride, the scratch
-/// buffer whose slot `i` holds record `i` clamped, and the table of the
-/// records' offsets in the buffer (upload memory of the list).
-pub(crate) struct GatherSet {
-    pub(crate) src: ID3D12Resource,
-    pub(crate) src_id: u64,
-    pub(crate) kind: u32,
-    pub(crate) stride: u32,
-    pub(crate) scratch: ID3D12Resource,
-    table_gpu: u64,
-    table: usize,
-    /// A record's offset in the buffer, and its slot.
-    slots: std::collections::HashMap<u32, u32>,
-}
-
-// SAFETY: D3D12 objects are free-threaded; the table is the list's own
-// upload memory, written under the list's lock before the list is submitted.
-unsafe impl Send for GatherSet {}
-
-impl GatherSet {
-    pub(crate) fn new(src: ID3D12Resource, src_id: u64, (kind, stride): (u32, u32), scratch: ID3D12Resource, (table_gpu, table): (u64, *mut u8)) -> Self {
-        Self { src, src_id, kind, stride, scratch, table_gpu, table: table as usize, slots: Default::default() }
-    }
-
-    /// The records gathered so far.
-    pub(crate) fn records(&self) -> u32 {
-        self.slots.len() as u32
-    }
-
-    /// The slot of the record at `offset`: the one it has, or the next
-    /// free one. None when the set is full.
-    pub(crate) fn slot(&mut self, offset: u32) -> Option<u32> {
-        if let Some(&slot) = self.slots.get(&offset) {
-            return Some(slot);
-        }
-        let slot = self.slots.len() as u32;
-        if slot >= GATHER_MOST {
-            return None;
-        }
-        // SAFETY: the table holds `GATHER_MOST` words.
-        unsafe { (self.table as *mut u32).add(slot as usize).write_volatile(offset) };
-        self.slots.insert(offset, slot);
-        Some(slot)
-    }
-
-    /// The scratch buffer `src`'s set uses, to keep for the list's next recording.
-    pub(crate) fn into_scratch(self) -> ID3D12Resource {
-        self.scratch
-    }
-}
-
-/// Whether [`gather`] can take a record of `kind` and `stride` at `offset`
-/// of a buffer at `src_gpu`: what [`record_gather_as`] asks of its
-/// arguments, checked when the record is taken, because a record once
-/// given a slot is drawn from the slot.
-pub(crate) fn gatherable(src_gpu: u64, offset: u64, (kind, stride): (u32, u32)) -> Option<u32> {
-    let min = min_stride(kind)?;
-    if stride < min || stride > GATHER_STRIDE || !stride.is_multiple_of(4) || !offset.is_multiple_of(4) || !src_gpu.is_multiple_of(4) {
-        return None;
-    }
-    u32::try_from(offset).ok().filter(|o| o.checked_add(stride).is_some())
-}
-
-/// For a single record of `kind` and `stride` at `offset` of the host copy
-/// `src` (its number `src_id`) that a draw of `list` is about to read: a
-/// slot in the list's scratch buffer for that argument buffer, which the
-/// list's prelude fills with the record clamped, in one pass with all the
-/// other records the list's draws read (`HostList::prelude`,
-/// [`record_gathers`]). Nothing is recorded in the list. The scratch
-/// buffer and the record's place in it; None if the list no longer
-/// gathers (something in it may write arguments), the set is full, or the
-/// record does not fit the clamp: the caller clamps it as before.
-///
-/// Why: the title keeps its mesh records scattered through one argument
-/// buffer of about 100 MB (from one draw to the next 16 to 33,056 bytes
-/// on, or back), so a window of records at one step cannot serve them, and
-/// about 1,450 draws a frame each had a compute pass of ours in front of
-/// them: the card left drawing for compute and came back, about nine
-/// microseconds each (run 243, and the windows' own measurement).
-pub(crate) fn gather(list: &HostList, (src, src_id): (&ID3D12Resource, u64), offset: u64, spec: (u32, u32)) -> Option<(ID3D12Resource, u64)> {
-    clamp()?;
-    // SAFETY: a live D3D12 buffer resource.
-    let Some(offset) = gatherable(unsafe { src.GetGPUVirtualAddress() }, offset, spec) else {
-        GATHER_NONE[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return None;
-    };
-    list.gather_slot(src, src_id, offset, spec)
-}
-
-/// Since the last line: records that got no slot because they do not fit
-/// the clamp, because their list had stopped gathering, because the list
-/// gathers from too many buffers, because their set was full, because a
-/// buffer could not be made.
-pub(crate) static GATHER_NONE: [std::sync::atomic::AtomicU64; 5] = [const { std::sync::atomic::AtomicU64::new(0) }; 5];
-
-/// Records the clamp of `records` gathered records into `dst`, which is in
-/// state `before`, and leaves `dst` in `INDIRECT_ARGUMENT`: record `i` is
-/// read at the offset word `i` of the table at `table_gpu` names, in the
-/// buffer `src`, and stored clamped at `i * stride`. Charged to the budget
-/// word at `budget` as records clamped one by one are. False, with nothing
-/// recorded, if the layout or the addresses do not fit the clamp.
-fn record_gather_as(
-    c: &Clamp,
-    l: &ID3D12GraphicsCommandList,
-    (dst, before): (&ID3D12Resource, D3D12_RESOURCE_STATES),
-    budget: u64,
-    src: &ID3D12Resource,
-    table_gpu: u64,
-    (kind, stride, records): (u32, u32, u32),
-) -> bool {
-    // SAFETY: live D3D12 buffer resources.
-    let (src_gpu, dst_gpu) = unsafe { (src.GetGPUVirtualAddress(), dst.GetGPUVirtualAddress()) };
-    if gatherable(src_gpu, 0, (kind, stride)).is_none()
-        || records == 0
-        || records > GATHER_MOST
-        || !dst_gpu.is_multiple_of(4)
-        || !budget.is_multiple_of(4)
-        || !table_gpu.is_multiple_of(4)
-    {
-        return false;
-    }
-    let constants = [kind, stride, records, 0u32, 4u32, 0u32];
-    let first = [uav_barrier(), transition(dst, before, D3D12_RESOURCE_STATE_UNORDERED_ACCESS)];
-    let second = [
-        uav_barrier(),
-        transition(dst, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT),
-    ];
-    // SAFETY: an open list; our root signature and pipeline; live source,
-    // table, scratch destination and budget buffers. The first wait puts
-    // the pass behind every earlier shader write (the title's argument
-    // passes of the lists before); the second puts the list's draws behind
-    // the pass.
-    unsafe {
-        l.ResourceBarrier(&first);
-        l.SetComputeRootSignature(&c.root);
-        l.SetPipelineState(&c.pso);
-        l.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
-        l.SetComputeRootShaderResourceView(1, src_gpu);
-        l.SetComputeRootShaderResourceView(2, table_gpu);
-        l.SetComputeRootUnorderedAccessView(3, dst_gpu);
-        l.SetComputeRootUnorderedAccessView(4, budget);
-        l.Dispatch(records.div_ceil(64), 1, 1);
-        l.ResourceBarrier(&second);
-    }
-    true
-}
-
-/// Records, into a list's prelude `l`, the passes that fill the scratch
-/// buffers of `sets` ([`gather`]), charged to the words of `budget`, which
-/// is zeroed first (the gathered records have a budget of their own: the
-/// list's own clamps zero and charge theirs inside the list, after this).
-/// False if anything could not be recorded: the slots then hold no clamped
-/// records and the list must not run.
-pub(crate) fn record_gathers(l: &ID3D12GraphicsCommandList, sets: &[GatherSet], budget: &ID3D12Resource) -> bool {
-    use windows::core::Interface;
-    let (Some(c), Ok(l2)) = (clamp(), l.cast::<ID3D12GraphicsCommandList2>()) else {
-        return false;
-    };
-    // SAFETY: a live buffer.
-    let at = unsafe { budget.GetGPUVirtualAddress() };
-    let zeros = [0u64, 4, 8].map(|offset| D3D12_WRITEBUFFERIMMEDIATE_PARAMETER { Dest: at + offset, Value: 0 });
-    // SAFETY: an open list; the budget buffer is the list's own and common
-    // between its runs.
-    unsafe {
-        l.ResourceBarrier(&[transition(budget, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST)]);
-        l2.WriteBufferImmediate(zeros.len() as u32, zeros.as_ptr(), None);
-        l.ResourceBarrier(&[transition(budget, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS)]);
-    }
-    let mut all = true;
-    for set in sets.iter().filter(|s| s.records() > 0) {
-        all &= record_gather_as(c, l, (&set.scratch, D3D12_RESOURCE_STATE_COMMON), at, &set.src, set.table_gpu, (set.kind, set.stride, set.records()));
-    }
-    // SAFETY: as above.
-    unsafe {
-        l.ResourceBarrier(&[transition(budget, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COMMON)]);
-    }
-    all
-}
-
-/// Whether every draw served from a window is checked against a fresh
-/// clamp of its record (`VICTORY_INDIRECT_WINDOW_CHECK=1`, with
-/// `VICTORY_INDIRECT_WINDOW=1`; off by default). A window clamps its
-/// records once, ahead of their draws; if anything wrote a record between
-/// the window's clamp and its draw, the draw reads the old one. The check
-/// clamps the record again just before the draw (into a buffer of its own,
-/// charging a budget of its own) and compares the two on the card: the
-/// counts are logged ("window check"), and the first record that differs in
-/// each run of a list is named. For telling whether windows can be trusted
-/// in a scene before they are on by default; it costs a clamp and a compare
-/// per window draw.
-pub(crate) fn window_check() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var_os("VICTORY_INDIRECT_WINDOW_CHECK").is_some_and(|v| v == "1")
-    })
-}
-
-/// The compare of [`window_check`]: `words` dwords of the record a window
-/// clamped (`t0`) against the same record clamped just now (`t1`). Counts
-/// the checks and the records that differ in `u0`, keeps the first record
-/// that differs there (eight dwords of each), and zeroes the fresh clamp's
-/// own budget (`u1`) for the next check.
-const CHECK_SOURCE: &str = r#"
-#define RS "RootConstants(num32BitConstants=1, b0), SRV(t0), SRV(t1), UAV(u0), UAV(u1)"
-cbuffer Check : register(b0) {
-    uint words;
-};
-ByteAddressBuffer window_record : register(t0);
-ByteAddressBuffer fresh_record : register(t1);
-RWByteAddressBuffer results : register(u0);
-RWByteAddressBuffer fresh_budget : register(u1);
-[RootSignature(RS)]
-[numthreads(1, 1, 1)]
-void main() {
-    bool same = true;
-    for (uint i = 0; i < words; i++) {
-        if (window_record.Load(4 * i) != fresh_record.Load(4 * i)) {
-            same = false;
-        }
-    }
-    uint was;
-    results.InterlockedAdd(4, 1, was);
-    if (!same) {
-        uint before;
-        results.InterlockedAdd(0, 1, before);
-        if (before == 0) {
-            for (uint k = 0; k < min(words, 8u); k++) {
-                results.Store(8 + 4 * k, window_record.Load(4 * k));
-                results.Store(40 + 4 * k, fresh_record.Load(4 * k));
+        .get_or_init(|| {
+            let made = host().ok_or_else(windows::core::Error::empty).and_then(|h| make_from(&h.device, batch::SOURCE));
+            match made {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    tracing::warn!(error = %e, "no batched argument clamp: records are clamped one at a time");
+                    None
+                }
             }
-        }
-    }
-    fresh_budget.Store3(0, uint3(0, 0, 0));
+        })
+        .as_ref()
 }
-"#;
 
-fn compare() -> Option<&'static Clamp> {
-    static COMPARE: std::sync::OnceLock<Option<Clamp>> = std::sync::OnceLock::new();
-    COMPARE
-=======
 /// Whether the clamp of a title's indirect command (`bound`, `bound_ahead`)
 /// ends with `dst`'s transition alone, without the wait for every earlier
 /// shader write that came with it (`VICTORY_CLAMP_LEAN=1`; off by default;
@@ -1453,18 +1187,65 @@ void main() {
 fn compare() -> Option<&'static Clamp> {
     static COMPARE: std::sync::OnceLock<Option<Clamp>> = std::sync::OnceLock::new();
     COMPARE
->>>>>>> origin/exp/fork-head
         .get_or_init(|| {
-            let made = host().ok_or_else(windows::core::Error::empty).and_then(|h| make_from(&h.device, batch::SOURCE));
-            match made {
+            let device = &host()?.device;
+            match make_from(device, CHECK_SOURCE) {
                 Ok(c) => Some(c),
                 Err(e) => {
-                    tracing::warn!(error = %e, "no batched argument clamp: records are clamped one at a time");
+                    tracing::warn!(error = %e, "no window check");
                     None
                 }
             }
         })
         .as_ref()
+}
+
+/// A list's buffers for [`window_check`]: the fresh clamps' records and
+/// budget (the card's memory), and the results (memory the CPU maps:
+/// records that differed, checks, then the first differing record as the
+/// window had it and as the fresh clamp made it, eight dwords each).
+pub(crate) struct WindowCheck {
+    args: ID3D12Resource,
+    budget: ID3D12Resource,
+    results: ID3D12Resource,
+    data: usize,
+}
+
+// SAFETY: D3D12 objects are free-threaded; the mapping is read only at
+// submission, when the list's last run has finished.
+unsafe impl Send for WindowCheck {}
+// SAFETY: as above.
+unsafe impl Sync for WindowCheck {}
+
+impl WindowCheck {
+    pub(crate) fn new() -> Option<WindowCheck> {
+        let host = host()?;
+        let (results, data) = host.shared_buffer(256)?;
+        // SAFETY: the mapping holds 256 bytes; nothing runs yet.
+        unsafe { std::ptr::write_bytes(data, 0, 256) };
+        Some(WindowCheck {
+            args: host.uav_buffer(64 << 10)?,
+            budget: host.uav_buffer(256)?,
+            results,
+            data: data as usize,
+        })
+    }
+
+    /// What the list's last run found, zeroed for the next: checks, records
+    /// that differed, and the first that did (as the window had it, as the
+    /// fresh clamp made it). Only between runs of the list.
+    pub(crate) fn take(&self) -> (u32, u32, [u32; 8], [u32; 8]) {
+        let words = self.data as *mut u32;
+        // SAFETY: the list's own mapped words; its last run has finished.
+        unsafe {
+            let at = |k: usize| words.add(k).read_volatile();
+            let window = std::array::from_fn(|k| at(2 + k));
+            let fresh = std::array::from_fn(|k| at(10 + k));
+            let found = (at(1), at(0), window, fresh);
+            std::ptr::write_bytes(words, 0, 18);
+            found
+        }
+    }
 }
 
 /// Opens a batch in `list` ([`batch`]): a pass that clamps the records of
@@ -1888,13 +1669,7 @@ void main() {
                 warp.list.SetComputeRootShaderResourceView(1, now_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(2, hashes_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(3, differs_gpu);
-<<<<<<< HEAD
-                warp.list.Dispatch(PIECES, 1, 1);
-||||||| 9c184b35b
-                warp.list.Dispatch(PIECES.div_ceil(64), 1, 1);
-=======
                 warp.list.Dispatch(groups(PIECES), 1, 1);
->>>>>>> origin/exp/fork-head
             }
             warp.submit_and_wait();
             // SAFETY: as above.
@@ -3495,16 +3270,11 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         for i in 0..RECORDS as usize {
             let rec = &out_words[i * 6..(i + 1) * 6];
             if rec[0] == (1 << 22) && rec[1] == 16 {
-<<<<<<< HEAD
-||||||| 9c184b35b
-                assert!(i == 1 || i == 2, "the first two real draws fit the budget");
-=======
                 // WHICH two draws keep the budget is the order the card
                 // runs the threads in, which nothing fixes (the software
                 // device gave another two in five runs of seven): only how
                 // many is the clamp's to say, below.
                 assert_ne!(i, 0, "the record that is no draw charges nothing and is not kept as one");
->>>>>>> origin/exp/fork-head
                 kept += 1;
             } else {
                 assert_eq!((rec[0], rec[1]), (0, 0), "excess draw must be zeroed");
@@ -4470,13 +4240,8 @@ void work() {
         heap_pairs: [[Option<ID3D12DescriptorHeap>; 2]; 2],
         tables: [D3D12_GPU_DESCRIPTOR_HANDLE; 2],
         targets: [D3D12_CPU_DESCRIPTOR_HANDLE; 2],
-<<<<<<< HEAD
-||||||| 9c184b35b
-        depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
-=======
         /// Kept beside `depth_tested` (the view the rig clears through when it is made).
         _depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
->>>>>>> origin/exp/fork-head
         depth_tested: D3D12_CPU_DESCRIPTOR_HANDLE,
         stamps: ID3D12QueryHeap,
         back: ID3D12Resource,
@@ -4784,12 +4549,7 @@ void work() {
                     heap_pairs,
                     tables,
                     targets,
-<<<<<<< HEAD
-||||||| 9c184b35b
-                    depth_written,
-=======
                     _depth_written: depth_written,
->>>>>>> origin/exp/fork-head
                     depth_tested,
                     stamps,
                     back,
