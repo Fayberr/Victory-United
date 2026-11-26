@@ -241,7 +241,6 @@ pub(crate) struct HostHeap {
     /// other memory there makes stale, and which to look at again when the
     /// runtime maps, unmaps or writes memory ([`remapped`]).
     placed: std::sync::Arc<Mutex<Spans>>,
-<<<<<<< HEAD
     /// Levels on demand (`crate::tiles`): whether any slot of this heap was
     /// made against a tiled texture (fast gate for non-tiled heaps).
     has_tiled: std::sync::atomic::AtomicBool,
@@ -249,6 +248,11 @@ pub(crate) struct HostHeap {
     /// optional placed start address (including tabled slots excluded from
     /// `placed`), and the `first_shown` level baked into each host descriptor.
     tiled_shown: Mutex<TiledSlots<crate::resource::OnDemand>>,
+    /// The slots that may be in `placed` (a slot noted there is put here
+    /// under its lock, and taken out when it is forgotten there; a slot
+    /// another's view made stale stays, which says only "may"): a write of
+    /// any other view needs nothing of `placed` ([`spans_quick`]).
+    spanned: Slots,
 }
 
 struct TiledSlot<T> {
@@ -326,13 +330,6 @@ fn placed_start(view: &View) -> Option<u64> {
         }
         _ => None,
     }
-||||||| e2a28ec7
-=======
-    /// The slots that may be in `placed` (a slot noted there is put here
-    /// under its lock, and taken out when it is forgotten there; a slot
-    /// another's view made stale stays, which says only "may"): a write of
-    /// any other view needs nothing of `placed` ([`spans_quick`]).
-    spanned: Slots,
 }
 
 /// Whether a slot's write of no placed texture view leaves `placed` alone
@@ -360,7 +357,6 @@ fn spans_quick() -> bool {
     }
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_SPANS_QUICK").is_none_or(|v| v != "0"))
->>>>>>> avatar/main
 }
 
 /// The spans of every view heap made ([`HostHeap::placed`]), for the
@@ -1306,19 +1302,12 @@ impl TextureQueue {
         }
         self.writes += 1;
         let write = self.writes;
-<<<<<<< HEAD
         self.rechecks.remove(&index);
-        self.slots.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0 });
-||||||| e2a28ec7
-        self.slots.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, checked: (0, 0, 0, 0, 0) });
-=======
-        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, checked: (0, 0, 0, 0, 0) });
->>>>>>> avatar/main
+        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0 });
     }
 
     fn remove(&mut self, index: u32) {
-<<<<<<< HEAD
-        self.slots.remove(&index);
+        self.take_out(index);
         self.rechecks.remove(&index);
     }
 
@@ -1367,11 +1356,6 @@ impl TextureQueue {
                 self.rechecks.remove(&index);
             }
         }
-||||||| e2a28ec7
-        self.slots.remove(&index);
-=======
-        self.take_out(index);
->>>>>>> avatar/main
     }
 
     /// Up to `max` slots due at `frame`, each with its write number, in
@@ -1487,14 +1471,8 @@ impl TextureQueue {
         self.writes += 1;
         let write = self.writes;
         let due = self.slots.get(&index).map_or(due, |w| w.due.min(due));
-<<<<<<< HEAD
         self.rechecks.remove(&index);
-        self.slots.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0 });
-||||||| e2a28ec7
-        self.slots.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, checked: (0, 0, 0, 0, 0) });
-=======
-        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, checked: (0, 0, 0, 0, 0) });
->>>>>>> avatar/main
+        self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0 });
     }
 
     /// Bytes of slot `index`'s memory that were mapped at its last upload
@@ -2000,7 +1978,6 @@ impl HostHeap {
                 Some((buffer, gpu, data as usize))
             })
             .flatten();
-<<<<<<< HEAD
         let views = (!sampler)
             .then(|| {
                 let bytes = u64::from(victory_shader::emit::SLOT_VIEWS_COUNT)
@@ -2015,10 +1992,7 @@ impl HostHeap {
                 Some((buffer, gpu, data as usize))
             })
             .flatten();
-||||||| e2a28ec7
-=======
         let queued = std::sync::Arc::new(Queued::new(if sampler { 0 } else { count }));
->>>>>>> avatar/main
         let h = HostHeap {
             heap,
             cpu,
@@ -2066,13 +2040,9 @@ impl HostHeap {
                 }
                 spans
             },
-<<<<<<< HEAD
             has_tiled: std::sync::atomic::AtomicBool::new(false),
             tiled_shown: Mutex::default(),
-||||||| e2a28ec7
-=======
             spanned: Slots::new((count + extra) as usize),
->>>>>>> avatar/main
         };
         // A slot never written is undefined: shaders reading one (a slot
         // the title wrote in a way we do not know, or a table entry no
@@ -4183,7 +4153,6 @@ impl HostHeap {
                         stale_unmade.push(slot);
                     }
                 }
-<<<<<<< HEAD
                 // A view of a texture object that has no host copy yet waits
                 // for it, as buffer views wait for a draw: the slot is made
                 // when the texture is first used (`super::make_waiting`), or
@@ -4265,68 +4234,6 @@ impl HostHeap {
                 self.record_tiled(index, &view, tiled);
                 self.keep(index, kept);
                 Some(view)
-||||||| e2a28ec7
-            }
-            #[cfg(feature = "diagnostics")]
-            if !self.sampler && is_texture_view(&view) {
-                note_before(index, shown, if later { "null, waits" } else { "at once" });
-            }
-            self.quick_is(index, 0);
-            self.made.set(index, if later { 0 } else { key });
-            let kept = if later {
-                None
-=======
-            }
-            // A texture made while lists sent before it may still run: those
-            // read this slot by index, and must not find it ([`show_new_later`]).
-            // The slot shows what it showed (or the neutral texture), and the
-            // new view when they have all run.
-            if !later
-                && !self.sampler
-                && show_new_later()
-                && is_texture_view(&view)
-                && let Some(after) = begun_before(&view)
-            {
-                // Asked again (each draw that reads the slot, each pass)
-                // while it waits: nothing more to do.
-                let own = (std::ptr::from_ref(self) as usize, index, key);
-                if !NEW_PENDING.lock().unwrap_or_else(|e| e.into_inner()).insert(own) {
-                    drop(held);
-                    self.unmake_stale(index, stale);
-                    return Some(view);
-                }
-                let old = view_at(shown as u32, (shown >> 32) as u32);
-                let kept = old.is_some_and(|old| match kin(&old, &view) {
-                    Kin::Same => true,
-                    kin => kin.kept(keep_shown()),
-                });
-                if shown == 0 || !kept {
-                    #[cfg(feature = "diagnostics")]
-                    note_before(index, shown, "neutral, new texture");
-                    self.quick_is(index, 0);
-                    self.made.set(index, 0);
-                    let kept = neutral_for(&view, self.at(index));
-                    self.put(index);
-                    self.clear_twin(index);
-                    self.keep(index, kept);
-                }
-                let late = Some(crate::frame::current());
-                let flip = Flip { after, heap: std::ptr::from_ref(self) as usize, index, handle, key, late };
-                FLIPS.lock().unwrap_or_else(|e| e.into_inner()).push(flip);
-                NEW_LATER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                drop(held);
-                self.unmake_stale(index, stale);
-                return Some(view);
-            }
-            #[cfg(feature = "diagnostics")]
-            if !self.sampler && is_texture_view(&view) {
-                note_before(index, shown, if later { "null, waits" } else { "at once" });
-            }
-            self.quick_is(index, 0);
-            self.made.set(index, if later { 0 } else { key });
-            let kept = if later {
-                None
->>>>>>> avatar/main
             } else {
                 Some(view)
             }
