@@ -1707,7 +1707,6 @@ fn a_branch_that_writes_lds_two_different_values_keeps_64_lanes() {
     // a second value after the read: what the flag ends up holding depends on what was read
     assert_eq!(flag_wave(&flag_program(Some(2))), Some(64));
 }
-<<<<<<< HEAD
 
 /// A dispatch counted in threads: of the last group only the lanes below the
 /// count store (after DexNom/VIctory bc3cd4b0).
@@ -1748,8 +1747,6 @@ fn the_lanes_past_a_count_of_threads_do_not_run() {
         }
     }
 }
-||||||| c7daeea5
-=======
 
 /// A spilled 64-thread wave64 compute program dispatched with `DispatchX`
 /// `USE_THREAD_DIMENSIONS` (`USER_DISPATCH_THREADS`): reads `s_bcnt1_i32_b64(exec)`
@@ -1913,4 +1910,3 @@ fn spilled_compute_masks_partial_dispatch_threads_on_wave64_and_wave32() {
     }
 }
 
->>>>>>> integ/vertex
