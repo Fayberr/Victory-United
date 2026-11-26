@@ -1956,27 +1956,31 @@ void main(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID) {
 
 /// Dispatch [`CARD_COMPARE`] for `pieces` pieces (one thread group per piece),
 /// chunking at D3D12's 65,535-group per-dimension limit if ever exceeded.
+/// `hashed`: the bytes of the copy the shader walks (a copy whose hashes
+/// were taken before it grew keeps the size they were taken at).
 ///
 /// # Safety
 /// The caller must have bound [`CARD_COMPARE`]'s root signature, pipeline,
 /// SRV, and UAVs on `list`, and `list` must be open for recording.
+#[allow(clippy::too_many_arguments)]
 unsafe fn dispatch_card_compare(
     list: &ID3D12GraphicsCommandList,
     first: u32,
     skew: u32,
-    size: u32,
+    hashed: u32,
     pieces: u32,
     out_at_bytes: u32,
     compare: u32,
+    inline_limit: u32,
 ) {
     const MAX_GROUPS: u32 = 65_535;
     let mut done = 0u32;
     while done < pieces {
         let chunk = (pieces - done).min(MAX_GROUPS);
-        let constants = [first + done, skew, size, chunk, out_at_bytes + done * 4, compare];
+        let constants = [first + done, skew, hashed, chunk, out_at_bytes + done * 4, compare, inline_limit];
         // SAFETY: caller guarantees `list` is open with CARD_COMPARE bound.
         unsafe {
-            list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
+            list.SetComputeRoot32BitConstants(0, 7, constants.as_ptr().cast(), 0);
             list.Dispatch(chunk, 1, 1);
         }
         done += chunk;
@@ -5038,9 +5042,16 @@ impl Host {
                             if run.pieces == 0 {
                                 continue;
                             }
-                            let constants = [run.first, run.skew, shadow.card_hashed().unwrap_or(size) as u32, run.pieces, 0, 0, 0];
-                            list.SetComputeRoot32BitConstants(0, 7, constants.as_ptr().cast(), 0);
-                            list.Dispatch(run.pieces, 1, 1);
+                            dispatch_card_compare(
+                                list,
+                                run.first,
+                                run.skew,
+                                shadow.card_hashed().unwrap_or(size) as u32,
+                                run.pieces,
+                                0,
+                                0,
+                                0,
+                            );
                         }
                     }
                     crate::cardmeter::end(list, timed);
@@ -5149,11 +5160,18 @@ impl Host {
                             continue;
                         };
                         let hashed = r.shadow.card_hashed().unwrap_or(size) as u32;
-                        let constants = [r.span.first, r.span.skew, hashed, r.span.pieces, r.at * 4, mode, inline_limit];
-                        list.SetComputeRoot32BitConstants(0, 7, constants.as_ptr().cast(), 0);
                         list.SetComputeRootShaderResourceView(1, r.shadow.buffer.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(2, before.GetGPUVirtualAddress());
-                        list.Dispatch(r.span.pieces, 1, 1);
+                        dispatch_card_compare(
+                            list,
+                            r.span.first,
+                            r.span.skew,
+                            hashed,
+                            r.span.pieces,
+                            r.at * 4,
+                            mode,
+                            inline_limit,
+                        );
                         CARD_PASSES[2].fetch_add(1, Ordering::Relaxed);
                     }
                     // The fetch inside the flight (`inflight_fetch`): behind
