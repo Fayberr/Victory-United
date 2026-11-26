@@ -98,7 +98,6 @@ pub const USER_VIEW_ADDRESS: u32 = 0x101;
 /// 4 and c). The shader adds the dword to every byte offset through that
 /// view. Asked for every root UAV.
 pub const USER_VIEW_BIAS: u32 = 0x103;
-<<<<<<< HEAD
 /// `RootType::Other` code of a user-data dword the host computes: the low
 /// 32 bits of the title address in the root view of root parameter `slot`;
 /// [`USER_ROOT_ADDRESS`] + 1: its bits from 32 up. Programs with a spilled
@@ -113,15 +112,6 @@ pub const USER_ROOT_ADDRESS: u32 = 0x104;
 /// the group's width. Asked for by the structure builder's programs
 /// ([`crate::spill::is_spilled`]).
 pub const USER_DISPATCH_THREADS_X: u32 = 0x106;
-||||||| 085ee7c4c
-=======
-/// `RootType::Other` code of a user-data dword the host computes: the
-/// actual X thread count of a one-dimensional partial dispatch. Zero keeps
-/// every thread of every dispatched group active; otherwise threads whose
-/// global X index is at or past it do nothing. The metadata `dword` holds
-/// the group's X width.
-pub const USER_DISPATCH_THREADS_X: u32 = 0x104;
->>>>>>> origin/exp/vitoriabr-head
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {
