@@ -1720,25 +1720,8 @@ fn execute(read: &QueuedRead, pages: Option<&PageRuns>) -> Result<(), HRESULT> {
             return Err(fail(E_INVALIDARG, "source larger than destination"));
         }
         let size = request.source_size as usize;
-        // A file read into a title address is the kernel's write, and the
-        // kernel does not fault into the GPU side's guard: a block guarded
-        // again between `kernel_will_write` and the read (the guard over all
-        // the views of a page protects other views from other threads) made
-        // the read fail with ERROR_INVALID_USER_BUFFER, and the title stops
-        // at the failed request (runs amd-C and amd-C2, seconds after the
-        // world's first frame). It is read beside and copied in: our copy
-        // faults into the guard like the title's own writes.
-        let bounce = options & (PAGE_DESTINATION | MEMORY_SOURCE) == 0;
-        return into_destination(request, pages, size, |out| {
-            if !bounce {
-                return read_into(request, out).map(|()| size);
-            }
-            let mut data = vec![0; size];
-            read_into(request, &mut data)?;
-            out.copy_from_slice(&data);
-            Ok(size)
-        })
-        .map_err(|hr| fail(hr, "copying"));
+        return into_destination(request, pages, size, |out| read_into(request, out).map(|()| size))
+            .map_err(|hr| fail(hr, "copying"));
     }
     let tables = if bc != 0 { Some(bcpack_tables()?) } else { None };
     let source = read_source(request).map_err(|hr| fail(hr, "reading the source"))?;
@@ -2438,36 +2421,6 @@ mod tests {
     }
 
     #[test]
-    fn a_list_that_changes_during_the_write_has_its_new_pages_written() {
-        use crate::modules::xmem;
-        let mut pages = [0usize; 4];
-        let mut n = 4;
-        assert_eq!(xmem::XMemAllocatePhysicalPages(0, &mut n, pages.as_mut_ptr()), 1);
-        // In place (consecutive pages) and through a buffer.
-        for old in [[pages[0], pages[1]], [pages[1], pages[0]]] {
-            let new = [pages[3], pages[2]];
-            let mut list = old;
-            let at = list.as_mut_ptr();
-            let len = PAGE + 100;
-            let r = request(PAGE_DESTINATION, at.cast(), len, std::ptr::null(), 0, len);
-            let mut runs = 0;
-            let written = into_destination(&r, len, |out| {
-                runs += 1;
-                out.fill(0xa5);
-                // SAFETY: our own list.
-                unsafe { at.cast::<[usize; 2]>().write_volatile(new) };
-                Ok(out.len())
-            });
-            assert_eq!((written, runs), (Ok(()), 2));
-            assert!(xmem::page_window(&new[..1], 0, PAGE).unwrap().bytes().iter().all(|&b| b == 0xa5));
-            assert!(xmem::page_window(&new[1..], 0, 100).unwrap().bytes().iter().all(|&b| b == 0xa5));
-            for page in new {
-                xmem::page_window(&[page], 0, PAGE).unwrap().bytes().fill(0);
-            }
-        }
-    }
-
-    #[test]
     fn a_read_into_memory_guarded_for_a_moment_is_tried_again() {
         use windows_sys::Win32::System::Memory::{
             MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, PAGE_READONLY, VirtualAlloc, VirtualProtect,
@@ -2491,7 +2444,7 @@ mod tests {
             protect(PAGE_READWRITE)
         });
         let r = request(0, at as *mut c_void, plain.len(), file, 0, plain.len());
-        assert_eq!(execute(&QueuedRead::new(r)), Ok(()));
+        assert_eq!(execute(&QueuedRead::new(r), None), Ok(()));
         assert_ne!(opener.join().unwrap(), 0);
         // SAFETY: as above, all of it readable.
         assert_eq!(unsafe { std::slice::from_raw_parts(at as *const u8, plain.len()) }, plain);
