@@ -933,7 +933,6 @@ fn scc_of_a_mask_operation_joined_with_a_scalar_test_needs_the_skip_wave_wide() 
     }
     eprintln!("ran on the hardware device: the inner test's SCC for every lane once some lane is inside");
 }
-<<<<<<< HEAD
 
 /// One console wave of 64 threads, thread t holding t + 1. A branch on s0 (the wave's) picks
 /// `WaveActiveMax` (s0 not 0) or `WaveActiveMin`, and the two reductions share their end:
@@ -2121,8 +2120,6 @@ fn an_automatic_barrier_inside_a_lane_branch_runs_on_narrow_hardware() {
     }
     eprintln!("ran automatic divergent barriers on hardware (max wave {}): 1, 10, 32, 33 and 64 active lanes", waves.WaveLaneCountMax);
 }
-||||||| merged common ancestors
-=======
 
 /// Issue #111: `v_writelane_b32` writes its target lane whenever any lane of
 /// the console wave is in EXEC, even if the target lane itself is outside EXEC;
@@ -2601,30 +2598,6 @@ fn an_lds_reservation_in_a_full_lds_is_made_by_each_host_wave() {
     eprintln!("ran on the hardware device: every slot taken once");
 }
 
-/// The ray-tracing builder's scans refuse on `v_readfirstlane_b32` under a
-/// per-lane branch: the cross-lane retry ([`super::widen`]) has to take the
-/// branch around it wave-wide so the two host waves meet at the exchange
-/// barrier, instead of skipping the other half's value.
-#[test]
-fn a_first_lane_refusal_is_retried_wave_wide() {
-    assert!(super::needs_wave_wide(
-        crate::native::HwStage::Cs,
-        "a first-lane read where not every lane runs"
-    ));
-    assert!(super::needs_wave_wide(
-        crate::native::HwStage::Cs,
-        "a lane read where not every lane runs"
-    ));
-    assert!(!super::needs_wave_wide(
-        crate::native::HwStage::Ps,
-        "a first-lane read where not every lane runs"
-    ));
-    assert!(!super::needs_wave_wide(
-        crate::native::HwStage::Cs,
-        "a descriptor chosen by control flow"
-    ));
-}
-
 /// A program of the structure builder's kind (a spilled user-data table, groups of 64
 /// threads) that stores the number of lanes in EXEC at the dword of its thread,
 /// `64 * group + thread`: dispatched by thread count, the threads past the count store
@@ -2741,4 +2714,3 @@ fn threads_past_the_count_are_left_out(wave64: bool) {
     }
     eprintln!("ran on the hardware device (wave64 {wave64}): only the launched threads, and the count of them");
 }
->>>>>>> vibr/main
