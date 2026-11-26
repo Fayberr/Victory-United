@@ -67,6 +67,7 @@ shaders and emulates the one instruction.
    partly working builder wrote garbage bounds into title memory and crashed
    the title.
 
+<<<<<<< HEAD
 ## The structures (from dumps of the arenas, `VICTORY_MEMORY_DUMP`)
 
 - Header, 64 bytes: dword 0 the version 6 in the low half and marks in the high
@@ -108,6 +109,26 @@ after it was given them as an unordered access view.
 Every ten seconds the log has a line "title memory by address: ..." with pages,
 dispatches, faults and what came.
 
+||||||| c7daeea5
+=======
+## While the builder is off
+
+The builder's dispatches are dropped at once (before any binding), and the
+programs that walk its structures are not given title memory: what lies at a
+structure's address is then not a structure. They get an empty directory
+(`memory::empty`), so every read by address gives 0. A structure of zeros is
+an empty scene: every ray misses, nothing is occluded, and the title shades
+as it does while its structures are still streaming in. No title memory is
+copied or compared for those programs. `VICTORY_RT_WALK_UNBUILT=1` has them
+read title memory as before, for comparing runs.
+
+Counts on a GPU with 32-lane waves (`VICTORY_HOST_WAVE=32 victory translate
+--validate --pipelines`): 49 of the builder's 52 programs and 59 of the 64
+programs with a ray test get a host pipeline. A diagnostics build says, at
+the builder's first dropped dispatches, how many builder pipelines the title
+has created and how many of them the host has.
+
+>>>>>>> integ/vertex
 ## Known gaps
 
 - With `VICTORY_BVH_BUILDER=1` the builder is not usable yet. Until the

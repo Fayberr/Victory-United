@@ -42,27 +42,44 @@ pub(crate) struct Pending {
     shaders: Vec<Arc<Shader>>,
     pub(crate) graphics: Option<Box<GraphicsState>>,
     queue_state: AtomicU8,
+<<<<<<< HEAD
     /// Taken by a worker from [`Queue::slow`].
     was_slow: AtomicBool,
+||||||| c7daeea5
+=======
+    /// Draws and dispatches that asked for it and found it not made: the
+    /// workers make the most wanted one first.
+    asked: AtomicU64,
+>>>>>>> integ/vertex
     made: OnceLock<Option<HostPipeline>>,
     /// What identifies it across runs (shader containers and state), and
     /// whether a draw or dispatch has requested it yet.
-    key: String,
+    pub(super) key: String,
     used: AtomicBool,
+<<<<<<< HEAD
     /// A pass over the screen ([`GraphicsState::screen_pass`]).
     screen: bool,
     /// Why it is not made, if it is not ([`left_out`]).
     left_out: Option<&'static str>,
+||||||| c7daeea5
+    /// Why it is not made, if it is not ([`left_out`]).
+    left_out: Option<&'static str>,
+=======
+>>>>>>> integ/vertex
     /// When a worker began it ([`slow`]).
     begun: OnceLock<Instant>,
+    /// Why it is not made, if it is not ([`left_out`]).
+    left_out: Option<&'static str>,
 }
 
-/// Why a pipeline with these shaders is not made, if it is not.
+/// Why a pipeline with these shaders is not made, if it is not: what
+/// `VICTORY_RT_RESOLVE=0` and `VICTORY_ACTIVATE_RAYS=0` leave out (both made
+/// by default).
 fn left_out(shaders: &[Arc<Shader>]) -> Option<&'static str> {
     if without_structures(shaders) {
-        Some("shades ray-tracing hits, left out")
+        Some("shades ray-tracing hits, left out (VICTORY_RT_RESOLVE=0)")
     } else if too_dear(shaders) {
-        Some("too dear to compile, left out")
+        Some("too dear to compile, left out (VICTORY_ACTIVATE_RAYS=0)")
     } else {
         None
     }
@@ -76,12 +93,11 @@ fn named(shaders: &[Arc<Shader>], name: &[u8]) -> bool {
 }
 
 /// Whether a shader is left out for what it costs the host's driver:
-/// `CS_ScreenProbes_ActivateRays` of the title
-/// (39f0e9aeb156a61c, 66,501 instructions, 9,948 branches). As translated
-/// before the clean-up passes (`emit::shader_opt`), AMD's took a core and
-/// 0.8 GB more every 10 s for it and did not finish (RX 7800 XT: 47 GB after
-/// 8 minutes); cleaned up, it takes 85 s and 1.3 GB, once.
-/// `VICTORY_ACTIVATE_RAYS=0` leaves it out.
+/// `CS_ScreenProbes_ActivateRays` (39f0e9aeb156a61c, 66,501 instructions,
+/// 9,948 branches). As translated before the clean-up passes
+/// (`emit::shader_opt`), AMD's took a core and 0.8 GB more every 10 s for it
+/// and did not finish (RX 7800 XT: 47 GB after 8 minutes); cleaned up, it
+/// takes 85 s and 1.3 GB, once. `VICTORY_ACTIVATE_RAYS=0` leaves it out.
 fn too_dear(shaders: &[Arc<Shader>]) -> bool {
     static OUT: OnceLock<bool> = OnceLock::new();
     let out = *OUT.get_or_init(|| std::env::var_os("VICTORY_ACTIVATE_RAYS").is_some_and(|v| v == "0"));
@@ -92,17 +108,14 @@ fn too_dear(shaders: &[Arc<Shader>]) -> bool {
 /// were hit by: about 1,000 compute programs of the title
 /// (`CS_RaytracingResolve`, the `raytracingresolve_dispatch` pass of each
 /// material), all bound at the world's first frame, each 5 to 9 s of AMD's
-/// compiler. They stood in the queue before the passes that make the
-/// picture, and with the structure builder off there is no hit to shade.
-/// Made by default, the picture before loading time (with the builder on
-/// they shade what reflections and indirect light hit);
-/// `VICTORY_RT_RESOLVE=0` leaves them out while the builder is off.
+/// compiler. They stand in the queue before the passes that make the
+/// picture, and with the structure builder off there is no hit to shade. `VICTORY_RT_RESOLVE=0` leaves them out, unless the
+/// builder is on (off here by default; the fork this is from,
+/// myokex/victory-amd, leaves them out unless told otherwise).
 fn without_structures(shaders: &[Arc<Shader>]) -> bool {
     static OUT: OnceLock<bool> = OnceLock::new();
-    let out = *OUT.get_or_init(|| {
-        let builder = std::env::var_os("VICTORY_BVH_BUILDER").is_some_and(|v| v == "1");
-        std::env::var_os("VICTORY_RT_RESOLVE").is_some_and(|v| v == "0") && !builder
-    });
+    let is = |name, value| std::env::var_os(name).is_some_and(|v| v == value);
+    let out = *OUT.get_or_init(|| is("VICTORY_RT_RESOLVE", "0") && !is("VICTORY_BVH_BUILDER", "1"));
     out && named(shaders, b"CS_RaytracingResolve")
 }
 
@@ -114,24 +127,24 @@ unsafe impl Sync for Pending {}
 
 impl Pending {
     pub(crate) fn new(shaders: Vec<Arc<Shader>>, graphics: Option<Box<GraphicsState>>) -> Pending {
-        let mut key = blake3::Hasher::new();
-        for s in &shaders {
-            key.update(s.stage.as_bytes());
-            key.update(s.hash.as_bytes());
-        }
-        key.update(graphics.as_ref().map(|g| g.describe()).unwrap_or_default().as_bytes());
+        let key = key(&shaders, graphics.as_deref());
         let left_out = left_out(&shaders);
         Pending {
             screen: graphics.as_ref().is_some_and(|g| g.screen_pass()),
             shaders,
             graphics,
             left_out,
-            begun: OnceLock::new(),
             queue_state: AtomicU8::new(NOT_QUEUED),
+<<<<<<< HEAD
             was_slow: AtomicBool::new(false),
+||||||| c7daeea5
+=======
+            asked: AtomicU64::new(0),
+>>>>>>> integ/vertex
             made: OnceLock::new(),
-            key: key.finalize().to_hex()[..32].to_owned(),
+            key,
             used: AtomicBool::new(false),
+            begun: OnceLock::new(),
         }
     }
 
@@ -152,16 +165,50 @@ impl Pending {
 
     fn make(&self) {
         let _ = self.begun.set(Instant::now());
+<<<<<<< HEAD
         self.made.get_or_init(|| {
             let began = Instant::now();
             let made = HostPipeline::new(&self.shaders, self.graphics.as_deref());
             super::library::note_time(&self.key, began.elapsed().as_millis() as u64);
             made
         });
+||||||| c7daeea5
+        self.made
+            .get_or_init(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
+=======
+        self.make_with(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
+    }
+
+    /// A panic on the way is a pipeline the host does not have: let out, it
+    /// would end the worker for good and leave `made` unset, so that every
+    /// later frame waited for it (and, on a title's thread, end the run).
+    fn make_with(&self, new: impl FnOnce() -> Option<HostPipeline>) {
+        self.made.get_or_init(|| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(new)).unwrap_or_else(|_| {
+                tracing::error!(
+                    key = %self.key,
+                    shaders = ?self.shaders,
+                    "making a host pipeline panicked; its draws are dropped"
+                );
+                None
+            })
+        });
+>>>>>>> integ/vertex
         let (lock, done) = &DONE;
         let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
         done.notify_all();
     }
+}
+
+/// Identifies the title pipeline by its shader containers and graphics state.
+pub(crate) fn key(shaders: &[Arc<Shader>], graphics: Option<&GraphicsState>) -> String {
+    let mut key = blake3::Hasher::new();
+    for shader in shaders {
+        key.update(shader.stage.as_bytes());
+        key.update(shader.hash.as_bytes());
+    }
+    key.update(graphics.map(GraphicsState::describe).unwrap_or_default().as_bytes());
+    key.finalize().to_hex()[..32].to_owned()
 }
 
 /// Why a pipeline has no host pipeline (diagnostics): its shaders that do
@@ -314,10 +361,40 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
         super::library::note_used(&p.key);
     }
     if p.made.get().is_none() {
+        p.asked.fetch_add(1, Ordering::Relaxed);
         start(p, REQUESTED);
         wait(p, crate::frame::current());
     }
     p.made.get()?.as_ref()
+}
+
+/// Starts `p` on the workers, before anything asks for it.
+pub(crate) fn begin(p: &Arc<Pending>) {
+    if p.left_out.is_none() {
+        start(p, REQUESTED);
+    }
+}
+
+/// Why each of `pipelines` that is made and is none the host has is not
+/// there, for the log.
+pub(crate) fn failures(pipelines: &[Arc<Pending>]) -> Vec<String> {
+    pipelines
+        .iter()
+        .filter(|p| matches!(p.made.get(), Some(None)))
+        .map(|p| {
+            let untranslated: Vec<String> = p
+                .shaders
+                .iter()
+                .filter(|s| matches!(s.translated.get(), Some(None)))
+                .map(|s| format!("{} {} does not translate", s.stage, s.hash))
+                .collect();
+            if untranslated.is_empty() {
+                format!("the host refuses {:?}", p.shaders)
+            } else {
+                untranslated.join(", ")
+            }
+        })
+        .collect()
 }
 
 /// Makes `p` on this thread if it is not made yet (waiting for a worker
@@ -448,7 +525,60 @@ impl FrameWait {
     }
 }
 
-/// Waits for `p` while frame `frame` has budget left.
+/// What a frame's budget was spent on: the time in which any thread waited.
+/// (The first thread to wait took all that was left of the budget and gave
+/// back the rest afterwards: the others waited for nothing meanwhile, not
+/// even for a pipeline that loads in a millisecond, and their draws were
+/// dropped.)
+struct Spent {
+    frame: u64,
+    time: Duration,
+    /// Threads waiting now, and since when there were any (or since the
+    /// frame began, if later).
+    waiting: u32,
+    since: Option<Instant>,
+}
+
+impl Spent {
+    const fn new() -> Self {
+        Self {
+            frame: u64::MAX,
+            time: Duration::ZERO,
+            waiting: 0,
+            since: None,
+        }
+    }
+
+    /// A thread wants to wait in `frame` at `now`: how long it may, of
+    /// `budget`. [`Spent::end`] follows if that is anything.
+    fn begin(&mut self, frame: u64, budget: Duration, now: Instant) -> Duration {
+        if self.frame != frame {
+            (self.frame, self.time) = (frame, Duration::ZERO);
+            self.since = (self.waiting > 0).then_some(now);
+        }
+        let running = self.since.map_or(Duration::ZERO, |s| now.saturating_duration_since(s));
+        let left = budget.saturating_sub(self.time + running);
+        if !left.is_zero() {
+            self.waiting += 1;
+            self.since.get_or_insert(now);
+        }
+        left
+    }
+
+    fn end(&mut self, now: Instant) {
+        self.waiting -= 1;
+        if self.waiting == 0
+            && let Some(since) = self.since.take()
+        {
+            self.time += now.saturating_duration_since(since);
+        }
+    }
+}
+
+/// Waits for `p` while frame `frame` has budget left. Dispatches have a
+/// budget of their own, as large: what a dropped draw leaves out is drawn
+/// in the next frame, but what a pass that runs once would have written is
+/// lost, and draws (far more of them) came first and spent it all.
 fn wait(p: &Pending, frame: u64) {
     let screen = p.screen && screens_first();
     let base = if screen { screen_budget() } else { wait_budget() };
@@ -575,6 +705,7 @@ impl Queue {
         Some(prev == NOT_QUEUED)
     }
 
+<<<<<<< HEAD
     fn pop(&mut self, screens_only: bool, slow_limit: usize) -> Option<Arc<Pending>> {
         // An early entry can have been promoted and claimed already.
         let unclaimed = |list: &mut VecDeque<Arc<Pending>>| {
@@ -592,6 +723,31 @@ impl Queue {
             }
         }
         let p = p?;
+||||||| c7daeea5
+    fn pop(&mut self) -> Option<Arc<Pending>> {
+        let p = self.requested.pop_front().or_else(|| {
+            // An early entry can have been promoted and claimed already.
+            std::iter::from_fn(|| self.early.pop_front())
+                .find(|p| p.queue_state.load(Ordering::Relaxed) == EARLY)
+        })?;
+=======
+    /// The most asked for of the requested ones (the first of equals), then
+    /// the early ones in order. In the order of the first request, one that
+    /// thousands of draws a frame want waited behind hundreds wanted once.
+    fn pop(&mut self) -> Option<Arc<Pending>> {
+        let mut most: Option<(usize, u64)> = None;
+        for (at, p) in self.requested.iter().enumerate() {
+            let asked = p.asked.load(Ordering::Relaxed);
+            if most.is_none_or(|(_, m)| asked > m) {
+                most = Some((at, asked));
+            }
+        }
+        let p = most.and_then(|(at, _)| self.requested.remove(at)).or_else(|| {
+            // An early entry can have been promoted and claimed already.
+            std::iter::from_fn(|| self.early.pop_front())
+                .find(|p| p.queue_state.load(Ordering::Relaxed) == EARLY)
+        })?;
+>>>>>>> integ/vertex
         p.queue_state.store(MAKING, Ordering::Relaxed);
         Some(p)
     }
@@ -848,6 +1004,42 @@ mod tests {
         assert!(matches!(p.made.get(), Some(None)));
     }
 
+    /// Threads waiting at the same time share the time they wait, none
+    /// takes it from the others, and a new frame starts anew.
+    #[test]
+    fn waits_at_the_same_time_count_once() {
+        let ms = Duration::from_millis;
+        let (t, mut s) = (Instant::now(), Spent::new());
+        assert_eq!(s.begin(1, ms(500), t), ms(500));
+        assert_eq!(s.begin(1, ms(500), t + ms(100)), ms(400), "the second waits too");
+        s.end(t + ms(150));
+        s.end(t + ms(200));
+        assert_eq!(s.begin(1, ms(500), t + ms(900)), ms(300), "200 ms were waited");
+        s.end(t + ms(1200));
+        assert_eq!(s.begin(1, ms(500), t + ms(1300)), ms(0));
+        // A wait that reaches into the next frame counts there from its start.
+        assert_eq!(s.begin(2, ms(500), t + ms(1400)), ms(500));
+        assert_eq!(s.begin(3, ms(500), t + ms(1500)), ms(500));
+        s.end(t + ms(1600));
+        s.end(t + ms(1700));
+        assert_eq!(s.begin(3, ms(500), t + ms(1800)), ms(300));
+    }
+
+    /// It is answered, waited for by no one, and the worker goes on.
+    #[test]
+    fn a_panic_while_making_is_a_pipeline_the_host_does_not_have() {
+        let p = Arc::new(Pending::new(Vec::new(), None));
+        p.make_with(|| panic!("a fault of the translator's"));
+        assert!(matches!(p.made.get(), Some(None)));
+        p.make_with(|| unreachable!("tried again"));
+        let started = Instant::now();
+        assert!(ready(&p).is_none());
+        assert!(started.elapsed() < Duration::from_millis(100));
+        let next = Arc::new(Pending::new(Vec::new(), None));
+        next.make();
+        assert!(matches!(next.made.get(), Some(None)));
+    }
+
     #[test]
     fn pending_pipeline_is_recorded_for_the_next_launch() {
         let mut p = Pending::new(Vec::new(), None);
@@ -864,6 +1056,36 @@ mod tests {
         assert!(ready(&p).is_none());
         assert!(p.made.get().is_none());
         assert!(super::super::library::wanted_early(&p.key));
+    }
+
+    #[test]
+    fn the_most_wanted_pipeline_is_made_first() {
+        let new = |asked: u64| {
+            let p = Arc::new(Pending::new(Vec::new(), None));
+            p.asked.store(asked, Ordering::Relaxed);
+            p
+        };
+        let (once, often, also_once, unasked) = (new(1), new(900), new(1), new(0));
+        let mut queue = Queue::new();
+        for p in [&unasked, &once, &also_once, &often] {
+            assert_eq!(queue.push(p, REQUESTED), Some(true));
+        }
+        // More draws ask while it waits.
+        also_once.asked.fetch_add(5, Ordering::Relaxed);
+        for p in [&often, &also_once, &once, &unasked] {
+            assert!(Arc::ptr_eq(&queue.pop().unwrap(), p));
+        }
+        assert!(queue.pop().is_none());
+    }
+
+    #[test]
+    fn only_pipelines_the_host_does_not_have_are_failures() {
+        let (refused, waiting) = (
+            Arc::new(Pending::new(Vec::new(), None)),
+            Arc::new(Pending::new(Vec::new(), None)),
+        );
+        refused.make_with(|| None);
+        assert_eq!(failures(&[refused, waiting]).len(), 1);
     }
 
     #[test]

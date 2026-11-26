@@ -129,13 +129,36 @@ pub(crate) enum C {
     WaitsForGroups,
     WaitsForBuffers,
     IndirectBounded,
+    /// The guards of view memory (`crate::watch`): askings; of them the
+    /// ones whose range was known as a view with no question to Windows,
+    /// and the ones found all clean; blocks walked by the others;
+    /// questions to Windows about memory; protections asked of Windows,
+    /// and the runs of blocks it refused whole.
+    GuardAsks,
+    GuardKnown,
+    GuardClean,
+    GuardBlocks,
+    GuardQueries,
+    GuardProtects,
+    GuardProtectFails,
     /// `watch::writes` kernel askings that failed (the range is not
     /// write-watched: view memory or not watchable).
     WatchFailed,
     /// `watch::writes` askings not made because the range's first block is
     /// already known to be guarded view memory (no kernel call).
     WatchKnownView,
+    /// Clamps of indirect records (no window hit) by where the records
+    /// come from: no shader the list recorded before the command may write
+    /// them (as declared: the card had them when the list began), or one
+    /// may; draws and mesh dispatches, then compute dispatches.
+    ClampFromBefore,
+    ClampWrittenInList,
+    ClampDispatchFromBefore,
+    ClampDispatchWrittenInList,
+    /// Clamps recorded into lists' preludes (`crate::indirect::early`).
+    IndirectEarly,
 }
+<<<<<<< HEAD
 const COUNTERS: usize = 80;
 /// One of some sets of counters, each in lines of the processor's memory of
 /// its own: a set for all threads had them wait for each other's lines at
@@ -162,6 +185,14 @@ fn bank() -> usize {
     })
     .unwrap_or(0)
 }
+||||||| c7daeea5
+const COUNTERS: usize = 80;
+static COUNT: [AtomicU64; COUNTERS] = [const { AtomicU64::new(0) }; COUNTERS];
+=======
+/// One past the last counter (it was a number kept by hand).
+const COUNTERS: usize = C::IndirectEarly as usize + 1;
+static COUNT: [AtomicU64; COUNTERS] = [const { AtomicU64::new(0) }; COUNTERS];
+>>>>>>> integ/vertex
 
 pub(crate) fn add(c: C, n: u64) {
     COUNT[bank()].0[c as usize].fetch_add(n, Relaxed);
@@ -1221,9 +1252,11 @@ pub(crate) fn log(frames: f64) {
     );
     let [together, written, mapped] =
         [0, 1, 2].map(|n| crate::watch::ALIASES[n].load(std::sync::atomic::Ordering::Relaxed));
+    let due = crate::watch::DUE.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / frames;
     tracing::info!(
         "guards over several views of a page, since the start: {together} blocks guarded with their other views, \
-         {written} views noted written by a write through another, {mapped} ranges opened because a view of them was mapped"
+         {written} views noted written by a write through another, {mapped} ranges opened because a view of them was mapped; \
+         {due:.0} clean blocks a frame looked at again with no write seen (VICTORY_VIEW_RECHECK)"
     );
     tracing::info!(
         "waits for the write trackers' locks per frame, all threads (number, time): {}",
@@ -1375,6 +1408,29 @@ pub(crate) fn log(frames: f64) {
         c[C::WaitsForBuffers as usize],
         c[C::IndirectBounded as usize],
         barrier_test()
+    );
+    tracing::info!(
+        "  guards of view memory per frame: {:.0} askings, {:.0} of them of ranges known as views with no \
+         question to Windows, {:.0} found all clean; the others walked {:.0} blocks; {:.0} questions to \
+         Windows about memory; {:.0} protections asked, {:.0} runs of blocks refused whole",
+        c[C::GuardAsks as usize],
+        c[C::GuardKnown as usize],
+        c[C::GuardClean as usize],
+        c[C::GuardBlocks as usize],
+        c[C::GuardQueries as usize],
+        c[C::GuardProtects as usize],
+        c[C::GuardProtectFails as usize],
+    );
+    tracing::info!(
+        "  indirect clamps per frame by their records: draws {:.0} with records no shader of the list wrote before \
+         them, {:.0} with records it may have written; dispatches {:.0} and {:.0}; {:.0} clamped in lists' \
+         preludes (VICTORY_INDIRECT_EARLY=0 turns that off: now {})",
+        c[C::ClampFromBefore as usize],
+        c[C::ClampWrittenInList as usize],
+        c[C::ClampDispatchFromBefore as usize],
+        c[C::ClampDispatchWrittenInList as usize],
+        c[C::IndirectEarly as usize],
+        if crate::indirect::early() { "on" } else { "off" },
     );
     // What is compared after submissions, largest first, and how much of
     // it shaders had written.

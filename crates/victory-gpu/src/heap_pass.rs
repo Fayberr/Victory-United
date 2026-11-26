@@ -42,6 +42,9 @@ struct Slot {
     from: u64,
     to: u64,
     record: Record,
+    /// The view is an unordered access one: shaders may store through it
+    /// (`crate::heap_marks` asks about every slot kept, every pass).
+    unordered: bool,
 }
 
 struct Copy<C> {
@@ -51,6 +54,19 @@ struct Copy<C> {
     to: u64,
     /// A slot went: the span is worked out again from those left.
     stale: bool,
+}
+
+/// Passes between two compares of every kept slot's record in title memory
+/// with the one seen (`VICTORY_HEAP_SCAN_EVERY`; 1, every pass, unless set).
+/// What it finds late is a record the title copied itself, past the API: its
+/// slot shows the old view, and the copy the new one reads is not brought up
+/// to date, for that many passes less one. After reddxd-byte/ShakiraRED-dt
+/// c2271e5.
+fn scan_every() -> u64 {
+    static N: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("VICTORY_HEAP_SCAN_EVERY").ok().and_then(|v| v.trim().parse().ok()).filter(|&n| n >= 1).unwrap_or(1)
+    })
 }
 
 /// What a pass looks at (see the module).
@@ -67,6 +83,8 @@ pub(crate) struct Picked<C> {
     forgotten: Option<Vec<u32>>,
     /// The old pass (`VICTORY_HEAP_PASS_FULL=1`).
     full: bool,
+    /// [`scan_every`].
+    scan_every: u64,
 }
 
 impl<C: Clone> Picked<C> {
@@ -79,6 +97,7 @@ impl<C: Clone> Picked<C> {
             by_entry: HashMap::new(),
             forgotten: None,
             full,
+            scan_every: scan_every(),
         }
     }
 
@@ -134,15 +153,20 @@ impl<C: Clone> Picked<C> {
                 );
             }
         }
-        for (&slot, kept) in &self.slots {
-            if record(slot) != Some(kept.record) {
-                due.insert(slot);
+        let scan = pass.is_multiple_of(self.scan_every);
+        if scan {
+            for (&slot, kept) in &self.slots {
+                if record(slot) != Some(kept.record) {
+                    due.insert(slot);
+                }
             }
         }
         let orphans_too = pass.is_multiple_of(ORPHANS_EVERY);
-        for (&slot, &seen) in &self.orphans {
-            if orphans_too || record(slot) != Some(seen) {
-                due.insert(slot);
+        if scan || orphans_too {
+            for (&slot, &seen) in &self.orphans {
+                if orphans_too || record(slot) != Some(seen) {
+                    due.insert(slot);
+                }
             }
         }
         let mut due: Vec<u32> = due.into_iter().collect();
@@ -181,21 +205,22 @@ impl<C: Clone> Picked<C> {
     }
 
     /// Slot `slot` (with `record`, naming table entry `entry`) reads title
-    /// memory `[from, to)` through host copy `copy` (`key`: its identity).
+    /// memory `[from, to)` through host copy `copy` (`key`: its identity);
+    /// `unordered`: through an unordered access view.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn keep(
         &mut self,
         slot: u32,
         key: usize,
         copy: &C,
-        from: u64,
-        to: u64,
+        [from, to]: [u64; 2],
         record: Record,
         entry: Option<u32>,
+        unordered: bool,
     ) {
         self.forget(slot);
         self.note_entry(slot, entry);
-        self.slots.insert(slot, Slot { copy: key, from, to, record });
+        self.slots.insert(slot, Slot { copy: key, from, to, record, unordered });
         let c = self.copies.entry(key).or_insert_with(|| Copy {
             copy: copy.clone(),
             slots: HashSet::new(),
@@ -228,6 +253,20 @@ impl<C: Clone> Picked<C> {
     /// The views kept.
     pub(crate) fn views(&self) -> usize {
         self.slots.len()
+    }
+
+    /// Every slot kept (whether or not this pass looked at it), and whether
+    /// its view is an unordered access one.
+    pub(crate) fn unordered(&self) -> impl Iterator<Item = (u32, bool)> + '_ {
+        self.slots.iter().map(|(&slot, s)| (slot, s.unordered))
+    }
+
+    /// What the view of `slot` reads, if the slot is kept: its host copy,
+    /// the range `(from, to)`, and whether the view is an unordered access
+    /// one.
+    pub(crate) fn view(&self, slot: u32) -> Option<(&C, u64, u64, bool)> {
+        let s = self.slots.get(&slot)?;
+        Some((&self.copies.get(&s.copy)?.copy, s.from, s.to, s.unordered))
     }
 
     /// Per host copy, the span its views read: `(copy, from, to)`.
@@ -304,7 +343,7 @@ mod tests {
             };
             let copy = slot / 4;
             let from = u64::from(slot) * 16;
-            p.keep(slot, copy as usize, &copy, from, from + 16, record, entry(record));
+            p.keep(slot, copy as usize, &copy, [from, from + 16], record, entry(record), slot % 2 == 1);
         }
         due
     }
@@ -338,6 +377,21 @@ mod tests {
         assert!(pass(&mut p, &heap, vec![], vec![]).is_empty());
     }
 
+    /// Scanned every fourth pass, a record copied past the API is found by
+    /// the next scan; what the API tells of is looked at at once.
+    #[test]
+    fn records_can_be_compared_every_few_passes() {
+        let mut heap = heap(8);
+        let mut p = Picked::new(false);
+        p.scan_every = 4;
+        pass(&mut p, &heap, vec![], vec![]);
+        heap.records.insert(3, [1, 300, 1]);
+        assert!(pass(&mut p, &heap, vec![], vec![]).is_empty());
+        assert_eq!(pass(&mut p, &heap, vec![6], vec![]), vec![6]);
+        assert!(pass(&mut p, &heap, vec![], vec![]).is_empty());
+        assert_eq!(pass(&mut p, &heap, vec![], vec![]), vec![3]);
+    }
+
     #[test]
     fn a_slot_that_went_shrinks_its_copy_span() {
         let mut heap = heap(8);
@@ -362,7 +416,7 @@ mod tests {
         let mut p: Picked<u32> = Picked::new(false);
         let _ = p.plan(vec![], || vec![0, 1, 2, 3], |s| heap.record(s), entry);
         for s in 0..3 {
-            p.keep(s, 0, &0, 0, 16, heap.record(s).unwrap(), None);
+            p.keep(s, 0, &0, [0, 16], heap.record(s).unwrap(), None, false);
         }
         p.orphan(3, heap.record(3).unwrap(), None);
         for n in 1..FULL_EVERY {
@@ -372,6 +426,26 @@ mod tests {
         }
         let due = p.plan(vec![], || vec![0, 1, 2, 3], |s| heap.record(s), entry);
         assert_eq!(due, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn every_kept_slot_says_whether_its_view_is_unordered_looked_at_or_not() {
+        let mut heap = heap(8);
+        let mut p = Picked::new(false);
+        pass(&mut p, &heap, vec![], vec![]);
+        // Nothing is looked at in this pass; all slots are still told of.
+        assert!(pass(&mut p, &heap, vec![], vec![]).is_empty());
+        let mut all: Vec<(u32, bool)> = p.unordered().collect();
+        all.sort_unstable();
+        assert_eq!(all, (0..8).map(|s| (s, s % 2 == 1)).collect::<Vec<_>>());
+        // The copy and range of a slot, with the flag.
+        assert_eq!(p.view(5), Some((&1, 80, 96, true)));
+        assert_eq!(p.view(4), Some((&1, 64, 80, false)));
+        // A slot that went is no longer told of.
+        heap.records.remove(&5);
+        pass(&mut p, &heap, vec![5], vec![]);
+        assert_eq!(p.view(5), None);
+        assert_eq!(p.unordered().count(), 7);
     }
 
     #[test]

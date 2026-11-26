@@ -1,7 +1,15 @@
+<<<<<<< HEAD
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+||||||| c7daeea5
+use std::io::Write;
+use std::path::{Path, PathBuf};
+=======
+use std::io::Write;
+use std::path::PathBuf;
+>>>>>>> integ/vertex
 
 use anyhow::{Context, Result};
 
@@ -16,7 +24,7 @@ impl CacheKey {
         Self::from_parts(converter.id(), converter.version(), &[input])
     }
 
-    /// Identifies a conversion without first concatenating its input parts.
+    /// Identifies a conversion without copying the input parts together.
     pub fn from_parts(id: &str, version: u32, input: &[&[u8]]) -> Self {
         let mut h = blake3::Hasher::new();
         h.update(id.as_bytes());
@@ -64,15 +72,22 @@ impl Cache {
         let output = converter
             .convert(input)
             .with_context(|| format!("converter {} v{}", converter.id(), converter.version()))?;
-        self.store(&key, &output)?;
+        self.write(&key, &output)?;
         Ok(path)
     }
 
     /// Atomically publishes already-converted output, replacing any old entry.
     pub fn store(&self, key: &CacheKey, output: &[u8]) -> Result<()> {
+        self.write(key, output)
+            .with_context(|| format!("publishing {}", self.path_for(key).display()))
+    }
+
+    /// Publishes an entry atomically, replacing an unreadable entry if needed.
+    pub fn write(&self, key: &CacheKey, output: &[u8]) -> Result<()> {
         let path = self.path_for(key);
         let dir = path.parent().expect("hashed path has a parent");
         std::fs::create_dir_all(dir)?;
+<<<<<<< HEAD
         // Write-then-rename so readers never see partial output.
         let (tmp, mut file) = tempfile_in(dir)?;
         let written = file.write_all(&output);
@@ -82,9 +97,30 @@ impl Cache {
             let _ = std::fs::remove_file(&tmp);
         }
         published.with_context(|| format!("publishing {}", path.display()))
+||||||| c7daeea5
+        // Write-then-rename so readers never see partial output.
+        let tmp = tempfile_in(dir);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        let written = file.write_all(output);
+        drop(file);
+        let published = written.and_then(|()| std::fs::rename(&tmp, &path));
+        if published.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        published.with_context(|| format!("publishing {}", path.display()))
+=======
+        let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+        tmp.write_all(output)?;
+        tmp.persist(path)?;
+        Ok(())
+>>>>>>> integ/vertex
     }
 }
 
+<<<<<<< HEAD
 fn tempfile_in(dir: &Path) -> io::Result<(PathBuf, File)> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     create_tempfile_in(dir, &COUNTER)
@@ -112,9 +148,20 @@ fn create_tempfile_in(dir: &Path, counter: &AtomicU64) -> io::Result<(PathBuf, F
     ))
 }
 
+||||||| c7daeea5
+fn tempfile_in(dir: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    dir.join(format!(".tmp-{}-{n}", std::process::id()))
+}
+
+=======
+>>>>>>> integ/vertex
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct Upper {

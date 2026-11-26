@@ -57,7 +57,15 @@ pub(crate) fn listed(n: u64) -> bool {
 /// says which pass writes which target, to find the pass whose output
 /// stays empty.
 #[cfg(feature = "diagnostics")]
-pub(crate) fn op(list: usize, what: impl FnOnce() -> String) {
+pub(crate) fn op<F: FnOnce() -> String>(list: usize, what: F) {
+    let what: Box<dyn FnOnce() -> String + '_> =
+        if light_log() && WORLD.load(std::sync::atomic::Ordering::Relaxed) != u64::MAX {
+            let text = what();
+            light_op(crate::queue::presented() + 1, &text);
+            Box::new(move || text)
+        } else {
+            Box::new(what)
+        };
     // A frame shot (`crate::shot`) keeps every line of its frame.
     if crate::shot::keeping_lines() {
         let text = what();
@@ -69,7 +77,7 @@ pub(crate) fn op(list: usize, what: impl FnOnce() -> String) {
 
 /// [`op`] for the frames [`listed`] and the lines before the world.
 #[cfg(feature = "diagnostics")]
-fn op_listed(list: usize, what: impl FnOnce() -> String) {
+fn op_listed<F: FnOnce() -> String>(list: usize, what: F) {
     use std::io::Write;
     let frame = crate::queue::presented() + 1;
     if !listed(frame) {
@@ -172,14 +180,20 @@ pub(crate) fn frame_drew(frame: u64, drawn: u64) {
 
 /// Whether frame `n` is saved.
 pub(crate) fn wanted(n: u64) -> bool {
-    // Before the world, with `VICTORY_CAPTURE_WORLD`: every 16th frame too
-    // (small pictures of menus, loading screens and title cards).
-    let before_world = world_on() && n.is_multiple_of(16) && WORLD.load(std::sync::atomic::Ordering::Relaxed) == u64::MAX;
+    // Two frames in a row each time: the title draws to two buffers in turn,
+    // and every 8th or 16th frame alone only ever showed one of them.
+    // Before the world, with `VICTORY_CAPTURE_WORLD` and
+    // `VICTORY_CAPTURE_MENUS=1`: every 16th frame too (small pictures of
+    // menus, loading screens and title cards). Asked for apart: saving them
+    // makes the menus and their music stutter.
+    static MENUS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let menus = *MENUS.get_or_init(|| std::env::var_os("VICTORY_CAPTURE_MENUS").is_some_and(|v| v == "1"));
+    let before_world = menus && world_on() && n % 16 < 2 && WORLD.load(std::sync::atomic::Ordering::Relaxed) == u64::MAX;
     // In the world: every 8th frame's picture, a timeline of the opening
     // cutscene (its shots do not fall on the same frame numbers from run to
     // run, so single frames cannot be compared between runs).
     let first = WORLD.load(std::sync::atomic::Ordering::Relaxed);
-    let in_world = world_on() && first != u64::MAX && n > first && (n - first).is_multiple_of(world_every());
+    let in_world = world_on() && first != u64::MAX && n > first && (n - first) % world_every() < 2;
     folder().is_some() && (n.is_power_of_two() || listed(n) || before_world || in_world)
 }
 
@@ -407,8 +421,195 @@ fn dump_on() -> bool {
     *ON.get_or_init(|| folder().is_some() && crate::switch::on("VICTORY_DUMP_TARGETS"))
 }
 
+/// `VICTORY_LOG_LIGHT=1`: at every present of the world, the texels of the
+/// 1x1 four-float textures the title renders to or writes (its exposure and
+/// average luminance), the constants of its exposure pass, and the buffers
+/// its first tiled-lighting draw of the frame reads: whether the host copy
+/// holds the bytes of title memory. Every 16th frame those buffers are
+/// saved too (`light-<n>.txt` lists them, `light-<n>.bin` holds title
+/// memory's bytes and the copy's of each, one after the other).
+fn light_log() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| folder().is_some() && std::env::var_os("VICTORY_LOG_LIGHT").is_some_and(|v| v == "1"))
+}
+
+/// The 1x1 textures of [`light_log`], and whether the frame wrote each.
+static TEXELS: std::sync::Mutex<Vec<(usize, std::sync::Arc<crate::resource::HostTexture>, bool)>> =
+    std::sync::Mutex::new(Vec::new());
+/// The ranges of title memory the frame's first tiled-lighting draw reads:
+/// the frame, then (what, address, bytes).
+static LIGHT_READS: std::sync::Mutex<(u64, Vec<(String, u64, u64)>)> = std::sync::Mutex::new((0, Vec::new()));
+
+fn note_texel(resource: crate::object::This) {
+    let Some(texture) = crate::resource::host_resource(resource) else { return };
+    // SAFETY: a live resource.
+    let d = unsafe { texture.GetDesc() };
+    if (d.Width, d.Height, d.Format) != (1, 1, DXGI_FORMAT_R32G32B32A32_FLOAT) {
+        return;
+    }
+    let mut texels = TEXELS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(t) = texels.iter_mut().find(|t| t.0 == resource as usize) {
+        t.2 = true;
+    } else if let Some(copy) = crate::resource::host_copy(resource) {
+        texels.push((resource as usize, copy, true));
+    }
+}
+
+/// The number after `0x` or in decimal at the start of `text`.
+fn number(text: &str) -> Option<u64> {
+    let text = text.trim_start();
+    if let Some(hex) = text.strip_prefix("0x") {
+        let end = hex.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(hex.len());
+        return u64::from_str_radix(&hex[..end], 16).ok();
+    }
+    let end = text.find(|c: char| !c.is_ascii_digit()).unwrap_or(text.len());
+    text[..end].parse().ok()
+}
+
+/// The range of title memory a described view is of.
+fn described_range(view: &str) -> Option<(u64, u64)> {
+    if let Some(at) = view.find("Constant(") {
+        let (address, size) = view[at + 9..].split_once(',')?;
+        return Some((number(address)?, number(size)?));
+    }
+    if let Some(at) = view.find("buffer Some((") {
+        let (address, size) = view[at + 13..].split_once(',')?;
+        return Some((number(address)?, number(size)?));
+    }
+    let at = view.find("dim 1 ")?;
+    let address = view.rfind(" at ")?;
+    Some((number(&view[address + 4..])?, number(&view[at + 6..])?))
+}
+
+/// A recorded operation's text ([`op`]), for [`light_log`].
+#[cfg(feature = "diagnostics")]
+fn light_op(frame: u64, text: &str) {
+    const EXPOSURE: [&str; 2] = ["pixel 00fae01469d3945d]", "pixel 42ac930cbc57650f]"];
+    const TILED: &str = "vertex 72c739b61097456d";
+    let head = text.get(..160).unwrap_or(text);
+    if let Some(which) = EXPOSURE.iter().find(|e| head.contains(**e)) {
+        let hash = &which[6..22];
+        for view in text.split('"').filter(|v| v.starts_with(hash) && v.contains(" Cbv ")) {
+            let Some((address, size)) = described_range(view) else { continue };
+            if size < 0x440 || !crate::texture::committed(address as *const u8, 0x440) {
+                continue;
+            }
+            // SAFETY: committed title memory.
+            let v = unsafe { ((address + 0x360) as *const [f32; 56]).read_unaligned() };
+            tracing::info!(frame, hash, constants = ?v, "light log: exposure constants from 0x360");
+        }
+    } else if head.contains(TILED) {
+        let mut reads = LIGHT_READS.lock().unwrap_or_else(|e| e.into_inner());
+        if reads.0 != frame {
+            let ranges = text
+                .split('"')
+                .filter(|v| v.contains(" Srv ") || v.contains(" Cbv "))
+                .filter_map(|v| described_range(v).map(|(at, len)| (v.chars().take(60).collect(), at, len)))
+                .filter(|r: &(String, u64, u64)| r.2 <= 4 << 20)
+                .collect();
+            *reads = (frame, ranges);
+        }
+    }
+}
+
+/// At the present of `frame`: [`light_log`]'s lines.
+pub(crate) fn light_present(frame: u64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if !light_log() || WORLD.load(Relaxed) == u64::MAX {
+        return;
+    }
+    let texels: Vec<_> = {
+        let mut texels = TEXELS.lock().unwrap_or_else(|e| e.into_inner());
+        let now = texels.clone();
+        texels.iter_mut().for_each(|t| t.2 = false);
+        now
+    };
+    if let Some(host) = crate::host::host()
+        && !texels.is_empty()
+        && let Ok(list) = host.new_list()
+    {
+        let copy = D3D12_RESOURCE_STATE_COPY_SOURCE;
+        let mut reads = Vec::new();
+        for (resource, made, written) in &texels {
+            let state = made.state.load(Relaxed);
+            let state = D3D12_RESOURCE_STATES(crate::host::legal_state(&made.texture, state) as i32);
+            // SAFETY: an open list of ours and a live texture.
+            unsafe {
+                if state != copy {
+                    list.list.ResourceBarrier(&[crate::host::transition(&made.texture, state, copy)]);
+                }
+                let read = read_back(&host.device, &list.list, &made.texture);
+                if state != copy {
+                    list.list.ResourceBarrier(&[crate::host::transition(&made.texture, copy, state)]);
+                }
+                reads.push((*resource, *written, read));
+            }
+        }
+        list.close();
+        host.execute(&[&list]);
+        for (resource, written, read) in reads {
+            let Some((buffer, _)) = read else { continue };
+            let mut data = std::ptr::null_mut();
+            // SAFETY: the copy finished; the buffer holds one texel of 16 bytes.
+            unsafe {
+                if buffer.Map(0, None, Some(&mut data)).is_ok() {
+                    let v = data.cast::<[f32; 4]>().read_unaligned();
+                    buffer.Unmap(0, None);
+                    tracing::info!(frame, resource = format_args!("{resource:#x}"), written, texel = ?v, "light log: texel");
+                }
+            }
+        }
+    }
+    let reads = LIGHT_READS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if reads.0 != frame {
+        return;
+    }
+    let save = frame % 16 == 0 || listed(frame);
+    let (mut list, mut bytes, mut line) = (String::new(), Vec::new(), String::new());
+    for (what, at, len) in &reads.1 {
+        let n = *len as usize;
+        if n == 0 || !crate::texture::committed(*at as *const u8, n) {
+            continue;
+        }
+        // SAFETY: committed title memory.
+        let title = unsafe { std::slice::from_raw_parts(*at as *const u8, n) }.to_vec();
+        let host = crate::shadow::find(*at, *len)
+            .and_then(|s| s.mapped(*at))
+            .filter(|(_, left)| *left >= *len)
+            // SAFETY: the mapped copy holds `len` bytes from there on.
+            .map(|(p, _)| unsafe { std::slice::from_raw_parts(p, n) }.to_vec());
+        let print = |b: &[u8]| {
+            b.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, x| (h ^ u64::from(*x)).wrapping_mul(0x100_0000_01b3)) as u32
+        };
+        let differ = host.as_ref().map(|h| h.iter().zip(&title).filter(|(a, b)| a != b).count());
+        use std::fmt::Write;
+        let slot = what.get(17..).and_then(|w| w.split(':').next()).unwrap_or("?");
+        let _ = write!(line, " {slot} {at:#x}+{len} {:08x}", print(&title));
+        match (&host, differ) {
+            (Some(h), Some(d)) if d > 0 => {
+                let _ = write!(line, "/{:08x} {d} differ;", print(h));
+            }
+            (Some(_), _) => line.push(';'),
+            _ => line.push_str(" no mapped copy;"),
+        }
+        if save {
+            let _ = writeln!(list, "{what} {at:#x} {len} copy {}", host.is_some());
+            bytes.extend_from_slice(&title);
+            bytes.extend_from_slice(host.as_deref().unwrap_or(&[]));
+        }
+    }
+    tracing::info!(frame, "light log: reads{line}");
+    if save && let Some(folder) = folder() {
+        let _ = std::fs::write(folder.join(format!("light-{frame}.txt")), list);
+        let _ = std::fs::write(folder.join(format!("light-{frame}.bin")), bytes);
+    }
+}
+
 /// Notes a title texture the frame being built renders to or writes.
 pub(crate) fn note_target(resource: crate::object::This) {
+    if !resource.is_null() && light_log() {
+        note_texel(resource);
+    }
     if resource.is_null() || !dump_on() || !listed(crate::queue::presented() + 1) {
         return;
     }

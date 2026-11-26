@@ -127,7 +127,8 @@ const SHADER_VISIBLE: u32 = 1;
 /// start, end, heap.
 ///
 /// Read by every lookup and by [`sync_heaps`], written only when a heap is
-/// made or dropped. It was a mutex, and [`sync_heaps`] holds it for its
+/// made or dropped (and held alone by the sync where it is to be exact,
+/// [`sync_exact`]). It was a mutex, and [`sync_heaps`] holds it for its
 /// whole pass (15 ms a frame on the submitting thread): the profile of run
 /// 225 has the title's six recording threads waiting 48.5 ms a frame in
 /// [`shader_slot`] for it, each lookup itself a few nanoseconds. Readers no
@@ -389,6 +390,7 @@ pub(crate) fn sync_heaps() {
         return;
     }
     let started = std::time::Instant::now();
+<<<<<<< HEAD
     let (mut pages, mut looked, mut mirrored, mut tabled, mut later) = (0u64, 0u64, 0u64, 0u64, 0u64);
     let (mut views, mut bytes) = (0u64, 0u64);
     let mut spent = [0u64; 3];
@@ -396,8 +398,25 @@ pub(crate) fn sync_heaps() {
     let mut kinds = [0u64; 5];
     let mut wait: Vec<u32> = Vec::new();
     let frame = crate::frame::current();
+||||||| c7daeea5
+    let (mut pages, mut looked, mut mirrored) = (0u64, 0u64, 0u64);
+    let mut page_bytes: Vec<u8> = Vec::new();
+    let mut straddle = [0u8; 32];
+=======
+    let (mut pages, mut looked, mut mirrored) = (0u64, 0u64, 0u64);
+    let mut due: Vec<host::Due> = Vec::new();
+    let mut page_bytes: Vec<u8> = Vec::new();
+    let mut straddle = [0u8; 32];
+>>>>>>> integ/vertex
     let _one = SYNCING.lock().unwrap_or_else(|e| e.into_inner());
-    let heaps = SHADER_HEAPS.read().unwrap_or_else(|e| e.into_inner());
+    // Alone where it is to be exact: a look-up of a recording thread that
+    // mirrors a record (under the list's shared side) never comes between
+    // this pass's read of a page and what it makes of it, or the older bytes
+    // would be made last.
+    let exact = sync_exact();
+    let alone = exact.then(|| SHADER_HEAPS.write().unwrap_or_else(|e| e.into_inner()));
+    let shared = (!exact).then(|| SHADER_HEAPS.read().unwrap_or_else(|e| e.into_inner()));
+    let heaps = alone.as_deref().or(shared.as_deref()).map_or(&[][..], |h| &h[..]);
     for &(start, end, at) in heaps.iter() {
         // SAFETY: registered heaps are live (removed when dropped).
         let heap = unsafe { &*(at as *const Heap) };
@@ -481,6 +500,122 @@ pub(crate) fn sync_heaps() {
                         store.clear();
                         store.extend_from_slice(&page_bytes);
                         seen.insert(from, (cur_gen, store));
+<<<<<<< HEAD
+||||||| c7daeea5
+                        moved
+                    };
+                    let mut slots = changed_slots(
+                        from + moved_from,
+                        from + moved_to,
+                        start as usize,
+                        step,
+                        mirrored_count,
+                    )
+                    .collect::<Vec<u64>>();
+                    if moved_from != 0 || moved_to != page_bytes.len() {
+                        let all = changed_slots(from, to, start as usize, step, mirrored_count);
+                        for index in all {
+                            if !slots.contains(&index) && host.needs_mirror(index as u32) {
+                                slots.push(index);
+                            }
+                        }
+                        slots.sort_unstable();
+                    }
+                    let step_len = step as usize;
+                    // The page's records in one go, under one lock
+                    // (`HostHeap::mirror_copied_page`); one by one below
+                    // with `VICTORY_HEAP_SYNC_PAGE=0`.
+                    let slots = if page_at_once() {
+                        let (seen, made) = host.mirror_copied_page(slots, (start, step), from, &page_bytes);
+                        looked += seen;
+                        mirrored += made;
+                        Vec::new()
+                    } else {
+                        slots
+                    };
+                    for index in slots {
+                        let handle = start + index * step;
+                        let record = match (handle as usize)
+                            .checked_sub(from)
+                            .and_then(|at| page_bytes.get(at..at + step_len))
+                        {
+                            Some(record) => record,
+                            None => {
+                                // A record straddling a 64 KiB page boundary (either
+                                // at `from` or `to`) is read whole through the kernel.
+                                if handle + step > end || step_len > straddle.len() {
+                                    continue;
+                                }
+                                if !crate::host::read_into(
+                                    handle as *const u8,
+                                    &mut straddle[..step_len],
+                                ) {
+                                    continue;
+                                }
+                                &straddle[..step_len]
+                            }
+                        };
+                        looked += 1;
+                        // Only a record that is not the one last seen there
+                        // (`HostHeap::mirror_copied`).
+                        if host.mirror_copied(index as u32, handle, record) {
+                            mirrored += 1;
+                        }
+=======
+                        moved
+                    };
+                    let mut slots = changed_slots(
+                        from + moved_from,
+                        from + moved_to,
+                        start as usize,
+                        step,
+                        mirrored_count,
+                    )
+                    .collect::<Vec<u64>>();
+                    if moved_from != 0 || moved_to != page_bytes.len() {
+                        let all = changed_slots(from, to, start as usize, step, mirrored_count);
+                        for index in all {
+                            if !slots.contains(&index) && host.needs_mirror(index as u32) {
+                                slots.push(index);
+                            }
+                        }
+                        slots.sort_unstable();
+                    }
+                    let step_len = step as usize;
+                    let straddling = |handle: u64, into: &mut [u8; 32]| {
+                        handle + step <= end && crate::host::read_into(handle as *const u8, &mut into[..step as usize])
+                    };
+                    // The page's records in one go, under one lock
+                    // (`HostHeap::mirror_copied_page`); one by one below
+                    // with `VICTORY_HEAP_SYNC_PAGE=0`.
+                    let slots = if page_at_once() {
+                        looked += host.mirror_copied_page(slots, (start, step), from, &page_bytes, straddling, &mut due);
+                        Vec::new()
+                    } else {
+                        slots
+                    };
+                    for index in slots {
+                        let handle = start + index * step;
+                        let record = match (handle as usize)
+                            .checked_sub(from)
+                            .and_then(|at| page_bytes.get(at..at + step_len))
+                        {
+                            Some(record) => record,
+                            None => {
+                                // A record over the page's ends is read whole.
+                                if step_len > straddle.len() || !straddling(handle, &mut straddle) {
+                                    continue;
+                                }
+                                &straddle[..step_len]
+                            }
+                        };
+                        looked += 1;
+                        // Only a record that is not the one last seen there
+                        // (`HostHeap::mirror_copied`).
+                        if host.mirror_copied(index as u32, handle, record) {
+                            mirrored += 1;
+                        }
+>>>>>>> integ/vertex
                     }
                     same
                 };
@@ -577,7 +712,12 @@ pub(crate) fn sync_heaps() {
         if !wait.is_empty() {
             host.copied_wait(frame, std::mem::take(&mut wait));
         }
+        // The heap's changed slots, in slot order within a page.
+        mirrored += due.len() as u64;
+        host.mirror_all(&due, exact);
+        due.clear();
     }
+<<<<<<< HEAD
     drop(heaps);
     let micros = started.elapsed().as_micros() as u64;
     for (count, n) in SYNCED.iter().zip([pages, looked, mirrored, micros, tabled, later]) {
@@ -588,6 +728,13 @@ pub(crate) fn sync_heaps() {
         count.fetch_add(n, Relaxed);
     }
     for (count, n) in SYNCED_KINDS.iter().zip(kinds) {
+||||||| c7daeea5
+    drop(heaps);
+    for (count, n) in SYNCED.iter().zip([pages, looked, mirrored, started.elapsed().as_micros() as u64]) {
+=======
+    drop((alone, shared));
+    for (count, n) in SYNCED.iter().zip([pages, looked, mirrored, started.elapsed().as_micros() as u64]) {
+>>>>>>> integ/vertex
         count.fetch_add(n, Relaxed);
     }
 }
@@ -678,6 +825,43 @@ pub(crate) fn sync_line(frames: f64) {
         split[3] / 1e6 / frames,
         split[4] / 1e6 / frames
     );
+    let left = host::BUFFERS_TABLED.swap(0, std::sync::atomic::Ordering::Relaxed);
+    if left > 0 {
+        tracing::info!(
+            "buffer and constant records left to the draws' tables (VICTORY_TABLE_BUFFERS=1), per frame: {:.0}",
+            left as f64 / frames
+        );
+    }
+    let skipped = host::NULLS_SKIPPED.swap(0, std::sync::atomic::Ordering::Relaxed);
+    if skipped > 0 {
+        tracing::info!(
+            "null views not made again because the slot held that kind already (VICTORY_SYNC_NULL_SKIP=0: made again), per frame: {:.0}",
+            skipped as f64 / frames
+        );
+    }
+    #[cfg(feature = "diagnostics")]
+    {
+        let c: Vec<u64> = host::COPIED_WHAT
+            .iter()
+            .map(|c| (c.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / frames) as u64)
+            .collect();
+        tracing::info!(
+            "records mirrored from bytes, per frame: covered by a table never {}, lately {}, 241-960 frames ago {}, longer {};              not ours {}, constants {}, placed buffers {}, placed textures {}, buffers {}, texture objects {}; by 64th of the heap {:?}",
+            c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], &c[10..]
+        );
+    }
+}
+
+/// Whether [`sync_heaps`] makes exactly what the bytes it read say, alone with
+/// the heaps meanwhile (`VICTORY_SYNC_EXACT=1`, and with
+/// `VICTORY_HEAP_SYNC_PAGE=0`; off by default). Otherwise a record another
+/// thread wrote since it was read is made as it is then and looked at again
+/// by the next pass, and no recording thread waits for the pass
+/// (`HostHeap::mirror_due`).
+#[cfg(windows)]
+fn sync_exact() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| !page_at_once() || std::env::var_os("VICTORY_SYNC_EXACT").is_some_and(|v| v == "1"))
 }
 
 /// Whether [`sync_heaps`] hands a changed page's records to the host heap
@@ -1486,6 +1670,21 @@ pub(crate) fn view(handle: u64) -> Option<View> {
     view_at(i, generation)
 }
 
+/// The view recorded at `handle`, and what says which record that is
+/// (`host::HostHeap::publish`).
+#[cfg(windows)]
+pub(crate) fn view_and_key(handle: u64) -> Option<(View, u64)> {
+    if handle == 0 {
+        return None;
+    }
+    // SAFETY: as in `view`.
+    let [tag, i, generation] = unsafe { (handle as *const [u32; 3]).read_unaligned() };
+    if tag != VIEW_TAG {
+        return None;
+    }
+    Some((view_at(i, generation)?, u64::from(generation) << 32 | u64::from(i)))
+}
+
 /// A description of `N` words, if the title passes one.
 fn words<const N: usize>(desc: *const [u32; N]) -> Option<[u32; N]> {
     // SAFETY: the title passes a description or null.
@@ -1786,6 +1985,74 @@ mod tests {
                 capped
             ),
             5..5
+        );
+    }
+
+    /// A table made afresh for a draw holds the descriptors its shader
+    /// moves halves through (`HostShader::half_views`), also past the range
+    /// starts its used-resource entries give: with one entry for a range
+    /// from dword 0 and a 16-bit float buffer view at dword 8, the table
+    /// takes two dynamic slots, so the next allocation does not land on the
+    /// view's. (The case avt0m4t48 found in review on #927.)
+    #[cfg(windows)]
+    #[test]
+    fn a_fresh_table_holds_the_half_views_past_its_range_starts() {
+        use victory_shader::{ResourceType, RootType, UsedResource};
+        let Some(device) = crate::host::host() else {
+            return; // no host GPU
+        };
+        let list = device.new_list().expect("a host list");
+        let desc = HeapDesc {
+            kind: VIEWS_KIND,
+            count: 2,
+            flags: SHADER_VISIBLE,
+            nodes: 1,
+        };
+        let none = Placement {
+            address: 0,
+            size: 0,
+        };
+        let mut h: This = std::ptr::null();
+        assert_eq!(create(desc, none, &mut h), S_OK);
+        let title = heap(h);
+        let host_heap = title.host().expect("a host view heap");
+        let (first, second) = (title.handle(0).unwrap(), title.handle(1).unwrap());
+        // An R16G16B16A16_FLOAT buffer view of memory in the second slot.
+        let memory = [0u64; 64];
+        let address = memory.as_ptr() as u64;
+        let resource = [1, 0, 0, 0, 512, 0, 1, 0x1_0001, 0, 1, 0, 1, 0, 0];
+        let mut words = [0u32; 16];
+        words[..10].copy_from_slice(&[10, 1, 5768, 0, 0, 0, 64, 0, 0, 0]);
+        words[10] = address as u32;
+        words[11] = (address >> 32) as u32;
+        create_placed_srv(std::ptr::null(), &resource, &words, second);
+        assert!(view(second).as_ref().and_then(host::half_view).is_some());
+        let mut state = crate::draw::State::default();
+        state.set_heaps(&[h]);
+        state.set_table(true, 1, first);
+        let range = UsedResource {
+            kind: ResourceType::Srv,
+            root: RootType::Table,
+            table_offset_dwords: 0,
+            lower_bound: 0,
+            stride: 8,
+            dwords: 4,
+            user_data: 4,
+            slot: 1,
+        };
+        let made = state.tables(&list, &[range], &[], &[(1, 8)], true);
+        let [(1, offset)] = made[..] else {
+            panic!("one fresh table for root parameter 1, not {made:?}");
+        };
+        assert_ne!(offset, u32::MAX, "the table found no dynamic slots");
+        let next = host_heap.dynamic(1).expect("a dynamic slot");
+        host_heap.release(next, 1);
+        drop(state);
+        slot::<extern "system" fn(This) -> u32>(h, 0x10)(h);
+        assert_eq!(
+            next,
+            offset / 32 + 2,
+            "the next allocation took the table's second slot"
         );
     }
 

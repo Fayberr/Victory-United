@@ -94,6 +94,24 @@ pub(crate) fn is_wc(start: u64) -> bool {
         .is_some_and(|(base, r)| *base + r.len > start as usize && r.protect & 0x400 != 0)
 }
 
+/// With [`skip_wc_compare`]: what shaders write is still looked for and
+/// fetched where another host copy holds the same title memory
+/// (`VICTORY_SKIP_WC_SHARED=0` leaves those bytes on the card too).
+///
+/// A view whose first byte is not on an element of its buffer's copy has a
+/// copy of its own bytes (`shadow::exact`), and buffers may lie inside one
+/// another: such copies learn of a shader's write through title memory
+/// alone. Left on the card, a write to the heap's copy never reached them.
+pub(crate) fn keep_shared() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| skip_wc_compare() && std::env::var_os("VICTORY_SKIP_WC_SHARED").is_none_or(|v| v != "0"))
+}
+
+/// What [`keep_shared`] kept: submissions looked at, ranges, bytes
+/// declared in them, copies met for the first time and the bytes fetched
+/// once for those.
+pub(crate) static SHARED: [std::sync::atomic::AtomicU64; 5] = [const { std::sync::atomic::AtomicU64::new(0) }; 5];
+
 /// Declared ranges left out of the compare by [`skip_wc_compare`].
 pub(crate) static UNCOMPARED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -104,7 +122,8 @@ pub(crate) static SKIPPED: [std::sync::atomic::AtomicU64; 2] =
 /// With [`skip_wc_back`]: whether a piece of `bytes` of the copy of the
 /// title buffer at `start` is left on the card (counted).
 pub(crate) fn skip_back(start: u64, bytes: u64) -> bool {
-    if !skip_wc_back() {
+    // With `keep_shared` the plans hold only what is to be fetched.
+    if !skip_wc_back() || keep_shared() {
         return false;
     }
     let wc = is_wc(start);

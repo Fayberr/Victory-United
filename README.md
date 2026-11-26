@@ -1,7 +1,8 @@
 # Victory United
 
 A tree for running GTA VI (the Xbox Series build) on Windows, built from the best work of the
-VIctory forks.
+VIctory forks. The program, its settings (`VICTORY_*`) and its crates keep the VIctory name, so
+that work can still be shared between the forks.
 
 [VIctory](https://github.com/Marvisak/VIctory) is a compatibility layer written in Rust that runs
 an Xbox Series game natively on Windows. A lot of people work on it at the same time, in the
@@ -10,8 +11,8 @@ and many good fixes sit in open pull requests that never get merged. Victory Uni
 the furthest-along fork and merges the best of those pull requests into one tree, so there is one
 place to build from. [PROVENANCE.md](PROVENANCE.md) lists what is in it and where it came from.
 
-It contains no game files. You need your own copy of the game. It is not affiliated with or
-endorsed by the game's developer or publisher, see [LEGAL.md](LEGAL.md).
+**There are no game files, code or assets here.** You need your own copy of the game. This project
+is not affiliated with or endorsed by the game's developer or publisher, see [LEGAL.md](LEGAL.md).
 
 ## State
 

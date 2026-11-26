@@ -638,11 +638,13 @@ dependencies = [
  "memchr",
  "victory-core",
  "victory-game",
+ "victory-gpu",
  "victory-hle",
  "victory-loader",
  "victory-pe",
  "victory-shader",
  "walkdir",
+ "windows",
 ]
 
 [[package]]
@@ -736,6 +738,21 @@ dependencies = [
  "tempfile",
  "tracing",
  "victory-core",
+]
+
+[[package]]
+name = "victory-pso"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde",
+ "tempfile",
+ "toml",
+ "victory-core",
+ "victory-shader",
+ "windows",
+ "zlib-rs",
 ]
 
 [[package]]

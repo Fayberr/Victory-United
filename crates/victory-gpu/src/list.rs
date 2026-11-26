@@ -252,6 +252,11 @@ pub(crate) struct Detached {
 
 #[cfg(windows)]
 impl Detached {
+    /// A closed list of ours, to run among a title's.
+    pub(crate) fn ours(host: crate::host::HostList) -> Self {
+        Detached { host, _uploads: Vec::new(), _state: Default::default() }
+    }
+
     pub(crate) fn host(&self) -> &crate::host::HostList {
         &self.host
     }
@@ -302,7 +307,7 @@ fn pools() -> bool {
 /// A host list open for recording: one that has run, as a title's list is
 /// after its reset, or a new one.
 #[cfg(windows)]
-fn fresh_list() -> Option<crate::host::HostList> {
+pub(crate) fn fresh_list() -> Option<crate::host::HostList> {
     let idle = {
         let mut idle = IDLE.lock().unwrap_or_else(|e| e.into_inner());
         let taken = idle.0.pop();
@@ -721,6 +726,15 @@ extern "system" fn close(this: This) -> HRESULT {
     S_OK
 }
 extern "system" fn reset(this: This, allocator: This, pipeline: This) -> HRESULT {
+    #[cfg(windows)]
+    {
+        thread_local! {
+            static PINNED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+        if !PINNED.replace(true) {
+            crate::framelog::keep_on_fast_cores("title-record");
+        }
+    }
     if allocator.is_null() {
         return E_INVALIDARG;
     }
@@ -939,6 +953,46 @@ extern "system" fn barrier(this: This, count: u32, barriers: *const Barrier) -> 
     0
 }
 
+/// Stands in for the console upscaler's dispatch on title list `this`:
+/// `output` gets the stretched top-left `render` texels of `colour`
+/// ([`crate::over`]). False if nothing was recorded (no host GPU, textures
+/// we do not hold, an output shaders cannot write).
+///
+/// The real dispatch leaves its own state in the list, so the title sets
+/// its own again afterwards; ours is replayed all the same.
+#[cfg(windows)]
+pub fn upscale_stretch(
+    this: *const std::ffi::c_void,
+    colour: *const std::ffi::c_void,
+    output: *const std::ffi::c_void,
+    render: [u32; 2],
+) -> bool {
+    const SHADER_READ: u32 = 0x40;
+    const UNORDERED: u32 = 0x8;
+    let (this, colour, output): (This, This, This) = (this.cast(), colour.cast(), output.cast());
+    if this.is_null() || colour.is_null() || output.is_null() {
+        return false;
+    }
+    let mut done = false;
+    with_state(this, |list, state| {
+        let (Some(to), Some(from), Some(host)) = (
+            crate::resource::host_resource(output),
+            crate::resource::host_resource(colour),
+            crate::host::host(),
+        ) else {
+            return;
+        };
+        ensure_state(list, colour, SHADER_READ);
+        ensure_state(list, output, UNORDERED);
+        done = crate::over::record_stretch(&host.device, &list.list, to, from, render);
+        if done {
+            crate::texture::host_written(output);
+        }
+        state.replay(list);
+    });
+    done
+}
+
 /// Moves a title texture's host copy to `state` in the list, if needed.
 #[cfg(windows)]
 pub(crate) fn ensure_state(list: &crate::host::HostList, resource: This, state: u32) {
@@ -996,6 +1050,7 @@ extern "system" fn copy_buffer_region(
     if let Some(list) = host_list_rec(this)
         && let Some(to) = buffer_range(dst, dst_offset, len)
         && let Some(from) = buffer_range(src, src_offset, len)
+        && !gpu_buffer_copy(list, to, from, len as usize)
     {
         buffer_copy(this, list, to, from, len as usize);
     }
@@ -1007,7 +1062,19 @@ extern "system" fn copy_buffer_region(
 /// other is not ([`crate::resource::target_format`]): their texels differ
 /// in size, so the host cannot copy between them (logged once).
 #[cfg(windows)]
-fn unlike(dst: This, src: This) -> bool {
+fn unlike(dst: This, src: This, mapped: bool) -> bool {
+    // A host copy without its largest levels has other subresources and
+    // sizes than the title's texture (`crate::resource::drop_levels`). A
+    // caller that maps subresources (`mapped`) copies level by level to the
+    // levels the host has (`crate::resource::host_subresource`); any other
+    // copy with such a texture is skipped.
+    if !mapped && (crate::resource::dropped(src) > 0 || crate::resource::dropped(dst) > 0) {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            tracing::warn!(?dst, ?src, "copy with a texture whose host copy leaves out levels skipped")
+        });
+        return true;
+    }
     let unlike = crate::resource::stands_in(dst) != crate::resource::stands_in(src);
     if unlike {
         static ONCE: std::sync::Once = std::sync::Once::new();
@@ -1033,7 +1100,10 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
             crate::resource::host_resource(dst),
             crate::resource::host_resource(src),
         ) {
-            if unlike(dst, src) {
+            // Host copies that leave out different numbers of levels differ
+            // in shape: copied level by level below.
+            let levelwise = crate::resource::dropped(dst) != crate::resource::dropped(src);
+            if unlike(dst, src, true) {
                 return;
             }
             // Two title textures over the same memory have one host
@@ -1075,17 +1145,128 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
             ensure_state(list, src, COPY_SOURCE);
             #[cfg(feature = "diagnostics")]
             list.note_op(|| format!("copy resource {src:?} to {dst:?}"));
-            // SAFETY: an open list and live textures.
-            unsafe { list.list.CopyResource(to, from) };
+            if levelwise {
+                copy_levels(list, dst, to, src, from);
+            } else {
+                // SAFETY: an open list and live textures.
+                unsafe { list.list.CopyResource(to, from) };
+            }
         } else if let (Some((to, a)), Some((from, b))) = (
             crate::resource::buffer_bytes(dst),
             crate::resource::buffer_bytes(src),
         ) {
+<<<<<<< HEAD
             buffer_copy(this, list, to, from, a.min(b) as usize);
+||||||| c7daeea5
+            list.defer_copy(to, from, a.min(b) as usize);
+=======
+            if !gpu_buffer_copy(list, to, from, a.min(b) as usize) {
+                list.defer_copy(to, from, a.min(b) as usize);
+            }
+>>>>>>> integ/vertex
         }
     }
     #[cfg(not(windows))]
     let _ = (this, dst, src);
+}
+
+/// Whether a title buffer copy runs on the card (`VICTORY_GPU_BUFFER_COPY=1`;
+/// off by default until measured), only where the copy at submission on the
+/// CPU would read or write bytes a flight in the air may write: that copy
+/// waits for the flights to land, about once a frame (run 10: 21 ms median,
+/// 43 at the ninetieth of a hundred), where the card runs a copy in its
+/// queue's order, behind them, as the console does. The source's host copy
+/// is brought up to date first, the destination's range is declared written
+/// by the card. False if it could not: the caller copies on the CPU as
+/// before. (Trexies e6d37be.)
+#[cfg(windows)]
+fn gpu_buffer_copy(list: &crate::host::HostList, to: *mut u8, from: *const u8, len: usize) -> bool {
+    use windows::Win32::Graphics::Direct3D12::{D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_TYPE_UAV};
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("VICTORY_GPU_BUFFER_COPY").is_some_and(|v| v == "1")) {
+        return false;
+    }
+    let (dst, src) = (to as usize, from as usize);
+    if len == 0
+        || !crate::host::late()
+        || !(crate::host::flights_write(src, src + len) || crate::host::flights_write(dst, dst + len))
+    {
+        return false;
+    }
+    let (Some(d), Some(s)) = (
+        crate::shadow::find(dst as u64, len as u64),
+        crate::shadow::find(src as u64, len as u64),
+    ) else {
+        return false;
+    };
+    // Both copies hold the whole range, and one buffer does not copy over
+    // itself where the ranges overlap.
+    let (Some(d_at), Some(s_at)) = (d.offset_in(dst as u64), s.offset_in(src as u64)) else {
+        return false;
+    };
+    if d.left(dst as u64) < len as u64
+        || s.left(src as u64) < len as u64
+        || (std::sync::Arc::ptr_eq(&d, &s) && src < dst + len && dst < src + len)
+    {
+        return false;
+    }
+    s.refresh(list, src as u64, len as u64);
+    d.refresh(list, dst as u64, len as u64);
+    d.gpu_writes(list, dst as u64, len as u64);
+    let uav = || D3D12_RESOURCE_BARRIER { Type: D3D12_RESOURCE_BARRIER_TYPE_UAV, ..Default::default() };
+    // SAFETY: an open list; both host copies are live and hold the ranges
+    // (checked above). Shaders' writes before the copy first, then the
+    // copy's before what follows.
+    unsafe {
+        list.list.ResourceBarrier(&[uav()]);
+        list.list.CopyBufferRegion(&d.buffer, d_at, &s.buffer, s_at, len as u64);
+        list.list.ResourceBarrier(&[uav()]);
+    }
+    let n = GPU_BUFFER_COPIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    if n.is_power_of_two() {
+        tracing::info!(n, bytes = len, "title buffer copies run on the card behind the flights (VICTORY_GPU_BUFFER_COPY=1)");
+    }
+    true
+}
+
+/// Title buffer copies run on the card ([`gpu_buffer_copy`]).
+#[cfg(windows)]
+static GPU_BUFFER_COPIES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A whole-texture copy between host copies that leave out different
+/// numbers of levels (`crate::resource::drop_levels`): each title level both
+/// host copies have, at its own index in each. A title level has the same
+/// size in every host copy that has it.
+#[cfg(windows)]
+fn copy_levels(
+    list: &crate::host::HostList,
+    dst: This,
+    to: &windows::Win32::Graphics::Direct3D12::ID3D12Resource,
+    src: This,
+    from: &windows::Win32::Graphics::Direct3D12::ID3D12Resource,
+) {
+    use windows::Win32::Graphics::Direct3D12::{
+        D3D12_TEXTURE_COPY_LOCATION, D3D12_TEXTURE_COPY_LOCATION_0, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+        ID3D12Resource,
+    };
+    let location = |texture: &ID3D12Resource, index: u32| D3D12_TEXTURE_COPY_LOCATION {
+        // SAFETY: a borrowed pointer the location never releases.
+        pResource: unsafe { std::mem::transmute_copy(texture) },
+        Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+        Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 { SubresourceIndex: index },
+    };
+    let count = crate::resource::title_subresources(dst).min(crate::resource::title_subresources(src));
+    for index in 0..count {
+        let (Some(d), Some(s)) = (
+            crate::resource::host_subresource(dst, index),
+            crate::resource::host_subresource(src, index),
+        ) else {
+            continue;
+        };
+        // SAFETY: an open list and live textures; both subresources exist
+        // and have the title level's size.
+        unsafe { list.list.CopyTextureRegion(&location(to, d), 0, 0, 0, &location(from, s), None) };
+    }
 }
 
 extern "system" fn copy_resource_x(this: This, dst: This, src: This, _flags: u32) {
@@ -1161,8 +1342,19 @@ extern "system" fn copy_texture_region(
             }
             return;
         };
-        if unlike(dst.resource, src.resource) {
+        // Both locations are mapped to the levels their host copies have
+        // (below), so copies with textures that leave out levels go ahead.
+        if unlike(dst.resource, src.resource, true) {
             return;
+        }
+        // Into a host copy without its largest levels: the level it has,
+        // or nothing (`crate::resource::drop_levels`).
+        let mut dst = dst;
+        if dst.kind != FOOTPRINT && crate::resource::dropped(dst.resource) > 0 {
+            match crate::resource::host_subresource(dst.resource, dst.footprint.offset as u32) {
+                Some(index) => dst.footprint.offset = u64::from(index),
+                None => return,
+            }
         }
         let mut from = src;
         // Both sides are the same subresource of one host texture (set below).
@@ -1203,6 +1395,14 @@ extern "system" fn copy_texture_region(
             let Some(texture) = crate::resource::host_resource(src.resource) else {
                 return;
             };
+            // From a host copy without its largest levels: the level it
+            // has (the same size as the title's), or nothing.
+            if crate::resource::dropped(src.resource) > 0 {
+                match crate::resource::host_subresource(src.resource, src.footprint.offset as u32) {
+                    Some(index) => from.footprint.offset = u64::from(index),
+                    None => return,
+                }
+            }
             // The same subresource of one host texture on both sides (two
             // title textures over one memory): not a copy the host allows.
             // The states and the copy are left out below; the rest is
@@ -1342,6 +1542,7 @@ fn read_back(
     // The title's buffer holds every row at its own pitch.
     let bytes = pitch * (rows - 1) + row;
     let data = buffer_range(dst.resource, dst.footprint.offset, bytes).ok_or("a destination outside its buffer")?;
+    let index = crate::resource::readback_subresource(src.resource, src.footprint.offset as u32)?;
     let texture = crate::resource::host_resource(src.resource).ok_or("no host texture")?;
     let buffer = host.read_back_buffer(size).ok_or("no read-back buffer")?;
     // As a texture source of any copy: what shaders wrote to a depth twin
@@ -1353,6 +1554,7 @@ fn read_back(
     ensure_state(list, src.resource, COPY_SOURCE);
     let mut from = src;
     from.resource = texture.as_raw().cast_const().cast();
+    from.footprint.offset = u64::from(index);
     let mut to = dst;
     to.resource = buffer.as_raw().cast_const().cast();
     to.footprint = footprint;
@@ -1412,7 +1614,7 @@ extern "system" fn resolve(
         use windows::core::Interface;
         const RESOLVE_DEST: u32 = 0x1000;
         const RESOLVE_SOURCE: u32 = 0x2000;
-        if unlike(dst, src) {
+        if unlike(dst, src, false) {
             return;
         }
         // Depth textures shaders also write: what they wrote, first.
@@ -1590,15 +1792,45 @@ extern "system" fn driver_hint(_: This, _feature: u64, _value: u64) -> u64 {
     0
 }
 
+<<<<<<< HEAD
 /// `DispatchX(x, y, z, flags)`: a dispatch with console flags, of which the
 /// host follows one: the counts are threads, not groups (`draw.rs`
 /// `THREAD_DIMENSIONS`; the ray-tracing structure builder dispatches this way).
 extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
     count_dispatch();
+||||||| c7daeea5
+/// `DispatchX(x, y, z, flags)`: a dispatch with console flags, which the
+/// host has no use for (the ray-tracing builder dispatches this way).
+extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, _flags: u32) {
+=======
+/// `DispatchX(x, y, z, flags)`: a compute dispatch with console
+/// `COMPUTE_DISPATCH_INITIATOR` flags (bit 5, `0x20`, is
+/// `USE_THREAD_DIMENSIONS`: `(x, y, z)` are raw thread counts rather than
+/// thread-group counts).
+extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
+>>>>>>> integ/vertex
     #[cfg(windows)]
+<<<<<<< HEAD
     with_state(this, |list, s| s.dispatch(list, x, y, z, flags));
+||||||| c7daeea5
+    state::dispatch(this, x, y, z);
+=======
+    state::dispatch_x(this, x, y, z, flags);
+>>>>>>> integ/vertex
     #[cfg(not(windows))]
+<<<<<<< HEAD
     let _ = (this, x, y, z, flags);
+||||||| c7daeea5
+    {
+        let _ = (this, x, y, z);
+        count_dispatch();
+    }
+=======
+    {
+        let _ = (this, x, y, z, flags);
+        count_dispatch();
+    }
+>>>>>>> integ/vertex
 }
 
 /// `BeginQuery`/`EndQuery(heap, type, index)`: queries are answered when
@@ -1911,6 +2143,10 @@ mod state {
     pub(super) extern "system" fn dispatch(this: This, x: u32, y: u32, z: u32) {
         super::count_dispatch();
         with_state(this, |list, s| s.dispatch(list, x, y, z, 0));
+    }
+    pub(super) fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
+        super::count_dispatch();
+        with_state(this, |list, s| s.dispatch_x(list, x, y, z, flags));
     }
     /// `DispatchMesh(x, y, z)` (the PC method of List6); the title's mesh
     /// programs take `x` groups only.

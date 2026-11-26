@@ -855,6 +855,12 @@ impl State {
         if self.messages.len() >= self.capacity {
             self.dropped = self.dropped.saturating_add(1);
             tracing::debug!(kind, dropped = self.dropped, "coprocessor message dropped");
+            // A title that waits for an acknowledgement waits for good.
+            static LOST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = LOST.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if n.is_power_of_two() {
+                tracing::warn!(n, kind, capacity = self.capacity, "audio coprocessor messages are lost: the title does not take them");
+            }
             return;
         }
         let mut message = Message {

@@ -101,6 +101,7 @@ pub const USER_VIEW_BIAS: u32 = 0x103;
 /// parts, each with the groups before it here. Asked for by compute programs
 /// that are told the x number alone (the one-dimensional ones).
 pub const USER_GROUP_BASE: u32 = 0x104;
+<<<<<<< HEAD
 /// `RootType::Other` code of a user-data dword the host computes: the low
 /// 32 bits of the title address in the root view of root parameter `slot`;
 /// [`USER_ROOT_ADDRESS`] + 1: its bits from 32 up. Programs with a spilled
@@ -116,9 +117,19 @@ pub const USER_ROOT_ADDRESS: u32 = 0x107;
 /// the group's width. Asked for by the structure builder's programs
 /// ([`crate::spill::is_spilled`]).
 pub const USER_DISPATCH_THREADS_X: u32 = 0x106;
+||||||| c7daeea5
+=======
+/// `RootType::Other` code of a user-data dword the host computes: the
+/// raw thread count along axis `dword` (0 = X, 1 = Y, 2 = Z) of a
+/// `DispatchX` call with `USE_THREAD_DIMENSIONS` (`flags & 0x20`), or 0
+/// for a normal thread-group dispatch (all threads in every group active).
+pub const USER_DISPATCH_THREADS: u32 = 0x105;
+>>>>>>> integ/vertex
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {
+    /// ForceEarlyDepthStencil (`[earlydepthstencil]`; no `SFI0` bit).
+    pub const EARLY_DEPTH: u64 = 1 << 3;
     pub const DOUBLES: u64 = 1 << 2;
     pub const RAW_BUFFERS: u64 = 1 << 4;
     pub const STENCIL_REF: u64 = 1 << 11;

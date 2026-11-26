@@ -592,35 +592,131 @@ pub(crate) fn pipeline_with_status(
             began.elapsed().as_secs_f64() * 1e3
         )
     });
+    // Stored after the fact: the pipeline is there to be drawn with, and a
+    // store waits for a save in progress, which writes the whole library.
+    to_store(name, &pso);
+    Ok((pso, false))
+}
+
+/// Pipelines made and not yet stored in the library.
+static TO_STORE: Mutex<std::collections::VecDeque<(String, ID3D12PipelineState)>> =
+    Mutex::new(std::collections::VecDeque::new());
+static STORE_MORE: std::sync::Condvar = std::sync::Condvar::new();
+/// How many there are, with the one being stored.
+static STORING_NOW: AtomicU64 = AtomicU64::new(0);
+
+/// Hands `pso` to the thread that stores pipelines; stores it here if there
+/// is none.
+fn to_store(name: &str, pso: &ID3D12PipelineState) {
+    static STORING: OnceLock<bool> = OnceLock::new();
+    let storing = *STORING.get_or_init(|| {
+        std::thread::Builder::new()
+            .name("victory-pipeline-store".into())
+            .spawn(|| {
+                loop {
+                    let next = {
+                        let mut queue = TO_STORE.lock().unwrap_or_else(|e| e.into_inner());
+                        loop {
+                            if let Some(next) = queue.pop_front() {
+                                break next;
+                            }
+                            queue = STORE_MORE.wait(queue).unwrap_or_else(|e| e.into_inner());
+                        }
+                    };
+                    store(&next.0, &next.1);
+                    STORING_NOW.fetch_sub(1, Ordering::AcqRel);
+                }
+            })
+            .is_ok()
+    });
+    if storing {
+        STORING_NOW.fetch_add(1, Ordering::AcqRel);
+        TO_STORE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push_back((name.to_owned(), pso.clone()));
+        STORE_MORE.notify_one();
+    } else {
+        store(name, pso);
+    }
+}
+
+fn store(name: &str, pso: &ID3D12PipelineState) {
+    let Some(library) = library() else { return };
+    let wide = HSTRING::from(name);
     let _all = one_call();
     let _stores = library.saving.read().unwrap_or_else(|e| e.into_inner());
     let _call = call("store", name);
     // SAFETY: a live pipeline; a name already stored (a description that
     // differs) is refused, which leaves the library as it was.
-    if unsafe { library.library.StorePipeline(PCWSTR(wide.as_ptr()), &pso) }.is_ok() {
+    if unsafe { library.library.StorePipeline(PCWSTR(wide.as_ptr()), pso) }.is_ok() {
         library.added.fetch_add(1, Ordering::Relaxed);
     }
-    Ok((pso, false))
+}
+
+/// Stores what waits to be stored, on this thread, and waits for a store in
+/// progress: before a last save.
+pub(super) fn store_waiting() {
+    while STORING_NOW.load(Ordering::Acquire) > 0 {
+        let next = TO_STORE.lock().unwrap_or_else(|e| e.into_inner()).pop_front();
+        match next {
+            Some((name, pso)) => {
+                store(&name, &pso);
+                STORING_NOW.fetch_sub(1, Ordering::AcqRel);
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(1)),
+        }
+    }
+}
+
+/// How long after a save that took `took` the next one waits: a save writes
+/// the whole library, so with a fixed pause the time spent saving grew with
+/// the library (a pre-build of the whole pack: tens of thousands of
+/// pipelines), until every worker stood behind one. At most a twentieth of
+/// the time goes into saves; at most ten minutes of pipelines are not saved,
+/// or four times as long as a save that takes longer than that allows.
+fn save_pause(took: std::time::Duration) -> std::time::Duration {
+    use std::time::Duration;
+    const LEAST: Duration = Duration::from_secs(20);
+    const MOST: Duration = Duration::from_secs(600);
+    (took * 20).clamp(LEAST, MOST).max(took * 4)
 }
 
 /// Writes the library and the early list if pipelines were added since the
-/// last save and `SAVE_EVERY` has passed (or `now`).
+/// last save and [`save_pause`] has passed (or `now`). One thread saves; the
+/// others do not wait for it.
 pub(crate) fn save(now: bool) {
-    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-    const SAVE_EVERY: std::time::Duration = std::time::Duration::from_secs(20);
+    use std::sync::TryLockError;
+    // When the last save ended, and how long it took. Held for all of a
+    // save: worker saves and shutdown's `save(true)` never race on the
+    // `.tmp` or target files.
+    static LAST: Mutex<Option<(std::time::Instant, std::time::Duration)>> = Mutex::new(None);
     let (Some(dir), Some(library)) = (DIR.get(), library()) else { return };
-    {
-        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-        if !now && last.is_some_and(|t| t.elapsed() < SAVE_EVERY) {
-            return;
+    let mut last = if now {
+        store_waiting();
+        LAST.lock().unwrap_or_else(|e| e.into_inner())
+    } else {
+        match LAST.try_lock() {
+            Ok(last) => last,
+            Err(TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(TryLockError::WouldBlock) => return,
         }
-        *last = Some(std::time::Instant::now());
+    };
+    if !now && last.is_some_and(|(ended, took)| ended.elapsed() < save_pause(took)) {
+        return;
     }
+    let began = std::time::Instant::now();
+    write_out(dir, library);
+    *last = Some((std::time::Instant::now(), began.elapsed()));
+}
+
+/// A save of `library` and the early list in `dir`.
+fn write_out(dir: &std::path::Path, library: &Library) {
     if let Err(e) = std::fs::create_dir_all(dir) {
         tracing::warn!(error = %e, "host pipeline library not saved");
         return;
     }
-    let tmp = dir.join(LIBRARY_FILE).with_extension("tmp");
+    let tmp = temp_path(&dir.join(LIBRARY_FILE));
     // The bytes of the library written to `tmp`; 0 when no pipeline was
     // added: the library on disk is then what it was, and only the early
     // list is written (a title pipeline first drawn with wrote all 1,352 MB
@@ -646,6 +742,9 @@ pub(crate) fn save(now: bool) {
                 }
                 tracing::warn!(error = %e, "host pipeline library not serialised");
                 let _ = std::fs::remove_file(&tmp);
+                if used_changed {
+                    USED_CHANGED.store(true, Ordering::Relaxed);
+                }
                 return;
             }
             library.added.store(0, Ordering::Relaxed);
@@ -654,10 +753,25 @@ pub(crate) fn save(now: bool) {
         };
         (bytes, used_changed)
     };
+<<<<<<< HEAD
     // Through `used`: a process that asked for none yet (`victory shaders`)
     // must not write the earlier runs' list over with nothing.
     let used: Vec<String> = used().iter().flatten().cloned().collect();
     let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
+||||||| c7daeea5
+    let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
+=======
+    // With what earlier runs listed: a run that asks for no title pipeline
+    // (`victory warm`) wrote an empty list over theirs, and the next world
+    // began with every pipeline still to be asked for.
+    let library_written = if bytes > 0 {
+        replace_library(dir, &tmp).inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
+    } else {
+        Ok(())
+    };
+>>>>>>> integ/vertex
     if bytes > 0 && library_written.is_ok() {
         // In place unless the system refused and the new one waits beside it.
         let in_place = !dir.join(NEXT_FILE).exists();
@@ -735,28 +849,43 @@ fn zeroed(size: usize) -> Option<Vec<u8>> {
 /// the mapping goes on reading the old one for as long as a handle on it
 /// is open ([`holds`]; with none, only the pages in memory at that moment
 /// stay: the rest read as zeros). Where a system refuses, the new library
-/// is left beside it as [`NEXT_FILE`] for the next start.
+/// is left beside it as [`NEXT_FILE`] for the next start. Subsequent
+/// saves also replace that pending file until startup promotes it, so an
+/// older pending file cannot overwrite a newer in-place save on restart.
 fn replace_library(dir: &std::path::Path, tmp: &std::path::Path) -> std::io::Result<()> {
-    std::fs::rename(tmp, dir.join(LIBRARY_FILE)).or_else(|_| std::fs::rename(tmp, dir.join(NEXT_FILE)))
+    let next = dir.join(NEXT_FILE);
+    if !next.exists() && std::fs::rename(tmp, dir.join(LIBRARY_FILE)).is_ok() {
+        return Ok(());
+    }
+    std::fs::rename(tmp, next)
+}
+
+/// A unique sibling temporary path for an atomic replacement of `path`.
+fn temp_path(path: &std::path::Path) -> std::path::PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let seq = NEXT.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("library");
+    path.with_file_name(format!("{stem}.{pid}.{seq}.tmp"))
 }
 
 /// Writes `bytes` to a temporary file beside `path`, then renames it over
 /// `path`: a reader never sees a part. Serialised so concurrent worker and
 /// shutdown saves do not race on the same staging file or target rename.
 fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::sync::atomic::AtomicU64;
     static WRITING: Mutex<()> = Mutex::new(());
-    static NEXT: AtomicU64 = AtomicU64::new(0);
     let _guard = WRITING.lock().unwrap_or_else(|e| e.into_inner());
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".tmp-{}-{n}", std::process::id()));
-    let tmp = path.with_file_name(name);
-    let res = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
-    if res.is_err() {
+    let tmp = temp_path(path);
+    if let Err(e) = std::fs::write(&tmp, bytes) {
         let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
-    res
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }
 
 /// How long each title pipeline that took long to make took, in ms (beside
@@ -820,10 +949,19 @@ fn used() -> std::sync::MutexGuard<'static, Option<HashSet<String>>> {
 }
 
 /// Whether the title pipeline with `key` was requested in this or an earlier run.
+<<<<<<< HEAD
 ///
 /// `VICTORY_EARLY_ALL=1`: every title pipeline is started at creation,
 /// requested before or not, so that the driver's own cache holds it for
 /// later runs.
+||||||| c7daeea5
+=======
+/// Open the early list before a cache save that has no title draws.
+pub(crate) fn keep_early_list() {
+    drop(used());
+}
+
+>>>>>>> integ/vertex
 pub(crate) fn wanted_early(key: &str) -> bool {
     static ALL: OnceLock<bool> = OnceLock::new();
     if *ALL.get_or_init(|| std::env::var_os("VICTORY_EARLY_ALL").is_some_and(|v| v == "1")) {
@@ -849,6 +987,21 @@ mod tests {
     fn a_save_buffer_the_host_cannot_give_is_refused() {
         assert!(zeroed(usize::MAX / 2).is_none());
         assert_eq!(zeroed(100).as_deref(), Some(&[0u8; 100][..]));
+    }
+
+    #[test]
+    fn saves_take_a_small_part_of_the_time_whatever_the_library_weighs() {
+        use std::time::Duration;
+        let s = Duration::from_secs;
+        assert_eq!(save_pause(Duration::ZERO), s(20));
+        assert_eq!(save_pause(s(1)), s(20));
+        assert_eq!(save_pause(s(6)), s(120));
+        assert_eq!(save_pause(s(60)), s(600));
+        assert_eq!(save_pause(s(300)), s(1200));
+        for took in 1..1000 {
+            let pause = save_pause(s(took));
+            assert!(pause >= s(took) * 4 && pause >= s(20), "{took}");
+        }
     }
 
     #[test]
@@ -905,6 +1058,52 @@ mod tests {
         // The next start reads the new one, wherever the save left it.
         assert_eq!(Blob::of(dir.path()).bytes(), &new[..]);
         assert!(!dir.path().join(NEXT_FILE).exists());
+    }
+
+    #[test]
+    fn restart_reads_the_latest_save_after_using_the_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(LIBRARY_FILE);
+        let next = dir.path().join(NEXT_FILE);
+        let tmp = path.with_extension("tmp");
+
+        // A directory at the library path makes the first rename fail.
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(&tmp, b"first save").unwrap();
+        replace_library(dir.path(), &tmp).unwrap();
+        assert_eq!(std::fs::read(&next).unwrap(), b"first save");
+
+        // In-place replacement is possible again by the second save.
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::write(&path, b"previous library").unwrap();
+        std::fs::write(&tmp, b"second save").unwrap();
+        replace_library(dir.path(), &tmp).unwrap();
+
+        assert_eq!(Blob::of(dir.path()).bytes(), b"second save");
+        assert!(!next.exists());
+        assert_eq!(std::fs::read(path).unwrap(), b"second save");
+    }
+
+    #[test]
+    fn restart_reads_the_latest_save_while_replacement_is_blocked() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(LIBRARY_FILE);
+        let next = dir.path().join(NEXT_FILE);
+        let tmp = path.with_extension("tmp");
+
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(&tmp, b"first save").unwrap();
+        replace_library(dir.path(), &tmp).unwrap();
+        assert_eq!(std::fs::read(&next).unwrap(), b"first save");
+
+        std::fs::write(&tmp, b"second save").unwrap();
+        replace_library(dir.path(), &tmp).unwrap();
+        assert_eq!(std::fs::read(&next).unwrap(), b"second save");
+
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::write(&path, b"previous library").unwrap();
+        assert_eq!(Blob::of(dir.path()).bytes(), b"second save");
+        assert!(!next.exists());
     }
 
     /// The bytes at `at` of the pattern the test below writes.
@@ -997,5 +1196,29 @@ mod tests {
         let final_bytes = std::fs::read(&target).unwrap();
         assert_eq!(final_bytes.len(), 4096);
         assert!(final_bytes.iter().all(|&b| b == final_bytes[0]));
+    }
+
+    #[test]
+    fn temp_paths_are_unique_and_write_atomically_cleans_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join(EARLY_FILE);
+        let a = temp_path(&target);
+        let b = temp_path(&target);
+        assert_ne!(a, b);
+        assert_eq!(a.parent(), target.parent());
+        assert_eq!(b.parent(), target.parent());
+
+        write_atomically(&target, b"first\nsecond").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"first\nsecond");
+
+        // Second replacement overwrites cleanly and leaves no `.tmp` files behind.
+        write_atomically(&target, b"updated").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"updated");
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "leftover tmp files: {leftovers:?}");
     }
 }

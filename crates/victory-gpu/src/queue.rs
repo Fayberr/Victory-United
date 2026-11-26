@@ -1372,7 +1372,6 @@ fn system_timestamp() -> u64 {
 /// Frames presented so far.
 static FRAMES: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(feature = "diagnostics")]
 pub(crate) fn presented() -> u64 {
     FRAMES.load(Ordering::Relaxed)
 }
@@ -1484,6 +1483,7 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
     #[cfg(all(windows, feature = "diagnostics"))]
     {
         crate::capture::frame_drew(frame, crate::draw::drawn());
+        crate::capture::light_present(frame);
         crate::renderdoc::frame_drew(frame, crate::draw::drawn());
         crate::shot::present(frame, crate::draw::drawn());
         if crate::capture::listed(frame) {
@@ -1538,7 +1538,8 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
         // A second plane (the title's interface over its game image, in
-        // its Series S mode) is drawn over the first: `crate::over`.
+        // its Series S mode) is drawn over the first: `crate::over`. Each
+        // plane's description is 0x48 bytes and starts as the first does.
         const READABLE: u32 = 0x80;
         // SAFETY: the title passes `planes` plane descriptions.
         let second = unsafe { second_plane(planes, plane_parameters, resource) }
@@ -1547,6 +1548,15 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
             let was = crate::resource::host_transition(r, READABLE).map_or(READABLE, |(_, before)| before);
             (r, t, was)
         });
+        if crate::present_trace::on() {
+            // SAFETY: the plane lists `count` resources.
+            let all = unsafe { std::slice::from_raw_parts(plane.resources, plane.count as usize) };
+            crate::present_trace::title(format!(
+                "planes {planes} token {} resources {all:?} state {state:#x} tables refused {}",
+                plane.token,
+                crate::descriptor::host::REFUSED.load(Ordering::Relaxed)
+            ));
+        }
         let shown = host.present(texture, state, frame, over.map(|(_, t, was)| (t, was)));
         if let Some((r, _, was)) = over {
             crate::resource::host_transition(r, was);
@@ -1567,9 +1577,7 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
     frame_ends();
     S_OK
 }
-
 /// The bytes from one plane's description to the next in a present.
-#[cfg(windows)]
 const PLANE_STRIDE: usize = 0x48;
 
 /// The first resource of a present's second plane, if it has one that is not
@@ -1578,7 +1586,6 @@ const PLANE_STRIDE: usize = 0x48;
 /// # Safety
 /// `parameters` is null or points at `planes` plane descriptions,
 /// [`PLANE_STRIDE`] bytes apart, each listing `count` resources.
-#[cfg(windows)]
 unsafe fn second_plane(planes: u32, parameters: *const Plane, first: This) -> Option<This> {
     if planes < 2 || parameters.is_null() {
         return None;
@@ -1593,6 +1600,7 @@ unsafe fn second_plane(planes: u32, parameters: *const Plane, first: This) -> Op
     (!resource.is_null() && resource != first).then_some(resource)
 }
 
+<<<<<<< HEAD
 
 /// Diagnostics: the title's present is over.
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -1627,6 +1635,54 @@ fn show(texture: &windows::Win32::Graphics::Direct3D12::ID3D12Resource, state: u
     let _ = (shown, what.resource);
 }
 
+||||||| c7daeea5
+=======
+#[cfg(test)]
+mod plane_tests {
+    use super::*;
+
+    /// Two plane descriptions as a title lays them out, [`PLANE_STRIDE`]
+    /// bytes apart, the second naming `count` resources at `resources`.
+    fn two(count: u32, resources: *const This) -> [u64; 2 * PLANE_STRIDE / 8] {
+        let mut words = [0u64; 2 * PLANE_STRIDE / 8];
+        let second = PLANE_STRIDE / 8;
+        words[second] = 7; // frame token
+        words[second + 1] = u64::from(count);
+        words[second + 2] = resources as u64;
+        words
+    }
+
+    #[test]
+    fn the_second_plane_is_chosen_only_when_it_names_another_resource() {
+        let (a, b) = (0x1000 as This, 0x2000 as This);
+        let other = [b];
+        let same = [a];
+        let none = [std::ptr::null::<crate::object::Object>()];
+        // SAFETY: each description is a whole local array laid out as the
+        // title's; resource lists are local arrays of one.
+        unsafe {
+            let with_other = two(1, other.as_ptr());
+            let p = with_other.as_ptr().cast::<Plane>();
+            assert_eq!(second_plane(2, p, a), Some(b));
+            // One plane, or no descriptions at all: nothing over the first.
+            assert_eq!(second_plane(1, p, a), None);
+            assert_eq!(second_plane(0, p, a), None);
+            assert_eq!(second_plane(2, std::ptr::null(), a), None);
+            // The same resource twice is not drawn over itself.
+            let with_same = two(1, same.as_ptr());
+            assert_eq!(second_plane(2, with_same.as_ptr().cast(), a), None);
+            // An empty plane, a plane without a list, a null resource.
+            let empty = two(0, other.as_ptr());
+            assert_eq!(second_plane(2, empty.as_ptr().cast(), a), None);
+            let unlisted = two(1, std::ptr::null());
+            assert_eq!(second_plane(2, unlisted.as_ptr().cast(), a), None);
+            let with_null = two(1, none.as_ptr());
+            assert_eq!(second_plane(2, with_null.as_ptr().cast(), a), None);
+        }
+    }
+}
+
+>>>>>>> integ/vertex
 /// Diagnostics: logs a presented frame that is black after one that was
 /// not, with what was presented and how many draws ran since.
 #[cfg(all(windows, feature = "diagnostics"))]

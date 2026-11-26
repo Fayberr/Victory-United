@@ -18,6 +18,12 @@
 //! is gone and fills in zeros). A write that faults is not ours to take:
 //! the destination is host memory, which is always there; such a fault
 //! goes on to the handlers after this one.
+//!
+//! [`write`] is the same the other way, for what shaders wrote going back
+//! into title memory (`VICTORY_WRITE_PLAIN=1`; off by default; after
+//! reddxd-byte/ShakiraRED-dt c2271e5): there it is the write that may fault
+//! (a page that is not there, or not the title's to write), and the
+//! caller's way through the kernel then says which page it is.
 
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
@@ -93,6 +99,27 @@ pub(crate) fn on() -> bool {
         on
     })
 }
+
+/// Whether copies of host memory into title memory are made in place
+/// (`VICTORY_WRITE_PLAIN=1`, with or without [`on`]).
+fn write_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        let on = cfg!(target_arch = "x86_64") && std::env::var_os("VICTORY_WRITE_PLAIN").is_some_and(|v| v == "1");
+        if on {
+            install();
+            tracing::info!(
+                "what shaders wrote goes into title memory in place, with the kernel's copy behind it for a page that is \
+                 not there (VICTORY_WRITE_PLAIN=1)"
+            );
+        }
+        on
+    })
+}
+
+/// Writes made in place, their bytes, and those that met a page that could
+/// not be written (and went to the kernel's copy), since the last line.
+static WROTE: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
 /// Copies made in place, their bytes, the copies that met a page that was
 /// not there (and went to the kernel's copy), and the copies not tried in
@@ -228,24 +255,21 @@ fn guarded_write(_: *mut u8, _: *const u8, _: usize) -> bool {
     false
 }
 
-fn write_on() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| on() && std::env::var_os("VICTORY_WRITE_PLAIN").is_none_or(|v| v != "0"))
-}
-
 /// Writes made in place, their bytes, and the writes that met an unmapped or
 /// read-only destination page (falling back to the kernel's write).
 static WRITE_COUNT: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
-/// With [`on`] (and `VICTORY_WRITE_PLAIN!=0`): writes host memory at `from`
-/// into title memory at `to` in place; false if disabled or a destination page
-/// is not writable (caller falls back to `NtWriteVirtualMemory`).
+/// With [`write_on`]: writes host memory at `from` into title memory at `to`
+/// in place; false if it is off or a destination page is not writable (the
+/// caller then writes through the kernel, all of it again).
 pub(crate) fn write(to: *mut u8, from: *const u8, len: usize) -> bool {
     if !write_on() {
         return false;
     }
     let whole = guarded_write(to, from, len);
+    WROTE[if whole { 0 } else { 2 }].fetch_add(1, Relaxed);
     if whole {
+        WROTE[1].fetch_add(len as u64, Relaxed);
         WRITE_COUNT[0].fetch_add(1, Relaxed);
         WRITE_COUNT[1].fetch_add(len as u64, Relaxed);
     } else {
@@ -282,6 +306,14 @@ pub(crate) fn copy(to: *mut u8, from: *const u8, len: usize) -> bool {
 
 /// With the frame line: what [`copy`] did per frame over `frames`.
 pub(crate) fn line(frames: f64) {
+    if write_on() {
+        let [writes, bytes, gone] = [0, 1, 2].map(|i| WROTE[i].swap(0, Relaxed) as f64 / frames);
+        tracing::info!(
+            "what shaders wrote, put into title memory in place per frame (VICTORY_WRITE_PLAIN=1): {writes:.0} stretches, \
+             {:.1} MB; {gone:.1} met a page that could not be written and went through the kernel's copy",
+            bytes / 1e6
+        );
+    }
     if !on() {
         return;
     }
@@ -364,6 +396,32 @@ mod tests {
         assert!(!faulted_lately(at + 0x10000, 4096));
         assert!(!faulted_lately(at - 0x10000, 4096));
         assert_eq!(blocks(0, 0), (1 << 63, 1 << 63));
+    }
+
+    /// Writes into title memory in place: one that is there is whole, one
+    /// into a page that is not there or read-only ends with false, and the
+    /// thread goes on.
+    #[test]
+    fn a_page_that_cannot_be_written_ends_the_write_without_a_fault() {
+        use windows_sys::Win32::System::Memory::PAGE_READONLY;
+        // SAFETY: memory of the test's own: a writable page, one that is not
+        // there, a read-only one.
+        let base = unsafe { VirtualAlloc(std::ptr::null(), 3 * PAGE, MEM_RESERVE, PAGE_NOACCESS) } as *mut u8;
+        assert!(!base.is_null());
+        // SAFETY: pages of that reservation.
+        unsafe {
+            assert!(!VirtualAlloc(base.cast(), PAGE, MEM_COMMIT, PAGE_READWRITE).is_null());
+            assert!(!VirtualAlloc(base.wrapping_add(2 * PAGE).cast(), PAGE, MEM_COMMIT, PAGE_READONLY).is_null());
+        }
+        let from = vec![0x5Au8; PAGE];
+        assert!(guarded_write(base, from.as_ptr(), PAGE));
+        // SAFETY: committed and readable.
+        assert!(unsafe { std::slice::from_raw_parts(base, PAGE) } == from);
+        assert!(!guarded_write(base.wrapping_add(PAGE), from.as_ptr(), PAGE));
+        assert!(!guarded_write(base.wrapping_add(2 * PAGE), from.as_ptr(), PAGE));
+        assert!(guarded_write(base, from.as_ptr(), PAGE));
+        // SAFETY: the test's reservation.
+        unsafe { VirtualFree(base.cast(), 0, MEM_RELEASE) };
     }
 
     /// Many threads at once, half of them faulting: each gets its own answer.

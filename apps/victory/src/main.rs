@@ -5,15 +5,24 @@
 
 mod agility;
 mod census;
+#[cfg(windows)]
+mod doctor;
 mod inspect;
+#[cfg(windows)]
+mod prebuild;
 mod precompile;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod replay;
 mod run;
 mod shader;
 mod translate;
+<<<<<<< HEAD
 #[cfg(windows)]
 mod warm;
+||||||| c7daeea5
+=======
+mod work;
+>>>>>>> integ/vertex
 
 use std::path::PathBuf;
 
@@ -72,6 +81,9 @@ enum Command {
         /// Also list the decoded native instructions (implies --verbose).
         #[arg(long)]
         disasm: bool,
+        /// Show the effects, techniques, and passes in shader databases.
+        #[arg(long)]
+        effects: bool,
     },
     /// Run every shader found (containers, SGD5 files) through the
     /// translator and report what it cannot handle yet.
@@ -81,22 +93,21 @@ enum Command {
         /// else the newest Windows SDK's).
         #[arg(long)]
         validate: bool,
-        /// Also create a host D3D12 pipeline for each emitted shader.
+        /// Check host pipelines, or prebuild the shader pack's pipelines with --cache.
         #[arg(long)]
         pipelines: bool,
+        /// Prebuild only shader-pack pipelines requested by earlier runs in this cache.
+        #[arg(long, requires_all = ["cache", "pipelines"])]
+        used_pipelines: bool,
         /// Print one line per program and outcome.
         #[arg(long)]
         list: bool,
         /// Worker threads (default: every logical core).
         #[arg(long)]
         jobs: Option<usize>,
-        /// Warm the run's shader cache: a file of shader hashes (the 16
-        /// hex digits a run's log names a shader by, anywhere in a line);
-        /// the containers with those hashes are translated into the
-        /// cache and nothing else is done. Set `VICTORY_HOST_WAVE` and
-        /// `VICTORY_VIEW_LIMIT` to what the run's log says of the host.
-        #[arg(long)]
-        warm: Option<PathBuf>,
+        /// Fill the shader cache that `run` reads.
+        #[arg(long, conflicts_with_all = ["validate", "list"])]
+        cache: bool,
     },
     /// Translate shaders into the runtime cache ahead of time (resumable).
     /// With --pipelines, also compile compute pipelines into the host
@@ -166,6 +177,10 @@ enum Command {
         /// The console model the title sees (device type, memory).
         #[arg(long, value_enum, default_value_t = Console::SeriesX)]
         console: Console,
+        /// Where work is done that the processor and the graphics card can
+        /// both do. Settings set in the environment already stay.
+        #[arg(long, value_enum, default_value_t = work::Work::Balanced)]
+        work: work::Work,
         /// Arguments for the title, after `--` (it reads the whole command
         /// line; a title that relaunches itself passes some).
         #[arg(last = true)]
@@ -177,6 +192,10 @@ enum Command {
     Replay(replay::Replay),
     /// Show the resolved configuration and check it.
     Config,
+    /// Check what this PC has of what a run needs (graphics, system DLLs,
+    /// memory, folders). Loads no title.
+    #[cfg(windows)]
+    Doctor,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -202,6 +221,10 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let cli = Cli::parse();
+    if let Command::Run { work, .. } = &cli.command {
+        // SAFETY: nothing so far has started a thread.
+        unsafe { work.apply() };
+    }
     match cli.command {
         Command::Inspect {
             file,
@@ -218,14 +241,24 @@ fn main() -> Result<()> {
             paths,
             verbose,
             disasm,
-        } => shader::run(paths, verbose || disasm, disasm),
+            effects,
+        } => shader::run(paths, verbose || disasm, disasm, effects),
+        Command::Translate {
+            paths,
+            jobs,
+            pipelines,
+            used_pipelines,
+            cache: true,
+            ..
+        } => translate::warm(paths, jobs, pipelines, used_pipelines),
         Command::Translate {
             paths,
             validate,
             pipelines,
             list,
             jobs,
-            warm,
+            cache: false,
+            ..
         } => {
             // `VICTORY_VIEW_LIMIT=<null slot>`: translate as on a host whose view heap is capped
             if let Some(n) = std::env::var("VICTORY_VIEW_LIMIT").ok().and_then(|v| v.parse().ok()) {
@@ -234,9 +267,6 @@ fn main() -> Result<()> {
             // `VICTORY_HOST_WAVE=32`: translate as for a GPU whose waves are at most 32 lanes
             if let Some(n) = std::env::var("VICTORY_HOST_WAVE").ok().and_then(|v| v.parse().ok()) {
                 victory_shader::emit::set_host_max_wave(n);
-            }
-            if let Some(file) = warm {
-                return translate::warm(paths, &file, jobs);
             }
             translate::run(paths, validate, pipelines, list, jobs)
         }
@@ -257,7 +287,14 @@ fn main() -> Result<()> {
             strict,
             execute,
             console,
+<<<<<<< HEAD
             title_args,
+||||||| c7daeea5
+            title_args: _,
+=======
+            work: _,
+            title_args: _,
+>>>>>>> integ/vertex
         } => {
             victory_hle::runtime::set_title_args(title_args);
             let code = run::run(&exe, unimplemented, strict, execute, console)?;
@@ -270,6 +307,8 @@ fn main() -> Result<()> {
         #[cfg(all(windows, feature = "diagnostics"))]
         Command::Replay(options) => replay::run(options),
         Command::Config => show_config(),
+        #[cfg(windows)]
+        Command::Doctor => doctor::run(),
     }
 }
 
