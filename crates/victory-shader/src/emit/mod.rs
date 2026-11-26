@@ -950,6 +950,7 @@ fn emit_forms(
 
 /// [`emit_forms`], the name the wave64 retries' tests call it by.
 #[cfg(test)]
+#[allow(dead_code)]
 fn emit_sized(
     c: &Container,
     native: &NativeProgram,
