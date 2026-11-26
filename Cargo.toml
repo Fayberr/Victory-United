@@ -71,19 +71,11 @@ opt-level = 2
 
 [profile.release]
 debug = "line-tables-only"
-<<<<<<< HEAD
 # Thin link-time optimization and one codegen unit: the layer spends its time
 # hashing, copying and looking up, and crosses crates to do it (the idea is
 # Key-rs's, VIctory-Belobug-AMD `a23d1b46`).
 lto = "thin"
 codegen-units = 1
-||||||| 085ee7c4
-=======
-# One codegen unit and thin LTO: the port spends its time hashing, copying and
-# translating, so cross-crate inlining pays for the slower build.
-lto = "thin"
-codegen-units = 1
->>>>>>> vitoriabr/main
 
 # The development build: release code generation plus the `diagnostics`
 # feature (`cargo build --profile diag -p victory --features diagnostics`),
