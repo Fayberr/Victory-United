@@ -15,6 +15,9 @@
 //! (directly indexed views are not known per draw); plane 0 is uploaded
 //! (every mip and array slice), depth and stencil planes are not.
 
+pub(crate) static SPARE_STATS: [std::sync::atomic::AtomicU64; 2] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 2];
+
 pub(crate) mod ahead;
 
 use std::collections::HashMap;
@@ -1450,7 +1453,7 @@ impl Staging {
             if !crate::host::read_into(self.memory, read) {
                 return false;
             }
-            last.hash = Some(blake3::hash(read));
+            last.hash = Some(digest(read));
             self.detile(read);
             last.asked = now;
             last.ahead = Some(crate::frame::current());

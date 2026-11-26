@@ -490,7 +490,7 @@ pub(crate) fn retire<T: 'static>(object: T) {
             drop(object);
             return;
         }
-        reap(vec![Retired(Box::new(object))]);
+        reap(vec![Retired::Any(Box::new(object))]);
         return;
     }
     RETIREMENTS[1].fetch_add(1, Ordering::Relaxed);
@@ -1876,6 +1876,8 @@ pub(crate) struct HostList {
     prelude: OnceLock<Option<Prelude>>,
     /// The pipelines the list binds, for reports of slow submissions.
     pipelines: std::sync::Arc<Mutex<std::collections::BTreeSet<String>>>,
+    pub(crate) shot_block: Mutex<(u32, u32, u32)>,
+    pub(crate) shot_mark: Mutex<(u32, u32)>,
     /// The records its draws read from slots that its prelude fills
     /// (`crate::indirect::gather`).
     gather: Mutex<Gather>,
@@ -4206,7 +4208,7 @@ fn joins_asked() -> (usize, usize) {
 /// those give their shaders, write back or write when they are done, and it
 /// changes no title memory that they read ([`Step::Copy`], [`Step::Run`]).
 pub(crate) fn joinable<'a>(ahead: impl Iterator<Item = &'a HostList>, next: &[&HostList]) -> bool {
-    if next.iter().any(|l| l.deferred().copies.iter().any(|s| matches!(s, Step::Copy(..) | Step::Run(_)))) {
+    if next.iter().any(|l| l.deferred().copies.iter().any(|s| matches!(s, Step::Copy(..) | Step::Run(..)))) {
         return false;
     }
     let ahead: Vec<&HostList> = ahead.collect();
@@ -5423,6 +5425,8 @@ impl Host {
                 _alive: Counted::new(),
                 #[cfg(feature = "diagnostics")]
                 notes,
+                shot_block: Mutex::default(),
+                shot_mark: Mutex::default(),
                 #[cfg(feature = "diagnostics")]
                 stamps: OnceLock::new(),
             })
@@ -7842,6 +7846,8 @@ impl HostList {
         self.states.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.twins.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.pipelines.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        *self.shot_block.lock().unwrap_or_else(|e| e.into_inner()) = (0, 0, 0);
+        *self.shot_mark.lock().unwrap_or_else(|e| e.into_inner()) = (0, 0);
         #[cfg(feature = "diagnostics")]
         self.indirects.lock().unwrap_or_else(|e| e.into_inner()).clear();
         {
@@ -8508,21 +8514,6 @@ impl HostList {
             .push(Step::Fill(dst as usize, src as usize, len, None));
     }
 
-    /// The host address of `len` bytes of scratch memory that hold the title
-    /// memory at `src` as of the list's submission: one fill for every ask
-    /// until the list next writes title memory.
-    pub(crate) fn fill_scratch(&self, src: *const u8, len: u64) -> Option<u64> {
-        let key = (src as usize, len as usize);
-        let known = self.deferred().filled.get(&key).copied();
-        if known.is_some() {
-            return known;
-        }
-        let (gpu, to) = self.scratch(len)?;
-        self.defer_fill(to, src, len as usize);
-        self.deferred().filled.insert(key, gpu);
-        Some(gpu)
-    }
-
     /// As [`HostList::defer_fill`], for upload memory that only `slot` (a
     /// title heap's address, and the slot) shows.
     pub(crate) fn defer_constants(&self, dst: *mut u8, src: *const u8, len: usize, slot: (usize, u32)) {
@@ -8926,7 +8917,7 @@ impl HostList {
     /// without the switch any write of title memory is assumed).
     pub(crate) fn defer_at(&self, at: usize, len: usize, work: impl Fn() + Send + 'static) {
         let mut deferred = self.deferred();
-        deferred.copies.push(Step::Run(Box::new(work)));
+        deferred.copies.push(Step::Run(Box::new(work), Some((at, len))));
         deferred.title_written();
         drop(deferred);
         self.changed_something();
@@ -9382,6 +9373,7 @@ struct Batch {
     /// Copies (by address) brought up to date ahead of the steps, and the
     /// range (from, to) ([`Batch::refresh_ahead`]).
     ahead: ByCopy<(usize, usize)>,
+    current: std::collections::HashMap<usize, (std::sync::Arc<crate::shadow::Shadow>, usize, usize)>,
     /// `ahead` holds everything the submission refreshes
     /// ([`Batch::refresh_front`]).
     front: bool,
@@ -9826,7 +9818,7 @@ impl Batch {
                     }
                     Step::GpuWrite(shadow, ..) => Touch::Write(std::sync::Arc::as_ptr(shadow) as usize),
                     Step::Copy(..) if taken(list, i) => Touch::Nothing,
-                    Step::Copy(..) | Step::Run(_) | Step::Placed(_) => break 'steps,
+                    Step::Copy(..) | Step::Run(..) | Step::Placed(_) => break 'steps,
                     _ => Touch::Nothing,
                 });
             }

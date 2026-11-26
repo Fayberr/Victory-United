@@ -489,10 +489,11 @@ mod counter_tests {
     fn the_last_counter_has_a_slot() {
         use super::{C, COUNT, add};
         use std::sync::atomic::Ordering::Relaxed;
-        let before = COUNT[C::RefreshSkipped as usize].load(Relaxed);
+        let before: u64 = COUNT.iter().map(|b| b.0[C::RefreshSkipped as usize].load(Relaxed)).sum();
         add(C::RefreshSkipped, 1);
         add(C::RefreshKnownUs, 0);
-        assert!(COUNT[C::RefreshSkipped as usize].load(Relaxed) > before);
+        let after: u64 = COUNT.iter().map(|b| b.0[C::RefreshSkipped as usize].load(Relaxed)).sum();
+        assert!(after > before);
     }
 }
 

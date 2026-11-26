@@ -197,6 +197,10 @@ pub(crate) fn png(width: u32, height: u32, rgb: &[u8]) -> Vec<u8> {
     encode(width, height, &raw)
 }
 
+pub(crate) fn png_rgb(width: u32, height: u32, rgb: &[u8]) -> Vec<u8> {
+    png(width, height, rgb)
+}
+
 /// A PNG of rows of RGB, each behind its filter byte.
 fn encode(w: u32, h: u32, raw: &[u8]) -> Vec<u8> {
     let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
@@ -245,7 +249,7 @@ pub(crate) fn read_back(
 
 /// As [`read_back`], of subresource `sub` (the stencil plane of a
 /// one-level, one-slice depth-stencil texture is subresource 1).
-fn read_back_of(
+pub(crate) fn read_back_of(
     device: &ID3D12Device,
     list: &ID3D12GraphicsCommandList,
     texture: &ID3D12Resource,
@@ -561,7 +565,7 @@ fn small_float(bits: u32, man: u32) -> f32 {
 /// as channel values scaled so the largest finite one is white (single
 /// channels: lowest black, highest white, as grey). `None` for formats not
 /// handled.
-fn to_rgba(format: u32, w: usize, h: usize, pitch: usize, rows: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn to_rgba(format: u32, w: usize, h: usize, pitch: usize, rows: &[u8]) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(w * h * 4);
     let px = |x: usize, y: usize, n: usize| &rows[y * pitch + x * n..][..n];
     let u16_at = |b: &[u8], i: usize| u16::from_le_bytes([b[2 * i], b[2 * i + 1]]);

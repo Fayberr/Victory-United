@@ -141,6 +141,7 @@ pub(crate) struct HostHeap {
     /// as bytes last saw them ([`Copied::changes`]). Made on first
     /// use.
     copied: Mutex<Vec<u8>>,
+    copied_prints: Mutex<Vec<u64>>,
     /// New ones of them that wait for a draw ([`HostHeap::copied_wait`]),
     /// by the frame they were found in.
     waiting: Mutex<std::collections::VecDeque<(u64, Vec<u32>)>>,
@@ -1771,6 +1772,7 @@ impl HostHeap {
             made: Made::new(count as usize),
             quick: (0..count).map(|_| std::sync::atomic::AtomicU64::new(0)).collect(),
             copied: Mutex::new(Vec::new()),
+            copied_prints: Mutex::new(Vec::new()),
             waiting: Mutex::default(),
             away: Mutex::default(),
             kept: (0..count + extra).map(|_| Mutex::new(None)).collect(),
@@ -2340,10 +2342,7 @@ impl HostHeap {
             let placed = self.placed.lock().unwrap_or_else(|e| e.into_inner());
             placed.by_slot.iter().map(|(&slot, &start)| (slot, start)).collect()
         };
-        let keys: Vec<u64> = {
-            let made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-            slots.iter().map(|&(slot, _)| made.get(slot as usize).copied().unwrap_or(0)).collect()
-        };
+        let keys: Vec<u64> = slots.iter().map(|&(slot, _)| self.made.get(slot).unwrap_or(0)).collect();
         let queued: Vec<bool> = {
             let textures = self.textures.lock().unwrap_or_else(|e| e.into_inner());
             slots.iter().map(|&(slot, _)| textures.slots.contains_key(&slot)).collect()
@@ -3574,7 +3573,7 @@ impl HostHeap {
         let mut due: Vec<(u32, u64)> = Vec::new();
         let walking = std::time::Instant::now();
         {
-            let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
+            let mut copied = self.copied_prints.lock().unwrap_or_else(|e| e.into_inner());
             if copied.is_empty() {
                 copied.resize(self.count as usize, 0);
             }
@@ -3842,10 +3841,7 @@ impl HostHeap {
             placed.by_slot.iter().map(|(&slot, &start)| (slot, start)).collect()
         };
         // The keys, then the queue, each under its own lock alone.
-        let keys: Vec<u64> = {
-            let made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-            slots.iter().map(|&(slot, _)| made.get(slot as usize).copied().unwrap_or(0)).collect()
-        };
+        let keys: Vec<u64> = slots.iter().map(|&(slot, _)| self.made.get(slot).unwrap_or(0)).collect();
         // 0 not queued, 1 held, 2 waiting for memory, 3 other.
         let queued: Vec<u8> = {
             let textures = self.textures.lock().unwrap_or_else(|e| e.into_inner());

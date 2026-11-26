@@ -797,6 +797,12 @@ pub mod known;
 #[cfg(windows)]
 mod library;
 #[cfg(windows)]
+pub(crate) fn frame_log_counts() -> (u64, u64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    (library::MADE.load(Relaxed), library::LOADED.load(Relaxed))
+}
+
+#[cfg(windows)]
 mod make;
 
 /// Lets the pipeline library's mapped file go from memory when no pipeline

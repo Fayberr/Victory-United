@@ -3946,19 +3946,6 @@ impl Shadow {
         crate::watch::unchanged_known(from, to, self.start as usize / PAGE, &copied)
     }
 
-    /// Whether [`Shadow::update_free`] of `[from, to)` would copy nothing,
-    /// known without asking the kernel or the guards
-    /// (`crate::watch::nothing_new`): the memory is watched, every page of
-    /// the range was taken, and none was noted written after it was.
-    /// `false` if the refresh would have to ask.
-    fn nothing_new(&self, from: usize, to: usize) -> bool {
-        if self.watched.load(Ordering::Relaxed) != 1 {
-            return false;
-        }
-        let copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-        crate::watch::nothing_new(from, to, self.start as usize / PAGE, &copied)
-    }
-
     /// Diagnostic (`VICTORY_REFRESH_CHECK=1`; off by default): after a
     /// refresh of `[from, to)` that trusted the write watch or the guards,
     /// the first 256 bytes of every 64 KiB block of it are read from title
@@ -4615,6 +4602,7 @@ impl Shadow {
                 sent: Mutex::default(),
                 touched: Default::default(),
                 size: len.next_multiple_of(PIECE as u64),
+                me: std::sync::OnceLock::new(),
             });
         }
         let shadow = Arc::new(shadow);
@@ -4769,8 +4757,9 @@ mod land_tests {
             before: Mutex::default(),
             dirty: Mutex::default(),
             sent: Mutex::default(),
-                touched: Default::default(),
+            touched: Default::default(),
             size: len as u64,
+            me: std::sync::OnceLock::new(),
         });
         Some(shadow)
     }
@@ -5488,6 +5477,7 @@ pub(crate) fn by_address(start: u64, len: u64) -> Option<Arc<Shadow>> {
         sent: Mutex::default(),
         touched: Default::default(),
         size: len,
+        me: std::sync::OnceLock::new(),
     });
     let shadow = Arc::new(shadow);
     CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));

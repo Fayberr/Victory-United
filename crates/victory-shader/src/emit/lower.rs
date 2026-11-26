@@ -4208,36 +4208,6 @@ impl<'a> Lower<'a> {
         self.s.m.select(c, z, sum, fused)
     }
 
-    /// Flushes f32 subnormals to signed zero, keeping all other values and
-    /// the sign of zero intact.
-    fn ftz(&mut self, x: V) -> V {
-        let c = self.cur;
-        let bits = self.as_int(x);
-        let exp_mask = self.s.m.i32(0x7F80_0000);
-        let sign_mask = self.s.m.i32(0x8000_0000);
-        let zero = self.s.m.i32(0);
-        let exp = self.s.m.bin(c, Bin::And, bits, exp_mask);
-        let sub = self.s.m.cmp(c, pred::EQ, exp, zero);
-        let signed_zero = self.s.m.bin(c, Bin::And, bits, sign_mask);
-        let flushed = self.s.m.select(c, sub, signed_zero, bits);
-        self.as_float(flushed)
-    }
-
-    /// A legacy multiply-add as RDNA 2 runs it: fused (`v_fma_legacy_f32`),
-    /// with the legacy rule that a zero factor makes the product a +0 rather
-    /// than turning an infinite or NaN factor into a NaN.
-    fn legacy_fmad(&mut self, a: V, b: V, c: V) -> V {
-        let cur = self.cur;
-        let fused = self.fmad(a, b, c);
-        let zero = self.s.m.f32(0);
-        let az = self.s.m.cmp(cur, pred::OEQ, a, zero);
-        let bz = self.s.m.cmp(cur, pred::OEQ, b, zero);
-        let z = self.s.m.bin(cur, Bin::Or, az, bz);
-        // +0 + c, so the sign of a zero addend follows the addition.
-        let addend = self.s.m.bin(cur, Bin::Add, zero, c);
-        self.s.m.select(cur, z, addend, fused)
-    }
-
     // ---- lane booleans ----
 
     fn boolean(&mut self, b: Bool, at: usize) -> Result<V, Why> {

@@ -1112,7 +1112,7 @@ fn ownerless_cap() -> usize {
             .unwrap_or(1 << 20)
     })
 }
-const VIEW_TAG: u32 = u32::from_le_bytes(*b"vVIE");
+pub(crate) const VIEW_TAG: u32 = u32::from_le_bytes(*b"vVIE");
 
 /// A record is the tag and two words, `i` and `generation` (the host keeps
 /// them as one 64-bit key per slot). The top two bits of `generation` say
@@ -1644,16 +1644,6 @@ fn view_at(i: u32, generation: u32) -> Option<View> {
     }
 }
 
-/// The words of the record at `handle`, if they are a view's.
-pub(crate) fn record_at(handle: u64) -> Option<[u32; 3]> {
-    if handle == 0 {
-        return None;
-    }
-    // SAFETY: the handle is a descriptor slot the title passes back.
-    let words = unsafe { (handle as *const [u32; 3]).read_unaligned() };
-    (words[0] == VIEW_TAG).then_some(words)
-}
-
 /// The view recorded at `handle`, if one is (and its resource is alive).
 pub(crate) fn view(handle: u64) -> Option<View> {
     if handle == 0 {
@@ -2087,9 +2077,10 @@ mod tests {
             user_data: 4,
             slot: 1,
         };
-        let made = state.tables(&list, &[range], &[], &[(1, 8)], true, &[], &mut Vec::new());
+        let plan = crate::draw::TablePlan::new(&[range], &[]);
+        let made = state.tables(&list, &plan, &[(1, 8)], true, &[], &mut Vec::new());
         let [(1, offset)] = made[..] else {
-            panic!("one fresh table for root parameter 1, not {made:?}");
+            panic!("one fresh table for root parameter 1, not {:?}", &made[..]);
         };
         assert_ne!(offset, u32::MAX, "the table found no dynamic slots");
         let next = host_heap.dynamic(1).expect("a dynamic slot");

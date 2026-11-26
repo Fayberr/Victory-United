@@ -17,8 +17,12 @@
 
 #[cfg(windows)]
 mod ambient;
+#[cfg(windows)]
+mod backreads;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod capture;
+#[cfg(windows)]
+mod cardmeter;
 #[cfg(windows)]
 mod compose;
 pub mod console;
@@ -63,6 +67,8 @@ pub mod pipeline;
 #[cfg(windows)]
 mod picked;
 #[cfg(windows)]
+mod plaincopy;
+#[cfg(windows)]
 mod pool;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod popwatch;
@@ -86,6 +92,8 @@ pub mod shader_cache;
 mod memory;
 #[cfg(windows)]
 mod shadow;
+#[cfg(all(windows, feature = "diagnostics"))]
+mod shot;
 #[cfg(windows)]
 mod tiles;
 pub mod signature;

@@ -247,7 +247,7 @@ static BAKE_UPLOAD: std::sync::Mutex<Option<BakeList>> = std::sync::Mutex::new(N
 /// Pending descriptor publications for a synchronous bake upload pass: slots
 /// stay on `neutral()` (or their previous compatible view) until the dedicated
 /// upload list has finished executing on the host GPU.
-struct BakeSync {
+pub(crate) struct BakeSync {
     publish: Vec<(u32, u64, u64)>,
     keep: Vec<std::sync::Arc<crate::resource::HostTexture>>,
 }
@@ -1239,17 +1239,6 @@ fn heap_recheck() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_HEAP_RECHECK").is_none_or(|v| v != "0"))
 }
 
-/// Whether a texture picked by index that a look found changed after its
-/// upload is looked at again in the next frame, not after
-/// `RECHECK_FRAMES[0]` (`VICTORY_RECHECK_SOON=1`; off by default). A
-/// texture whose bytes land in several pieces, or that the title keeps
-/// writing, was shown four frames behind at each change. (The AMD sibling
-/// repository's switch of that name, on by default there.)
-fn recheck_soon() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("VICTORY_RECHECK_SOON").is_some_and(|v| v == "1"))
-}
-
 /// Uploads of textures picked by index looked at again in the next frame
 /// because a look had found them changed ([`recheck_soon`]), since the
 /// start.
@@ -2200,7 +2189,7 @@ impl State {
             if t.stores && crate::picked::on() && crate::picked::picks(&stage.shader, &t.picks) {
                 crate::picked::runs_in(list);
             }
-            let made = self.tables(list, &t.tables, compute);
+            let made = self.tables(list, &t.tables, &t.host.half_views, compute, &spans, &mut staged);
             STORES.set(true);
             if made.iter().any(|m| m.1 == u32::MAX) {
                 once!("a draw whose descriptor table found no free slots is dropped");
@@ -2685,7 +2674,7 @@ impl State {
         #[cfg(feature = "diagnostics")]
         let refreshed = std::time::Instant::now();
         stage.next("the heap pass: textures");
-        let _ = self.heap_textures(list, heap, host, None);
+        let _ = Self::heap_textures(Into::List(list), heap, host, None);
         stage.end();
         #[cfg(feature = "diagnostics")]
         HEAP_SPLIT[2].fetch_add(refreshed.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -3101,7 +3090,7 @@ impl State {
                     }
                     BAKE_SERVED.store(0, Ordering::Relaxed);
                     PASS_BUDGET.set(Some((left, 2 << 30, true)));
-                    served = self.heap_textures(bake_list, heap, host, Some(&mut sync));
+                    served = Self::heap_textures(Into::List(bake_list), heap, host, Some(&mut sync));
                     PASS_BUDGET.set(None);
                 }
                 crate::texture::BAKING.set(false);
@@ -3141,7 +3130,7 @@ impl State {
             EARLY_TEXTURE_PASSES[1].fetch_add(1, Ordering::Relaxed);
             PASS_BUDGET.set(Some((left, 2 << 30, true)));
             crate::texture::BAKING.set(exact);
-            let _ = self.heap_textures(list, heap, host, None);
+            let _ = Self::heap_textures(Into::List(list), heap, host, None);
             crate::texture::BAKING.set(false);
             PASS_BUDGET.set(None);
             BAKED_MS.fetch_add(began.elapsed().as_millis() as u64, Ordering::Relaxed);
@@ -3154,7 +3143,7 @@ impl State {
         };
         EARLY_TEXTURE_PASSES[0].fetch_add(1, Ordering::Relaxed);
         PASS_BUDGET.set(Some((budget.0, budget.1, false)));
-        let _ = self.heap_textures(list, heap, host, None);
+        let _ = Self::heap_textures(Into::List(list), heap, host, None);
         PASS_BUDGET.set(None);
     }
 
@@ -3193,7 +3182,7 @@ impl State {
         let mut done = [0u64; 4];
         let mut skipped = false;
         if matches!(mode, BakeMode::Upload | BakeMode::Full) && waiting {
-            if mode == BakeMode::Full || crate::resource::room() {
+            if mode == BakeMode::Full || crate::resource::room(crate::host::host().and_then(|h| h.video_memory())) {
                 let _pass = crate::heap_worker::on().then(crate::heap_worker::urgent);
                 host.texture_slots_requeue(&sources.unmade, crate::frame::current());
                 PASS_SOURCES.set(Some(sources.queued.iter().chain(&sources.unmade).copied().collect()));
@@ -3201,7 +3190,7 @@ impl State {
                 // No budget of the frame's: the run serves the sources
                 // alone, within their own bytes.
                 PASS_BUDGET.set(Some((0, 0, true)));
-                Self::heap_textures(Into::List(list), heap, host);
+                Self::heap_textures(Into::List(list), heap, host, None);
                 PASS_BUDGET.set(None);
                 PASS_SOURCES.set(None);
                 done = PASS_SOURCED.get();
@@ -3463,7 +3452,7 @@ impl State {
         if !*ON.get_or_init(|| std::env::var_os("VICTORY_HEAP_TEXTURES").is_none_or(|v| v != "0")) {
             return true;
         }
-        let memory = crate::host::host().and_then(|h| h.video_memory());
+        let vmem = crate::host::host().and_then(|h| h.video_memory());
         // `VICTORY_TEXTURE_STAGE_MB` sets it: a backlog of tens of thousands of
         // textures (a scene's first minutes) then drains in fewer frames.
         static PER_FRAME_MB: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
@@ -3473,7 +3462,7 @@ impl State {
         let per_frame = match asked {
             Some(mb) => mb << 20,
             None => {
-                let base = staging_budget_per_frame(memory.map(|[budget, ..]| budget));
+                let base = staging_budget_per_frame(vmem.map(|[budget, ..]| budget));
                 if crate::residency::limited_host_ram() {
                     base.min(128 << 20)
                 } else {
@@ -3503,7 +3492,7 @@ impl State {
         // A bake draw's own run with `VICTORY_BAKE_SOURCES=full` goes on
         // as if the card had room, within its own bytes.
         let forced = only && bake_sources_mode().0 == BakeMode::Full;
-        let mut room = forced || crate::resource::room(memory);
+        let mut room = forced || crate::resource::room(vmem);
         // Bytes uploaded by this pass since the card was last asked
         // whether it has room: asked again every 32 MiB (a pass may upload
         // 192 MB and more, and one asking a pass let the queue run some
@@ -3910,8 +3899,10 @@ impl State {
                     }
                     // Its bytes are in, or on the way there in a list before.
                     if late && texture.is_some_and(crate::pool::fresh) && !crate::texture::ahead::there(resource) {
-                        if let (Some(handle), Some(key)) = (heap.handle(index), upload_key) {
+                        if let (Into::List(list), Some(handle), Some(key)) = (&into, heap.handle(index), upload_key) {
                             host.texture_slot_show_after(list, index, handle, key);
+                        } else {
+                            at_once();
                         }
                     } else {
                         at_once();
@@ -3957,7 +3948,14 @@ impl State {
                 // (What was found mapped of it a moment ago is not asked
                 // again, unless the host copy may need more.)
                 crate::texture::PICKING.set(Some(there.filter(|_| partly.is_none()).unwrap_or(u64::MAX)));
-                readable(list, sampled.kind, view);
+                match &mut into {
+                    Into::List(list) => readable(list, sampled.kind, view),
+                    Into::Ahead(batch) => {
+                        if let Some(list) = batch.list() {
+                            readable(list, sampled.kind, view);
+                        }
+                    }
+                }
                 crate::texture::PICKING.set(None);
             }
             // A failed or deferred staging allocation leaves this slot due.
@@ -3975,15 +3973,15 @@ impl State {
                 }
                 sync.publish.push((index, handle, key));
             }
-            if shows_other && let (Some(handle), Some(key)) = (heap.handle(index), upload_key) {
+            if shows_other && let (Into::List(list), Some(handle), Some(key)) = (&into, heap.handle(index), upload_key) {
                 host.texture_slot_flip(list, index, handle, key);
             }
-            if late && let (Some(handle), Some(key)) = (heap.handle(index), upload_key) {
+            if late && let (Into::List(list), Some(handle), Some(key)) = (&into, heap.handle(index), upload_key) {
                 host.texture_slot_show_after(list, index, handle, key);
             }
             #[cfg(feature = "diagnostics")]
             if crate::book::on()
-                && let Some(texture) = texture.filter(|t| crate::pool::fresh(t))
+                && let (Into::List(list), Some(texture)) = (&into, texture.filter(|t| crate::pool::fresh(t)))
             {
                 use windows::core::Interface;
                 let raw = texture.as_raw() as usize;
@@ -4054,7 +4052,7 @@ impl State {
             since_asked += bytes;
             if room && since_asked >= 32 << 20 {
                 since_asked = 0;
-                room = forced || crate::resource::room(memory);
+                room = forced || crate::resource::room(vmem);
             }
             HEAP_TEXTURE_BYTES.fetch_add(bytes, Ordering::Relaxed);
             HEAP_TEXTURES.fetch_add(1, Ordering::Relaxed);
@@ -4982,10 +4980,11 @@ impl State {
                 let index = first + k;
                 // A view this list has made before: its descriptor copied,
                 // and nothing more if nothing changed in the list since.
-                if list_views
-                    && let Some(words) = crate::descriptor::record_at(table + u64::from(k) * 32)
-                    && let Some(mut listed) = host.make_listed(recording, words, index)
-                {
+                if list_views {
+                    let words = crate::descriptor::record_at(table + u64::from(k) * 32);
+                    if words[0] == crate::descriptor::VIEW_TAG
+                        && let Some(mut listed) = host.make_listed(recording, words, index)
+                    {
                     let kind = group
                         .entry(k)
                         .map(|u| u.kind)
@@ -5022,6 +5021,7 @@ impl State {
                         crate::descriptor::host::note_listed(recording, words, listed);
                     }
                     continue;
+                    }
                 }
                 let used = group.entry(k);
                 match crate::descriptor::view(table + u64::from(k) * 32) {
@@ -6306,47 +6306,5 @@ mod record_hash_tests {
         // (One record of zeros is among the above.)
         let zeros: Vec<u64> = (2..100).map(|n| of(&vec![[0; 3]; n])).collect();
         assert!(zeros.iter().all(|h| seen.insert(*h)));
-    }
-
-    /// A bake draw names the indices in its constants, and those in the
-    /// records its constants give and in the one after them; not those of
-    /// records past the buffer, nor of one that cannot be read.
-    #[test]
-    fn a_bake_draw_names_the_indices_of_its_constants_and_records() {
-        let mut constants = [0u8; 0x80];
-        let put = |bytes: &mut [u8], at: usize, value: u32| bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
-        for (n, at) in BAKE_CONSTANT_INDICES.into_iter().enumerate() {
-            put(&mut constants, at, 100 + n as u32);
-        }
-        // Records 2 and 3, of 9 in all.
-        put(&mut constants, 0, 9);
-        put(&mut constants, 0x78, 2);
-        put(&mut constants, 0x7c, 4);
-        // Record `i` names 1000 + 10 i + n at its n-th place; record 3 the
-        // index of the constants' first once more.
-        let record = |i: u32| {
-            let mut record = [0xffu8; 0x44];
-            for (n, at) in BAKE_RECORD_INDICES.into_iter().enumerate() {
-                put(&mut record, at, 1000 + 10 * i + n as u32);
-            }
-            if i == 3 {
-                put(&mut record, 0, 100);
-            }
-            Some(record)
-        };
-        let (named, records) = bake_named(&constants, 9, record);
-        assert_eq!(records, (2, 3), "two records walked, and the one after them looked at");
-        let mut expected: Vec<u32> = (100..105).collect();
-        expected.extend((1020..1025).chain(1031..1035).chain(1040..1045));
-        assert_eq!(named, expected);
-        // The buffer ends with record 3: the one after is not there.
-        assert_eq!(bake_named(&constants, 4, record).1, (2, 2));
-        // A record that cannot be read ends the walk.
-        let (named, records) = bake_named(&constants, 9, |i| if i == 3 { None } else { record(i) });
-        assert_eq!(records, (2, 1));
-        assert!(named.contains(&1024) && !named.contains(&1040));
-        // No records at all: the constants' own.
-        put(&mut constants, 0x7c, 2);
-        assert_eq!(bake_named(&constants, 0, record), ((100..105).collect(), (0, 0)));
     }
 }

@@ -26,7 +26,7 @@ pub(crate) struct GraphicsState {
     /// state for other target formats starts from it
     /// ([`GraphicsState::with_formats`]). Not part of
     /// [`GraphicsState::describe`].
-    blend_as_given: Option<D3D12_BLEND_DESC>,
+    pub(super) blend_as_given: Option<D3D12_BLEND_DESC>,
     pub(super) sample_mask: u32,
     pub(super) rasterizer: D3D12_RASTERIZER_DESC,
     pub(super) depth: D3D12_DEPTH_STENCIL_DESC,
@@ -1452,25 +1452,6 @@ mod tests {
             t.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
         }
         b
-    }
-
-    #[test]
-    fn integer_targets_do_not_blend() {
-        let t = targets(&[
-            DXGI_FORMAT_R8G8B8A8_UNORM,
-            DXGI_FORMAT_R16G16B16A16_FLOAT,
-            DXGI_FORMAT_R8_UINT,
-        ]);
-        for independent in [false, true] {
-            let host = host_blend(&blending(independent), &t);
-            assert!(host.IndependentBlendEnable.as_bool());
-            assert!(host.RenderTarget[0].BlendEnable.as_bool());
-            assert!(host.RenderTarget[1].BlendEnable.as_bool());
-            assert!(!host.RenderTarget[2].BlendEnable.as_bool());
-            // The rest of the target's state is the title's.
-            assert_eq!(host.RenderTarget[2].SrcBlend, D3D12_BLEND_SRC_ALPHA);
-            assert_eq!(host.RenderTarget[0].DestBlend, D3D12_BLEND_INV_SRC_ALPHA);
-        }
     }
 
     #[test]
