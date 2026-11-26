@@ -9102,12 +9102,8 @@ impl Meter {
             }
         }
         if self.caption.is_none() {
-            // The window's own text, read without a message.
-            let mut buffer = vec![0u16; 512];
-            // SAFETY: a window handle and a buffer of that length.
-            let n = unsafe { InternalGetWindowText(hwnd, &mut buffer) };
-            buffer.truncate(n.max(0) as usize);
-            self.caption = Some(buffer);
+            // This fork's name in place of the title's own caption (its code name).
+            self.caption = Some(CAPTION.encode_utf16().collect());
         }
         let Some(caption) = &self.caption else { return };
         let text = format!(" | VIctory {fps:.0} fps {ms:.1} ms/frame {draws:.0} draws/frame");
@@ -9128,6 +9124,8 @@ impl Meter {
                         match next {
                             // SAFETY: a window handle and a NUL-terminated text.
                             Some((hwnd, text)) => unsafe {
+                                static ICON: std::sync::Once = std::sync::Once::new();
+                                ICON.call_once(|| set_title_icon(HWND(hwnd as *mut _)));
                                 let _ = SetWindowTextW(HWND(hwnd as *mut _), PCWSTR(text.as_ptr()));
                             },
                             None => std::thread::sleep(std::time::Duration::from_millis(100)),
@@ -9136,6 +9134,59 @@ impl Meter {
                 });
         });
     }
+}
+
+/// The name the window's caption starts with.
+const CAPTION: &str = "Brazil";
+
+static TITLE_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// The folder of the title's files, for its own logo as the window's icon.
+pub fn set_title_dir(dir: &std::path::Path) {
+    let _ = TITLE_DIR.set(dir.to_path_buf());
+}
+
+/// The logo a title's `MicrosoftGame.config` names (`attribute="file"`), in `dir`.
+fn title_logo(dir: &std::path::Path, attribute: &str) -> Option<std::path::PathBuf> {
+    let config = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("MicrosoftGame.config"))?;
+    let text = std::fs::read_to_string(config.path()).ok()?;
+    let at = text.find(&format!("{attribute}=\""))? + attribute.len() + 2;
+    let name = &text[at..at + text[at..].find('"')?];
+    Some(dir.join(name))
+}
+
+/// Gives the window the title's own logo as its icon (title bar and taskbar),
+/// read from the user's files: nothing of the title's is in this tree.
+fn set_title_icon(hwnd: HWND) {
+    // VICTORY_ICON names a PNG shown instead of the title's own logos.
+    let own = std::env::var_os("VICTORY_ICON").and_then(|p| std::fs::read(p).ok());
+    for (attribute, which) in [("Square150x150Logo", ICON_BIG), ("Square44x44Logo", ICON_SMALL)] {
+        let logo = || title_logo(TITLE_DIR.get()?, attribute).and_then(|p| std::fs::read(p).ok());
+        let Some(png) = own.clone().or_else(logo) else {
+            continue;
+        };
+        // SAFETY: PNG bytes of that length; a PNG is a valid icon image since Vista.
+        let icon = unsafe { CreateIconFromResourceEx(&png, true, 0x0003_0000, 0, 0, LR_DEFAULTCOLOR) };
+        if let Ok(icon) = icon {
+            // SAFETY: a window handle and an icon that lives for the run.
+            unsafe { SendMessageW(hwnd, WM_SETICON, Some(WPARAM(which as usize)), Some(LPARAM(icon.0 as isize))) };
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn title_logo_is_read_from_the_config() {
+    let dir = std::env::temp_dir().join(format!("victory-logo-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("MicrosoftGame.Config"), r#"<Game><ShellVisuals Square150x150Logo="big.png" Square44x44Logo="small.png"/></Game>"#).unwrap();
+    assert_eq!(title_logo(&dir, "Square150x150Logo"), Some(dir.join("big.png")));
+    assert_eq!(title_logo(&dir, "Square44x44Logo"), Some(dir.join("small.png")));
+    assert_eq!(title_logo(&dir, "StoreLogo"), None);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 impl Host {
