@@ -450,12 +450,7 @@ static FUNCTIONS: Table<160> = {
     f[28] = resource::create_heap as *const (); // 0xe0
     f[29] = resource::create_placed as *const (); // 0xe8
     f[36] = fence::create as *const (); // 0x120
-<<<<<<< HEAD
     f[37] = removed_reason as *const (); // 0x128
-||||||| merged common ancestors
-=======
-    f[37] = not_removed as *const (); // 0x128
->>>>>>> vibr/main
     f[38] = resource::copyable_footprints as *const (); // 0x130
     f[39] = query::create as *const (); // 0x138
     f[41] = signature::create as *const (); // 0x148
