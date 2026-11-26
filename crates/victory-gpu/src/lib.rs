@@ -73,6 +73,8 @@ pub mod queue;
 #[cfg(windows)]
 mod queue2;
 #[cfg(windows)]
+mod ranges;
+#[cfg(windows)]
 mod readback;
 #[cfg(windows)]
 mod rebar;
