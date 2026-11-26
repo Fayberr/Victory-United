@@ -890,16 +890,10 @@ fn work(scheduler: &'static Scheduler) {
         let mut job = job;
         drop(lanes);
         let started = std::time::Instant::now();
-<<<<<<< HEAD
         let traced = Traced::start(&job);
         let reading = victory_gpu::timeline::span("streaming: a request");
-        let result = execute(&job.read);
-        reading.end();
-||||||| c7daeea5
-        let result = execute(&job.read);
-=======
         let result = execute(&job.read, job.pages.as_ref());
->>>>>>> integ/vertex
+        reading.end();
         walls_request(&job.read.request, &result, started);
         stream_log::request(&job, started, &result);
         if let Some(traced) = traced {
@@ -1048,21 +1042,13 @@ impl Lanes {
             let seq = self.next_seq;
             self.next_seq += 1;
             match command {
-<<<<<<< HEAD
-                Command::Read(mut read) => {
+                Command::Read(mut read, mut pages) => {
                     read.note.submitted(&read.request, early);
-                    lane.reads.push_back((seq, read));
-                }
-||||||| c7daeea5
-                Command::Read(request) => lane.reads.push_back((seq, request)),
-=======
-                Command::Read(read, mut pages) => {
                     if pages.is_none() && page_list() == PageList::Submit {
                         pages = resolve(&read.request, "submit");
                     }
                     lane.reads.push_back((seq, read, pages));
                 }
->>>>>>> integ/vertex
                 Command::Status(status) => lane.statuses.push_back((seq, status)),
             }
         }
@@ -1250,7 +1236,6 @@ impl Drop for QueuedRead {
     }
 }
 
-<<<<<<< HEAD
 /// The streaming trace (`VICTORY_DSTORAGE_TRACE`): 0 or unset: off; 1: a
 /// line for every batch, and for every request whose page list, or whose
 /// pages' mapping, changed when it should not have, or whose bytes another
@@ -1324,7 +1309,7 @@ fn trace_batch(queue: u64, commands: &[Command], early: bool) {
     }
     let reads = || {
         commands.iter().filter_map(|c| match c {
-            Command::Read(read) => Some(read),
+            Command::Read(read, _) => Some(read),
             Command::Status(_) => None,
         })
     };
@@ -1442,8 +1427,6 @@ impl Traced {
         );
     }
 }
-||||||| c7daeea5
-=======
 /// When a page destination's list is read (`VICTORY_PAGE_LIST`). The
 /// title passes a pointer into its live table of physical pages: it
 /// enqueues, then maps the pages (which fills the table in), then submits,
@@ -1541,7 +1524,6 @@ fn destination_span(request: &Request) -> (usize, usize) {
     };
     ((request.page_offset & 0xffff) as usize, len as usize)
 }
->>>>>>> integ/vertex
 
 /// A status entry to write, holding a reference on its array.
 struct Status {
@@ -1597,7 +1579,6 @@ extern "system" fn enqueue_status(this: QueueRef, array: Array, index: u32) {
     queue(this, Command::Status(Status { array, index, enqueued }));
 }
 
-<<<<<<< HEAD
 /// Whether a queue submits itself once half of it is enqueued
 /// (`VICTORY_DSTORAGE_HALF=1`), as DirectStorage for the PC does and as ours
 /// did. The title's batches (up to 4,095 requests, in queues of 4,159) hold
@@ -1617,15 +1598,6 @@ fn half_submits() -> bool {
 /// Adds a command to the queue; blocks while the queue is full. A queue
 /// that is full of commands nobody submitted submits itself, since nothing
 /// else could make room.
-||||||| c7daeea5
-/// Adds a command to the queue; blocks while the queue is full, and
-/// submits on its own once half of it is enqueued, as the console does.
-=======
-/// Adds a command to the queue; blocks while the queue is full, and
-/// submits on its own once half of it is enqueued, as the console does,
-/// unless page-destination requests wait in it (their lists are only right
-/// at the title's submit): then only a full queue submits on its own.
->>>>>>> integ/vertex
 fn queue(this: QueueRef, command: Command) {
     // SAFETY: a queue we created and the title still holds.
     let id = unsafe { &*this }.state.id;
@@ -1641,23 +1613,11 @@ fn queue(this: QueueRef, command: Command) {
         if lane.entries() + 1 < lane.capacity.max(2) {
             break;
         }
-<<<<<<< HEAD
         // Full with reads held for a Submit the title cannot make while it
         // waits here: they go now, page lists as they are.
-        let (held, unsubmitted) = (!lane.held.is_empty(), lane.unsubmitted.len());
+        let (held, unsubmitted) = (lane.held.len(), lane.unsubmitted.len());
         let nothing_running = lane.reads.is_empty() && lane.running.is_empty();
-        if held {
-||||||| c7daeea5
-        // Full with reads held for a Submit the title cannot make while it
-        // waits here: they go now, page lists as they are.
-        if !lane.held.is_empty() {
-=======
-        // Full with commands waiting: reads held for a Submit the title
-        // cannot make while it waits here go now, page lists as they are,
-        // as do the plain ones.
-        let (held, waiting) = (lane.held.len(), lane.unsubmitted.len());
-        if waiting > 0 || held > 0 {
->>>>>>> integ/vertex
+        if held > 0 {
             static WARNED: AtomicBool = AtomicBool::new(false);
             if held > 0 && !WARNED.swap(true, Ordering::Relaxed) {
                 tracing::warn!("dstorage: a full queue's reads into physical pages start before the title's Submit");
@@ -1688,14 +1648,7 @@ fn queue(this: QueueRef, command: Command) {
     lane.unsubmitted.push(command);
     if half_submits() && lane.unsubmitted.len() >= (lane.capacity / 2).max(1) {
         let capacity = lane.capacity;
-<<<<<<< HEAD
         lanes.submit(id, true);
-||||||| c7daeea5
-        lanes.submit_as(id, false);
-=======
-        // `late` keeps the old behaviour: the reads go now, lists as they are.
-        lanes.submit_as(id, page_list() == PageList::Late);
->>>>>>> integ/vertex
         scheduler.work.notify_all();
         let held = lanes.lanes.get(&id).map_or(0, |l| l.held.len());
         let n = AUTO_SUBMITS.fetch_add(1, Ordering::Relaxed) + 1;
@@ -1766,50 +1719,8 @@ fn execute(read: &QueuedRead, pages: Option<&PageRuns>) -> Result<(), HRESULT> {
             return Err(fail(E_INVALIDARG, "source larger than destination"));
         }
         let size = request.source_size as usize;
-<<<<<<< HEAD
-        return into_destination(request, size, |out| read_into(request, out).map(|()| size))
+        return into_destination(request, pages, size, |out| read_into(request, out).map(|()| size))
             .map_err(|hr| fail(hr, "copying"));
-||||||| c7daeea5
-        // A file read into a title address is the kernel's write, and the
-        // kernel does not fault into the GPU side's guard: a block guarded
-        // again between `kernel_will_write` and the read (the guard over all
-        // the views of a page protects other views from other threads) made
-        // the read fail with ERROR_INVALID_USER_BUFFER, and the title stops
-        // at the failed request (runs amd-C and amd-C2, seconds after the
-        // world's first frame). It is read beside and copied in: our copy
-        // faults into the guard like the title's own writes.
-        let bounce = options & (PAGE_DESTINATION | MEMORY_SOURCE) == 0;
-        return into_destination(request, size, |out| {
-            if !bounce {
-                return read_into(request, out).map(|()| size);
-            }
-            let mut data = vec![0; size];
-            read_into(request, &mut data)?;
-            out.copy_from_slice(&data);
-            Ok(size)
-        })
-        .map_err(|hr| fail(hr, "copying"));
-=======
-        // A file read into a title address is the kernel's write, and the
-        // kernel does not fault into the GPU side's guard: a block guarded
-        // again between `kernel_will_write` and the read (the guard over all
-        // the views of a page protects other views from other threads) made
-        // the read fail with ERROR_INVALID_USER_BUFFER, and the title stops
-        // at the failed request (runs amd-C and amd-C2, seconds after the
-        // world's first frame). It is read beside and copied in: our copy
-        // faults into the guard like the title's own writes.
-        let bounce = options & (PAGE_DESTINATION | MEMORY_SOURCE) == 0;
-        return into_destination(request, pages, size, |out| {
-            if !bounce {
-                return read_into(request, out).map(|()| size);
-            }
-            let mut data = vec![0; size];
-            read_into(request, &mut data)?;
-            out.copy_from_slice(&data);
-            Ok(size)
-        })
-        .map_err(|hr| fail(hr, "copying"));
->>>>>>> integ/vertex
     }
     let tables = if bc != 0 { Some(bcpack_tables()?) } else { None };
     let source = read_source(request).map_err(|hr| fail(hr, "reading the source"))?;
@@ -2064,53 +1975,6 @@ fn into_destination(
         return filled;
     }
     let offset = (request.page_offset & 0xffff) as usize;
-<<<<<<< HEAD
-    let list = request.destination.cast();
-    let mut pages = page_list(list, offset, len);
-    // The title sees its destination through the pages its list names: if
-    // it names others by the time the data is written, they get it as well.
-    // (Said aloud: by the title's protocol a submitted request's list stays
-    // as it is.)
-    for _ in 0..3 {
-        into_pages(list, &pages, offset, len, &mut fill)?;
-        let now = read_list(list, offset, len);
-        if now == pages || !super::xmem::pages_known(&now, offset, len) {
-            break;
-        }
-        tracing::warn!(
-            list = format_args!("{list:p}"),
-            offset,
-            len,
-            first = pages.first(),
-            first_now = now.first(),
-            "dstorage: a destination's page list changed during the write; written to its new pages too"
-        );
-        pages = now;
-    }
-    Ok(())
-}
-
-/// Runs `fill` on `len` bytes of `pages`, from `offset` into the first.
-fn into_pages(
-    list: *const usize,
-    pages: &[usize],
-    offset: usize,
-    len: usize,
-    mut fill: impl FnMut(&mut [u8]) -> Result<usize, HRESULT>,
-) -> Result<(), HRESULT> {
-||||||| c7daeea5
-    let count = (offset + len).div_ceil(PAGE);
-    // The page numbers as the title has them now: it may still be writing
-    // them (read each time, not kept).
-    let read_pages = || -> Vec<usize> {
-        (0..count)
-            // SAFETY: the title passes a page number per 64 KiB of
-            // destination, which holds at least `len` bytes from `offset`.
-            .map(|i| unsafe { std::ptr::read_volatile(request.destination.cast::<usize>().add(i)) })
-            .collect()
-    };
-    let mut pages = read_pages();
-=======
     let late;
     let runs = match pages {
         Some(runs) => Some(runs),
@@ -2120,24 +1984,12 @@ fn into_pages(
             late.as_ref()
         }
     };
->>>>>>> integ/vertex
     // Consecutive pages of one allocation (the usual case): written in
     // place through one view.
     if let Some(runs) = runs
         && let Some(mut window) = runs.window()
     {
         let filled = fill(window.bytes()).map(drop);
-<<<<<<< HEAD
-        super::xmem::pages_written(pages, offset, len);
-||||||| c7daeea5
-        drop(window);
-        // The title maps pages where the card reads them and has them
-        // filled afterwards: the GPU side's copies of those addresses
-        // learn of the bytes only from this (upstream c75fdba, fork PR
-        // #571). After a decode that failed part way too: what it wrote
-        // is there.
-        super::xmem::pages_written(&pages, offset, len);
-=======
         drop(window);
         // The title maps pages where the card reads them and has them
         // filled afterwards: the GPU side's copies of those addresses
@@ -2145,64 +1997,16 @@ fn into_pages(
         // #571). After a decode that failed part way too: what it wrote
         // is there.
         runs.written(len);
->>>>>>> integ/vertex
         return filled;
     }
     let mut data = vec![0; len];
     let n = fill(&mut data)?;
-<<<<<<< HEAD
-    // The numbers as the title has them now: it may still be writing them.
-    let mut pages = pages.to_vec();
-    // A page the title has just made, or a view the host refuses for a moment (commit
-    // or address space short while a load maps many at once), can come right a little
-    // later: tried again before the request fails (`VICTORY_DSTORAGE_RETRIES`, default 12,
-    // about 1.5 s in all).
-||||||| c7daeea5
-    // A page number not known yet: the title may fill the array after it
-    // enqueued the request, and a queue submits on its own once half full,
-    // so a worker can come to it first. (Failed at once, 302 requests of a
-    // burst at the opening's loading went unwritten in one run, 44 and 9 in
-    // others; one was known 17 us later.) The numbers are read again for a
-    // while.
-    let waiting = std::time::Instant::now();
-    let mut waited = 0u32;
-    while !super::xmem::pages_known(&pages, offset, n) && waiting.elapsed() < std::time::Duration::from_millis(250) {
-        waited += 1;
-        if waited < 16 {
-            std::thread::yield_now();
-        } else {
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        pages = read_pages();
-    }
-    if waited > 0 {
-        DESTINATION_WAITS.fetch_add(1, Ordering::Relaxed);
-        if super::xmem::pages_known(&pages, offset, n) {
-            static SEEN: std::sync::Once = std::sync::Once::new();
-            SEEN.call_once(|| {
-                tracing::info!(
-                    tries = waited,
-                    us = waiting.elapsed().as_micros() as u64,
-                    "dstorage: a destination's page numbers were known only after the request was taken (read again until they were)"
-                );
-            });
-        }
-    }
-    // A page the title has just made, or a view the host refuses for a
-    // moment, comes right a little later: the write is tried again before
-    // the request fails (`VICTORY_DSTORAGE_RETRIES`, 12 tries, about 0.9 s
-    // in all; 0: not tried again, as before). Runs 175-178 lost 12 to 446
-    // reads a launch here, all in one second of the loading; the one build
-    // that tried again (run 165) lost none of 13. The page numbers are read
-    // again before each try.
-=======
     // A page the title has just made, or a view the host refuses for a
     // moment, comes right a little later: the write is tried again before
     // the request fails (`VICTORY_DSTORAGE_RETRIES`, 12 tries, about 0.9 s
     // in all; 0: not tried again, as before). Runs 175-178 lost 12 to 446
     // reads a launch here, all in one second of the loading; the one build
     // that tried again (run 165) lost none of 13.
->>>>>>> integ/vertex
     static RETRIES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
     let retries = *RETRIES.get_or_init(|| {
         std::env::var("VICTORY_DSTORAGE_RETRIES").ok().and_then(|v| v.parse().ok()).unwrap_or(12)
@@ -2216,15 +2020,7 @@ fn into_pages(
     while !written && runs.is_some() && tries < retries {
         std::thread::sleep(std::time::Duration::from_millis((2u64 << tries.min(6)).min(128)));
         tries += 1;
-<<<<<<< HEAD
-        pages = read_list(list, offset, len);
-        written = super::xmem::write_physical(&pages, offset, &data[..n]);
-||||||| c7daeea5
-        pages = read_pages();
-        written = super::xmem::write_physical(&pages, offset, &data[..n]);
-=======
         written = write();
->>>>>>> integ/vertex
     }
     if written {
         if tries > 0 {
@@ -2284,38 +2080,6 @@ fn read_list(list: *const usize, offset: usize, len: usize) -> Vec<usize> {
         // it may be writing them.
         .map(|i| unsafe { list.add(i).read_volatile() })
         .collect()
-}
-
-/// The request's page numbers. A list is the part of the title's own page
-/// table (one number per 64 KiB of its address range) that describes the
-/// destination, filled in when the title submits the batch, so it is valid
-/// here. It is only ever overwritten: an address the title unmapped keeps
-/// the number of the page it had, which the title maps elsewhere soon after,
-/// so a number the title owns says nothing about whether it is the right
-/// one ([`half_submits`]). Page 0 does (an address never mapped yet): a list
-/// with a page the title does not own is read again for a while, up to
-/// 1.5 s; what it holds then is used as it is.
-fn page_list(list: *const usize, offset: usize, len: usize) -> Vec<usize> {
-    let mut pages = read_list(list, offset, len);
-    if super::xmem::pages_known(&pages, offset, len) {
-        return pages;
-    }
-    DESTINATION_WAITS.fetch_add(1, Ordering::Relaxed);
-    // Timed from here: what took long before was the lock on the page table
-    // (which the title's mapping calls hold), not the list.
-    let started = std::time::Instant::now();
-    let mut known = false;
-    while !known && started.elapsed().as_millis() < 1500 {
-        std::thread::sleep(std::time::Duration::from_millis(1));
-        pages = read_list(list, offset, len);
-        known = super::xmem::pages_known(&pages, offset, len);
-    }
-    tracing::warn!(
-        ms = started.elapsed().as_millis() as u64,
-        known,
-        "dstorage: a destination's page list was not filled in yet"
-    );
-    pages
 }
 
 /// Slots by the 2020 order, which the argument shapes at
@@ -2894,16 +2658,7 @@ mod tests {
         );
         request.intermediate_size = 60;
         lane.unsubmitted
-<<<<<<< HEAD
-            .extend([
-                Command::Read(QueuedRead::new(request)),
-                Command::Read(QueuedRead::new(request)),
-            ]);
-||||||| c7daeea5
-            .extend([Command::Read(QueuedRead::new(request)), Command::Read(QueuedRead::new(request))]);
-=======
             .extend([Command::Read(QueuedRead::new(request), None), Command::Read(QueuedRead::new(request), None)]);
->>>>>>> integ/vertex
         l.lanes.insert(0, lane);
         l.submit(0, false);
 
