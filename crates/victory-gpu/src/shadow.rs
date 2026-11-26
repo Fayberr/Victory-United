@@ -3694,7 +3694,7 @@ pub(crate) fn land_as_before(start: usize, now: usize, held: usize, n: usize, ti
 
 /// The step a refresh that compares ([`refresh_compare`]) takes or leaves
 /// whole: the kernel's page, which is as fine as its write watch tells.
-const CHUNK: usize = 4 << 10;
+const COMPARE_CHUNK: usize = 4 << 10;
 
 /// Into `runs`, emptied first: the runs of whole `chunk`-byte steps of
 /// `now` (the last step may be shorter) holding a byte that differs from
@@ -3737,7 +3737,7 @@ pub(crate) fn refresh_compare() -> bool {
 }
 
 /// The step of [`refresh_compare`] in bytes (`VICTORY_REFRESH_STEP`, a power
-/// of two from 16 to 4096; [`CHUNK`] by default). With shader writes left on
+/// of two from 16 to 4096; [`COMPARE_CHUNK`] by default). With shader writes left on
 /// the card (`VICTORY_SKIP_WC_BACK`) a step goes up whole when the title
 /// changed a byte of it, and takes the old bytes of what a shader wrote
 /// beside it along: a finer step takes less.
@@ -3747,8 +3747,8 @@ fn refresh_step() -> usize {
         std::env::var("VICTORY_REFRESH_STEP")
             .ok()
             .and_then(|v| v.trim().parse::<usize>().ok())
-            .filter(|n| n.is_power_of_two() && (16..=CHUNK).contains(n))
-            .unwrap_or(CHUNK)
+            .filter(|n| n.is_power_of_two() && (16..=COMPARE_CHUNK).contains(n))
+            .unwrap_or(COMPARE_CHUNK)
     })
 }
 
@@ -3815,7 +3815,7 @@ struct Taken {
 
 /// Reads title memory `[at, to)` a 64 KiB page at a time, compares it with
 /// the copy's bytes for it at `held`, and puts the 4 KiB steps that differ
-/// ([`CHUNK`]) into the copy; what it did is added to `out`.
+/// ([`COMPARE_CHUNK`]) into the copy; what it did is added to `out`.
 ///
 /// # Safety
 /// `held` is valid for `to - at` bytes that nothing else reads or writes
@@ -3851,7 +3851,7 @@ unsafe fn take_changed(at: usize, to: usize, held: *mut u8, out: &mut Taken) {
 #[cfg(test)]
 mod merge_tests {
     use super::{
-        CHUNK, PAGE, PIECE, SNAPS, Taken, WIDE_COMPARE_JOB, back_piece, changed_chunks,
+        COMPARE_CHUNK, PAGE, PIECE, SNAPS, Taken, WIDE_COMPARE_JOB, back_piece, changed_chunks,
         changed_dword_runs, changed_runs, changed_runs_bytes, changed_runs_wide, changed_stretches,
         compare_jobs, dword_runs, give_back, join_runs, pooled, put_changed, take_changed,
         take_snapshots, word_runs, word_runs_put,
@@ -4278,7 +4278,7 @@ mod merge_tests {
             end = at + n;
         }
         let taken: usize = out.runs.iter().map(|&(_, n)| n).sum();
-        assert!(taken <= 4 * CHUNK, "{taken}");
+        assert!(taken <= 4 * COMPARE_CHUNK, "{taken}");
     }
 }
 
