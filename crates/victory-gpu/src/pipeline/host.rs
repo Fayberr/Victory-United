@@ -91,7 +91,6 @@ impl Default for GraphicsState {
     }
 }
 
-<<<<<<< HEAD
 /// Integer render target formats: D3D12 cannot blend into them.
 fn integer_format(f: DXGI_FORMAT) -> bool {
     matches!(
@@ -151,68 +150,7 @@ fn host_blend(blend: &D3D12_BLEND_DESC, targets: &D3D12_RT_FORMAT_ARRAY) -> D3D1
     host
 }
 
-||||||| 085ee7c4c
-=======
-/// Integer render target formats: D3D12 cannot blend into them.
-fn integer_format(f: DXGI_FORMAT) -> bool {
-    matches!(
-        f,
-        DXGI_FORMAT_R32G32B32A32_UINT
-            | DXGI_FORMAT_R32G32B32A32_SINT
-            | DXGI_FORMAT_R32G32B32_UINT
-            | DXGI_FORMAT_R32G32B32_SINT
-            | DXGI_FORMAT_R16G16B16A16_UINT
-            | DXGI_FORMAT_R16G16B16A16_SINT
-            | DXGI_FORMAT_R32G32_UINT
-            | DXGI_FORMAT_R32G32_SINT
-            | DXGI_FORMAT_R10G10B10A2_UINT
-            | DXGI_FORMAT_R8G8B8A8_UINT
-            | DXGI_FORMAT_R8G8B8A8_SINT
-            | DXGI_FORMAT_R16G16_UINT
-            | DXGI_FORMAT_R16G16_SINT
-            | DXGI_FORMAT_R32_UINT
-            | DXGI_FORMAT_R32_SINT
-            | DXGI_FORMAT_R8G8_UINT
-            | DXGI_FORMAT_R8G8_SINT
-            | DXGI_FORMAT_R16_UINT
-            | DXGI_FORMAT_R16_SINT
-            | DXGI_FORMAT_R8_UINT
-            | DXGI_FORMAT_R8_SINT
-    )
-}
-
-/// The title's blend state as the host takes it: blending off on integer
-/// render targets. The console ignores blending there, and titles leave it
-/// on (the world sets it on an `R8_UINT` target), but D3D12 does not allow
-/// it and refuses such a pipeline with `E_INVALIDARG`. With one description
-/// for every target, each target gets its own copy so the others keep theirs.
-fn host_blend(blend: &D3D12_BLEND_DESC, targets: &D3D12_RT_FORMAT_ARRAY) -> D3D12_BLEND_DESC {
-    let count = (targets.NumRenderTargets as usize).min(8);
-    let per_target = blend.IndependentBlendEnable.as_bool();
-    let blends = |i: usize| {
-        blend.RenderTarget[if per_target { i } else { 0 }]
-            .BlendEnable
-            .as_bool()
-    };
-    if !(0..count).any(|i| integer_format(targets.RTFormats[i]) && blends(i)) {
-        return *blend;
-    }
-    let mut host = *blend;
-    if !per_target {
-        host.IndependentBlendEnable = true.into();
-        host.RenderTarget = [blend.RenderTarget[0]; 8];
-    }
-    for i in 0..count {
-        if integer_format(targets.RTFormats[i]) {
-            host.RenderTarget[i].BlendEnable = false.into();
-        }
-    }
-    host
-}
-
->>>>>>> origin/exp/vitoriabr-head
 impl GraphicsState {
-<<<<<<< HEAD
     /// Whether the draws are a pass over the screen: no vertex input, no
     /// depth or stencil, a target. Such passes fill tables once; their shaders
     /// are few. (After Belobug/VIctory-Belobug-AMD 18e57db8.)
@@ -224,15 +162,12 @@ impl GraphicsState {
             && self.topology == D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE
     }
 
-||||||| 085ee7c4c
-=======
     pub(super) fn writes_depth_only(&self) -> bool {
         self.targets.NumRenderTargets == 0
             && self.depth_format != DXGI_FORMAT_UNKNOWN
             && self.depth.DepthEnable.as_bool()
             && self.depth.DepthWriteMask == D3D12_DEPTH_WRITE_MASK_ALL
     }
->>>>>>> origin/exp/vitoriabr-head
     /// Takes in one subobject of a stream: its type, then its data at +4
     /// (+8 for those holding pointers).
     ///
@@ -605,12 +540,7 @@ impl HostPipeline {
                         slot == victory_shader::emit::SLOT_FAULTS
                     } else {
                         slot == victory_shader::emit::SLOT_STRIDES
-<<<<<<< HEAD
                             || slot == victory_shader::emit::SLOT_TABLE_STRIDES
-||||||| 085ee7c4c
-=======
-                            || slot == victory_shader::emit::SLOT_VIEWS
->>>>>>> origin/exp/vitoriabr-head
                             || slot == victory_shader::emit::SLOT_MEMORY
                     };
                     if (uav || kind == D3D12_ROOT_PARAMETER_TYPE_SRV) && !ours && bounded_root_srvs() {
@@ -1057,16 +987,7 @@ fn mesh_pipeline(
             root: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE, root.as_raw()),
             ms: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS, ms),
             ps: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, ps),
-<<<<<<< HEAD
             blend: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND, host_blend(&g.blend, &g.targets)),
-||||||| 085ee7c4c
-            blend: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND, g.blend),
-=======
-            blend: Sub(
-                D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND,
-                host_blend(&g.blend, &g.targets),
-            ),
->>>>>>> origin/exp/vitoriabr-head
             mask: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK, g.sample_mask),
             raster: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER, g.rasterizer),
             depth,
@@ -1085,16 +1006,7 @@ fn mesh_pipeline(
             root: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE, root.as_raw()),
             ms: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS, ms),
             ps: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, ps),
-<<<<<<< HEAD
             blend: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND, host_blend(&g.blend, &g.targets)),
-||||||| 085ee7c4c
-            blend: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND, g.blend),
-=======
-            blend: Sub(
-                D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND,
-                host_blend(&g.blend, &g.targets),
-            ),
->>>>>>> origin/exp/vitoriabr-head
             mask: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK, g.sample_mask),
             raster: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER, g.rasterizer),
             depth: Sub(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL1, g.depth1()),
@@ -1346,21 +1258,9 @@ mod tests {
         let sub = Sub21(
             21,
             D3D12_DEPTH_STENCIL_DESC1 {
-<<<<<<< HEAD
                 DepthEnable: true.into(),
                 DepthWriteMask: D3D12_DEPTH_WRITE_MASK_ZERO,
                 DepthFunc: D3D12_COMPARISON_FUNC_ALWAYS,
-||||||| 085ee7c4c
-                DepthEnable: false.into(),
-                DepthWriteMask: D3D12_DEPTH_WRITE_MASK_ZERO,
-                DepthFunc: D3D12_COMPARISON_FUNC_ALWAYS,
-=======
-                DepthEnable: false.into(),
-                // Ignored when `DepthEnable` is false: `depth1()` must clear
-                // writes and force `ALWAYS` when enabling depth for WARP.
-                DepthWriteMask: D3D12_DEPTH_WRITE_MASK_ALL,
-                DepthFunc: D3D12_COMPARISON_FUNC_NEVER,
->>>>>>> origin/exp/vitoriabr-head
                 DepthBoundsTestEnable: true.into(),
                 ..Default::default()
             },
