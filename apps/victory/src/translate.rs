@@ -248,7 +248,6 @@ pub fn run(
         victory_core::ensure_outside_repo(Path::new(&dir))?;
     }
     let paths = crate::default_paths(paths)?;
-<<<<<<< HEAD
     // `VICTORY_HOST_MAX_WAVE=32`: translate as for a host whose waves have
     // at most 32 lanes (as the runtime does on such a card).
     if let Some(n) = std::env::var("VICTORY_HOST_MAX_WAVE").ok().and_then(|v| v.parse().ok()) {
@@ -256,14 +255,6 @@ pub fn run(
     }
     // `VICTORY_HOST_RDNA=1`: as for an AMD RDNA card (`VICTORY_RDNA_FLOAT`).
     victory_shader::emit::set_host_rdna(std::env::var_os("VICTORY_HOST_RDNA").is_some_and(|v| v == "1"));
-||||||| a66ac212
-=======
-    // `VICTORY_HOST_MAX_WAVE=32`: translate as for a host whose waves have
-    // at most 32 lanes (as the runtime does on such a card).
-    if let Some(n) = std::env::var("VICTORY_HOST_MAX_WAVE").ok().and_then(|v| v.parse().ok()) {
-        victory_shader::emit::set_host_max_wave(n);
-    }
->>>>>>> klbf/beta-2
     let dll = validate.then(Validator::default_path).flatten();
     if validate {
         Validator::load(dll.as_deref()).map_err(anyhow::Error::msg)?;
@@ -431,7 +422,6 @@ pub fn run(
     Ok(())
 }
 
-<<<<<<< HEAD
 /// Every shader found into the cache runs translate from.
 pub fn precompile(paths: Vec<PathBuf>, jobs: Option<usize>) -> Result<()> {
     let cfg = victory_core::Config::load()?;
@@ -674,81 +664,6 @@ pub fn warm(_: Vec<PathBuf>, _: Option<usize>, _: bool, _: bool) -> Result<()> {
     anyhow::bail!("precompiling shaders requires Windows D3D12")
 }
 
-||||||| a66ac212
-=======
-/// `victory warm`: fills the caches a run reads (`Command::Warm`).
-pub fn warm(paths: Vec<PathBuf>, jobs: Option<usize>, pipelines: bool) -> Result<()> {
-    let paths = crate::default_paths(paths)?;
-    let cfg = victory_core::Config::load()?;
-    victory_hle::modules::d3d12x::use_shader_cache(cfg.cache_subdir("shaders")?);
-    let threads = jobs.unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
-    let seen = Mutex::new(HashSet::new());
-    let [done, refused, made, unmade] = [const { AtomicUsize::new(0) }; 4];
-    let started = std::time::Instant::now();
-    for root in &paths {
-        for entry in walkdir::WalkDir::new(root).into_iter().filter_map(Result::ok) {
-            if !entry.file_type().is_file() || entry.metadata().map_or(0, |m| m.len()) > MAX_FILE {
-                continue;
-            }
-            let Ok(data) = std::fs::read(entry.path()) else {
-                continue;
-            };
-            let jobs = sources(&data);
-            let next = AtomicUsize::new(0);
-            std::thread::scope(|s| {
-                for _ in 0..threads.min(jobs.len()) {
-                    s.spawn(|| {
-                        while let Some(job) = jobs.get(next.fetch_add(1, Ordering::Relaxed)) {
-                            let Some(bytes) = job.bytes() else { continue };
-                            let Ok(container) = Container::parse(&bytes) else { continue };
-                            // As the title passes it: no more than the container.
-                            let Some(total) = bytes.get(0x18..0x1c).and_then(|b| b.try_into().ok()) else { continue };
-                            let total = u32::from_le_bytes(total) as usize;
-                            let bytes = &bytes[..total.min(bytes.len())];
-                            let Some(dxil) = container.part(FourCC::DXIL).map(|p| p.data) else { continue };
-                            if !lock(&seen).insert(blake3::hash(bytes)) {
-                                continue;
-                            }
-                            let Ok(programs) = native_programs(dxil) else { continue };
-                            let stage = programs.iter().find_map(|p| match p.stage {
-                                HwStage::Vs => Some("vertex"),
-                                HwStage::Ps => Some("pixel"),
-                                HwStage::Ms => Some("mesh"),
-                                HwStage::Cs => Some("compute"),
-                                _ => None,
-                            });
-                            let Some(stage) = stage else { continue };
-                            let compute = pipelines && stage == "compute";
-                            let (translated, pipeline) = victory_hle::modules::d3d12x::warm(stage, bytes, compute);
-                            let count = if translated { &done } else { &refused };
-                            let n = count.fetch_add(1, Ordering::Relaxed) + 1;
-                            match pipeline {
-                                Some(true) => made.fetch_add(1, Ordering::Relaxed),
-                                Some(false) => unmade.fetch_add(1, Ordering::Relaxed),
-                                None => 0,
-                            };
-                            if n.is_multiple_of(2000) {
-                                println!("{:6.0} s  {n} shaders", started.elapsed().as_secs_f64());
-                            }
-                        }
-                    });
-                }
-            });
-        }
-    }
-    victory_hle::modules::d3d12x::save_pipeline_cache();
-    println!(
-        "warm         {} translated, {} refused; {} compute pipelines, {} refused; {:.0} s",
-        done.into_inner(),
-        refused.into_inner(),
-        made.into_inner(),
-        unmade.into_inner(),
-        started.elapsed().as_secs_f64()
-    );
-    Ok(())
-}
-
->>>>>>> klbf/beta-2
 fn translate(
     source: &Source,
     path: &Path,
