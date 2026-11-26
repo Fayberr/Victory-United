@@ -741,7 +741,6 @@ fn the_lanes_past_a_count_of_threads_do_not_run() {
         }
     }
 }
-<<<<<<< HEAD
 
 /// Lowers `body` as a console program of one 64-lane wave (or 32 when `wave64` is not set)
 /// for a host of 32-lane waves, validates it and runs it there; each lane stores v3 to dword
@@ -940,8 +939,6 @@ fn the_console_threads_of_a_two_dimensional_group_are_each_given_once() {
     }
     eprintln!("ran on the hardware device: 64 of 64 console threads, each once");
 }
-||||||| merged common ancestors
-=======
 
 /// The block of `p` closed by the branch `name`.
 fn closed_by(p: &ir::Program, name: &str) -> usize {
@@ -1058,4 +1055,3 @@ fn a_loop_lanes_leave_one_by_one_is_taken_wave_wide_before_host_waves_meet_in_it
     // (the other forms keep the block as one every lane runs: see `lower::with_loop_exits`)
     assert_eq!(lower::branches_around(&st, &[head]), Some(Vec::new()));
 }
->>>>>>> origin/exp/vibr-head
