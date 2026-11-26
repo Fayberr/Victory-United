@@ -17,6 +17,10 @@ use crate::host::host;
 /// Distinguishes host heaps even when a title heap address is reused.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Each host heap's identity, handed out in order: a range of dynamic slots
+/// is given back to the heap that took it, and a heap made later at the same
+/// address is not that heap ([`HostHeap::release`]).
+
 /// A set of a heap's slots, a bit for each: no lock (a pass that went through
 /// a set of 70,000 under its lock kept everyone who writes slots waiting for
 /// 5 ms of a frame, timeline thin-6).
@@ -2339,6 +2343,12 @@ impl HostHeap {
         self.count
     }
 
+    /// This heap's identity ([`NEXT_ID`]): dynamic slots are given back only
+    /// to it, never to a heap made later at the same address.
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
     /// The GPU address of the table of element strides by title slot (view
     /// heaps).
     pub(crate) fn strides_gpu(&self) -> Option<u64> {
@@ -3558,11 +3568,6 @@ impl HostHeap {
             // dynamic slots are exclusively owned until submission finishes).
             unsafe { (*data as *mut u32).add(index as usize).write_volatile(word) };
         }
-    }
-
-    /// The identity to store with a range this heap allocated.
-    pub(crate) fn id(&self) -> u64 {
-        self.id
     }
 
     /// Gives back `n` slots from `first` (an index [`dynamic`] returned)
@@ -6551,6 +6556,7 @@ fn null_view(at: D3D12_CPU_DESCRIPTOR_HANDLE) {
 mod tests {
     use super::*;
 
+    /// Slots allocated by a new heap cannot be returned with an old identity.
     #[test]
     fn dynamic_slots_are_given_back_only_to_the_heap_that_took_them() {
         let Some(old) = HostHeap::new(false, 4) else { return };
@@ -8346,7 +8352,7 @@ mod bake_flip_tests {
         };
         assert!(make(&srv_placed, heap.cpu(2)).flatten().is_some());
         assert_eq!(
-            crate::resource::alias_of(srv_obj as crate::object::This),
+            crate::resource::alias_of(srv_obj as crate::object::This).as_ref().map(crate::resource::Held::get),
             Some(uav_obj as crate::object::This),
             "placed SRV must find the placed UAV texture in TARGETS_AT"
         );

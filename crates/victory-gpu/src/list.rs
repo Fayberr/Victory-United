@@ -1498,7 +1498,7 @@ extern "system" fn driver_hint(_: This, _feature: u64, _value: u64) -> u64 {
 extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
     count_dispatch();
     #[cfg(windows)]
-    with_state(this, |list, s| s.dispatch(list, x, y, z, flags));
+    with_state(this, |list, s| s.dispatch_x(list, x, y, z, flags));
     #[cfg(not(windows))]
     let _ = (this, x, y, z, flags);
 }
@@ -1840,7 +1840,11 @@ mod state {
     }
     pub(super) extern "system" fn dispatch(this: This, x: u32, y: u32, z: u32) {
         super::count_dispatch();
-        with_state(this, |list, s| s.dispatch(list, x, y, z, 0));
+        with_state(this, |list, s| s.dispatch(list, x, y, z));
+    }
+    pub(super) fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
+        super::count_dispatch();
+        with_state(this, |list, s| s.dispatch_x(list, x, y, z, flags));
     }
     /// `DispatchMesh(x, y, z)` (the PC method of List6); the title's mesh
     /// programs take `x` groups only.
