@@ -643,13 +643,7 @@ fn wait(p: &Pending, frame: u64) {
     if left.is_zero() {
         return;
     }
-<<<<<<< HEAD
-||||||| 85d564167
-    let started = Instant::now();
-=======
     let waiting = crate::timeline::span("pipeline: first use waits for a host pipeline");
-    let started = Instant::now();
->>>>>>> avatar/main
     let (lock, done) = &DONE;
     let mut held = lock.lock().unwrap_or_else(|e| e.into_inner());
     while p.made.get().is_none() && !p.slow() {
