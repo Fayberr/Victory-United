@@ -365,17 +365,13 @@ struct Lower<'a> {
     /// the waves take their console threads from a counter as with `halves` (issue #1243).
     ticket: Option<u32>,
     wave_base: Option<V>,
-<<<<<<< HEAD
     /// A partial final group (`USER_DISPATCH_THREADS_X`) whose console waves are two host
     /// waves: the threads past the count stay for the exchange's group barriers, so they
     /// cannot leave at entry; this says which threads the console launched, and memory,
     /// EXEC's ballots and the wave's reductions leave the others out.
     partial_active: Option<V>,
-||||||| 0a4356653
-=======
     /// With `wave_base`: this thread's place among the active lanes of its host wave.
     wave_rank: Option<V>,
->>>>>>> vicetay/main
     /// Vertex and mesh outputs holding 16-bit values: row, whether two per
     /// dword, and the row packed after it.
     half_outputs: HashMap<u8, (bool, Option<u8>)>,
@@ -557,7 +553,6 @@ fn need(block: usize) {
     });
 }
 
-<<<<<<< HEAD
 /// VGPR values that are the same in every lane of a console wave holding them (`all` is
 /// [`all_lane_blocks`]): written lane by lane from scalars, constants and such values, by an
 /// instruction that either every arriving lane runs or that runs under a condition itself the
@@ -577,23 +572,6 @@ fn lane_uniform(
     all: &[bool],
     wave_tid: Option<Value>,
 ) -> HashSet<Value> {
-||||||| 0a4356653
-/// VGPR values that are the same in every lane holding them (`all` is [`all_lane_blocks`]):
-/// written by an instruction every arriving lane runs (no guard), lane by lane, from scalars,
-/// constants and such values; or loaded from an address made of them. The compiler keeps
-/// wave-uniform data in VGPRs and fetches it with `v_readfirstlane`.
-/// shortcut: a value joined by a phi counts only where every predecessor is a block all lanes
-/// run (no lane branch can have split the arriving lanes); loop-carried values never do.
-fn lane_uniform(p: &Program, st: &Structured, all: &[bool]) -> HashSet<Value> {
-=======
-/// VGPR values that are the same in every lane holding them (`all` is [`all_lane_blocks`]):
-/// written by an instruction every arriving lane runs (no guard), lane by lane, from scalars,
-/// constants and such values; or loaded from an address made of them. The compiler keeps
-/// wave-uniform data in VGPRs and fetches it with `v_readfirstlane`.
-/// shortcut: a value joined by a phi counts only where every predecessor is a block all lanes
-/// run (no lane branch can have split the arriving lanes); loop-carried values never do.
-fn lane_uniform(p: &Program, st: &Structured, all: &[bool], ordered_lds: bool) -> HashSet<Value> {
->>>>>>> vicetay/main
     let is_mask = |v: Value| st.masks.contains_key(&v) || st.highs.contains_key(&v);
     let order = crate::ir::reverse_postorder(&p.blocks);
     let regions = lane_regions(st);
@@ -628,7 +606,6 @@ fn lane_uniform(p: &Program, st: &Structured, all: &[bool], ordered_lds: bool) -
                 }
                 w
             }
-<<<<<<< HEAD
             None => all.to_vec(),
         };
         let mut next: HashSet<Value> = HashSet::new();
@@ -645,36 +622,9 @@ fn lane_uniform(p: &Program, st: &Structured, all: &[bool], ordered_lds: bool) -
                         .args
                         .iter()
                         .all(|a| next.contains(a) || same.contains(a))
-||||||| 0a4356653
-        }
-        for (i, inst) in block.insts.iter().enumerate() {
-            let name = inst.name();
-            let ops: Vec<Operand> = match &inst.fields {
-                Fields::Valu(v)
-                    if v.dpp.is_none()
-                        && v.sdwa.is_none()
-                        && !name.starts_with("v_mbcnt")
-                        && !name.starts_with("v_cmpx")
-                        && !name.contains("lane") =>
-=======
-        }
-        for (i, inst) in block.insts.iter().enumerate() {
-            let name = inst.name();
-            if st.guards[b][i].is_some() {
-                continue; // lanes outside EXEC keep another value
-            }
-            let ops: Vec<Operand> = match &inst.fields {
-                Fields::Valu(v)
-                    if v.dpp.is_none()
-                        && v.sdwa.is_none()
-                        && !name.starts_with("v_mbcnt")
-                        && !name.starts_with("v_cmpx")
-                        && !name.contains("lane") =>
->>>>>>> vicetay/main
                 {
                     next.insert(phi.value);
                 }
-<<<<<<< HEAD
             }
             let known = |next: &HashSet<Value>, x: &Value| next.contains(x) || same.contains(x);
             for (i, inst) in block.insts.iter().enumerate() {
@@ -693,38 +643,6 @@ fn lane_uniform(p: &Program, st: &Structured, all: &[bool], ordered_lds: bool) -
                     if !old_alike {
                         continue;
                     }
-||||||| 0a4356653
-                _ => continue,
-            };
-            if st.guards[b][i].is_some() {
-                continue; // lanes outside EXEC keep another value
-            }
-            let alike = ops.iter().all(|op| match *op {
-                Operand::Vector { reg, .. } => {
-                    // every dword of the operand the instruction reads from that register on
-                    let read: Vec<Value> =
-                        inst.reads.iter().filter(|r| matches!(r.0, Reg::V(x) if x >= reg)).map(|r| r.1).collect();
-                    !read.is_empty() && read.iter().all(|x| same.contains(x))
-=======
-                Fields::Ds {
-                    addr: Some(Operand::Vector { reg, dwords: 1 }),
-                    gds: false,
-                    ..
-                } if ordered_lds && name == "ds_read_b32" => {
-                    if inst.read(Reg::V(*reg)).is_some_and(|a| same.contains(&a)) {
-                        same.extend(inst.writes.iter().map(|w| w.1));
-                    }
-                    continue;
-                }
-                _ => continue,
-            };
-            let alike = ops.iter().all(|op| match *op {
-                Operand::Vector { reg, .. } => {
-                    // every dword of the operand the instruction reads from that register on
-                    let read: Vec<Value> =
-                        inst.reads.iter().filter(|r| matches!(r.0, Reg::V(x) if x >= reg)).map(|r| r.1).collect();
-                    !read.is_empty() && read.iter().all(|x| same.contains(x))
->>>>>>> vicetay/main
                 }
                 // an LDS read at an alike address reads one value in every lane
                 if let Fields::Ds {
@@ -1216,23 +1134,16 @@ fn lds_meetings(p: &crate::ir::Program, st: &Structured, all: &[bool]) -> Option
             }
         }
     }
-<<<<<<< HEAD
     // A region that reads and writes LDS is still taken when it only raises flags
     // (`lds_flag_region`): a read that misses the other host wave's write changes nothing
-    // the region leaves behind.
+    // the region leaves behind. With `loose_lds` ([`super::loose_lds::on`]) such a region is
+    // taken whole.
     let flags_on = std::env::var_os("VICTORY_LDS_FLAGS").is_none_or(|v| v != "0");
     for r in (0..n).filter(|&r| reads[r] && writes[r]).collect::<Vec<_>>() {
         let blocks: Vec<usize> = (0..n).filter(|&b| !all[b] && find(&mut region, b) == r).collect();
-        if !(flags_on && lds_flag_region(p, st, &blocks)) {
+        if !(super::loose_lds::on() || (flags_on && lds_flag_region(p, st, &blocks))) {
             return None;
         }
-||||||| 0a4356653
-    if (0..n).any(|r| reads[r] && writes[r]) {
-        return None;
-=======
-    if (0..n).any(|r| reads[r] && writes[r]) && !super::loose_lds::on() {
-        return None;
->>>>>>> vicetay/main
     }
     let mut meet = vec![(false, false); n];
     for b in 0..n {
@@ -1659,7 +1570,6 @@ pub(super) fn with_first_half_pairs<R>(translate: impl FnOnce() -> R) -> R {
     result
 }
 
-<<<<<<< HEAD
 thread_local! {
     /// Whether a mask operation on numbers read as data is the number it
     /// computes ([`with_mask_ops_on_numbers`]).
@@ -1678,18 +1588,6 @@ pub(super) fn with_mask_ops_on_numbers<R>(translate: impl FnOnce() -> R) -> R {
     result
 }
 
-pub(super) fn host_max_wave() -> u32 {
-    THREAD_MAX_WAVE
-        .get()
-        .unwrap_or_else(|| HOST_MAX_WAVE.load(std::sync::atomic::Ordering::Relaxed))
-||||||| 0a4356653
-pub(super) fn host_max_wave() -> u32 {
-    #[cfg(test)]
-    if let Some(lanes) = TEST_HOST_WAVE.get() {
-        return lanes;
-    }
-    HOST_MAX_WAVE.load(std::sync::atomic::Ordering::Relaxed)
-=======
 /// Whether programs with console lanes in groups of several host waves take their console
 /// threads from a group counter (`ticket`, issue #1243). `VICTORY_THREAD_TICKET=0`: the flat id
 /// of the wave's first lane rounded down, as before.
@@ -1698,12 +1596,9 @@ fn ticket_on() -> bool {
 }
 
 pub(super) fn host_max_wave() -> u32 {
-    #[cfg(test)]
-    if let Some(lanes) = TEST_HOST_WAVE.get() {
-        return lanes;
-    }
-    HOST_MAX_WAVE.load(std::sync::atomic::Ordering::Relaxed)
->>>>>>> vicetay/main
+    THREAD_MAX_WAVE
+        .get()
+        .unwrap_or_else(|| HOST_MAX_WAVE.load(std::sync::atomic::Ordering::Relaxed))
 }
 
 thread_local! {
@@ -2235,15 +2130,7 @@ impl<'a> Lower<'a> {
             local_ok: false,
             local_any: LOCAL_ANY.get(),
             uniform: match &exchange {
-<<<<<<< HEAD
                 Some((_, false, all)) if !LOCAL_WAVES.get() => lane_uniform(p, x.st, all, wave_tid(p, x)),
-||||||| 0a4356653
-                Some((_, false, all)) if !LOCAL_WAVES.get() => lane_uniform(p, x.st, all),
-=======
-                Some((_, false, all)) if !LOCAL_WAVES.get() => {
-                    lane_uniform(p, x.st, all, split_lds && super::group_sync() != 0)
-                }
->>>>>>> vicetay/main
                 _ => HashSet::new(),
             },
             own_bits: match &exchange {
@@ -2256,12 +2143,8 @@ impl<'a> Lower<'a> {
             clane: None,
             pair: None,
             halves,
-<<<<<<< HEAD
             partial_active: None,
-||||||| 0a4356653
-=======
             ticket,
->>>>>>> vicetay/main
             wave_base: None,
             wave_rank: None,
             flat: None,
