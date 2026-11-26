@@ -9435,7 +9435,6 @@ impl Host {
         // Sends up to `after` are of no use to any later merge.
         crate::shadow::relay_fetched(after);
     }
-    }
 
     /// [`relay`], on the thread that lands flights: `items` are the first
     /// things of the line, flights the card has run and what follows them.
@@ -9811,8 +9810,6 @@ impl Host {
     /// [`Host::execute_late`] of parts of submissions in one: another begins
     /// at each place of `order` in `parts` ([`joins`]).
     pub(crate) fn execute_parts(&self, mut lists: Vec<crate::list::Detached>, mut order: Vec<usize>, parts: &[usize]) {
-        // (Neptune) The clock is read at every submission (`moment`).
-        tick();
         if order.is_empty() {
             crate::list::recycle(lists, &order);
             return;
