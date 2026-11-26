@@ -9215,7 +9215,6 @@ pub(crate) fn list_views() -> bool {
 mod tests {
     use super::*;
 
-<<<<<<< HEAD
     use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
     use windows::core::Interface;
 
@@ -9795,272 +9794,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         super::read_all(start);
     }
 
-||||||| a66ac212
-=======
-    /// The unsigned twin of a 16-bit float or signed format has its layout,
-    /// and only buffer views in such a format are shown as another view.
-    #[test]
-    fn only_16_bit_float_and_signed_buffer_views_get_an_unsigned_twin() {
-        for (format, unsigned) in [(10, 12), (14, 12), (34, 36), (38, 36), (54, 57), (59, 57)] {
-            assert_eq!(half_format(format), Some(unsigned));
-            assert_eq!(
-                crate::resource::element(format),
-                crate::resource::element(unsigned),
-                "format {format}"
-            );
-        }
-        // The unsigned formats themselves, normalised 16-bit formats, and
-        // wider and narrower ones.
-        for other in [0, 12, 36, 57, 11, 13, 35, 37, 56, 58, 42, 17, 30, 61] {
-            assert_eq!(half_format(other), None, "format {other}");
-        }
-        const BUFFER: u32 = 1;
-        let words = |format: u32, dimension: u32| [format, dimension, 5768, 0, 0, 0, 64, 0, 0, 0];
-        // R16G16B16A16_FLOAT: a buffer of halves a program moves as they are.
-        assert_eq!(
-            half_view(&View::Unordered(7, 0, Some(words(10, BUFFER)))),
-            Some(View::Unordered(7, 0, Some(words(12, BUFFER))))
-        );
-        assert_eq!(
-            half_view(&View::Shader(7, Some(words(54, BUFFER)))),
-            Some(View::Shader(7, Some(words(57, BUFFER))))
-        );
-        let mut placed = [0u32; 16];
-        placed[..10].copy_from_slice(&words(38, BUFFER));
-        placed[10] = 0x1234_0000;
-        let mut twin = placed;
-        twin[0] = 36;
-        let memory = [BUFFER, 0, 0, 0, 512, 0, 1, 0x1_0001, 0, 1, 0, 1, 0, 0];
-        assert_eq!(
-            half_view(&View::Placed(true, memory, placed)),
-            Some(View::Placed(true, memory, twin))
-        );
-        // The title's kind (R16G16B16A16_UINT and R16_UINT buffers), a
-        // texture view (dimension 4: 2D), a view without a description, a
-        // constant buffer: the title's own.
-        assert_eq!(
-            half_view(&View::Unordered(7, 0, Some(words(12, BUFFER)))),
-            None
-        );
-        assert_eq!(half_view(&View::Shader(7, Some(words(57, BUFFER)))), None);
-        assert_eq!(half_view(&View::Unordered(7, 0, Some(words(10, 4)))), None);
-        assert_eq!(half_view(&View::Shader(7, None)), None);
-        assert_eq!(half_view(&View::Constant(0x1000, 256)), None);
-    }
-
-    /// The buffer views through which the integers a shader moves halves
-    /// as are not what the console gives are named; the title's are not.
-    #[test]
-    fn views_whose_values_the_console_would_convert_are_named() {
-        const BUFFER: u32 = 1;
-        let words = |format: u32, dimension: u32| [format, dimension, 5768, 0, 0, 0, 64, 0, 0, 0];
-        for exact in [10, 12, 14, 34, 36, 38, 54, 57, 59, 25, 30, 50, 62] {
-            let view = View::Unordered(7, 0, Some(words(exact, BUFFER)));
-            assert_eq!(half_inexact(&view), None, "format {exact}");
-        }
-        // R32_FLOAT, R32_UINT, R16G16B16A16_UNORM, R8G8B8A8_UNORM, R8_SINT,
-        // and a structured or raw view (no format).
-        for inexact in [41, 42, 11, 28, 64, 0] {
-            let view = View::Shader(7, Some(words(inexact, BUFFER)));
-            assert_eq!(half_inexact(&view), Some(inexact));
-        }
-        let mut placed = [0u32; 16];
-        placed[..10].copy_from_slice(&words(41, BUFFER));
-        let memory = [BUFFER, 0, 0, 0, 512, 0, 1, 0x1_0001, 0, 1, 0, 1, 0, 0];
-        assert_eq!(half_inexact(&View::Placed(true, memory, placed)), Some(41));
-        // Not a buffer view.
-        assert_eq!(half_inexact(&View::Shader(7, Some(words(41, 4)))), None);
-        assert_eq!(half_inexact(&View::Constant(0x1000, 256)), None);
-    }
-
-    /// The two ways a translated `buffer_load_format_d16_xyzw` and
-    /// `buffer_store_format_d16_xyzw` have moved a typed buffer's 16-bit
-    /// channels, on the host device, over a buffer that holds every 16-bit
-    /// pattern. As unsigned integers through an unsigned view (the title's
-    /// own R16G16B16A16_UINT, or the twin `half_view` gives a float one)
-    /// every pattern comes back as it was. By way of floats, as before
-    /// (load as floats, each to its half's bits; each half widened and
-    /// stored as a float): through the title's integer view that is
-    /// outside what D3D12 defines, and what the device gives is printed,
-    /// not checked (1 pattern of 65,536 on the cards tried: the network
-    /// that moves the title's faces computed zeros).
-    #[test]
-    fn halves_cross_an_unsigned_buffer_view_unchanged() {
-        const MOVES: &str = r#"
-#define RS "DescriptorTable(UAV(u0, numDescriptors=2))"
-#ifdef BY_FLOATS
-RWBuffer<float4> from : register(u0);
-RWBuffer<float4> to : register(u1);
-#else
-RWBuffer<uint4> from : register(u0);
-RWBuffer<uint4> to : register(u1);
-#endif
-[RootSignature(RS)]
-[numthreads(64, 1, 1)]
-void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
-#ifdef BY_FLOATS
-    uint4 h = f32tof16(from[id.x]);
-#else
-    uint4 h = from[id.x] & 0xffff;
-#endif
-    uint low = h.x | h.y << 16;
-    uint high = h.z | h.w << 16;
-#ifdef BY_FLOATS
-    to[id.x] = float4(f16tof32(low), f16tof32(low >> 16), f16tof32(high), f16tof32(high >> 16));
-#else
-    to[id.x] = uint4(low & 0xffff, low >> 16, high & 0xffff, high >> 16);
-#endif
-}
-"#;
-        const ELEMENTS: usize = 1 << 14;
-        const BYTES: u64 = ELEMENTS as u64 * 8;
-        const TITLES: u32 = 12; // R16G16B16A16_UINT
-        let Some(host) = host() else {
-            return; // no host GPU
-        };
-        let heap: ID3D12DescriptorHeap = {
-            let desc = D3D12_DESCRIPTOR_HEAP_DESC {
-                Type: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-                NumDescriptors: 2,
-                Flags: D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
-                NodeMask: 0,
-            };
-            // SAFETY: plain heap creation.
-            unsafe { host.device.CreateDescriptorHeap(&desc) }.expect("a view heap")
-        };
-        // How many of the 65,536 patterns come back as they were, moved by
-        // the program `by_floats` or not, through views in `format`.
-        let moved = |by_floats: bool, format: u32| -> usize {
-            let source = if by_floats {
-                MOVES
-                    .replace("BY_FLOATS_OR_NOT", "main")
-                    .replace("#ifdef BY_FLOATS", "#if 1")
-            } else {
-                MOVES
-                    .replace("BY_FLOATS_OR_NOT", "main")
-                    .replace("#ifdef BY_FLOATS", "#if 0")
-            };
-            let code = crate::host::compile(
-                &source,
-                windows::core::s!("main"),
-                windows::core::s!("cs_5_1"),
-            )
-            .expect("the test's shader");
-            let (from, filled) = host.shared_buffer(BYTES).expect("a buffer");
-            let (to, result) = host.shared_buffer(BYTES).expect("a buffer");
-            // SAFETY: the shader's own root signature and plain creation
-            // calls; both mappings hold `BYTES` bytes; the views are of
-            // live buffers, in slots of the heap made above; an open list.
-            unsafe {
-                let root: ID3D12RootSignature = host
-                    .device
-                    .CreateRootSignature(0, &code)
-                    .expect("a root signature");
-                let pso: ID3D12PipelineState = host
-                    .device
-                    .CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
-                        pRootSignature: std::mem::transmute_copy(&root),
-                        CS: D3D12_SHADER_BYTECODE {
-                            pShaderBytecode: code.as_ptr().cast(),
-                            BytecodeLength: code.len(),
-                        },
-                        ..Default::default()
-                    })
-                    .expect("a pipeline");
-                let filled = std::slice::from_raw_parts_mut(filled.cast::<u16>(), ELEMENTS * 4);
-                for (pattern, half) in filled.iter_mut().enumerate() {
-                    *half = pattern as u16;
-                }
-                std::ptr::write_bytes(result, 0xee, BYTES as usize);
-                let view = D3D12_UNORDERED_ACCESS_VIEW_DESC {
-                    Format: DXGI_FORMAT(format as i32),
-                    ViewDimension: D3D12_UAV_DIMENSION_BUFFER,
-                    Anonymous: D3D12_UNORDERED_ACCESS_VIEW_DESC_0 {
-                        Buffer: D3D12_BUFFER_UAV {
-                            NumElements: ELEMENTS as u32,
-                            ..Default::default()
-                        },
-                    },
-                };
-                let start = heap.GetCPUDescriptorHandleForHeapStart();
-                let step = host
-                    .device
-                    .GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
-                    as usize;
-                host.device.CreateUnorderedAccessView(
-                    &from,
-                    None::<&ID3D12Resource>,
-                    Some(&view),
-                    start,
-                );
-                let second = D3D12_CPU_DESCRIPTOR_HANDLE {
-                    ptr: start.ptr + step,
-                };
-                host.device.CreateUnorderedAccessView(
-                    &to,
-                    None::<&ID3D12Resource>,
-                    Some(&view),
-                    second,
-                );
-                let list = host.new_list().expect("a host list");
-                list.list.SetDescriptorHeaps(&[Some(heap.clone())]);
-                list.list.SetComputeRootSignature(&root);
-                list.list.SetPipelineState(&pso);
-                list.list
-                    .SetComputeRootDescriptorTable(0, heap.GetGPUDescriptorHandleForHeapStart());
-                list.list.Dispatch(ELEMENTS as u32 / 64, 1, 1);
-                list.close();
-                host.execute(&[&list]);
-                assert!(
-                    host.device.GetDeviceRemovedReason().is_ok(),
-                    "the device, after views in format {format}"
-                );
-                let result = std::slice::from_raw_parts(result.cast::<u16>(), ELEMENTS * 4);
-                (0..=u16::MAX)
-                    .filter(|&p| result[usize::from(p)] == p)
-                    .count()
-            }
-        };
-        // A float view of halves is shown as the title's kind of view.
-        assert_eq!(half_format(10), Some(TITLES));
-        let unsigned = moved(false, TITLES);
-        let by_floats = moved(true, TITLES);
-        eprintln!(
-            "halves through an R16G16B16A16_UINT buffer view: {unsigned} of 65536 patterns came back unchanged moved as unsigned integers, {by_floats} moved by way of floats"
-        );
-        assert_eq!(
-            unsigned, 65_536,
-            "patterns unchanged, moved as unsigned integers"
-        );
-    }
-
-    #[test]
-    fn capped_shader_views_keep_the_overlap_with_retained_mips() {
-        let view = |most, mips, lod| {
-            let mut desc = D3D12_SHADER_RESOURCE_VIEW_DESC {
-                ViewDimension: D3D12_SRV_DIMENSION_TEXTURE2D,
-                Anonymous: D3D12_SHADER_RESOURCE_VIEW_DESC_0 {
-                    Texture2D: D3D12_TEX2D_SRV {
-                        MostDetailedMip: most,
-                        MipLevels: mips,
-                        ResourceMinLODClamp: lod,
-                        PlaneSlice: 0,
-                    },
-                },
-                ..Default::default()
-            };
-            capped_srv(&mut desc, 2, 9);
-            // SAFETY: the view stays Texture2D.
-            let v = unsafe { desc.Anonymous.Texture2D };
-            (v.MostDetailedMip, v.MipLevels, v.ResourceMinLODClamp)
-        };
-        assert_eq!(view(0, 1, 0.0), (0, 1, 0.0));
-        assert_eq!(view(1, 5, 3.5), (0, 4, 1.5));
-        assert_eq!(view(3, 2, 0.0), (1, 2, 0.0));
-        assert_eq!(view(3, u32::MAX, 0.0), (1, u32::MAX, 0.0));
-    }
-
->>>>>>> klbf/beta-2
     /// A null texture UAV keeps the title's dimension (3D for the world's
     /// wind field), and is 2D when the title names none.
     #[test]
@@ -10081,7 +9814,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert_eq!(dimension(Some(6)), D3D12_UAV_DIMENSION_TEXTURE2D);
     }
 
-<<<<<<< HEAD
     /// What the texture code asks of the spans (levels on demand): where
     /// the next texture starts inside a span, the lowest level a view of a
     /// texture shows, and a texture's slots.
@@ -10105,32 +9837,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert_eq!(spans.first_viewed(0x1_0000), Some(3));
     }
 
-||||||| a66ac212
-=======
-    /// What the texture code asks of the spans (levels on demand): where
-    /// the next texture starts inside a span, the lowest level a view of a
-    /// texture shows, and a texture's slots.
-    #[test]
-    fn spans_say_the_next_start_and_the_lowest_level_viewed() {
-        let mut spans = Spans::default();
-        // A 512x512 texture of 0x56000 bytes viewed from levels 3 and 1,
-        // and the next one 0x6000 after it (run 188).
-        spans.note(1, 0x1_0000, 0x1_0000 + 0x5_6000, true);
-        spans.shows(1, 3);
-        spans.note(2, 0x1_0000, 0x1_0000 + 0x5_6000, true);
-        spans.shows(2, 1);
-        spans.note(3, 0x1_6000, 0x1_6000 + 0x5_6000, true);
-        assert_eq!(spans.next_start(0x1_0000, 0x1_0000 + 0x5_6000), Some(0x1_6000));
-        assert_eq!(spans.next_start(0x1_6000, 0x1_6000 + 0x5_6000), None);
-        assert_eq!(spans.first_viewed(0x1_0000), Some(1));
-        assert_eq!(spans.first_viewed(0x1_6000), None);
-        assert_eq!(spans.slots_at(0x1_0000), vec![1, 2]);
-        // The view from level 1 goes: the texture is viewed from level 3.
-        spans.forget(2);
-        assert_eq!(spans.first_viewed(0x1_0000), Some(3));
-    }
-
->>>>>>> klbf/beta-2
     /// Views of one placed texture are told from views of others by the
     /// address and the resource description, not by what they show.
     #[test]
@@ -10166,7 +9872,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert!(!same_placed_texture(&low, &View::Shader(0, None)));
     }
 
-<<<<<<< HEAD
     #[test]
     fn ranges_that_touch_are_one() {
         let mut ranges = vec![(40, 50), (30, 40), (35, 40), (10, 20), (45, 60), (60, 61), (1, 1)];
@@ -10281,26 +9986,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert!(unsafe { host.device.GetDeviceRemovedReason() }.is_ok());
     }
 
-||||||| a66ac212
-=======
-    /// The texture that stands for missing ones can be made and viewed.
-    #[cfg(feature = "diagnostics")]
-    #[test]
-    fn a_magenta_texture_is_made() {
-        let Some(host) = host() else {
-            return; // no host GPU
-        };
-        let Some(heap) = HostHeap::new(false, 4) else {
-            return;
-        };
-        let texture = magenta().expect("the texture");
-        // SAFETY: a slot of our heap and a live texture.
-        unsafe { host.device.CreateShaderResourceView(texture, None, heap.cpu(0)) };
-        // SAFETY: a plain device query.
-        assert!(unsafe { host.device.GetDeviceRemovedReason() }.is_ok());
-    }
-
->>>>>>> klbf/beta-2
     /// A null 3D UAV made on the real device leaves it alive.
     #[test]
     fn null_3d_uav_is_accepted_by_the_device() {
@@ -10509,7 +10194,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
     /// 1, 2, 4 frames up to the limit; and what the pass reports about a
     /// slot written again meanwhile is dropped.
     #[test]
-<<<<<<< HEAD
     fn a_texture_uploaded_whole_is_looked_at_again() {
         let mut q = TextureQueue::default();
         let at = (0x1000, 0x2000);
@@ -10563,83 +10247,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
     }
 
     #[test]
-||||||| a66ac212
-=======
-    fn constant_views_are_whole_and_at_most_64_kib() {
-        assert_eq!(constant_size(1), 256);
-        assert_eq!(constant_size(256), 256);
-        assert_eq!(constant_size(65_536), 65_536);
-        assert_eq!(constant_size(969_472), 65_536);
-        assert_eq!(constant_size(u32::MAX), 65_536);
-    }
-
-    #[test]
-    fn views_past_the_end_are_cut_to_the_elements_inside() {
-        assert_eq!(elements_inside(0, 10, 16, 160), 10);
-        assert_eq!(elements_inside(4, 10, 16, 160), 6);
-        assert_eq!(elements_inside(4, 10, 16, 167), 6);
-        // Nothing inside: as it was, for the host check to refuse.
-        assert_eq!(elements_inside(10, 10, 16, 160), 10);
-        assert_eq!(elements_inside(0, 7, 4, 1 << 40), 7);
-    }
-
-    /// A slot uploaded whole is looked at a few times, further and further
-    /// apart; one found changed is due at once; one written again, taken
-    /// out or waiting in the queue is not looked at.
-    #[test]
-    fn uploaded_textures_are_looked_at_again() {
-        let mut q = TextureQueue::default();
-        let at = (0x1000, 64);
-        q.written(7, 1, 1, false);
-        let write = q.due(1, 1)[0].1;
-        q.recheck(7, 1, at, 5);
-        assert!(q.rechecks_due(1000, 9).is_empty(), "it waits in the queue");
-        q.done(7, write);
-        q.recheck(7, 1, at, 5);
-        assert_eq!(q.census(1000)[0], 0, "no slot of the queue");
-        let mut frame = 1;
-        for wait in RECHECK_FRAMES {
-            assert!(q.rechecks_due(frame + wait - 1, 9).is_empty());
-            frame += wait;
-            let due = q.rechecks_due(frame, 9);
-            assert_eq!(due.len(), 1);
-            q.rechecked(7, &due[0].1, false, frame);
-        }
-        assert!(q.rechecks_due(u64::MAX, 9).is_empty(), "the looks are over");
-        q.recheck(7, frame, at, 5);
-        let due = q.rechecks_due(u64::MAX, 9);
-        q.rechecked(7, &due[0].1, true, frame + 4);
-        assert_eq!(q.due(frame + 4, 9)[0].0, 7);
-        assert!(q.rechecks_due(u64::MAX, 9).is_empty());
-        // A draw makes the host slot anew: the slot is due although a look
-        // at it was still to come.
-        q.recheck(8, 1, at, 5);
-        let seen = q.rechecks_due(u64::MAX, 9);
-        q.written(8, 2, 2, true);
-        assert!(q.due(2, 9).iter().any(|d| d.0 == 8));
-        q.rechecked(8, &seen[0].1, false, 5);
-        assert!(q.rechecks_due(u64::MAX, 9).is_empty());
-    }
-
-    /// The fingerprint of a texture's memory sees a change at its start, in
-    /// its middle and at its end, and is the same for the same bytes.
-    #[test]
-    fn a_fingerprint_sees_changes() {
-        let mut memory = vec![3u8; 1 << 20];
-        let print = |m: &[u8]| crate::texture::fingerprint(m.as_ptr() as u64, m.len() as u64);
-        let before = print(&memory);
-        assert_eq!(print(&memory), before);
-        let last = memory.len() - 1;
-        for at in [0, ((memory.len() - 4096) / 11 * 5) & !0xfff, last] {
-            memory[at] ^= 1;
-            assert_ne!(print(&memory), before, "byte {at}");
-            memory[at] ^= 1;
-        }
-        assert_ne!(print(&memory[..100]), print(&memory[..200]));
-    }
-
-    #[test]
->>>>>>> klbf/beta-2
     fn the_texture_queue_serves_the_newest_writes_first() {
         let mut q = TextureQueue::default();
         // Slots 10..18 written in frames 1..9, slot 5 last.
@@ -10692,7 +10299,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert!(q.due(16, 100).iter().any(|d| d.0 == 98));
     }
 
-<<<<<<< HEAD
     /// Slots held back for lack of room on the card are not handed out
     /// until their frame, keep their place, are not counted as waiting
     /// for their memory, and all come back at once when the card has room;
@@ -11205,32 +10811,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
     /// The rule until run 188 (`VICTORY_STALE_TEXTURES=overlap`): a view
     /// written over memory that older views describe otherwise makes
     /// those stale; views of the same span are one texture's.
-||||||| a66ac212
-    /// A view written over memory that older views describe otherwise
-    /// makes those stale; views of the same span are one texture's.
-=======
-    /// A slot written with another texture leaves its old span; the same
-    /// view written again changes nothing.
-    #[test]
-    fn a_slot_rewritten_moves_to_its_new_span() {
-        let mut spans = Spans::default();
-        assert!(spans.note(1, 0x10000, 0x12000, &shape(0x10000, 0x12000), true).is_empty());
-        assert!(spans.note(2, 0x12000, 0x14000, &shape(0x12000, 0x14000), true).is_empty());
-        assert!(spans.note(1, 0x10000, 0x12000, &shape(0x10000, 0x12000), true).is_empty());
-        assert_eq!(spans.slots_in(0x10000, 0x10001), [1]);
-        // Slot 1 now views a texture far away.
-        assert!(spans.note(1, 0x90000, 0x91000, &shape(0x90000, 0x91000), true).is_empty());
-        assert_eq!(spans.slots_in(0x10000, 0x10001), [] as [u32; 0]);
-        assert_eq!(spans.slots_in(0x12000, 0x12001), [2]);
-        assert_eq!(spans.slots_in(0x90000, 0x90001), [1]);
-        spans.forget(1);
-        spans.forget(2);
-        assert!(spans.spans.is_empty() && spans.by_slot.is_empty());
-    }
-
-    /// A view written over memory that older views describe otherwise makes
-    /// those stale; views of the same span are one texture's.
->>>>>>> klbf/beta-2
     #[test]
     fn a_newer_view_of_other_memory_makes_the_older_stale() {
         let mut spans = Spans { rule: Rule::Overlap, ..Default::default() };
@@ -11460,7 +11040,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert_eq!(slots(u64::MAX), [2]);
     }
 
-<<<<<<< HEAD
     /// A write of no placed texture view forgets the slot in the spans
     /// whether it goes by their lock or not (`spans_quick`): slots that are
     /// in them stay marked, also one another's view made stale.
@@ -11506,8 +11085,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert!(set.take().is_empty());
     }
 
-||||||| a66ac212
-=======
     /// The table of strides marks a constant buffer view's slot, and a
     /// texture written over it after leaves no mark: a program that picks
     /// the slot then reads zeros, not the texture's descriptor as a
@@ -11538,7 +11115,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert_eq!(entry(4), 0);
     }
 
->>>>>>> klbf/beta-2
     /// A slot a draw read through a table leaves the queue; the title's
     /// next write of it waits for its draw, and is due after the grace
     /// frames if none reads it.
@@ -11646,7 +11222,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert_eq!(heap.dynamic(50), None);
         heap.release(a, 50);
         assert_eq!(heap.dynamic(50), Some(4));
-<<<<<<< HEAD
         assert_eq!(heap.dynamic(40), Some(4 + heap.dynamic - 41));
     }
 
@@ -11803,66 +11378,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         heap.release(14, 4);
         let c = heap.dynamic(4);
         assert_eq!(c, Some(14));
-||||||| a66ac212
-        assert_eq!(heap.dynamic(40), Some(4 + heap.dynamic - 40));
-=======
-        assert_eq!(heap.dynamic(40), Some(4 + heap.dynamic - 41));
-    }
-}
-
-#[cfg(test)]
-mod record_print_tests {
-    use super::record_print;
-
-    /// Equal records print alike; a record that differs in any one byte,
-    /// or in its length, prints otherwise.
-    #[test]
-    fn a_record_that_changed_prints_otherwise() {
-        let record: Vec<u8> = (0..32u8).map(|i| i.wrapping_mul(37).wrapping_add(5)).collect();
-        let print = record_print(&record);
-        assert_eq!(print, record_print(&record.clone()));
-        for at in 0..32 {
-            for bit in 0..8 {
-                let mut other = record.clone();
-                other[at] ^= 1 << bit;
-                assert_ne!(record_print(&other), print, "byte {at} bit {bit}");
-            }
-        }
-        assert_ne!(record_print(&record[..16]), print);
-        assert_ne!(record_print(&[0u8; 32]), record_print(&[0u8; 16]));
-        // A record of zeros is told from "never looked at" by the caller's `| 1`.
-        assert_ne!(record_print(&[0u8; 32]) | 1, 0);
-    }
-}
-
-#[cfg(test)]
-mod own_copy_tests {
-    use super::own_bytes_if;
-
-    /// A buffer view gets a copy of its own bytes only when it has no host
-    /// view on its buffer's copy: off that copy's elements, and not a
-    /// structured view that can be a raw view of the same bytes.
-    #[test]
-    fn a_view_off_its_copys_elements_gets_its_own_bytes() {
-        let base = 0xd_9000_0000u64;
-        // On an element: the buffer's copy (the two cases of every run's
-        // log are the ones below).
-        assert_eq!(own_bytes_if(true, 24, base, 3, 10, 12, 0, false), None);
-        assert_eq!(own_bytes_if(true, 0, base, 0, 10, 12, 0, false), None);
-        // A typed view of 12-byte elements, 5,222,240 bytes into its copy
-        // (8 past an element): its own bytes, from its first element.
-        assert_eq!(own_bytes_if(true, 5_222_240, base, 3, 10, 12, 0, false), Some((base + 36, 120)));
-        // A structured view of 32-byte elements 8 bytes in: not on 16, so
-        // no raw view of the copy either.
-        assert_eq!(own_bytes_if(true, 8, base, 2, 4, 32, 32, true), Some((base + 64, 128)));
-        // The same 16 bytes in: off its elements, but a raw view of the
-        // copy's bytes does (as before).
-        assert_eq!(own_bytes_if(true, 16, base, 2, 4, 32, 32, true), None);
-        // No elements, no size, or the switch off: as before.
-        assert_eq!(own_bytes_if(true, 8, base, 2, 0, 32, 32, true), None);
-        assert_eq!(own_bytes_if(true, 8, base, 2, 4, 0, 0, false), None);
-        assert_eq!(own_bytes_if(false, 8, base, 2, 4, 32, 32, true), None);
->>>>>>> klbf/beta-2
     }
 }
 
