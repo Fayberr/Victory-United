@@ -263,17 +263,9 @@ mod tests {
         // origin poll that times out (and starts the frame), then a
         // blocking flip wait. Each flip takes its own tick.
         const FLIP: u32 = 2;
-<<<<<<< HEAD
-        // 50 ms ticks: a thread woken 15-30 ms late on a busy host (seen with
-        // 5 ms ticks) still makes its tick.
-        assert_eq!(set_interval(null, null, 50_000, 3, 0), S_OK);
-||||||| a26859fc
-        assert_eq!(set_interval(null, null, 5_000, 3, 0), S_OK);
-=======
         // (The ticks are far apart, and it may take a few tries: a busy PC
         // wakes a wait tens of milliseconds late at times.)
         assert_eq!(set_interval(null, null, 60_000, 3, 0), S_OK);
->>>>>>> avatar/main
         let mut token = 0;
         let mut four = || -> Vec<u64> {
             (0..4)

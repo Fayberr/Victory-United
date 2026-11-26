@@ -74,24 +74,8 @@ impl Cache {
         let dir = path.parent().expect("hashed path has a parent");
         std::fs::create_dir_all(dir)?;
         // Write-then-rename so readers never see partial output.
-<<<<<<< HEAD
-        let tmp = tempfile_in(dir);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        let written = file.write_all(output);
-||||||| a26859fc
-        let tmp = tempfile_in(dir);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        let written = file.write_all(&output);
-=======
         let (tmp, mut file) = tempfile_in(dir)?;
         let written = file.write_all(&output);
->>>>>>> avatar/main
         drop(file);
         let published = written.and_then(|()| std::fs::rename(&tmp, &path));
         if published.is_err() {
