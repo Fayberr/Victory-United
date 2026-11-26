@@ -62,7 +62,6 @@ impl Fields {
         };
         D3D12_SAMPLER_DESC {
             Filter: D3D12_FILTER((reduction << 7 | filter) as i32),
-<<<<<<< HEAD
             AddressU: address_mode(self.address[0]),
             AddressV: address_mode(self.address[1]),
             AddressW: address_mode(self.address[2]),
@@ -72,42 +71,15 @@ impl Fields {
                 self.bias
                     .clamp(D3D12_MIP_LOD_BIAS_MIN, D3D12_MIP_LOD_BIAS_MAX)
             },
-||||||| merged common ancestors
-            AddressU: D3D12_TEXTURE_ADDRESS_MODE(self.address[0] as i32),
-            AddressV: D3D12_TEXTURE_ADDRESS_MODE(self.address[1] as i32),
-            AddressW: D3D12_TEXTURE_ADDRESS_MODE(self.address[2] as i32),
-            MipLODBias: self.bias,
-=======
-            AddressU: address(0),
-            AddressV: address(1),
-            AddressW: address(2),
-            MipLODBias: self.bias,
->>>>>>> vibr/main
             MaxAnisotropy: if aniso {
                 self.anisotropy.clamp(1, 16)
             } else {
                 1
             },
-<<<<<<< HEAD
             // (kept beside a minimum or maximum filter too: the comparison
             // sampler made of this one, [`comparison`], has it)
             ComparisonFunc: if reduction == 1 || compares {
                 D3D12_COMPARISON_FUNC(self.compare as i32)
-||||||| merged common ancestors
-            ComparisonFunc: D3D12_COMPARISON_FUNC(self.compare.max(1) as i32),
-            BorderColor: self.border,
-            MinLOD: self.min_lod,
-            // Without a mip filter the console samples mip 0 only.
-            MaxLOD: if self.mip == 0 {
-                self.min_lod
-=======
-            ComparisonFunc: D3D12_COMPARISON_FUNC(compare as i32),
-            BorderColor: self.border,
-            MinLOD: self.min_lod,
-            // Without a mip filter the console samples mip 0 only.
-            MaxLOD: if self.mip == 0 {
-                self.min_lod
->>>>>>> vibr/main
             } else {
                 D3D12_COMPARISON_FUNC_NEVER
             },
