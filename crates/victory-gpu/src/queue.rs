@@ -458,10 +458,14 @@ fn hold(this: This, what: impl FnOnce() -> Held) -> bool {
 /// one.
 #[cfg(windows)]
 pub(crate) fn release_held(all: bool) {
-<<<<<<< HEAD
     if !all && behind() {
         // A thread of ours runs what is free to run ([`behind`]).
         wake();
+        return;
+    }
+    if behind::on() {
+        // What queues stand at is looked at by the thread that runs them.
+        behind::wake();
         return;
     }
     release_held_now(all);
@@ -735,26 +739,8 @@ fn send_joined(joined: &mut Joined) {
     }
 }
 
-/// Before a submission of ours that is waited for, with [`behind`]: what
-/// the queues hold and is free to run runs first, on this thread, so the
-/// submission keeps its place behind them.
-#[cfg(windows)]
-pub(crate) fn before_sync() {
-    if behind() && !RELEASING_HERE.get() {
-        release_held_now(false);
-    }
-}
-
 #[cfg(windows)]
 fn release_held_now(all: bool) {
-||||||| a26859fc
-=======
-    if behind::on() {
-        // What queues stand at is looked at by the thread that runs them.
-        behind::wake();
-        return;
-    }
->>>>>>> avatar/main
     // One caller at a time, so a queue's submissions keep their order.
     static RELEASING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     if lock(&WAITING).is_empty() {
@@ -1212,18 +1198,14 @@ extern "system" fn signal(this: This, fence: This, value: u64) -> HRESULT {
     if fence.is_null() {
         return E_INVALIDARG;
     }
-<<<<<<< HEAD
     #[cfg(all(windows, feature = "diagnostics"))]
     crate::fence::pace::signal_called(fence as usize, value);
-||||||| a26859fc
-=======
     let _called = crate::timeline::span("the title's queue Signal");
     #[cfg(windows)]
     if behind::on() && !this.is_null() {
         behind::signal(this, fence, value);
         return S_OK;
     }
->>>>>>> avatar/main
     // A queue that waits signals after what it holds.
     #[cfg(windows)]
     if hold(this, || Held::Signal(fence as usize, value)) {
@@ -1405,7 +1387,6 @@ extern "system" fn present(
     plane_parameters: *const Plane,
     _parameters: *const u8,
 ) -> HRESULT {
-<<<<<<< HEAD
     #[cfg(windows)]
     let presenting = std::time::Instant::now();
     let hr = present_now(this, planes, plane_parameters);
@@ -1422,14 +1403,8 @@ extern "system" fn present(
 fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESULT {
     #[cfg(windows)]
     let presenting = std::time::Instant::now();
-||||||| a26859fc
-=======
-    #[cfg(not(windows))]
-    let _ = this;
->>>>>>> avatar/main
     #[cfg(all(windows, feature = "diagnostics"))]
     crate::copystat::present_begins();
-<<<<<<< HEAD
     #[cfg(all(windows, feature = "diagnostics"))]
     crate::profile::frame();
     // With `present_behind`: the frame is shown by our thread, behind what
@@ -1438,30 +1413,21 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
     let sent_behind = present_behind() && send_behind(this, planes, plane_parameters);
     #[cfg(not(windows))]
     let _ = this;
-||||||| a26859fc
-=======
     let called = crate::timeline::span("the title's Present");
     #[cfg(all(windows, feature = "diagnostics"))]
     crate::timeline::title_thread();
->>>>>>> avatar/main
     // Submissions sent to the card and not waited for are settled first,
     // and what that frees runs in its own order, before anything is forced.
     #[cfg(windows)]
-<<<<<<< HEAD
     if sent_behind {
+    } else if behind::on() {
+        // The present goes into the line of what the queues were given.
     } else if crate::host::late() && !crate::host::late_free_present() {
         // (With `behind`: what the queues hold runs here first, and what
         // it sent is settled with the rest.)
         if behind() {
             release_held_now(false);
         }
-||||||| a26859fc
-    if crate::host::late() && !crate::host::late_free_present() {
-=======
-    if behind::on() {
-        // The present goes into the line of what the queues were given.
-    } else if crate::host::late() && !crate::host::late_free_present() {
->>>>>>> avatar/main
         crate::host::settle_for_present();
         release_held_now(false);
         crate::host::settle_for_present();
@@ -1473,19 +1439,11 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
     // shortcut: what a queue still holds at a present runs now, whatever
     // its fence: a wait is not kept across frames.
     #[cfg(windows)]
-<<<<<<< HEAD
-    if !sent_behind {
+    if !sent_behind && !behind::on() {
         release_held(forces());
     }
     #[cfg(windows)]
     crate::framelog::add(crate::framelog::T::PresentLineUs, presenting.elapsed().as_micros() as u64);
-||||||| a26859fc
-    release_held(forces());
-=======
-    if !behind::on() {
-        release_held(forces());
-    }
->>>>>>> avatar/main
     let frame = FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
     #[cfg(windows)]
     if sent_behind && PRESENTS_BEHIND.load(Ordering::Relaxed).is_multiple_of(512) {
@@ -1534,13 +1492,7 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         }
     }
     #[cfg(windows)]
-<<<<<<< HEAD
-    if !sent_behind
-        && planes > 0
-||||||| a26859fc
-    if planes > 0
-=======
-    if behind::on() && !this.is_null() {
+    if !sent_behind && behind::on() && !this.is_null() {
         const COPY_SOURCE: u32 = 0x800;
         let texture = if planes > 0
             // SAFETY: the title passes `planes` plane descriptions.
@@ -1571,8 +1523,8 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         return S_OK;
     }
     #[cfg(windows)]
-    if planes > 0
->>>>>>> avatar/main
+    if !sent_behind
+        && planes > 0
         // SAFETY: the title passes `planes` plane descriptions.
         && let Some(plane) = unsafe { plane_parameters.as_ref() }
         && plane.count > 0
@@ -1585,7 +1537,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         const COPY_SOURCE: u32 = 0x800;
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
-<<<<<<< HEAD
         // A second plane (the title's interface over its game image, in
         // its Series S mode) is drawn over the first: `crate::over`.
         const READABLE: u32 = 0x80;
@@ -1600,11 +1551,10 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         if let Some((r, _, was)) = over {
             crate::resource::host_transition(r, was);
         }
-||||||| a26859fc
-        let shown = host.present(texture, state, frame);
-=======
-        show(texture, state, Shown { frame, resource: resource as usize });
->>>>>>> avatar/main
+        #[cfg(feature = "diagnostics")]
+        blinks(frame, resource, state, shown);
+        #[cfg(not(feature = "diagnostics"))]
+        let _ = shown;
         crate::resource::host_transition(resource, state);
         let _ = host;
     }
@@ -1617,7 +1567,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
     frame_ends();
     S_OK
 }
-<<<<<<< HEAD
 
 /// The bytes from one plane's description to the next in a present.
 #[cfg(windows)]
@@ -1644,8 +1593,6 @@ unsafe fn second_plane(planes: u32, parameters: *const Plane, first: This) -> Op
     (!resource.is_null() && resource != first).then_some(resource)
 }
 
-||||||| a26859fc
-=======
 
 /// Diagnostics: the title's present is over.
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -1673,14 +1620,13 @@ fn show(texture: &windows::Win32::Graphics::Direct3D12::ID3D12Resource, state: u
     let Some(host) = crate::host::host() else {
         return;
     };
-    let shown = host.present(texture, state, what.frame);
+    let shown = host.present(texture, state, what.frame, None);
     #[cfg(feature = "diagnostics")]
     blinks(what.frame, what.resource as This, state, shown);
     #[cfg(not(feature = "diagnostics"))]
     let _ = (shown, what.resource);
 }
 
->>>>>>> avatar/main
 /// Diagnostics: logs a presented frame that is black after one that was
 /// not, with what was presented and how many draws ran since.
 #[cfg(all(windows, feature = "diagnostics"))]
