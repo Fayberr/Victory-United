@@ -4485,6 +4485,17 @@ fn blocked_by(written: &[(usize, usize)], runs: &[&HostList], count: bool) -> Op
         for step in &list.deferred().copies {
             match step {
                 &Step::Copy(dst, src, len) => {
+                    // A copy that only READS where flights may write is not
+                    // waited for either, and checked like a fill
+                    // ([`fill_ahead`]; run 210 looked at 197 such waits, four
+                    // a frame, 43 to 60 ms, and neither side had other bytes
+                    // after one). A copy INTO such a range still waits.
+                    if !touches(written, dst, dst + len) && fill_ahead::on(src, len) {
+                        if count {
+                            fill_ahead::read(src, len);
+                        }
+                        continue;
+                    }
                     if let Some(_read) = copy_blocked(written, dst, src, len) {
                         if count {
                             LATE_STATS[15].fetch_add(1, Ordering::Relaxed);
@@ -4500,6 +4511,18 @@ fn blocked_by(written: &[(usize, usize)], runs: &[&HostList], count: bool) -> Op
                 }
                 &Step::Fill(_, src, len, _) => {
                     if read_blocked(written, src, len) {
+                        // A fill that only reads where flights may write is
+                        // not waited for: what it read is compared with what
+                        // they write when they land, and the 64 KiB pieces
+                        // that differ make such fills wait again
+                        // ([`fill_ahead`]). The avatar merge's resolution
+                        // dropped these calls and left `fill_ahead` unused.
+                        if fill_ahead::on(src, len) {
+                            if count {
+                                fill_ahead::read(src, len);
+                            }
+                            continue;
+                        }
                         if count {
                             LATE_STATS[16].fetch_add(1, Ordering::Relaxed);
                             #[cfg(feature = "diagnostics")]
