@@ -835,14 +835,8 @@ impl Layout {
     }
 
     /// Copies one subresource out of tiled memory (the whole texture,
-<<<<<<< HEAD
     /// [`Layout::size`] bytes, or the [`Layout::bytes_from`] of the mip)
     /// into linear rows: mip `mip` of array slice
-||||||| merged common ancestors
-    /// [`Layout::size`] bytes) into linear rows: mip `mip` of array slice
-=======
-    /// [`Layout::reach`] bytes of the mip at least) into linear rows: mip `mip` of array slice
->>>>>>> belobug/main
     /// `slice` (3D: every depth slice of the mip, `slice` 0). Rows are
     /// `row_pitch` bytes apart, depth slices `depth_pitch`.
     pub fn detile(
@@ -903,15 +897,9 @@ impl Layout {
             .checked_mul(row_pitch)
             .and_then(|offset| offset.checked_add(bytes))
             .ok_or(Error::TooSmall)?;
-<<<<<<< HEAD
 
         // Multiple depth slices must not overwrite each other.
         if depth > 1 && depth_pitch < slice_bytes {
-||||||| merged common ancestors
-        if tiled_len < self.size as usize || linear_len < need || row_pitch < bytes {
-=======
-        if tiled_len < self.reach(mip) as usize || linear_len < need || row_pitch < bytes {
->>>>>>> belobug/main
             return Err(Error::TooSmall);
         }
 
