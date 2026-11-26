@@ -448,7 +448,6 @@ fn library() -> Option<&'static Library> {
     static LIBRARY: OnceLock<Option<Library>> = OnceLock::new();
     LIBRARY
         .get_or_init(|| {
-<<<<<<< HEAD
             // With RenderDoc loaded the device is RenderDoc's: the card's
             // library is not for it, and what it would save is not for
             // the card. Neither read nor written in such a run.
@@ -457,10 +456,7 @@ fn library() -> Option<&'static Library> {
                 tracing::info!("RenderDoc is loaded: the host pipeline library is neither read nor saved in this run");
                 return None;
             }
-||||||| 85d564167
-=======
             let _opening = crate::timeline::span("pipeline: open the host pipeline library");
->>>>>>> avatar/main
             let device = crate::host::host()?.device.cast::<ID3D12Device1>().ok()?;
             let blob = DIR.get().map_or(Blob::None, |d| Blob::of(d));
             let library = open(&device, blob);
@@ -549,7 +545,6 @@ pub(crate) fn pipeline(
     load: impl FnOnce(&ID3D12PipelineLibrary1, PCWSTR) -> windows::core::Result<ID3D12PipelineState>,
     create: impl FnOnce() -> windows::core::Result<ID3D12PipelineState>,
 ) -> windows::core::Result<ID3D12PipelineState> {
-<<<<<<< HEAD
     pipeline_with_status(name, load, create).map(|(pso, _)| pso)
 }
 
@@ -560,13 +555,10 @@ pub(crate) fn pipeline_with_status(
     load: impl FnOnce(&ID3D12PipelineLibrary1, PCWSTR) -> windows::core::Result<ID3D12PipelineState>,
     create: impl FnOnce() -> windows::core::Result<ID3D12PipelineState>,
 ) -> windows::core::Result<(ID3D12PipelineState, bool)> {
-||||||| 85d564167
-=======
     let create = || {
         let _creating = crate::timeline::span("pipeline: create a PSO in the driver");
         create()
     };
->>>>>>> avatar/main
     let wide = HSTRING::from(name);
     let Some(library) = library() else {
         MADE.fetch_add(1, Ordering::Relaxed);
@@ -608,7 +600,6 @@ pub(crate) fn pipeline_with_status(
             began.elapsed().as_secs_f64() * 1e3
         )
     });
-<<<<<<< HEAD
     // Stored after the fact: the pipeline is there to be drawn with, and a
     // store waits for a save in progress, which writes the whole library.
     to_store(name, &pso);
@@ -661,10 +652,7 @@ fn to_store(name: &str, pso: &ID3D12PipelineState) {
 fn store(name: &str, pso: &ID3D12PipelineState) {
     let Some(library) = library() else { return };
     let wide = HSTRING::from(name);
-||||||| 85d564167
-=======
     let mut storing = crate::timeline::span("pipeline: acquire library store guards");
->>>>>>> avatar/main
     let _all = one_call();
     let _stores = library.saving.read().unwrap_or_else(|e| e.into_inner());
     let _call = call("store", name);
@@ -727,7 +715,6 @@ pub(crate) fn save(now: bool) {
     if !now && last.is_some_and(|(ended, took)| ended.elapsed() < save_pause(took)) {
         return;
     }
-<<<<<<< HEAD
     let began = std::time::Instant::now();
     write_out(dir, library);
     *last = Some((std::time::Instant::now(), began.elapsed()));
@@ -735,10 +722,7 @@ pub(crate) fn save(now: bool) {
 
 /// A save of `library` and the early list in `dir`.
 fn write_out(dir: &std::path::Path, library: &Library) {
-||||||| 85d564167
-=======
     let _saving = crate::timeline::span("pipeline: save the library and early list");
->>>>>>> avatar/main
     if let Err(e) = std::fs::create_dir_all(dir) {
         tracing::warn!(error = %e, "host pipeline library not saved");
         return;
