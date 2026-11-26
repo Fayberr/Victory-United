@@ -238,21 +238,7 @@ fn encode(w: u32, h: u32, raw: &[u8]) -> Vec<u8> {
     debug_assert_eq!(rc, zlib_rs::ReturnCode::Ok);
     chunk(&mut png, b"IDAT", idat);
     chunk(&mut png, b"IEND", &[]);
-<<<<<<< HEAD
-    let path = folder.join(format!("{name}.png"));
-    match std::fs::create_dir_all(folder).and_then(|()| std::fs::write(&path, png)) {
-        Ok(()) => tracing::info!(path = %path.display(), "frame saved"),
-        Err(e) => tracing::warn!(error = %e, path = %path.display(), "frame not saved"),
-    }
-||||||| a26859fc
-    let path = folder.join(format!("{name}.png"));
-    match std::fs::write(&path, png) {
-        Ok(()) => tracing::info!(path = %path.display(), "frame saved"),
-        Err(e) => tracing::warn!(error = %e, path = %path.display(), "frame not saved"),
-    }
-=======
     png
->>>>>>> avatar/main
 }
 
 /// A PNG of `w` by `h` 8-bit RGB pixels; `raw` is its rows, each after a
