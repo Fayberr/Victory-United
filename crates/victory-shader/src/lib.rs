@@ -16,12 +16,8 @@ pub mod ir;
 pub mod merged;
 pub mod native;
 pub mod resource;
-<<<<<<< HEAD
-pub mod spill;
-||||||| merged common ancestors
-=======
 pub mod sgpr_spill;
->>>>>>> belobug/main
+pub mod spill;
 pub mod structure;
 pub mod unspill;
 
