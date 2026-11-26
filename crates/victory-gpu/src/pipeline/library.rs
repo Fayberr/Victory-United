@@ -654,14 +654,9 @@ pub(crate) fn save(now: bool) {
         };
         (bytes, used_changed)
     };
-<<<<<<< HEAD
-||||||| a26859fc
-    let used: Vec<String> = USED.lock().unwrap_or_else(|e| e.into_inner()).iter().flatten().cloned().collect();
-=======
     // Through `used`: a process that asked for none yet (`victory shaders`)
     // must not write the earlier runs' list over with nothing.
     let used: Vec<String> = used().iter().flatten().cloned().collect();
->>>>>>> avatar/main
     let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
     if bytes > 0 && library_written.is_ok() {
         // In place unless the system refused and the new one waits beside it.
@@ -677,14 +672,14 @@ pub(crate) fn save(now: bool) {
             )
         });
     }
-<<<<<<< HEAD
     // Only rewrite `early-pipelines.txt` when this run actually recorded new
     // used title pipelines; offline precompilation leaves `USED` untouched and
     // must preserve any existing early list on disk.
+    let slow: Vec<String> = slow_ones().iter().flatten().map(|(key, ms)| format!("{key} {ms}")).collect();
     let (early_count, written) = if write_early {
-        let used: Vec<String> = used().iter().flatten().cloned().collect();
         let len = used.len();
         let res = library_written
+            .and_then(|()| write_atomically(&dir.join(SLOW_FILE), slow.join("\n").as_bytes()))
             .and_then(|()| write_atomically(&dir.join(EARLY_FILE), used.join("\n").as_bytes()));
         (len, res)
     } else {
@@ -695,15 +690,6 @@ pub(crate) fn save(now: bool) {
             .map_or(0, HashSet::len);
         (len, library_written)
     };
-||||||| a26859fc
-    let written = library_written
-        .and_then(|()| write_atomically(&dir.join(EARLY_FILE), used.join("\n").as_bytes()));
-=======
-    let slow: Vec<String> = slow_ones().iter().flatten().map(|(key, ms)| format!("{key} {ms}")).collect();
-    let written = library_written
-        .and_then(|()| write_atomically(&dir.join(SLOW_FILE), slow.join("\n").as_bytes()))
-        .and_then(|()| write_atomically(&dir.join(EARLY_FILE), used.join("\n").as_bytes()));
->>>>>>> avatar/main
     match written {
         Ok(()) => tracing::info!(
             bytes,
@@ -758,25 +744,6 @@ fn replace_library(dir: &std::path::Path, tmp: &std::path::Path) -> std::io::Res
 /// `path`: a reader never sees a part. Serialised so concurrent worker and
 /// shutdown saves do not race on the same staging file or target rename.
 fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-<<<<<<< HEAD
-    use std::sync::atomic::AtomicU64;
-    static WRITING: Mutex<()> = Mutex::new(());
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let _guard = WRITING.lock().unwrap_or_else(|e| e.into_inner());
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".tmp-{}-{n}", std::process::id()));
-    let tmp = path.with_file_name(name);
-    let res = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
-    if res.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    res
-||||||| a26859fc
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
-=======
     use std::sync::atomic::AtomicU64;
     static WRITING: Mutex<()> = Mutex::new(());
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -832,7 +799,6 @@ pub(crate) fn note_time(key: &str, ms: u64) {
         // With the next save of the early list.
         USED_CHANGED.store(true, Ordering::Relaxed);
     }
->>>>>>> avatar/main
 }
 
 /// Title pipeline keys requested by draws or dispatches (this run and the last).

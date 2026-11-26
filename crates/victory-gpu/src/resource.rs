@@ -2132,14 +2132,10 @@ pub(crate) fn let_go_idle() {
             crate::host::retire(host);
         }
     }
-<<<<<<< HEAD
     drop(all);
-||||||| a26859fc
-=======
     SWEPT_US[0].fetch_add(1, Relaxed);
     SWEPT_US[1].fetch_add(began.elapsed().as_micros() as u64, Relaxed);
     SWEPT_US[2].fetch_max(began.elapsed().as_micros() as u64, Relaxed);
->>>>>>> avatar/main
     if went > 0 {
         crate::host::trail(|| {
             format!(
@@ -2666,14 +2662,8 @@ fn host_texture_as(
             )
         }
     };
-<<<<<<< HEAD
     crate::census::made(if reserved { 5 } else { 4 }, 0);
-    if let Err(e) = made {
-||||||| a26859fc
-    if let Err(e) = made {
-=======
     if let Err(e) = &made {
->>>>>>> avatar/main
         tracing::warn!(error = %e, desc = ?d, reserved, "no host texture");
     }
     if !reserved
