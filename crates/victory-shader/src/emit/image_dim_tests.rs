@@ -261,7 +261,7 @@ fn cube_loads_read_each_faces_texels() {
     let texels: Vec<[f32; 4]> = (0..96)
         .map(|t| cube_texel(t / 16, 0, t % 4, t / 4 % 4))
         .collect();
-    for (label, uavs) in run(&shader, View::Cube(4, &texels), 96) {
+    for (label, uavs) in run(&shader, View::Cube(4, 1, &texels), 96) {
         assert_eq!(uavs[0], bits(&texels), "{label}");
     }
 }
