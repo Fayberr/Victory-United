@@ -12,6 +12,7 @@
 //! bake) are there at once as before; past the budget a draw or dispatch
 //! whose pipeline is not ready is dropped, as an untranslated one is.
 //!
+<<<<<<< HEAD
 //! The default budget is 12 s per title frame and kind, a window the
 //! recording threads wait in together ([`DEFAULT_WAIT_MS`]); it was half
 //! a second. A pass the title runs only once and whose pipeline takes
@@ -28,6 +29,24 @@
 //! behind a world's worth of pipelines they were dropped; that run had no
 //! lamps and no diffuse light to its end (run textures-d2, the first after a
 //! new translation; Belobug 18e57db8 found the same).
+||||||| merged common ancestors
+//! The default budget is half a second per title frame. A pass the title
+//! runs only once and whose pipeline takes longer is lost.
+=======
+//! The default budget is half a second per title frame for the first
+//! [`WARMUP_FRAMES`] (boot and one-shot init passes compile reliably), then
+//! [`STEADY_MS`]: half a second in every frame that met a new pipeline made
+//! the intro and menus stutter while a cold library was filled. A pass the
+//! title runs only once and whose pipeline takes longer is lost.
+//!
+//! A dispatch waits within the same budget and is dropped past it, as a
+//! draw is. Waiting for every compute pipeline at its first dispatch (up to
+//! 20 s each, made on the recording thread if no worker had taken it) held
+//! the world's first frame until hundreds of them were made: a black screen
+//! for minutes with a stale library (made ~170 per 20 s). Every compute
+//! pipeline is still started when the title creates it, so most are made
+//! during loading; a dispatch promotes its own ahead of those.
+>>>>>>> vibr/main
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
@@ -52,6 +71,7 @@ pub(crate) struct Pending {
     /// whether a draw or dispatch has requested it yet.
     pub(super) key: String,
     used: AtomicBool,
+<<<<<<< HEAD
     /// A pass over the screen ([`GraphicsState::screen_pass`]).
     screen: bool,
     /// When a worker began it ([`slow`]).
@@ -112,6 +132,16 @@ fn without_structures(shaders: &[Arc<Shader>]) -> bool {
     let is = |name, value| std::env::var_os(name).is_some_and(|v| v == value);
     let out = *OUT.get_or_init(|| is("VICTORY_RT_RESOLVE", "0") && !is("VICTORY_BVH_BUILDER", "1"));
     out && named(shaders, b"CS_RaytracingResolve")
+||||||| merged common ancestors
+=======
+    /// When a worker began it ([`slow`]).
+    begun: OnceLock<Instant>,
+    /// First title frame in which a recording thread waited on this pipeline
+    /// (`u64::MAX`: never waited yet). Caps waiting to one frame per pipeline
+    /// so a slow or hung shader compiles asynchronously without stalling every
+    /// subsequent frame for the full wait budget.
+    waited_frame: AtomicU64,
+>>>>>>> vibr/main
 }
 
 // SAFETY: D3D12 objects are free-threaded; the graphics state (whose input
@@ -137,7 +167,13 @@ impl Pending {
             made: OnceLock::new(),
             key,
             used: AtomicBool::new(false),
+<<<<<<< HEAD
             begun: OnceLock::new(),
+||||||| merged common ancestors
+=======
+            begun: OnceLock::new(),
+            waited_frame: AtomicU64::new(u64::MAX),
+>>>>>>> vibr/main
         }
     }
 
@@ -157,6 +193,7 @@ impl Pending {
     }
 
     fn make(&self) {
+<<<<<<< HEAD
         let _ = self.begun.set(Instant::now());
         self.make_with(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
     }
@@ -178,9 +215,21 @@ impl Pending {
             super::library::note_time(&self.key, began.elapsed().as_millis() as u64);
             made
         });
+||||||| merged common ancestors
+        self.made
+            .get_or_init(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
+=======
+        let _ = self.begun.set(Instant::now());
+        self.made
+            .get_or_init(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
+>>>>>>> vibr/main
         let (lock, done) = &DONE;
         let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
         done.notify_all();
+    }
+
+    fn compute(&self) -> bool {
+        matches!(self.shaders.as_slice(), [cs] if cs.stage == "compute")
     }
 }
 
@@ -229,6 +278,7 @@ pub(crate) fn hashes(p: &Pending) -> String {
 /// Signalled whenever a worker has made a pipeline.
 static DONE: (Mutex<()>, Condvar) = (Mutex::new(()), Condvar::new());
 
+<<<<<<< HEAD
 /// Waiting allowed per title frame, over all threads.
 fn wait_budget() -> Duration {
     #[cfg(test)]
@@ -237,13 +287,74 @@ fn wait_budget() -> Duration {
     }
     static BUDGET: OnceLock<Duration> = OnceLock::new();
     *BUDGET.get_or_init(|| {
+||||||| merged common ancestors
+/// Waiting allowed per title frame, over all threads.
+fn wait_budget() -> Duration {
+    static BUDGET: OnceLock<Duration> = OnceLock::new();
+    *BUDGET.get_or_init(|| {
+=======
+/// Title frames that get [`WARMUP_MS`] of waiting.
+const WARMUP_FRAMES: u64 = 60;
+const WARMUP_MS: u64 = 500;
+/// Waiting per frame after the warm-up frames.
+const STEADY_MS: u64 = 8;
+
+/// Waiting allowed in title frame `frame`, over all threads;
+/// `VICTORY_PIPELINE_WAIT_MS` sets it for every frame.
+fn wait_budget(frame: u64) -> Duration {
+    static BUDGET: OnceLock<Option<Duration>> = OnceLock::new();
+    let set = *BUDGET.get_or_init(|| {
+>>>>>>> vibr/main
         let millis = std::env::var("VICTORY_PIPELINE_WAIT_MS")
             .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok());
+        tracing::info!(?millis, "host pipeline wait budget per frame (none: {WARMUP_MS} ms, then {STEADY_MS} ms)");
+        millis.map(Duration::from_millis)
+    });
+    set.unwrap_or(Duration::from_millis(if frame < WARMUP_FRAMES { WARMUP_MS } else { STEADY_MS }))
+}
+
+/// Whether the host's driver has been at compute pipeline `p` for longer
+/// than most take (one of the title's takes 85 s): no frame waits for it.
+fn slow(p: &Pending) -> bool {
+    p.begun.get().is_some_and(|at| at.elapsed() > Duration::from_secs(10))
+}
+
+/// What a frame may wait for a compute pipeline while a world loads: the
+/// passes that unpack a world's models are dispatched once, and in a run
+/// whose pipelines were all still to be made 130 of them were dropped, and
+/// with them walls, floor, ceiling and faces (they never came back). A draw
+/// comes again next frame, so graphics pipelines keep the frame's budget.
+const LOADING_FRAME_COMPUTE: Duration = Duration::from_secs(12);
+
+/// What is left of the bound on all such waits of a run, past the frames'
+/// budgets, after `spent`: `VICTORY_PIPELINE_GATE_S` seconds (victory-amd
+/// uses 120). Off by default: here every compute pipeline is started at
+/// its creation, `victory warm` puts them in the library ahead of a run,
+/// and waits past the frame's budget once made the world's first frame
+/// take minutes.
+fn loading_left(spent: Duration) -> Duration {
+    static TOTAL: OnceLock<Duration> = OnceLock::new();
+    let total = *TOTAL.get_or_init(|| {
+        let seconds = std::env::var("VICTORY_PIPELINE_GATE_S")
+            .ok()
             .and_then(|value| value.trim().parse::<u64>().ok())
+<<<<<<< HEAD
             .unwrap_or(DEFAULT_WAIT_MS);
         tracing::info!(millis, "host pipeline wait budget per frame, per kind");
         Duration::from_millis(millis)
     })
+||||||| merged common ancestors
+            .unwrap_or(500);
+        tracing::info!(millis, "host pipeline wait budget per frame");
+        Duration::from_millis(millis)
+    })
+=======
+            .unwrap_or(0);
+        Duration::from_secs(seconds)
+    });
+    total.saturating_sub(spent)
+>>>>>>> vibr/main
 }
 
 /// The default of [`wait_budget`]: the picture before frame rate. A frame
@@ -347,7 +458,19 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
     if p.made.get().is_none() {
         p.asked.fetch_add(1, Ordering::Relaxed);
         start(p, REQUESTED);
-        wait(p, crate::frame::current());
+        let frame = crate::frame::current();
+        let first = match p.waited_frame.compare_exchange(
+            u64::MAX,
+            frame,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => frame,
+            Err(f) => f,
+        };
+        if first == frame {
+            wait(p, frame);
+        }
     }
     p.made.get()?.as_ref()
 }
@@ -446,13 +569,27 @@ pub(crate) fn now(p: &Arc<Pending>) -> bool {
     p.made.get().is_some_and(|made| made.is_some())
 }
 
+/// Makes the host pipeline of a compute program for the driver's library
+/// (`victory warm`); whether it has one.
+pub(crate) fn warm(shaders: Vec<Arc<Shader>>) -> bool {
+    HostPipeline::new(&shaders, None).is_some()
+}
+
 /// At the title's creation of a pipeline: starts it at once if an earlier
-/// run drew with it (during loading, so the world's first frames find it).
+/// run drew with it (during loading, so the world's first frames find it),
+/// and every compute pipeline: what a dropped dispatch writes is missing
+/// until its pipeline is made, so the world's are made while it loads.
 pub(crate) fn early(p: &Arc<Pending>) {
+<<<<<<< HEAD
     // Turning off speculative starts keeps first-use scheduling and the disk caches available.
     static PREWARM: OnceLock<bool> = OnceLock::new();
     let enabled = *PREWARM.get_or_init(|| std::env::var_os("VICTORY_EARLY_PIPELINES").is_none_or(|v| v != "0"));
     if enabled && p.left_out.is_none() && !p.shaders.is_empty() && super::library::wanted_early(&p.key) {
+||||||| merged common ancestors
+    if !p.shaders.is_empty() && super::library::wanted_early(&p.key) {
+=======
+    if !p.shaders.is_empty() && (p.compute() || super::library::wanted_early(&p.key)) {
+>>>>>>> vibr/main
         super::library::EARLY.fetch_add(1, Ordering::Relaxed);
         start(p, EARLY);
     }
@@ -475,6 +612,7 @@ fn shared_budget() -> Sharing {
     *ON.get_or_init(|| sharing_from(std::env::var("VICTORY_PIPELINE_WAIT_SHARED").ok().as_deref()))
 }
 
+<<<<<<< HEAD
 /// How the threads that wait in one frame count its budget for one kind
 /// of pipeline (`VICTORY_PIPELINE_WAIT_SHARED`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -499,7 +637,22 @@ fn sharing_from(value: Option<&str>) -> Sharing {
         Some("0") => Sharing::PerThread,
         Some("reserve") => Sharing::Reserve,
         _ => Sharing::Window,
+||||||| merged common ancestors
+/// Waits for `p` while frame `frame` has budget left.
+fn wait(p: &Pending, frame: u64) {
+    let budget = wait_budget();
+    if budget.is_zero() {
+        return;
+=======
+/// Waits for `p` while frame `frame` has budget left.
+fn wait(p: &Pending, frame: u64) {
+    let budget = wait_budget(frame);
+    let compute = p.compute();
+    if budget.is_zero() || compute && slow(p) {
+        return;
+>>>>>>> vibr/main
     }
+<<<<<<< HEAD
 }
 
 /// One frame's waiting for one kind of pipeline.
@@ -523,6 +676,35 @@ impl FrameWait {
     fn begin(&mut self, sharing: Sharing, frame: u64, budget: Duration, now: Instant) -> Duration {
         if self.frame != frame {
             *self = FrameWait { frame, ..FrameWait::new() };
+||||||| merged common ancestors
+    // The frame the budget belongs to, and what was waited of it (or is
+    // taken by a thread waiting now).
+    static SPENT: Mutex<(u64, Duration)> = Mutex::new((u64::MAX, Duration::ZERO));
+    let shared = shared_budget();
+    let left = {
+        let mut spent = SPENT.lock().unwrap_or_else(|e| e.into_inner());
+        if spent.0 != frame {
+            *spent = (frame, Duration::ZERO);
+=======
+    // What compute waits took past the frames' budgets since the start, in
+    // milliseconds; they have a budget of their own (ported from myokex's
+    // victory-amd).
+    static PAST: AtomicU64 = AtomicU64::new(0);
+    let budget = if compute {
+        budget.max(LOADING_FRAME_COMPUTE.min(loading_left(Duration::from_millis(PAST.load(Ordering::Relaxed)))))
+    } else {
+        budget
+    };
+    // The frame the budget belongs to, and what was waited of it (or is
+    // taken by a thread waiting now); compute and graphics apart.
+    static SPENTS: [Mutex<(u64, Duration)>; 2] = [const { Mutex::new((u64::MAX, Duration::ZERO)) }; 2];
+    let frame_spent = &SPENTS[usize::from(compute)];
+    let shared = shared_budget();
+    let left = {
+        let mut spent = frame_spent.lock().unwrap_or_else(|e| e.into_inner());
+        if spent.0 != frame {
+            *spent = (frame, Duration::ZERO);
+>>>>>>> vibr/main
         }
         if sharing == Sharing::Window {
             let open = self.since.map_or(Duration::ZERO, |at| now.saturating_duration_since(at));
@@ -644,7 +826,13 @@ fn wait(p: &Pending, frame: u64) {
     }
     let (lock, done) = &DONE;
     let mut held = lock.lock().unwrap_or_else(|e| e.into_inner());
+<<<<<<< HEAD
     while p.made.get().is_none() && !p.slow() {
+||||||| merged common ancestors
+    while p.made.get().is_none() {
+=======
+    while p.made.get().is_none() && !(compute && slow(p)) {
+>>>>>>> vibr/main
         let rest = left.saturating_sub(started.elapsed());
         if rest.is_zero() {
             break;
@@ -655,6 +843,7 @@ fn wait(p: &Pending, frame: u64) {
     }
     drop(held);
     let waited = started.elapsed().min(left);
+<<<<<<< HEAD
     if screen && waited > Duration::from_millis(500) {
         tracing::info!(
             ms = waited.as_millis() as u64,
@@ -662,6 +851,32 @@ fn wait(p: &Pending, frame: u64) {
             shaders = ?p.shaders,
             "a pass over the screen was waited for (VICTORY_SCREEN_WAIT_MS=0: dropped past half a second a frame)"
         );
+||||||| merged common ancestors
+    {
+        let mut spent = SPENT.lock().unwrap_or_else(|e| e.into_inner());
+        // A frame that began meanwhile has its own budget.
+        if spent.0 == frame {
+            if shared {
+                spent.1 = spent.1.saturating_sub(left - waited);
+            } else {
+                spent.1 += waited;
+            }
+        }
+=======
+    if compute {
+        PAST.fetch_add(waited.saturating_sub(wait_budget(frame)).as_millis() as u64, Ordering::Relaxed);
+    }
+    {
+        let mut spent = frame_spent.lock().unwrap_or_else(|e| e.into_inner());
+        // A frame that began meanwhile has its own budget.
+        if spent.0 == frame {
+            if shared {
+                spent.1 = spent.1.saturating_sub(left - waited);
+            } else {
+                spent.1 += waited;
+            }
+        }
+>>>>>>> vibr/main
     }
     past.fetch_add(waited.saturating_sub(base).as_millis() as u64, Ordering::Relaxed);
     frame_wait.lock().unwrap_or_else(|e| e.into_inner()).end(sharing, frame, left, waited, Instant::now());
@@ -761,6 +976,7 @@ impl Queue {
         Some(prev == NOT_QUEUED)
     }
 
+<<<<<<< HEAD
     /// The passes over the screen first, then the most asked for of the
     /// requested ones (the first of equals), then the early ones in order,
     /// then one long one if there is room for it. In the order of the first
@@ -795,6 +1011,24 @@ impl Queue {
             }
         }
         let p = p?;
+||||||| merged common ancestors
+    fn pop(&mut self) -> Option<Arc<Pending>> {
+        let p = self.requested.pop_front().or_else(|| {
+            // An early entry can have been promoted and claimed already.
+            std::iter::from_fn(|| self.early.pop_front())
+                .find(|p| p.queue_state.load(Ordering::Relaxed) == EARLY)
+        })?;
+=======
+    /// The next pipeline to make: a requested one first, unless only early
+    /// ones are taken (a spare worker, which can starve).
+    fn pop(&mut self, early_only: bool) -> Option<Arc<Pending>> {
+        let requested = if early_only { None } else { self.requested.pop_front() };
+        let p = requested.or_else(|| {
+            // An early entry can have been promoted and claimed already.
+            std::iter::from_fn(|| self.early.pop_front())
+                .find(|p| p.queue_state.load(Ordering::Relaxed) == EARLY)
+        })?;
+>>>>>>> vibr/main
         p.queue_state.store(MAKING, Ordering::Relaxed);
         Some(p)
     }
@@ -820,25 +1054,45 @@ fn start(p: &Arc<Pending>, priority: u8) {
         if new {
             PEAK.fetch_max(WAITING.fetch_add(1, Ordering::Relaxed) + 1, Ordering::Relaxed);
         }
+<<<<<<< HEAD
         // (One woken could be a worker that takes passes over the screen
         // alone: it would leave the pipeline to nobody.)
         AVAILABLE.notify_all();
+||||||| merged common ancestors
+        AVAILABLE.notify_one();
+=======
+        // All: a spare worker woken for a requested one would not take it.
+        AVAILABLE.notify_all();
+>>>>>>> vibr/main
     }
 }
 
+<<<<<<< HEAD
 /// Workers that make passes over the screen alone, besides the others.
 const SCREEN_WORKERS: usize = 2;
 
 fn next(screens_only: bool) -> Arc<Pending> {
+||||||| merged common ancestors
+fn next() -> Arc<Pending> {
+=======
+fn next(early_only: bool) -> Arc<Pending> {
+>>>>>>> vibr/main
     let mut queue = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
     loop {
+<<<<<<< HEAD
         if let Some(p) = queue.pop(screens_only, slow_limit()) {
+||||||| merged common ancestors
+        if let Some(p) = queue.pop() {
+=======
+        if let Some(p) = queue.pop(early_only) {
+>>>>>>> vibr/main
             return p;
         }
         queue = AVAILABLE.wait(queue).unwrap_or_else(|e| e.into_inner());
     }
 }
 
+<<<<<<< HEAD
 /// Workers at work until the title draws a world.
 const MENU_WORKERS: usize = 2;
 static WORLD: AtomicBool = AtomicBool::new(false);
@@ -863,10 +1117,35 @@ fn worker_count(asked: Option<usize>, processors: usize) -> usize {
 }
 
 /// Starts the workers ([`worker_count`]) on first use.
+||||||| merged common ancestors
+/// Starts the workers (half the logical processors, 2 to 8) on first use.
+=======
+/// Stack of each pipeline worker: room for the driver's shader compiler,
+/// which runs on it (reserved address space; committed only as used).
+const PIPELINE_STACK: usize = 64 << 20;
+
+/// Workers at the title's priority (half the logical processors, 2 to 8)
+/// and spare ones below it, up to all processors but two (at most 16
+/// workers in all), for `logical` processors. The spare ones run while the
+/// title waits (loading, a world whose pipelines are not made yet: 8
+/// workers made ~8 a second of a cold library while the rest of a 24-thread
+/// processor stood idle) and starve when it is busy, as all workers did
+/// below its priority (PR #1505), so they cost the world's frames nothing;
+/// they take only early pipelines, so none a frame waits for starves there.
+/// shortcut: 16 caps the driver compiles' memory unmeasured; raise it after
+/// a cold run shows the commit charge with all of them compiling.
+fn worker_counts(logical: usize) -> (usize, usize) {
+    let normal = (logical / 2).clamp(2, 8);
+    (normal, logical.saturating_sub(2).min(16).saturating_sub(normal))
+}
+
+/// Starts the workers ([`worker_counts`]) on first use.
+>>>>>>> vibr/main
 fn workers() -> bool {
     static RUNNING: OnceLock<bool> = OnceLock::new();
     *RUNNING.get_or_init(|| {
         let mut running = false;
+<<<<<<< HEAD
         let workers = worker_count(
             std::env::var("VICTORY_PIPELINE_WORKERS")
                 .ok()
@@ -877,8 +1156,17 @@ fn workers() -> bool {
         let screens = if screens_first() { SCREEN_WORKERS } else { 0 };
         for i in 0..workers + screens {
             let screens_only = i >= workers;
+||||||| merged common ancestors
+        let workers = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(2, 8));
+        for i in 0..workers {
+=======
+        let (normal, spare) = worker_counts(std::thread::available_parallelism().map_or(4, |n| n.get()));
+        tracing::info!(normal, spare, "host pipeline workers");
+        for i in 0..normal + spare {
+>>>>>>> vibr/main
             let spawned = std::thread::Builder::new()
                 .name(format!("victory-pipelines-{i}"))
+<<<<<<< HEAD
                 .spawn(move || {
                     // Below the title's own threads (loading, recording),
                     // and the streaming one, which is below normal itself
@@ -889,8 +1177,34 @@ fn workers() -> bool {
                         use windows::Win32::System::Threading::*;
                         let priority = if lowest { THREAD_PRIORITY_LOWEST } else { THREAD_PRIORITY_BELOW_NORMAL };
                         let _ = SetThreadPriority(GetCurrentThread(), priority);
+||||||| merged common ancestors
+                .spawn(|| {
+                    // Below the title's own threads (loading, recording).
+                    // SAFETY: a plain call on our own thread.
+                    unsafe {
+                        use windows::Win32::System::Threading::*;
+                        let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+=======
+                // The driver compiles pipelines on this thread, recursively:
+                // NVIDIA's compiler (nvgpucomp64) overflowed the default 2 MB
+                // on a world compute program and refused it as out of memory.
+                .stack_size(PIPELINE_STACK)
+                .spawn(move || {
+                    if i >= normal {
+                        // SAFETY: a plain call on our own thread.
+                        unsafe {
+                            use windows::Win32::System::Threading::*;
+                            let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+                        }
+>>>>>>> vibr/main
                     }
+                    // The others at the title's own priority: below it,
+                    // the world's busy threads starved the workers (236
+                    // pipelines a minute at the start screen, 7 a minute in
+                    // the world on a 16-thread laptop, PR #1505), and draws
+                    // stay dropped until their pipelines exist.
                     loop {
+<<<<<<< HEAD
                         // All of them during the intro and the menus starve
                         // the title's threads: frames come unevenly.
                         while i >= MENU_WORKERS && !WORLD.load(Ordering::Relaxed) {
@@ -903,6 +1217,11 @@ fn workers() -> bool {
                             queue.slow_now -= 1;
                             AVAILABLE.notify_all();
                         }
+||||||| merged common ancestors
+                        next().make();
+=======
+                        next(i >= normal).make();
+>>>>>>> vibr/main
                         if WAITING.fetch_sub(1, Ordering::Relaxed) == 1 {
                             drained();
                         } else {
@@ -1051,6 +1370,7 @@ mod tests {
         assert!(matches!(p.made.get(), Some(None)));
     }
 
+<<<<<<< HEAD
     /// Threads waiting at the same time share the time they wait, none
     /// takes it from the others, and a new frame starts anew.
     #[test]
@@ -1111,6 +1431,49 @@ mod tests {
         assert_eq!(p.queue_state.load(Ordering::Relaxed), NOT_QUEUED);
     }
 
+||||||| merged common ancestors
+=======
+    /// A compute pipeline is started at its creation, and a dispatch whose
+    /// pipeline a worker is still making waits only within the frame's
+    /// budget (it waited up to 20 s per pipeline, and the world's first
+    /// frame minutes), then is dropped.
+    #[test]
+    fn a_compute_dispatch_waits_only_within_the_frame_budget() {
+        let cs = Arc::new(super::super::Shader {
+            stage: "compute",
+            hash: "c0c0c0c0c0c0c0c0".to_owned(),
+            container: Vec::new(),
+            translated: OnceLock::new(),
+            walks: OnceLock::new(),
+            resolves_light: false,
+            draws_sky: false,
+            ends_reflections: false,
+            bakes: false,
+        });
+        let early_one = Arc::new(Pending::new(vec![cs.clone()], None));
+        early(&early_one);
+        assert_ne!(early_one.queue_state.load(Ordering::Relaxed), NOT_QUEUED);
+
+        let p = Arc::new(Pending::new(vec![cs], None));
+        // A worker has taken it and cannot finish it yet.
+        p.queue_state.store(MAKING, Ordering::Relaxed);
+        let started = Instant::now();
+        assert!(ready(&p).is_none());
+        assert!(p.made.get().is_none(), "not made on the recording thread");
+        assert!(started.elapsed() <= wait_budget(0) + Duration::from_millis(250));
+    }
+
+    #[test]
+    fn spare_workers_fill_all_processors_but_two() {
+        assert_eq!(worker_counts(1), (2, 0));
+        assert_eq!(worker_counts(4), (2, 0));
+        assert_eq!(worker_counts(8), (4, 2));
+        assert_eq!(worker_counts(16), (8, 6));
+        assert_eq!(worker_counts(24), (8, 8));
+        assert_eq!(worker_counts(64), (8, 8));
+    }
+
+>>>>>>> vibr/main
     #[test]
     fn pending_pipeline_is_recorded_for_the_next_launch() {
         let mut p = Pending::new(Vec::new(), None);
@@ -1172,9 +1535,18 @@ mod tests {
         assert_eq!(queue.push(&promoted, REQUESTED), Some(false));
         assert_eq!(queue.push(&promoted, REQUESTED), None);
 
+<<<<<<< HEAD
         assert!(Arc::ptr_eq(&queue.pop(false, 1).unwrap(), &requested));
         assert!(Arc::ptr_eq(&queue.pop(false, 1).unwrap(), &promoted));
+||||||| merged common ancestors
+        assert!(Arc::ptr_eq(&queue.pop().unwrap(), &requested));
+        assert!(Arc::ptr_eq(&queue.pop().unwrap(), &promoted));
+=======
+        assert!(Arc::ptr_eq(&queue.pop(false).unwrap(), &requested));
+        assert!(Arc::ptr_eq(&queue.pop(false).unwrap(), &promoted));
+>>>>>>> vibr/main
         assert_eq!(queue.push(&promoted, REQUESTED), None);
+<<<<<<< HEAD
         assert!(Arc::ptr_eq(&queue.pop(false, 1).unwrap(), &earlier));
         assert!(queue.pop(false, 1).is_none());
     }
@@ -1218,5 +1590,49 @@ mod tests {
         assert!(Arc::ptr_eq(&queue.pop(true, 1).unwrap(), &screen));
         assert!(queue.pop(true, 1).is_none());
         assert!(Arc::ptr_eq(&queue.pop(false, 1).unwrap(), &world));
+||||||| merged common ancestors
+        assert!(Arc::ptr_eq(&queue.pop().unwrap(), &earlier));
+        assert!(queue.pop().is_none());
+=======
+        assert!(Arc::ptr_eq(&queue.pop(false).unwrap(), &earlier));
+        assert!(queue.pop(false).is_none());
+    }
+
+    #[test]
+    fn spare_workers_take_only_early_pipelines() {
+        let early_one = Arc::new(Pending::new(Vec::new(), None));
+        let promoted = Arc::new(Pending::new(Vec::new(), None));
+        let requested = Arc::new(Pending::new(Vec::new(), None));
+        let mut queue = Queue::new();
+        queue.push(&early_one, EARLY);
+        queue.push(&promoted, EARLY);
+        queue.push(&requested, REQUESTED);
+        queue.push(&promoted, REQUESTED);
+
+        // The promoted one's early entry is skipped: it is requested now.
+        assert!(Arc::ptr_eq(&queue.pop(true).unwrap(), &early_one));
+        assert!(queue.pop(true).is_none());
+        assert!(Arc::ptr_eq(&queue.pop(false).unwrap(), &requested));
+        assert!(Arc::ptr_eq(&queue.pop(false).unwrap(), &promoted));
+    }
+
+    #[test]
+    fn slow_pipeline_waits_at_most_one_frame() {
+        let mut p = Pending::new(Vec::new(), None);
+        p.key = "slow-pipeline-one-frame-test".to_owned();
+        // Simulate a pipeline already claimed by a worker that has not finished.
+        p.queue_state.store(MAKING, Ordering::Relaxed);
+        let first_frame = crate::frame::current();
+        // Pretend it already exhausted its wait on another frame (avoid u64::MAX sentinel).
+        let earlier_frame = if first_frame == 0 { 1 } else { first_frame - 1 };
+        p.waited_frame.store(earlier_frame, Ordering::Relaxed);
+        let p = Arc::new(p);
+        let started = Instant::now();
+        assert!(ready(&p).is_none());
+        assert!(
+            started.elapsed() < Duration::from_millis(50),
+            "subsequent frames must not block for the pipeline wait budget"
+        );
+>>>>>>> vibr/main
     }
 }

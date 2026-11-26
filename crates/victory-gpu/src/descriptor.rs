@@ -12,6 +12,8 @@ use crate::resource::{Memory, PAGEABLE_IIDS};
 
 #[cfg(windows)]
 pub(crate) mod host;
+#[cfg(windows)]
+pub use host::adjust_mips;
 
 const HEAP_IIDS: [Iid; 4] = [
     guid(
@@ -143,6 +145,7 @@ static SHADER_HEAPS: std::sync::RwLock<Vec<(u64, u64, usize)>> = std::sync::RwLo
 #[cfg(windows)]
 static SYNCING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+<<<<<<< HEAD
 /// An owned COM reference to a shader-visible [`Heap`], keeping it (and its
 /// host heap and backing memory) alive past the [`SHADER_HEAPS`] lookup.
 #[cfg(windows)]
@@ -165,6 +168,24 @@ impl Drop for HeapRef {
     }
 }
 
+||||||| merged common ancestors
+<<<<<<<<< Temporary merge branch 1
+||||||||| ffe310eb
+/// The shader-visible heap holding `handle`, and the descriptor's index.
+#[cfg(windows)]
+fn shader_slot<'a>(handle: u64) -> Option<(&'a Heap, u32)> {
+    let heaps = SHADER_HEAPS.lock().unwrap_or_else(|e| e.into_inner());
+    let &(_, _, at) = heaps
+        .iter()
+        .find(|&&(start, end, _)| (start..end).contains(&handle))?;
+    // SAFETY: registered heaps are live (removed when dropped).
+    let heap = unsafe { &*(at as *const Heap) };
+    Some((heap, heap.index(handle)?))
+}
+
+=========
+=======
+>>>>>>> vibr/main
 /// The shader-visible heap holding `handle`, and the descriptor's index.
 #[cfg(windows)]
 fn shader_slot(handle: u64) -> Option<(HeapRef, u32)> {
@@ -184,10 +205,10 @@ fn shader_slot(handle: u64) -> Option<(HeapRef, u32)> {
 }
 
 /// Makes the host descriptor for what the title wrote at `handle`, if it
-/// is in a shader-visible heap. Keeps `SHADER_HEAPS` locked for the duration
-/// so `Heap::drop` cannot free the heap concurrently.
+/// is in a shader-visible heap.
 #[cfg(windows)]
 fn mirror(handle: u64) {
+<<<<<<< HEAD
     let heaps = SHADER_HEAPS.read().unwrap_or_else(|e| e.into_inner());
     let Some(&(_, _, at)) = heaps
         .iter()
@@ -199,6 +220,21 @@ fn mirror(handle: u64) {
     // the `SHADER_HEAPS` lock we hold here.
     let heap = unsafe { &*(at as *const Heap) };
     let Some(index) = heap.index(handle) else {
+||||||| merged common ancestors
+    let heaps = SHADER_HEAPS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(&(_, _, at)) = heaps
+        .iter()
+        .find(|&&(start, end, _)| (start..end).contains(&handle))
+    else {
+        return;
+    };
+    // SAFETY: registered heaps stay alive until `Heap::drop`, which takes
+    // the `SHADER_HEAPS` lock we hold here.
+    let heap = unsafe { &*(at as *const Heap) };
+    let Some(index) = heap.index(handle) else {
+=======
+    let Some((heap, index)) = shader_slot(handle) else {
+>>>>>>> vibr/main
         return;
     };
     let mut pending = heap.pending.lock().unwrap_or_else(|e| e.into_inner());
@@ -1184,6 +1220,8 @@ const DSV_TAG: u32 = u32::from_le_bytes(*b"vDSV");
 pub(crate) enum View {
     /// Constant buffer: GPU address and size.
     Constant(u64, u32),
+    /// A constant buffer view with no buffer bound.
+    NullConstant,
     /// Shader resource: resource, description (none: the resource's own).
     Shader(usize, Option<[u32; 10]>),
     /// Unordered access: resource, counter resource, description.
@@ -1214,7 +1252,7 @@ impl View {
             View::Shader(r, _) | View::Unordered(r, _, _) => {
                 crate::resource::buffer_bytes(*r as This).is_some()
             }
-            View::Sampler(_) | View::ConsoleSampler(_) => false,
+            View::NullConstant | View::Sampler(_) | View::ConsoleSampler(_) => false,
         }
     }
 }
@@ -1760,10 +1798,11 @@ fn words<const N: usize>(desc: *const [u32; N]) -> Option<[u32; N]> {
 
 /// Device method.
 pub(crate) extern "system" fn create_cbv(_: This, desc: *const [u32; 4], handle: u64) {
-    if let Some([lo, hi, size, _]) = words(desc) {
-        let address = u64::from(lo) | u64::from(hi) << 32;
-        record(handle, View::Constant(address, size));
-    }
+    let view = match words(desc) {
+        Some([lo, hi, size, _]) => View::Constant(u64::from(lo) | u64::from(hi) << 32, size),
+        None => View::NullConstant,
+    };
+    record(handle, view);
 }
 
 /// Device method.
@@ -1829,9 +1868,7 @@ pub(crate) extern "system" fn create_sampler_x(_: This, desc: *const [u32; 27], 
 
 /// Device method: `count` descriptors of `kind` from `src` to `dst`.
 pub(crate) extern "system" fn copy_simple(_: This, count: u32, dst: u64, src: u64, kind: u32) {
-    let Some(step) = increment(kind).map(u64::from) else {
-        return;
-    };
+    let step = u64::from(increment(kind).unwrap_or(0));
     let len = u64::from(count) * step;
     if dst != 0 && src != 0 {
         // SAFETY: both ranges are descriptor slots the title owns.
@@ -1946,9 +1983,6 @@ pub(crate) extern "system" fn create_heap(
     let placed = placement.address != 0 && placement.size == size;
     tracing::debug!(?desc, placed, "descriptor heap");
     let (start, memory) = if placed {
-        if placement.address.checked_add(size).is_none() {
-            return E_INVALIDARG;
-        }
         (placement.address, None)
     } else {
         match Memory::zeroed(size, 64) {
@@ -2420,6 +2454,19 @@ mod tests {
         slot::<extern "system" fn(This) -> u32>(h, 0x10)(h);
         // SAFETY: this allocation belongs to the test.
         unsafe { VirtualFree(memory, 0, MEM_RELEASE) };
+    }
+
+    #[test]
+    fn null_cbv_overwrites_an_existing_view() {
+        let null = std::ptr::null();
+        let mut slot = [0u64; 4];
+        let handle = slot.as_mut_ptr() as u64;
+        create_srv(null, null, std::ptr::null(), handle);
+        assert_eq!(view(handle), Some(View::Shader(0, None)));
+
+        create_cbv(null, std::ptr::null(), handle);
+
+        assert_eq!(view(handle), Some(View::NullConstant));
     }
 
     #[test]

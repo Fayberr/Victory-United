@@ -30,7 +30,9 @@
 //! Which passes run is `emit::shader_opt()` (`VICTORY_SHADER_OPT`), part of
 //! the translation and so of the shader cache's key.
 
-use std::collections::HashMap;
+// (the tables below are looked up by key only, never walked: their order is
+// no part of the result)
+use crate::structure::Map;
 
 use super::{
     Attr, Bin, Cast, Const, Func, MdDef, Module, Op, Term, Ty, TypeDef, V, for_each_operand, pred,
@@ -79,6 +81,8 @@ pub const DEFAULT: u32 = ALL & !WIDE;
 pub(crate) struct Usage {
     /// A wave or quad operation.
     pub wave_ops: bool,
+    /// `dx.op.attributeAtVertex.*` (shader barycentrics).
+    pub barycentrics: bool,
     /// A 64-bit integer, as a result or an operand.
     pub int64: bool,
     /// A typed load of several components from a UAV.
@@ -139,8 +143,8 @@ fn opposite(p: u8) -> u8 {
 /// and comparisons (by their operands) with a known outcome.
 #[derive(Default)]
 struct Facts {
-    bits: HashMap<V, bool>,
-    compares: HashMap<(u8, V, V), bool>,
+    bits: Map<V, bool>,
+    compares: Map<(u8, V, V), bool>,
 }
 
 /// The facts a block added, to forget when its part of the tree is done.
@@ -804,9 +808,9 @@ impl Module {
         }
         // The values every path to the block being walked has computed
         // (those of the blocks above it in the tree, and its own so far).
-        let mut known: HashMap<Key, V> = HashMap::new();
+        let mut known: Map<Key, V> = Map::default();
         // The reads of the block being walked since its last store.
-        let mut read: HashMap<Key, V> = HashMap::new();
+        let mut read: Map<Key, V> = Map::default();
         let mut facts = Facts::default();
         let (yes, no) = (self.bool(true), self.bool(false));
         enum Step {
@@ -849,7 +853,7 @@ impl Module {
             read.clear();
             // Two joins of the same values from the same blocks are one.
             if passes & REUSE != 0 && self.blocks[b].phis.len() > 1 {
-                let mut joins: HashMap<Vec<(usize, V)>, V> = HashMap::new();
+                let mut joins: Map<Vec<(usize, V)>, V> = Map::default();
                 for &p in &self.blocks[b].phis {
                     if repl[p as usize].is_some() {
                         continue;
@@ -1114,6 +1118,8 @@ impl Module {
                     }
                 } else if name.starts_with("atomic") && name.ends_with(".i64") {
                     u.atomic64 = true;
+                } else if name.starts_with("attributeAtVertex") {
+                    u.barycentrics = true;
                 } else if name.starts_with("textureLoad") || name.starts_with("bufferLoad") {
                     u.typed_uav_loads |= args.get(1).and_then(|&h| annotation(h)).is_none_or(
                         |(kind, components)| kind & 0x1000 != 0 && components >> 8 & 0xff > 1,
@@ -1122,6 +1128,38 @@ impl Module {
             }
         }
         u
+    }
+
+    /// Per input signature element: bitmask of columns actually read by
+    /// reachable `dx.op.loadInput.*` or `dx.op.attributeAtVertex.*` calls.
+    pub(crate) fn input_usage(&self, count: usize) -> Vec<u8> {
+        let mut masks = vec![0u8; count];
+        let reached = self.reached();
+        for (_, blk) in self.blocks.iter().enumerate().filter(|(b, _)| reached[*b]) {
+            for &i in &blk.body {
+                let Op::Call(f, args) = &self.insts[i as usize].op else {
+                    continue;
+                };
+                let name = self.funcs[*f as usize].name.as_str();
+                let name = name.strip_prefix("dx.op.").unwrap_or(name);
+                if !(name.starts_with("loadInput.") || name.starts_with("attributeAtVertex.")) {
+                    continue;
+                }
+                let Some((_, id)) = args.get(1).and_then(|&v| self.int_k(v)) else {
+                    continue;
+                };
+                let Some((_, col)) = args.get(3).and_then(|&v| self.int_k(v)) else {
+                    continue;
+                };
+                if let Ok(id) = usize::try_from(id)
+                    && id < count
+                    && (0..4).contains(&col)
+                {
+                    masks[id] |= 1u8 << col;
+                }
+            }
+        }
+        masks
     }
 
     /// A constant table no remaining load reads leaves the module (the

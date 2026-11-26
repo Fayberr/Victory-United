@@ -233,6 +233,12 @@ extern "system" fn node_count(_: This) -> u32 {
     1
 }
 
+/// `GetDeviceRemovedReason`: this device is alive. The host device's own
+/// removal is reported by `host` (every submission is checked).
+extern "system" fn not_removed(_: This) -> HRESULT {
+    S_OK
+}
+
 /// Feature query 2: the highest of the requested feature levels we support.
 #[repr(C)]
 struct FeatureLevels {
@@ -444,7 +450,12 @@ static FUNCTIONS: Table<160> = {
     f[28] = resource::create_heap as *const (); // 0xe0
     f[29] = resource::create_placed as *const (); // 0xe8
     f[36] = fence::create as *const (); // 0x120
+<<<<<<< HEAD
     f[37] = removed_reason as *const (); // 0x128
+||||||| merged common ancestors
+=======
+    f[37] = not_removed as *const (); // 0x128
+>>>>>>> vibr/main
     f[38] = resource::copyable_footprints as *const (); // 0x130
     f[39] = query::create as *const (); // 0x138
     f[41] = signature::create as *const (); // 0x148
@@ -500,6 +511,13 @@ mod tests {
         );
         let missing = slot::<extern "system" fn() -> HRESULT>(device, 0xf0);
         assert_eq!(missing(), E_NOTIMPL);
+    }
+
+    #[test]
+    fn a_live_device_is_not_reported_removed() {
+        let device = super::device();
+        let reason = slot::<extern "system" fn(This) -> HRESULT>(device, 0x128);
+        assert_eq!(reason(device), S_OK);
     }
 
     #[test]

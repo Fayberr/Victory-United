@@ -15,10 +15,17 @@ pub struct KnownBuild {
     pub label: &'static str,
     /// BLAKE3 of the original executable, hex.
     pub blake3: &'static str,
+<<<<<<< HEAD
     /// Changes to its code made before it is mapped.
     pub patches: &'static [CodePatch],
+||||||| merged common ancestors
+    /// RPF9 archive the title needs during startup, relative to its executable.
+    pub startup_archive: &'static str,
+=======
+>>>>>>> vibr/main
 }
 
+<<<<<<< HEAD
 /// A change to title code: at `rva`, the bytes `expect` (a short signature
 /// checked before anything is written) become `write`, our own code.
 #[derive(Debug, Clone, Copy)]
@@ -60,6 +67,17 @@ pub const KNOWN_BUILDS: &[KnownBuild] = &[KnownBuild {
         },
     ],
 }];
+||||||| merged common ancestors
+/// Executables identified from a local package.
+pub const KNOWN_BUILDS: &[KnownBuild] = &[KnownBuild {
+    label: "Series 1.0.2.1",
+    blake3: "b99f876b74d4a77f03af5f878223b27bd647b5c35a79d5decd9f716504239e93",
+    startup_archive: "appdata0.rpf",
+}];
+=======
+/// Builds we support. Empty until the executable is available.
+pub const KNOWN_BUILDS: &[KnownBuild] = &[];
+>>>>>>> vibr/main
 
 /// Looks up a build by the BLAKE3 hash of its executable.
 pub fn identify(blake3_hex: &str) -> Option<&'static KnownBuild> {

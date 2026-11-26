@@ -59,6 +59,7 @@ pub struct Instruction {
     pub offset: usize,
     pub encoding: Encoding,
     pub opcode: u16,
+<<<<<<< HEAD
     /// Every dword of the instruction, including literals and extra dwords;
     /// `len` of them. The longest instruction here is an MIMG with its three
     /// extra address dwords, five in all, so they live inline: a heap vector
@@ -70,9 +71,22 @@ pub struct Instruction {
     /// The translator asks about every instruction eight times; the table is
     /// a binary search.
     name: Option<&'static str>,
+||||||| merged common ancestors
+    /// Every dword of the instruction, including literals and extra dwords.
+    pub words: Vec<u32>,
+=======
+    /// Every dword of the instruction, including literals and extra dwords;
+    /// `len` of them. The longest instruction here is an MIMG with its three
+    /// extra address dwords, five in all, so they live inline: a heap vector
+    /// per instruction was one allocation and one cache miss for a word or
+    /// two of data.
+    words: [u32; Instruction::MAX_WORDS],
+    len: u8,
+>>>>>>> vibr/main
 }
 
 impl Instruction {
+<<<<<<< HEAD
     /// The most dwords an instruction here has: an MIMG with its three extra
     /// address dwords.
     pub const MAX_WORDS: usize = 5;
@@ -84,9 +98,33 @@ impl Instruction {
         Self { offset, encoding, opcode, words, len: 1, name: name(encoding, opcode) }
     }
 
+||||||| merged common ancestors
+=======
+    /// The most dwords an instruction here has: an MIMG with its three extra
+    /// address dwords.
+    const MAX_WORDS: usize = 5;
+
+    pub(crate) fn single_word(offset: usize, encoding: Encoding, opcode: u16, word: u32) -> Self {
+        let mut words = [0; Self::MAX_WORDS];
+        words[0] = word;
+        Self {
+            offset,
+            encoding,
+            opcode,
+            words,
+            len: 1,
+        }
+    }
+
+>>>>>>> vibr/main
     /// AMD's name for the opcode, if it is in our table.
     pub fn name(&self) -> Option<&'static str> {
         self.name
+    }
+
+    /// Every dword of the instruction, including literals and extra dwords.
+    pub fn words(&self) -> &[u32] {
+        &self.words[..usize::from(self.len)]
     }
 
     /// Every dword of the instruction, including literals and extra dwords.
@@ -220,7 +258,14 @@ pub(crate) fn control<'a>(
     len: usize,
     before: impl Fn(usize) -> Option<&'a Instruction>,
 ) -> Result<Flow, ShaderError> {
+<<<<<<< HEAD
     Ok(match flow(inst, inst.offset + 4 * inst.words().len(), len)? {
+||||||| merged common ancestors
+    Ok(match flow(inst, inst.offset + 4 * inst.words.len(), len)? {
+=======
+    let next = inst.offset + 4 * inst.words().len();
+    Ok(match flow(inst, next, len)? {
+>>>>>>> vibr/main
         Flow::Stop if inst.name() == Some("s_setpc_b64") => {
             far_jump(before, inst, len)?.map_or(Flow::Stop, Flow::Jump)
         }
@@ -260,12 +305,20 @@ fn far_jump<'a>(
     setpc: &Instruction,
     len: usize,
 ) -> Result<Option<usize>, ShaderError> {
+<<<<<<< HEAD
     let n = setpc.words()[0] & 0xFF;
     if n >= 127 {
         return Ok(None);
     }
     let mut lo: Option<(bool, u32)> = None;
     let mut hi: Option<(bool, u32)> = None;
+||||||| merged common ancestors
+    let n = setpc.words[0] & 0xFF;
+    let mut delta = None;
+=======
+    let n = setpc.words()[0] & 0xFF;
+    let mut delta = None;
+>>>>>>> vibr/main
     let mut at = setpc.offset;
     for _ in 0..4 {
         let Some(prev) = before(at) else {
@@ -274,6 +327,7 @@ fn far_jump<'a>(
         if prev.offset + 4 * prev.words().len() != at {
             break;
         }
+<<<<<<< HEAD
         // Never look back across a control-flow boundary into another block.
         if !matches!(flow(prev, at, len), Ok(Flow::Next))
             || matches!(prev.name(), Some("s_swappc_b64" | "s_rfe_b64"))
@@ -281,6 +335,11 @@ fn far_jump<'a>(
             break;
         }
         let w = prev.words()[0];
+||||||| merged common ancestors
+        let w = prev.words[0];
+=======
+        let w = prev.words()[0];
+>>>>>>> vibr/main
         let (sdst, ssrc0, ssrc1) = ((w >> 16) & 0x7F, w & 0xFF, (w >> 8) & 0xFF);
         let imm = |code: u32| -> Option<u32> {
             match code {
@@ -294,6 +353,7 @@ fn far_jump<'a>(
             (Encoding::Sop2, Some("s_addc_u32"))
                 if hi.is_none() && lo.is_none() && sdst == n + 1 =>
             {
+<<<<<<< HEAD
                 let val = if ssrc0 == n + 1 {
                     imm(ssrc1)
                 } else if ssrc1 == n + 1 {
@@ -328,6 +388,17 @@ fn far_jump<'a>(
                     break;
                 };
                 lo = Some((true, val));
+||||||| merged common ancestors
+                // The low dword of a signed 64-bit offset: a backward jump
+                // adds a negative one (its high dword is -1).
+                let literal = i64::from(prev.words[1] as i32);
+                delta = Some(if op == "s_add_u32" { literal } else { -literal });
+=======
+                // The low dword of a signed 64-bit offset: a backward jump
+                // adds a negative one (its high dword is -1).
+                let literal = i64::from(prev.words()[1] as i32);
+                delta = Some(if op == "s_add_u32" { literal } else { -literal });
+>>>>>>> vibr/main
             }
             (Encoding::Sop1, Some("s_getpc_b64")) if sdst == n => {
                 let Some((is_sub, lo_val)) = lo else { break };
@@ -501,6 +572,7 @@ fn instruction(code: &[u8], offset: usize) -> Result<Instruction, ShaderError> {
             _ => return Err(isa(offset, "unknown encoding")),
         }
     };
+<<<<<<< HEAD
     if len > Instruction::MAX_WORDS {
         return Err(isa(offset, "instruction longer than the decoder's budget"));
     }
@@ -509,13 +581,33 @@ fn instruction(code: &[u8], offset: usize) -> Result<Instruction, ShaderError> {
         *w = word(i)?;
     }
     let opcode = opcode as u16;
+||||||| merged common ancestors
+=======
+    if len > Instruction::MAX_WORDS {
+        return Err(isa(offset, "instruction longer than the decoder's budget"));
+    }
+    let mut words = [0u32; Instruction::MAX_WORDS];
+    words[0] = w;
+    for (i, w) in words.iter_mut().enumerate().take(len).skip(1) {
+        *w = word(i)?;
+    }
+>>>>>>> vibr/main
     Ok(Instruction {
         offset,
         encoding,
+<<<<<<< HEAD
         opcode,
         words,
         len: len as u8,
         name: name(encoding, opcode),
+||||||| merged common ancestors
+        opcode: opcode as u16,
+        words: (0..len).map(word).collect::<Result<_, _>>()?,
+=======
+        opcode: opcode as u16,
+        words,
+        len: len as u8,
+>>>>>>> vibr/main
     })
 }
 
@@ -549,10 +641,7 @@ fn name(encoding: Encoding, opcode: u16) -> Option<&'static str> {
         Encoding::Global => (t::GLOBAL, opcode),
         Encoding::Scratch => (t::SCRATCH, opcode),
     };
-    table
-        .binary_search_by_key(&op, |&(o, _)| o)
-        .ok()
-        .map(|i| table[i].1)
+    table.lookup(op)
 }
 
 fn isa(offset: usize, reason: &'static str) -> ShaderError {
@@ -582,6 +671,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn vop3_cmpx_writes_exec() {
         let code = bytes(&[0xD411_0005, 0x0001_E501, S_ENDPGM]);
         let inst = &decode(&code).unwrap()[0];
@@ -635,9 +725,42 @@ mod tests {
             opcodes::FLAT,
             opcodes::GLOBAL,
             opcodes::SCRATCH,
+||||||| merged common ancestors
+    fn tables_are_sorted() {
+        for t in [
+            opcodes::SOP2,
+            opcodes::SOPK,
+            opcodes::SOP1,
+            opcodes::SOPC,
+            opcodes::SOPP,
+            opcodes::SMEM,
+            opcodes::VOP2,
+            opcodes::VOP1,
+            opcodes::VOPC,
+            opcodes::VOP3,
+            opcodes::VOP3P,
+            opcodes::VINTRP,
+            opcodes::DS,
+            opcodes::MUBUF,
+            opcodes::MTBUF,
+            opcodes::MIMG,
+            opcodes::FLAT,
+            opcodes::GLOBAL,
+            opcodes::SCRATCH,
+=======
+    fn vop3_names_match_aliased_encodings() {
+        for (encoding, start, count) in [
+            (Encoding::Vopc, 0x000, 0x100),
+            (Encoding::Vop2, 0x100, 0x40),
+            (Encoding::Vop1, 0x180, 0x80),
+>>>>>>> vibr/main
         ] {
-            assert!(t.windows(2).all(|w| w[0].0 < w[1].0));
+            for opcode in 0..count {
+                assert_eq!(name(Encoding::Vop3, start + opcode), name(encoding, opcode));
+            }
         }
+        assert_eq!(name(Encoding::Vop3, 0x14b), Some("v_fma_f32"));
+        assert_eq!(name(Encoding::Vop3, 0x17f), None);
     }
 
     #[test]
@@ -667,6 +790,21 @@ mod tests {
                 (44, 1, "s_endpgm"),
             ]
         );
+    }
+
+    #[test]
+    fn preserves_all_five_image_words() {
+        let image = [0xF080_0F0E, 0, 1, 2, 3];
+        let mut code = bytes(&image);
+        code.extend(S_ENDPGM.to_le_bytes());
+        let decoded = decode(&code).unwrap();
+
+        assert_eq!(decoded[0].words(), image);
+        assert_eq!(decoded[1].offset, 20);
+        assert!(matches!(
+            decode(&code[..16]),
+            Err(ShaderError::Isa { offset: 0, .. })
+        ));
     }
 
     #[test]

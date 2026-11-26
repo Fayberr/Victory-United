@@ -31,6 +31,11 @@ impl CacheKey {
     pub fn to_hex(&self) -> String {
         self.0.to_hex().to_string()
     }
+
+    /// The key [`CacheKey::to_hex`] wrote, `None` if `hex` is not one.
+    pub fn from_hex(hex: &str) -> Option<Self> {
+        blake3::Hash::from_hex(hex).ok().map(CacheKey)
+    }
 }
 
 /// Content-addressed store under the user's cache directory.
@@ -64,6 +69,7 @@ impl Cache {
         let output = converter
             .convert(input)
             .with_context(|| format!("converter {} v{}", converter.id(), converter.version()))?;
+<<<<<<< HEAD
         self.write(&key, &output)?;
         Ok(path)
     }
@@ -88,7 +94,52 @@ impl Cache {
             let _ = std::fs::remove_file(&tmp);
         }
         published.with_context(|| format!("publishing {}", path.display()))
+||||||| merged common ancestors
+        let dir = path.parent().expect("hashed path has a parent");
+        std::fs::create_dir_all(dir)?;
+        // Write-then-rename so readers never see partial output.
+        let tmp = tempfile_in(dir);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        let written = file.write_all(&output);
+        drop(file);
+        let published = written.and_then(|()| std::fs::rename(&tmp, &path));
+        if published.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        published?;
+        Ok(path)
+=======
+        write_atomic(&path, &output)?;
+        Ok(path)
+>>>>>>> vibr/main
     }
+
+    /// Stores `output` under `(converter, input)`, replacing what is there.
+    pub fn replace(&self, converter: &dyn Converter, input: &[u8], output: &[u8]) -> Result<()> {
+        write_atomic(&self.path_for(&CacheKey::new(converter, input)), output)
+    }
+}
+
+/// Write-then-rename so readers never see partial output.
+fn write_atomic(path: &Path, output: &[u8]) -> Result<()> {
+    let dir = path.parent().expect("hashed path has a parent");
+    std::fs::create_dir_all(dir)?;
+    let tmp = tempfile_in(dir);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)?;
+    let written = file.write_all(output);
+    drop(file);
+    let published = written.and_then(|()| std::fs::rename(&tmp, path));
+    if published.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    published?;
+    Ok(())
 }
 
 fn tempfile_in(dir: &Path) -> io::Result<(PathBuf, File)> {

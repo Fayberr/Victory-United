@@ -198,12 +198,26 @@ pub fn boxes(children: &[u32; 4], boxes: &[[f32; 6]; 4], ray: &Ray, sort: bool) 
         }
         let enter = near[0].max(near[1]).max(near[2]);
         let leave = far[0].min(far[1]).min(far[2]);
+<<<<<<< HEAD
         // A box whose minimum x is NaN is switched off. A child that is not
         // there may have inverted infinite bounds, which every ray enters at
         // minus infinity: it would be first of the sorted children and end
         // the walk before them (DexNom/VIctory bc3cd4b0). Their pointers must
         // also keep the miss distance when sorting real hits.
         if children[n] != NONE && !b[0].is_nan() && leave >= enter.max(0.0) && enter < ray.extent {
+||||||| merged common ancestors
+        // A box whose minimum x is NaN is switched off.
+        if !b[0].is_nan() && leave >= enter.max(0.0) && enter < ray.extent {
+=======
+        // A child that is not there is a miss, whatever bytes its box
+        // holds, and so is a box that is empty (a minimum above its
+        // maximum: +inf..-inf, or +65504..-65504 in 16-bit floats, what a
+        // builder leaves for no box) or holds a NaN: ordered compares say
+        // no to both, where the minimum and maximum above would take an
+        // inverted box for the box between its planes.
+        let there = children[n] != NONE && b[0] <= b[3] && b[1] <= b[4] && b[2] <= b[5];
+        if there && leave >= enter.max(0.0) && enter < ray.extent {
+>>>>>>> vibr/main
             ids[n] = children[n];
             distances[n] = enter;
         }
@@ -494,6 +508,7 @@ pub(crate) mod tests {
         assert_eq!(intersect(&node, 5, &ray, true), [8, NONE, NONE, NONE]);
     }
 
+<<<<<<< HEAD
     /// A node whose children that are not there have boxes the ray
     /// enters: the first before the one child's, the other two at the
     /// ray's origin. (The card tests run it too.)
@@ -529,6 +544,69 @@ pub(crate) mod tests {
         }
     }
 
+||||||| merged common ancestors
+=======
+    /// A node whose children that are not there have boxes the ray
+    /// enters: the first before the one child's, the other two at the
+    /// ray's origin. (The card tests run it too.)
+    pub(crate) const MISSING_FIRST: ([u32; 4], [[f32; 6]; 4]) = (
+        [NONE, 8, NONE, NONE],
+        [
+            [-1.0, -1.0, 1.0, 1.0, 1.0, 2.0],
+            [-1.0, -1.0, 3.0, 1.0, 1.0, 4.0],
+            [0.0; 6],
+            [0.0; 6],
+        ],
+    );
+
+    /// The ray of [`MISSING_FIRST`]: from the origin along +z.
+    pub(crate) fn missing_first() -> Ray {
+        Ray::new([0.0; 3], [0.0, 0.0, 1.0], 10.0)
+    }
+
+    #[test]
+    fn a_child_that_is_not_there_is_a_miss_whatever_its_box() {
+        let (children, boxes) = MISSING_FIRST;
+        let ray = missing_first();
+        for (node, kind) in [(box32(children, boxes), 5), (box16(children, boxes), 4)] {
+            // Sorted: the child that is there (entered at 3), then the
+            // three that are not, their boxes entered at 0 and 1.
+            assert_eq!(
+                intersect(&node, kind, &ray, true),
+                [8, NONE, NONE, NONE],
+                "kind {kind}"
+            );
+            // Not sorted: child order.
+            assert_eq!(intersect(&node, kind, &ray, false), children, "kind {kind}");
+        }
+    }
+
+    /// (Port of the test of fxceless/victory-fork #814.)
+    #[test]
+    fn a_box_with_a_nan_or_a_minimum_above_its_maximum_is_a_miss() {
+        let ray = Ray::new([-5.0, 0.0, 0.0], [1.0, 0.0, 0.0], 100.0);
+        for coord in 0..6 {
+            let mut bad = UNIT;
+            bad[coord] = f32::NAN;
+            let boxes = [bad, OFF, OFF, OFF];
+            assert_eq!(intersect(&box32([8, 16, 24, 32], boxes), 5, &ray, true), [NONE; 4], "32-bit, coordinate {coord}");
+            assert_eq!(intersect(&box16([8, 16, 24, 32], boxes), 4, &ray, true), [NONE; 4], "16-bit, coordinate {coord}");
+        }
+        let (inf, big) = (f32::INFINITY, 65504.0);
+        let boxes = [
+            [inf, inf, inf, -inf, -inf, -inf],
+            [-1.0, 1.0, -1.0, 1.0, -1.0, 1.0],
+            [big, big, big, -big, -big, -big],
+            // No thickness is still a box.
+            [0.0, -1.0, -1.0, 0.0, 1.0, 1.0],
+        ];
+        for (node, kind) in [(box32([8, 16, 24, 32], boxes), 5), (box16([8, 16, 24, 32], boxes), 4)] {
+            assert_eq!(intersect(&node, kind, &ray, true), [32, NONE, NONE, NONE], "kind {kind}");
+            assert_eq!(intersect(&node, kind, &ray, false), [NONE, NONE, NONE, 32], "kind {kind}");
+        }
+    }
+
+>>>>>>> vibr/main
     #[test]
     fn equal_distances_keep_child_order() {
         let node = box32([8, 16, 24, 32], [UNIT; 4]);

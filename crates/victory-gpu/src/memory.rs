@@ -78,15 +78,34 @@
 //! [`SWEEP`] frames.
 //! shortcut: a copy that is numbered is kept for the rest of the run, and
 //! there are at most [`COPIES`] of them (4 MiB windows mostly: 4 GiB at
-//! most). Every dispatch of such a shader brings all numbered copies up to
-//! date and, if it can store, declares all of them written (the bytes are
-//! compared on the CPU afterwards, as for any unordered access view): a
-//! dirty-page mask written by the shader would bound both.
+//! most). Every list with such a shader brings all numbered copies up to
+//! date.
+//!
+//! **Where shaders stored** is told by the shaders: a store by address sets
+//! its page's bit behind the fault notes, the host takes the bits when a
+//! submission has run ([`take_dirty`]), and a list whose shaders can store
+//! declares as written (snapshot before, compare after, as for any
+//! unordered access view) the copies its dispatches' written root views
+//! name and the pages whose bit was set in the last [`MARK_FRAMES`]
+//! frames. Declaring every numbered copy instead was 16 GB snapshotted and
+//! compared a frame with the whole builder running (4 to 6 s a frame).
+//! Port of fxceless/victory-fork #814.
+//! shortcut: the first stores to a page no root view named stay in the
+//! host's copy (the programs that walk the structures read them there)
+//! and reach title memory only when a later store to the page changes
+//! them again; the answer is a snapshot the card keeps, or the title's
+//! bytes taken as the snapshot of a page first found written.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
+<<<<<<< HEAD
 use victory_shader::emit::{MEMORY_FAULTS, MEMORY_PAGES, MEMORY_READ_ONLY};
+||||||| merged common ancestors
+use victory_shader::emit::{MEMORY_FAULTS, MEMORY_PAGES};
+=======
+use victory_shader::emit::{MEMORY_DIRTY_DWORDS, MEMORY_FAULTS, MEMORY_PAGES};
+>>>>>>> vibr/main
 use windows::Win32::Graphics::Direct3D12::*;
 
 use crate::descriptor::host::HostHeap;
@@ -97,6 +116,7 @@ use crate::shadow::Shadow;
 const COPIES: u32 = (1 << 12) - 1;
 /// A directory page.
 const PAGE: u64 = 1 << 16;
+<<<<<<< HEAD
 /// An arena's bytes.
 const ARENA: u64 = 64 << 20;
 /// What is compared at a time.
@@ -159,13 +179,24 @@ struct Packed {
     /// Its first two dwords in title memory.
     header: u64,
 }
+||||||| merged common ancestors
+=======
+/// A page counts as one shaders store to for this many frames after its
+/// bit was last found set ([`take_dirty`]): lists recorded while earlier
+/// submissions still run declare it too.
+const MARK_FRAMES: u64 = 8;
+>>>>>>> vibr/main
 
 struct Memory {
     /// The CPU's entries (number, offset), and the copy shaders read.
     directory: (*mut u32, Arc<Shadow>),
     faults: (ID3D12Resource, *mut u32, u64),
+    /// The fault notes of shaders whose stores are not copied back (`ready`
+    /// without `writes`): their bits must not make pages count as written.
+    quarantine_faults: (ID3D12Resource, *mut u32, u64),
     /// Copy `n` is `copies[n - 1]`.
     copies: Vec<Arc<Shadow>>,
+<<<<<<< HEAD
     /// Places of title buffers' copies among `copies`.
     numbers: HashMap<usize, usize>,
     /// Arenas: place in `copies`, address.
@@ -188,6 +219,13 @@ struct Memory {
     open: std::collections::HashSet<usize>,
     /// Pages taken from faults.
     faulted: usize,
+||||||| merged common ancestors
+=======
+    /// Pages whose bit was found set: the copy's index, and the frame.
+    dirty_pages: BTreeMap<u32, (usize, u64)>,
+    /// Counts the times a page joined `dirty_pages`.
+    dirty_changes: usize,
+>>>>>>> vibr/main
     /// Per host view heap (by address): the first slot of its run, and how
     /// many copies have their view there.
     heaps: HashMap<usize, (u32, u32)>,
@@ -269,9 +307,19 @@ impl Memory {
         let gpu = unsafe { faults.GetGPUVirtualAddress() };
         tracing::info!("title memory by address: a shader reads or writes through raw addresses");
         Some(Memory {
+<<<<<<< HEAD
             directory: (entries as *mut u32, directory),
             faults: (faults, data.cast::<u32>(), gpu),
+||||||| merged common ancestors
+            directory: make(u64::from(MEMORY_PAGES) * 2, "directory")?,
+            faults: make(u64::from(MEMORY_FAULTS), "faults")?,
+=======
+            directory: make(u64::from(MEMORY_PAGES) * 2, "directory")?,
+            faults: make(u64::from(MEMORY_FAULTS) + u64::from(MEMORY_DIRTY_DWORDS), "faults")?,
+            quarantine_faults: make(u64::from(MEMORY_FAULTS) + u64::from(MEMORY_DIRTY_DWORDS), "faults, stores not copied back")?,
+>>>>>>> vibr/main
             copies: Vec::new(),
+<<<<<<< HEAD
             numbers: HashMap::new(),
             arenas: Vec::new(),
             pages: HashMap::new(),
@@ -284,6 +332,11 @@ impl Memory {
             free: Vec::new(),
             open: Default::default(),
             faulted: 0,
+||||||| merged common ancestors
+=======
+            dirty_pages: BTreeMap::new(),
+            dirty_changes: 0,
+>>>>>>> vibr/main
             heaps: HashMap::new(),
             frame: u64::MAX,
             refused: Default::default(),
@@ -296,19 +349,55 @@ impl Memory {
         })
     }
 
+<<<<<<< HEAD
     /// `heap`'s run of slots for the copies' views (its first slot and how
     /// many copies have their view there), taken at its first use.
     fn run(&mut self, heap: &HostHeap) -> Option<(u32, u32)> {
         let key = std::ptr::from_ref(heap) as usize;
         if let Some(&run) = self.heaps.get(&key) {
             return Some(run);
+||||||| merged common ancestors
+    /// Gives the page of `address` its copy, if it has none and the memory
+    /// is the title's.
+    fn map(&mut self, address: u64) {
+        let page = address / PAGE;
+        // The last entry stays empty: addresses past the directory read it.
+        if page >= u64::from(MEMORY_PAGES) - 1 {
+            return;
+=======
+    /// Gives the page of `address` its copy, if it has none and the memory
+    /// is the title's. The copy's index in `copies`, if the page has one.
+    fn map(&mut self, address: u64) -> Option<usize> {
+        let page = address / PAGE;
+        // The last entry stays empty: addresses past the directory read it.
+        // The first megabyte is no title memory: a null pointer and what a
+        // shader adds to it (the host's own pages are there).
+        if !(16..u64::from(MEMORY_PAGES) - 1).contains(&page) {
+            return None;
+>>>>>>> vibr/main
         }
+<<<<<<< HEAD
         // Held for the heap's life: not given back with a list's slots.
         let base = heap.dynamic(COPIES + 1)?;
         // Every slot of the run: a number shows no view of another kind.
         for n in 0..=COPIES {
             heap.null_raw_uav_at(base + n);
+||||||| merged common ancestors
+        // SAFETY: inside the directory's mapping.
+        let entry = unsafe { self.directory.1.add(page as usize * 2) };
+        // SAFETY: as above.
+        if unsafe { entry.read() } != 0 {
+            return;
+=======
+        // SAFETY: inside the directory's mapping.
+        let entry = unsafe { self.directory.1.add(page as usize * 2) };
+        // SAFETY: as above.
+        let held = unsafe { entry.read() };
+        if held != 0 {
+            return Some(held as usize - 1);
+>>>>>>> vibr/main
         }
+<<<<<<< HEAD
         self.heaps.insert(key, (base, 0));
         Some((base, 0))
     }
@@ -324,6 +413,19 @@ impl Memory {
     fn copy_of(&self, page: u64) -> Option<usize> {
         if page >= u64::from(MEMORY_PAGES) {
             return None;
+||||||| merged common ancestors
+        let start = page * PAGE;
+        // A shader's pointer, or a constant taken for an address, may be
+        // anything: only memory the title has.
+        if self.refused.contains(&page) {
+            return;
+=======
+        let start = page * PAGE;
+        // A shader's pointer, or a constant taken for an address, may be
+        // anything: only memory the title has.
+        if self.refused.contains(&page) {
+            return None;
+>>>>>>> vibr/main
         }
         // SAFETY: an entry of the directory.
         ((unsafe { self.entry(page).read() } & !MEMORY_READ_ONLY) as usize).checked_sub(1)
@@ -343,6 +445,7 @@ impl Memory {
             && crate::watch::writes(at, at + PAGE as usize, true).is_some();
         if !ours {
             self.refused.insert(page);
+<<<<<<< HEAD
             self.stats.unknown += 1;
         }
         ours
@@ -358,7 +461,31 @@ impl Memory {
             static ONCE: std::sync::Once = std::sync::Once::new();
             ONCE.call_once(|| tracing::warn!(COPIES, "title memory by address: no number left for another copy; its pages read zeros"));
             return None;
+||||||| merged common ancestors
+            return;
+=======
+            return None;
+>>>>>>> vibr/main
         }
+<<<<<<< HEAD
+||||||| merged common ancestors
+        // The copy a root view at that address would get; a buffer that
+        // ends inside the page is passed over for what holds all of it.
+        let whole = |s: &Arc<Shadow>| s.offset_in(start).is_some_and(|_| s.left(start) >= PAGE);
+        let Some(shadow) = crate::shadow::find(start, 1)
+            .filter(whole)
+            .or_else(|| crate::shadow::find(start, PAGE).filter(whole))
+        else {
+            return;
+        };
+=======
+        // The copy a root view at that address would get; a buffer that
+        // ends inside the page is passed over for what holds all of it.
+        let whole = |s: &Arc<Shadow>| s.offset_in(start).is_some_and(|_| s.left(start) >= PAGE);
+        let shadow = crate::shadow::find(start, 1)
+            .filter(whole)
+            .or_else(|| crate::shadow::find(start, PAGE).filter(whole))?;
+>>>>>>> vibr/main
         // SAFETY: a live buffer.
         let flags = unsafe { shadow.buffer.GetDesc() }.Flags;
         if flags.0 & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS.0 == 0 {
@@ -403,6 +530,7 @@ impl Memory {
                     at += PAGE;
                 }
             }
+<<<<<<< HEAD
             // SAFETY: as above.
             if unsafe { self.entry(page).read() } == 0 {
                 close(self.entry(page), n, start - shadow.span().0);
@@ -633,6 +761,21 @@ impl Memory {
             known.frame = self.frame;
             if known.header == header && soon {
                 return;
+||||||| merged common ancestors
+            None => {
+                static ONCE: std::sync::Once = std::sync::Once::new();
+                ONCE.call_once(|| {
+                    tracing::warn!(COPIES, "title memory by address: no number left for another copy; its pages read zeros")
+                });
+                return;
+=======
+            None => {
+                static ONCE: std::sync::Once = std::sync::Once::new();
+                ONCE.call_once(|| {
+                    tracing::warn!(COPIES, "title memory by address: no number left for another copy; its pages read zeros")
+                });
+                return None;
+>>>>>>> vibr/main
             }
             if known.header != header {
                 self.gone(address);
@@ -705,11 +848,13 @@ impl Memory {
         if whole {
             shadow.resend(base + from, base + to);
         }
+        Some(n)
     }
 
     /// The pages shaders found empty since the last frame.
     fn take_faults(&mut self) {
         let mut pages = Vec::new();
+<<<<<<< HEAD
         for i in 1..MEMORY_FAULTS as usize {
             // SAFETY: inside the faults' mapping; the GPU may be writing,
             // a number missed now is written again next frame.
@@ -718,10 +863,32 @@ impl Memory {
             let page = unsafe { at.read_volatile() };
             if page != 0 {
                 pages.push(u64::from(page));
+||||||| merged common ancestors
+        for i in 1..MEMORY_FAULTS as usize {
+            // SAFETY: inside the faults' mapping; the GPU may be writing,
+            // a number missed now is written again next frame.
+            let at = unsafe { self.faults.1.add(i) };
+            // SAFETY: as above.
+            let page = unsafe { at.read_volatile() };
+            if page != 0 {
+                pages.push(page);
+=======
+        for notes in [self.faults.1, self.quarantine_faults.1] {
+            for i in 1..MEMORY_FAULTS as usize {
+                // SAFETY: inside the faults' mapping; the GPU may be writing,
+                // a number missed now is written again next frame.
+                let at = unsafe { notes.add(i) };
+>>>>>>> vibr/main
                 // SAFETY: as above.
-                unsafe { at.write_volatile(0) };
+                let page = unsafe { at.read_volatile() };
+                if page != 0 {
+                    pages.push(page);
+                    // SAFETY: as above.
+                    unsafe { at.write_volatile(0) };
+                }
             }
         }
+<<<<<<< HEAD
         if pages.is_empty() {
             return;
         }
@@ -732,6 +899,29 @@ impl Memory {
                 made += 1;
                 self.faulted += 1;
                 self.bring(page, page + 1);
+||||||| merged common ancestors
+        if !pages.is_empty() {
+            // Each is an access that read 0 or was dropped.
+            static SAID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if SAID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 50 {
+                tracing::warn!(
+                    pages = pages.len(),
+                    first = format_args!("{:#x}", u64::from(pages[0]) * PAGE),
+                    "title memory by address: shaders touched pages that had no copy (those accesses read 0 or were dropped); the copies are made now"
+                );
+=======
+        if !pages.is_empty() {
+            // Each is an access that read 0 or was dropped.
+            static SAID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if SAID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 50 {
+                tracing::warn!(
+                    pages = pages.len(),
+                    first = format_args!("{:#x}", u64::from(pages[0]) * PAGE),
+                    copies = self.copies.len(),
+                    written_pages = self.dirty_pages.len(),
+                    "title memory by address: shaders touched pages that had no copy (those accesses read 0 or were dropped); the copies are made now"
+                );
+>>>>>>> vibr/main
             }
         }
         self.stats.faults += pages.len() as u64;
@@ -755,6 +945,7 @@ impl Memory {
         }
     }
 
+<<<<<<< HEAD
     /// The structures named in a list's upload memory around `address`
     /// (instances of a top-level build: a structure's address is their last
     /// 8 bytes): the first page of each.
@@ -842,9 +1033,25 @@ impl Memory {
             self.faulted
         );
         self.stats.from = Some((now, self.frame));
+||||||| merged common ancestors
+    /// What a dispatch names: the copy around `address` and the 4 MiB
+    /// after it.
+    fn name(&mut self, address: u64) {
+        self.map(address);
+        self.map((address & !(CELL - 1)) + CELL);
+=======
+    /// What a dispatch names: the copy around `address` and the 4 MiB
+    /// after it. Their indices go to `named`, if given.
+    fn name(&mut self, address: u64, named: Option<&mut Vec<usize>>) {
+        let copies = [self.map(address), self.map((address & !(CELL - 1)) + CELL)];
+        if let Some(named) = named {
+            named.extend(copies.into_iter().flatten());
+        }
+>>>>>>> vibr/main
     }
 }
 
+<<<<<<< HEAD
 /// A list with this key ([`HostList::used`]) asks the builder for sizes.
 const SIZES: usize = usize::MAX - (9 << 33);
 
@@ -940,17 +1147,69 @@ fn merge(title: &[u8; PIECE], ours: &mut [u8], never: bool) -> usize {
     changed
 }
 
+||||||| merged common ancestors
+=======
+/// `pages` (page, its copy's index; in page order) as runs of title memory
+/// (the copy's index, address, bytes), each inside its copy (`spans`: the
+/// copies' address and length).
+fn coalesce_dirty_runs(pages: impl IntoIterator<Item = (u32, usize)>, spans: &[(u64, u64)]) -> Vec<(usize, u64, u64)> {
+    let mut runs: Vec<(usize, u64, u64)> = Vec::new();
+    for (page, copy) in pages {
+        let Some(&(start, len)) = spans.get(copy) else {
+            continue;
+        };
+        let (from, to) = ((u64::from(page) * PAGE).max(start), ((u64::from(page) + 1) * PAGE).min(start + len));
+        if from >= to {
+            continue;
+        }
+        match runs.last_mut() {
+            Some((last, _, end)) if *last == copy && from <= *end => *end = (*end).max(to),
+            _ => runs.push((copy, from, to)),
+        }
+    }
+    for (_, start, end) in &mut runs {
+        *end -= *start;
+    }
+    runs
+}
+
+>>>>>>> vibr/main
 /// Before a draw whose shader reads title memory by address: what its
+<<<<<<< HEAD
 /// root arguments name is made ready (`addresses`: its root views, of them
 /// `written` those it writes; `constants`: its root constants, see the
 /// module), every numbered copy
+||||||| merged common ancestors
+/// root arguments name gets its copies (`addresses`: its root views;
+/// `constants`: its root constants, see the module), every numbered copy
+=======
+/// root arguments name gets its copies (`read_addresses` and
+/// `write_addresses`: its root views, the latter those it stores through;
+/// `constants`: its root constants, see the module), every numbered copy
+>>>>>>> vibr/main
 /// has its view in `heap`'s run and is brought up to date when `list` is
+<<<<<<< HEAD
 /// submitted. None if the host cannot hold it; the draw is then dropped.
+||||||| merged common ancestors
+/// submitted (and, with `writes`, copied back after). None if the host
+/// cannot hold it; the draw is then dropped.
+=======
+/// submitted, and with `writes` what the shaders may store to is copied
+/// back after (see the module). None if the host cannot hold it; the draw
+/// is then dropped.
+>>>>>>> vibr/main
 pub(crate) fn ready(
     list: &HostList,
     heap: &HostHeap,
+<<<<<<< HEAD
     addresses: &[u64],
     written: &[u64],
+||||||| merged common ancestors
+    addresses: &[u64],
+=======
+    read_addresses: &[u64],
+    write_addresses: &[u64],
+>>>>>>> vibr/main
     constants: &[u32],
     use_: Use,
     threads: Option<[u32; 3]>,
@@ -964,15 +1223,30 @@ pub(crate) fn ready(
     if m.frame != frame {
         m.frame = frame;
         m.refused.clear();
+        m.dirty_pages.retain(|_, (_, last)| frame.wrapping_sub(*last) <= MARK_FRAMES);
         m.take_faults();
         m.look_again();
         m.report();
         #[cfg(feature = "diagnostics")]
         m.trace.look(frame);
     }
+<<<<<<< HEAD
     #[cfg(feature = "diagnostics")]
     if use_ != Use::Reads {
         m.trace.dispatch(frame, list, addresses, written, constants, threads);
+||||||| merged common ancestors
+    let numbered = m.copies.len();
+    for &address in addresses {
+        m.name(address);
+=======
+    // The copies the dispatch stores to through root views.
+    let mut named = Vec::new();
+    for &address in read_addresses {
+        m.name(address, None);
+    }
+    for &address in write_addresses {
+        m.name(address, Some(&mut named));
+>>>>>>> vibr/main
     }
     let builds = use_ != Use::Reads;
     if builds && sizes_wait() && asks_size(written, constants, threads) {
@@ -995,18 +1269,33 @@ pub(crate) fn ready(
             && (1..=0x1F).contains(&high)
             && c >= 0x1_0000
         {
+<<<<<<< HEAD
             let at = u64::from(c) | u64::from(high) << 32;
             if named(1, at) {
                 m.ready(at, 1);
             }
+||||||| merged common ancestors
+            m.name(u64::from(c) | u64::from(high) << 32);
+=======
+            m.name(u64::from(c) | u64::from(high) << 32, None);
+>>>>>>> vibr/main
         }
+<<<<<<< HEAD
         if builds && (0x0100_0000..0x2000_0000).contains(&c) {
             let at = u64::from(c) << 8;
             if named(1, at) {
                 m.ready(at, 1);
             }
+||||||| merged common ancestors
+        if c >= 0x0100_0000 {
+            m.name(u64::from(c) << 8);
+=======
+        if c >= 0x0100_0000 {
+            m.name(u64::from(c) << 8, None);
+>>>>>>> vibr/main
         }
     }
+<<<<<<< HEAD
     let mut came = [held(m) - before, 0, 0, 0];
     for &at in addresses.iter().filter(|&&a| a >= 1 << 32) {
         // (Several structures to a page.)
@@ -1037,6 +1326,27 @@ pub(crate) fn ready(
                 }
             });
             m.bring_up(list);
+||||||| merged common ancestors
+    let key = std::ptr::from_ref(heap) as usize;
+    let (base, made) = match m.heaps.get(&key) {
+        Some(&run) => run,
+        None => {
+            // Held for the heap's life: not given back with a list's slots.
+            let base = heap.dynamic(COPIES + 1)?;
+            heap.null_raw_uav_at(base);
+            (base, 0)
+=======
+    named.sort_unstable();
+    named.dedup();
+    let key = std::ptr::from_ref(heap) as usize;
+    let (base, made) = match m.heaps.get(&key) {
+        Some(&run) => run,
+        None => {
+            // Held for the heap's life: not given back with a list's slots.
+            let base = heap.dynamic(COPIES + 1)?;
+            heap.null_raw_uav_at(base);
+            (base, 0)
+>>>>>>> vibr/main
         }
         if builds && written.contains(&at) && list.first_use(usize::MAX - (4 << 33) - (at >> 2 & 0x7FFF_FFFF) as usize) {
             if let Some((start, len)) = crate::shadow::in_buffer(at, 1)
@@ -1084,20 +1394,87 @@ pub(crate) fn ready(
         heap.raw_uav_at(base + 1 + n as u32, &shadow.buffer, 0, len);
     }
     m.heaps.insert(key, (base, m.copies.len() as u32));
+<<<<<<< HEAD
     // Every copy by every list that has come to by-address memory, whoever
     // numbered it: an arena another list made while this one was being
     // recorded was brought up to date by that list's submission alone, which
     // may run after this one's (structures unpacked from zeros, and then
     // written over by the arena's first upload: in frames that stream much in
     // half of them, run light-8).
+||||||| merged common ancestors
+    // Once per list, and for copies numbered since: the builder alone
+    // dispatches hundreds of times a frame.
+    // shortcut: a copy another list numbers meanwhile is brought up to date
+    // by that list's submission, which may run after this one's.
+    const READ: usize = usize::MAX - 0x6d;
+    const WRITE: usize = usize::MAX - 0x6e;
+=======
+    // Each copy once per list, whichever list numbered it (the builder
+    // alone dispatches hundreds of times a frame; the title records its
+    // lists on several threads, and this list's shaders reach a copy
+    // another list numbered through the directory all the same). Copies
+    // are only ever added, so those a list has not taken yet are the last.
+    const READ: usize = usize::MAX - 0x6d;
+    const READ_COPY: usize = usize::MAX - 0x1_0000;
+    const WRITE_COPY: usize = usize::MAX - 0x2_0000;
+    const WRITE_PAGE: usize = usize::MAX - 0x400_0000;
+    const WRITE_PAGES: usize = usize::MAX - 0x1000_0000;
+>>>>>>> vibr/main
     let first_read = list.first_use(READ);
+<<<<<<< HEAD
     if list.first_use(usize::MAX - (6 << 33) - m.copies.len()) {
         m.bring_up(list);
+||||||| merged common ancestors
+    let first_write = writes && list.first_use(WRITE);
+    for (n, shadow) in m.copies.iter().enumerate() {
+        let (start, len) = shadow.span();
+        if first_read || n >= numbered {
+            shadow.refresh(list, start, len);
+        }
+        if writes && (first_write || n >= numbered) {
+            shadow.gpu_writes(list, start, len);
+        }
+=======
+    for (n, shadow) in m.copies.iter().enumerate().rev() {
+        if !list.first_use(READ_COPY - n) {
+            break;
+        }
+        let (start, len) = shadow.span();
+        shadow.refresh(list, start, len);
+    }
+    if writes {
+        WRITERS.store(true, std::sync::atomic::Ordering::Relaxed);
+        for &n in &named {
+            if list.first_use(WRITE_COPY - n) {
+                let (start, len) = m.copies[n].span();
+                m.copies[n].gpu_writes(list, start, len);
+            }
+        }
+        // The written pages once per list, and again when more have joined
+        // them (thousands of pages, hundreds of dispatches a frame).
+        if list.first_use(WRITE_PAGES - (m.dirty_changes & 0xFF_FFFF)) {
+            let spans: Vec<(u64, u64)> = m.copies.iter().map(|s| s.span()).collect();
+            let dirty: Vec<(u32, usize)> = m
+                .dirty_pages
+                .iter()
+                .filter(|&(&page, _)| list.first_use(WRITE_PAGE - page as usize))
+                .map(|(&page, &(n, _))| (page, n))
+                .collect();
+            for (n, start, len) in coalesce_dirty_runs(dirty, &spans) {
+                m.copies[n].gpu_writes(list, start, len);
+            }
+        }
+>>>>>>> vibr/main
     }
     if first_read {
         list.keep(&m.faults.0);
+<<<<<<< HEAD
         #[cfg(feature = "diagnostics")]
         m.dump(list, addresses);
+||||||| merged common ancestors
+=======
+        list.keep(&m.quarantine_faults.0);
+>>>>>>> vibr/main
     }
     #[cfg(feature = "diagnostics")]
     if use_ == Use::Reads {
@@ -1105,12 +1482,21 @@ pub(crate) fn ready(
     }
     let directory = &m.directory.1;
     Some(Ready {
+<<<<<<< HEAD
         directory: directory.gpu(directory.span().0),
         faults: m.faults.2,
+||||||| merged common ancestors
+        directory: m.directory.2,
+        faults: m.faults.2,
+=======
+        directory: m.directory.2,
+        faults: if writes { m.faults.2 } else { m.quarantine_faults.2 },
+>>>>>>> vibr/main
         base,
         count: m.copies.len() as u32,
     })
 }
+<<<<<<< HEAD
 
 
 /// Evicts cached descriptor-run state for `heap` when its owning `Heap` is
@@ -1484,3 +1870,93 @@ mod tests {
         }
     }
 }
+||||||| merged common ancestors
+=======
+
+/// A list whose shaders' stores by address are copied back was recorded:
+/// from then on there are bits to take.
+static WRITERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The pages whose bit is set in `mask` (`dwords` of it), in order; the
+/// bits are taken (a dword at once: a bit a shader sets meanwhile stays
+/// for the next time or is taken now).
+///
+/// # Safety
+/// `mask` points to `dwords` dwords that are valid and aligned.
+unsafe fn drain_dirty_bits(mask: *mut u32, dwords: usize, out: &mut Vec<u32>) {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    for i in 0..dwords {
+        // SAFETY: inside the mask (the caller's word).
+        let at = unsafe { mask.add(i) };
+        // SAFETY: as above. Most dwords are zero and need no exchange.
+        if unsafe { at.read_volatile() } == 0 {
+            continue;
+        }
+        // SAFETY: as above, and aligned.
+        let mut word = unsafe { AtomicU32::from_ptr(at) }.swap(0, Ordering::AcqRel);
+        while word != 0 {
+            out.push(i as u32 * 32 + word.trailing_zeros());
+            word &= word - 1;
+        }
+    }
+}
+
+/// After a submission ran: the pages its shaders stored to by address
+/// count as written for the lists recorded from now on (see the module).
+pub(crate) fn take_dirty() {
+    if !WRITERS.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let frame = crate::frame::current();
+    let mut guard = MEMORY.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(m) = guard.as_mut() else {
+        return;
+    };
+    let mut pages = Vec::new();
+    // SAFETY: the faults' buffer holds the mask behind the notes.
+    unsafe { drain_dirty_bits(m.faults.1.add(MEMORY_FAULTS as usize), MEMORY_DIRTY_DWORDS as usize, &mut pages) };
+    for page in pages {
+        // SAFETY: inside the directory's mapping (the mask has no more bits
+        // than the directory has entries).
+        let copy = unsafe { m.directory.1.add(page as usize * 2).read() } as usize;
+        if (1..=m.copies.len()).contains(&copy) && m.dirty_pages.insert(page, (copy - 1, frame)).is_none() {
+            m.dirty_changes += 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PAGE, coalesce_dirty_runs, drain_dirty_bits};
+
+    /// (Port of the tests of fxceless/victory-fork #814.)
+    #[test]
+    fn the_mask_gives_its_pages_and_is_left_empty() {
+        let mut words = vec![0u32; 8];
+        words[0] = 1 | 1 << 31;
+        words[5] = 1 << 7;
+        let mut pages = Vec::new();
+        // SAFETY: eight dwords of our own.
+        unsafe { drain_dirty_bits(words.as_mut_ptr(), words.len(), &mut pages) };
+        assert_eq!(pages, [0, 31, 5 * 32 + 7]);
+        assert!(words.iter().all(|&w| w == 0));
+    }
+
+    #[test]
+    fn written_pages_join_into_runs_inside_their_copies() {
+        // A copy that begins and ends inside pages, and a window.
+        let spans = [(0x1000_0000 + 0x4000, 3 * PAGE), (0x2000_0000, 4 << 20)];
+        let (a, b) = ((spans[0].0 / PAGE) as u32, (spans[1].0 / PAGE) as u32);
+        let runs = coalesce_dirty_runs([(a, 0), (a + 1, 0), (a + 3, 0), (b, 1), (b + 2, 1), (b + 3, 1), (999, 99)], &spans);
+        assert_eq!(
+            runs,
+            [
+                (0, spans[0].0, 2 * PAGE - 0x4000),
+                (0, u64::from(a + 3) * PAGE, 0x4000),
+                (1, u64::from(b) * PAGE, PAGE),
+                (1, u64::from(b + 2) * PAGE, 2 * PAGE),
+            ]
+        );
+    }
+}
+>>>>>>> vibr/main

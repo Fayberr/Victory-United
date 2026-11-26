@@ -342,6 +342,7 @@ pub(crate) fn range(src: usize, len: usize, us: u64, kind: u32) {
 /// runtime and of the driver alike (3.5 GB in run 60's gameplay, growing by
 /// some 2 MB a frame, and nothing said whose): this says which part is
 /// ours. Bigger blocks are allocations of their own in the map.
+<<<<<<< HEAD
 static OWN: [Bank<8>; BANKS] = [const { Bank([const { AtomicU64::new(0) }; 8]) }; BANKS];
 
 /// Count `i` of [`OWN`], all sets together (a block made by one thread and
@@ -349,6 +350,51 @@ static OWN: [Bank<8>; BANKS] = [const { Bank([const { AtomicU64::new(0) }; 8]) }
 fn owned(i: usize) -> u64 {
     OWN.iter().fold(0u64, |sum, b| sum.wrapping_add(b.0[i].load(Relaxed)))
 }
+||||||| merged common ancestors
+static OWN: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+=======
+///
+/// Counted per thread, in [`SHARDS`] cache lines ([`own_now`] sums them):
+/// with one set of counters every allocation of every thread wrote the
+/// same cache line, and six `victory translate` workers spent 45% of their
+/// time waiting for it.
+static OWN: [Shard; SHARDS] = [const { Shard([const { AtomicU64::new(0) }; 8]) }; SHARDS];
+const SHARDS: usize = 64;
+
+#[repr(align(64))]
+struct Shard([AtomicU64; 8]);
+
+/// The counters this thread adds to: threads take the shards in turn.
+fn shard() -> &'static [AtomicU64; 8] {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    thread_local! {
+        // (no destructor and no lazy start: safe inside the allocator)
+        static MINE: std::cell::Cell<usize> = const { std::cell::Cell::new(usize::MAX) };
+    }
+    let n = MINE
+        .try_with(|mine| {
+            if mine.get() == usize::MAX {
+                mine.set(NEXT.fetch_add(1, Relaxed) % SHARDS);
+            }
+            mine.get()
+        })
+        .unwrap_or(0);
+    &OWN[n].0
+}
+
+/// [`OWN`] over all threads. A block released by another thread than the
+/// one that made it leaves both their shards off by it and the sum right
+/// (the counters wrap).
+fn own_now() -> [u64; 8] {
+    let mut sum = [0u64; 8];
+    for shard in &OWN {
+        for (total, n) in sum.iter_mut().zip(&shard.0) {
+            *total = total.wrapping_add(n.load(Relaxed));
+        }
+    }
+    sum
+}
+>>>>>>> vibr/main
 
 /// The class of [`OWN`] a block of `size` bytes counts in.
 fn block_class(size: usize) -> usize {
@@ -362,7 +408,12 @@ fn block_class(size: usize) -> usize {
 
 fn own(size: usize, made: bool) {
     let class = block_class(size);
+<<<<<<< HEAD
     let own = &OWN[bank()].0;
+||||||| merged common ancestors
+=======
+    let own = shard();
+>>>>>>> vibr/main
     if made {
         own[class].fetch_add(size as u64, Relaxed);
         own[4 + class].fetch_add(1, Relaxed);
@@ -480,7 +531,13 @@ mod command_tests {
 
 #[cfg(test)]
 mod own_tests {
+<<<<<<< HEAD
     use super::{block_class, owned};
+||||||| merged common ancestors
+    use super::{OWN, block_class};
+=======
+    use super::{block_class, own_now};
+>>>>>>> vibr/main
     use std::sync::atomic::Ordering::Relaxed;
 
     #[test]
@@ -518,10 +575,35 @@ mod own_tests {
     #[test]
     fn a_block_is_counted_while_it_lives() {
         let block = vec![1u8; 8 << 20];
+<<<<<<< HEAD
         assert!(owned(3) >= 8 << 20);
         assert!(owned(7) >= 1);
+||||||| merged common ancestors
+        assert!(OWN[3].load(Relaxed) >= 8 << 20);
+        assert!(OWN[7].load(Relaxed) >= 1);
+=======
+        assert!(own_now()[3] >= 8 << 20);
+        assert!(own_now()[7] >= 1);
+>>>>>>> vibr/main
         drop(block);
+<<<<<<< HEAD
         assert!(owned(7) < u64::MAX / 2, "no count below zero");
+||||||| merged common ancestors
+        assert!(OWN[7].load(Relaxed) < u64::MAX / 2, "no count below zero");
+=======
+        assert!(own_now()[7] < u64::MAX / 2, "no count below zero");
+    }
+
+    /// A block made on one thread and released on another leaves the sum
+    /// as it was.
+    #[test]
+    fn a_block_released_by_another_thread_is_not_left_counted() {
+        let block = std::thread::spawn(|| vec![1u8; 8 << 20]).join().unwrap();
+        assert!(own_now()[3] >= 8 << 20);
+        drop(block);
+        // (this thread's shard is now below zero, the other's above)
+        assert!(own_now()[3] < u64::MAX / 2 && own_now()[7] < u64::MAX / 2);
+>>>>>>> vibr/main
     }
 }
 
@@ -798,7 +880,7 @@ fn log_memory() {
          host copies the host renders to or writes: {} alive {:.0} MB; host copies the title \
          fills: {} alive {:.0} MB ({} of them placed), {} let go {:.0} MB and {} made again \
          {:.0} MB since the start; {} host copies made in all; passes that made none for lack of \
-         room: {}; the card: {:.0} MB in use of a budget of {:.0} MB, {:.0} MB of the PC's memory \
+         room: {} ({} slots given up to make room; {} heap slots marked taken by shaders); the card: {:.0} MB in use of a budget of {:.0} MB, {:.0} MB of the PC's memory \
          shared with it in use",
         census[2],
         mb(census[3]),
@@ -813,14 +895,54 @@ fn log_memory() {
         mb(kinds[5]),
         kinds[6],
         crate::draw::HEAP_TEXTURES_FULL.load(Relaxed),
+        crate::draw::HEAP_TEXTURES_EVICTED.load(Relaxed),
+        crate::draw::HEAP_SLOTS_USED.load(Relaxed),
         mb(card[1]),
         mb(card[0]),
         mb(card[3]),
     );
+<<<<<<< HEAD
     {
         let [textures, staging] = crate::pool::memory();
         tracing::info!("memory in blocks (VICTORY_TEXTURE_POOL=0 turns them off): {textures} MB of textures, {staging} MB of their staging buffers");
     }
+||||||| merged common ancestors
+=======
+    // The card's memory by kind, and what of the PC's memory shaders read.
+    let targets = crate::resource::target_census();
+    let on_card = crate::shadow::card_bytes();
+    let known = census[1] + census[5] + on_card.iter().sum::<u64>();
+    tracing::info!(
+        "the card's memory by kind: {:.0} MB in use of a budget of {:.0} MB: render targets, \
+         depth and unordered access textures {:.0} MB (twins {:.0} MB; {:.0} MB of them share \
+         title memory with another, which spans {:.0} MB; {:.0} MB at the address of another \
+         with the same description; {} larger than their title memory; {} let go as their \
+         title memory was unmapped, {:.0} MB, and {} taken from a texture at the same \
+         address with the same description, since the start), textures the title fills \
+         {:.0} MB, title buffers {:.0} MB (and {:.0} MB before-twins), windows {:.0} MB, the rest \
+         (lists, views, scratch, the swap chain, the driver) {:.0} MB; the PC's memory the card \
+         reads: {:.0} MB in use, of it windows {:.0} MB and title buffers' copies {:.0} MB",
+        mb(card[1]),
+        mb(card[0]),
+        mb(census[1]),
+        mb(census[7]),
+        mb(targets[0]),
+        mb(targets[2]),
+        mb(targets[1]),
+        targets[3],
+        targets[4],
+        mb(targets[5]),
+        crate::resource::SHARED_TARGETS.load(Relaxed),
+        mb(census[5]),
+        mb(on_card[0]),
+        mb(on_card[1]),
+        mb(on_card[2]),
+        mb(card[1].saturating_sub(known)),
+        mb(card[3]),
+        mb(copies[3]),
+        mb(copies[1].saturating_sub(copies[3])),
+    );
+>>>>>>> vibr/main
     let targets = crate::resource::targets_census();
     tracing::info!(
         "host copies the sweep never lets go: {} the host renders to or writes {:.0} MB ({} of them placed {:.0} MB);          of them {} have title memory that is not mapped now {:.0} MB, {} were not used for 30 s and are held by no          list and no slot {:.0} MB, {} are both {:.0} MB; and {} copies of textures the title fills that the host          copied into {:.0} MB",
@@ -887,7 +1009,13 @@ fn log_memory() {
     let alive: Vec<u64> = crate::host::ALIVE.iter().map(|a| a.load(Relaxed)).collect();
     let window = crate::shadow::window_use();
     let views = crate::descriptor::views_kept();
+<<<<<<< HEAD
     let own: Vec<u64> = (0..8).map(owned).collect();
+||||||| merged common ancestors
+    let own: Vec<u64> = OWN.iter().map(|o| o.load(Relaxed)).collect();
+=======
+    let own = own_now();
+>>>>>>> vibr/main
     tracing::info!(
         "memory, what holds it: {} host lists alive; their scratch memory: {} chunks {:.0} MB, of          them {} chunks {:.0} MB spare ({} taken from the spare ones so far); their other upload          buffers: {} alive {:.0} MB; windows outside buffers (grid {} KiB): {:.0} MB of their          pages ever copied, {} shown by descriptor slots {:.0} MB, {} held by lists or the pass          over the heap {:.0} MB, {} asked for without a length {:.0} MB; buffer views of the heap          whose slot showed another copy than the one brought up to date: {}; distinct views          kept: {} ({} free) {:.0} MB; our own allocations: {:.0} MB in {} blocks (under 4 KiB          {:.0} MB in {}, to 64 KiB {:.0} MB in {}, to 1 MiB {:.0} MB in {}, larger {:.0} MB in {})",
         alive[0],
@@ -1392,7 +1520,6 @@ pub(crate) fn log(frames: f64) {
         c[C::WatchKnownView as usize],
         crate::watch::AHEAD_VIEWS.swap(0, Relaxed) as f64 / frames,
     );
-    crate::draw::window_line(frames);
     tracing::info!(
         "  waits for every earlier shader write, per frame: {:.0} for the title's barrier groups, {:.0} \
          for its barriers on buffers; {:.0} indirect commands bounded (a dispatch of ours between two \

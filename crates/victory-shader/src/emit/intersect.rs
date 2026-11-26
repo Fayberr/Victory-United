@@ -150,6 +150,20 @@ impl<'a> Lower<'a> {
             x.push(self.i32_of(v)?);
         }
         let pointer = x[0];
+        if crate::emit::rt_miss() {
+            // A box node: no child; any other kind: the triangle miss.
+            let head = self.cur;
+            let (k4, k6) = (self.s.m.i32(4), self.s.m.i32(6));
+            let pair = self.s.m.bin(head, Bin::And, pointer, k6);
+            let is_box = self.s.m.cmp(head, pred::EQ, pair, k4);
+            let none = self.s.m.i32(bvh::NONE);
+            for (k, miss) in bvh::MISS.iter().enumerate() {
+                let miss = self.s.m.i32(miss.to_bits());
+                let r = self.s.m.select(head, is_box, none, miss);
+                self.write(inst, Reg::V(dst + k as u8), r, guard);
+            }
+            return Ok(());
+        }
         let pointer_high = wide.then(|| x[1]);
         let f: Vec<V> = x[1 + usize::from(wide)..]
             .iter()
@@ -474,9 +488,11 @@ impl<'a> Lower<'a> {
             let leave = self.binary(36, far[0], far[1]);
             let leave = self.binary(36, leave, far[2]);
             let from = self.binary(35, enter, fzero);
-            // Ordered compares: a NaN anywhere is a miss.
+            // Ordered compares: a NaN anywhere is a miss, and so is an
+            // empty box, its minimum above its maximum (`bvh::boxes`).
             let through = self.s.m.cmp(c, pred::OGE, leave, from);
             let before = self.s.m.cmp(c, pred::OLT, enter, ray.extent);
+<<<<<<< HEAD
             let off = self.is_nan_f32(bx[0]);
             let on = self.s.m.bool(true);
             let on = self.s.m.bin(c, Bin::Xor, off, on);
@@ -488,6 +504,23 @@ impl<'a> Lower<'a> {
                 Some(there) => self.s.m.bin(c, Bin::And, hit, there[n]),
                 None => hit,
             };
+||||||| merged common ancestors
+            let off = self.is_nan_f32(bx[0]);
+            let on = self.s.m.bool(true);
+            let on = self.s.m.bin(c, Bin::Xor, off, on);
+            let hit = self.s.m.bin(c, Bin::And, through, before);
+            let hit = self.s.m.bin(c, Bin::And, hit, on);
+=======
+            let mut hit = self.s.m.bin(c, Bin::And, through, before);
+            for a in 0..3 {
+                let ordered = self.s.m.cmp(c, pred::OLE, bx[a], bx[3 + a]);
+                hit = self.s.m.bin(c, Bin::And, hit, ordered);
+            }
+            // A child that is not there is a miss, whatever bytes its box
+            // holds: it must not sort before a child that is.
+            let there = self.s.m.cmp(c, pred::IULT, children[n], none);
+            let hit = self.s.m.bin(c, Bin::And, hit, there);
+>>>>>>> vibr/main
             ids[n] = self.s.m.select(c, hit, children[n], none);
             distances[n] = self.s.m.select(c, hit, enter, infinity);
         }

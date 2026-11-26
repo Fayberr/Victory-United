@@ -145,9 +145,14 @@ pub extern "system" fn CreateWindowExW(
         )
     };
     hook(hwnd);
+<<<<<<< HEAD
     if top {
         stand_in(hwnd, ex_style, style, x, y, width, height);
     }
+||||||| merged common ancestors
+=======
+    caption(parent, hwnd);
+>>>>>>> vibr/main
     hwnd
 }
 
@@ -187,12 +192,18 @@ pub extern "system" fn CreateWindowExA(
         )
     };
     hook(hwnd);
+<<<<<<< HEAD
     if top {
         stand_in(hwnd, ex_style, style, x, y, width, height);
     }
+||||||| merged common ancestors
+=======
+    caption(parent, hwnd);
+>>>>>>> vibr/main
     hwnd
 }
 
+<<<<<<< HEAD
 /// `VICTORY_HIDDEN_WINDOW=1`: the title's top-level window is made off the
 /// screens (right of the virtual desktop), out of the taskbar and never
 /// activated by a click, for unattended runs on a machine in use. The swap
@@ -212,6 +223,18 @@ fn hide(parent: HWND, ex_style: u32, x: i32, y: i32) -> (u32, i32, i32) {
     (ex_style | wm::WS_EX_TOOLWINDOW | wm::WS_EX_NOACTIVATE, right + 64, 0)
 }
 
+||||||| merged common ancestors
+=======
+/// A top-level window starts with this fork's caption, not the title's own
+/// (its code name); the frame counter adds its numbers once frames show.
+fn caption(parent: HWND, hwnd: HWND) {
+    if parent.is_null() && !hwnd.is_null() {
+        // SAFETY: a window this thread just created, and a NUL-terminated text.
+        unsafe { wm::SetWindowTextW(hwnd, w!("Brazil | VIctory")) };
+    }
+}
+
+>>>>>>> vibr/main
 /// A console title sizes its window to its render target (
 /// the title: 3840x2160 on a Series X), which can exceed the host's screen.
 /// A top-level window larger than the work area is shrunk to fit, keeping
@@ -858,11 +881,13 @@ mod tests {
             std::ptr::null(),
         );
         assert!(!hwnd.is_null());
-        let mut text = [0u16; 16];
-        // SAFETY: our window; the buffer holds 16 characters.
+        let mut text = [0u16; 32];
+        // SAFETY: our window; the buffer holds 32 characters.
         unsafe {
+            let n = wm::GetWindowTextW(hwnd, text.as_mut_ptr(), 32);
+            assert_eq!(String::from_utf16_lossy(&text[..n as usize]), "Brazil | VIctory");
             wm::SetWindowTextW(hwnd, w!("after"));
-            let n = wm::GetWindowTextW(hwnd, text.as_mut_ptr(), 16);
+            let n = wm::GetWindowTextW(hwnd, text.as_mut_ptr(), 32);
             assert_eq!(String::from_utf16_lossy(&text[..n as usize]), "after");
             assert!(!wm::GetPropW(hwnd, TITLE_PROC).is_null());
             assert!(is_title_window(hwnd) && !is_title_window(null));

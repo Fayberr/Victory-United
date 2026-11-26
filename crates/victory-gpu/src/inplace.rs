@@ -481,6 +481,30 @@ pub(crate) fn view_census(at: usize, len: usize) -> (usize, usize) {
     (in_views, multi)
 }
 
+/// For the census (`crate::census`): how many bytes of `[at, at + len)` are
+/// physical-page views, and how many of those show a page that has more
+/// than one address. Logging only.
+pub(crate) fn view_census(at: usize, len: usize) -> (usize, usize) {
+    let v = views();
+    let end = at.saturating_add(len);
+    let (mut in_views, mut multi) = (0, 0);
+    for (&base, &(vlen, section, offset)) in v.views.range(..end) {
+        let (lo, hi) = (base.max(at), (base + vlen).min(end));
+        if lo >= hi {
+            continue;
+        }
+        in_views += hi - lo;
+        let first = (lo - base) / K64;
+        let last = (hi - base).div_ceil(K64);
+        for k in first..last {
+            if v.pages.get(&(section, offset + (k * K64) as u64)).is_some_and(|l| l.len() > 1) {
+                multi += (base + (k + 1) * K64).min(hi) - (base + k * K64).max(lo);
+            }
+        }
+    }
+    (in_views, multi)
+}
+
 /// What `[at, at + len)` showed is gone ([`crate::title_memory_remapped`]):
 /// the views that touch it are forgotten (the runtime tells again those it
 /// maps anew). Returns any remaining views of physical pages whose view count
@@ -1814,8 +1838,13 @@ mod tests {
             assert!(same(start as *const u8, &got), "the GPU reads the title buffer's bytes");
             rig.store(&placed.buffer, placed.bias + 16, &[0xa5; 64]).unwrap();
             assert!(same((start + 16) as *const u8, &[0xa5; 64]), "the GPU's write is at the title's address");
+            // The rig's command list still references the placed buffer, and
+            // the software adapter keeps the opened heap (and so the pages
+            // locked) until the list goes.
+            drop(rig);
             drop(placed);
             // Half of it decommitted: turned down, the host not asked.
+<<<<<<< HEAD
             // The heap lets go of the pages a moment after its last
             // reference, if the adapter is busy with other tests' work.
             let gone = (0..500).any(|_| {
@@ -1827,6 +1856,18 @@ mod tests {
             });
             assert!(gone, "the heap keeps the pages");
             assert!(matches!(place_part(&device, start, len), Err(None)));
+||||||| merged common ancestors
+            assert_ne!(mem::VirtualFree(base.add(2 * K64).cast(), K64, mem::MEM_DECOMMIT), 0);
+            assert!(matches!(place_part(&device, start, len), Err(None)));
+=======
+            // Some software adapters (the CI runner's) release the heap later
+            // still; the refusal itself is `private_whole`'s, tested above.
+            if mem::VirtualFree(base.add(2 * K64).cast(), K64, mem::MEM_DECOMMIT) != 0 {
+                assert!(matches!(place_part(&device, start, len), Err(None)));
+            } else {
+                eprintln!("decommit refused while the heap is released: {}", std::io::Error::last_os_error());
+            }
+>>>>>>> vibr/main
             mem::VirtualFree(base.cast(), 0, mem::MEM_RELEASE);
         }
     }

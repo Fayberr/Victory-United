@@ -55,6 +55,41 @@ fn spilled(native: &NativeProgram) -> Option<Vec<(u32, u32)>> {
     (spilled.iter().map(|e| e.0).min() == Some(FIRST) && registers >= 2).then_some(spilled)
 }
 
+/// `v_cmpx_gt_u32 exec, s0, v0`; the SGPR goes in the low bits.
+const LIMIT: u32 = 0x7DA8_0000;
+
+/// The SGPR [`limit_threads`] reads the thread limit from in `native`, if it
+/// changed the program: the first one the hardware does not initialize.
+pub(crate) fn thread_limit(native: &NativeProgram) -> Option<u8> {
+    let StageIo::Cs(cs) = &native.io else {
+        return None;
+    };
+    let s = cs.initialized_sgprs();
+    let first = native.code.first_chunk::<4>().map(|w| u32::from_le_bytes(*w));
+    (first == Some(LIMIT | u32::from(s)) && is_spilled(native)).then_some(s)
+}
+
+/// Makes a spilled compute program run only the threads its dispatch
+/// launches. The structure builder dispatches by thread count (`DispatchX`
+/// with the thread-dimensions flag): the last group is then partial, the
+/// threads past the count are in no wave's EXEC, and the programs count on
+/// it (they store one node per launched lane and address by the number of
+/// lanes in EXEC). The host only dispatches whole groups, so the program
+/// gets the comparison the hardware makes as its first instruction:
+/// `v_cmpx_gt_u32 exec, s<limit>, v0`, with the limit in the first SGPR the
+/// hardware leaves alone ([`crate::io::Input::ThreadLimit`]). Code offsets
+/// in errors and logs are then 4 past the container's.
+pub fn limit_threads(native: &mut NativeProgram) {
+    let StageIo::Cs(cs) = &native.io else {
+        return;
+    };
+    let s = u32::from(cs.initialized_sgprs());
+    // (the table's entries become the entry values of SGPRs FIRST and up)
+    if is_spilled(native) && s < FIRST {
+        native.code.splice(0..0, (LIMIT | s).to_le_bytes());
+    }
+}
+
 /// Whether `native` reads its root parameters from a spilled user-data
 /// table. (In the title exactly the compute programs of the
 /// console's ray-tracing structure builder do.)

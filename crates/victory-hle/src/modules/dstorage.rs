@@ -619,6 +619,7 @@ struct Job {
 // SAFETY: as for `Lane`.
 unsafe impl Send for Job {}
 
+<<<<<<< HEAD
 /// How many storage workers run at once. The pool reads, inflates and unpacks
 /// in parallel, so the useful count is the PC's **physical** cores: logical
 /// processors count SMT twins, which add little to a pool that already
@@ -697,6 +698,76 @@ fn physical_cores() -> Option<usize> {
     None
 }
 
+||||||| merged common ancestors
+=======
+/// How many storage workers run at once. The pool reads, inflates and unpacks
+/// in parallel, so the useful count is the PC's **physical** cores: logical
+/// processors count SMT twins, which add little to a pool that already
+/// oversubscribes the cores the submitting thread and the copies need. One
+/// 8-core/16-thread laptop ran 16 workers and had the submitting thread
+/// waiting behind them; 8 measured `copying back` at 2.4-3.5 ms/MB against
+/// 5.7 ms/MB with 16. `VICTORY_DSTORAGE_WORKERS` sets the count outright.
+fn worker_count() -> usize {
+    static COUNT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *COUNT.get_or_init(|| {
+        if let Some(n) = std::env::var("VICTORY_DSTORAGE_WORKERS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|n| (1..=64).contains(n))
+        {
+            return n;
+        }
+        let logical = std::thread::available_parallelism().map_or(4, |n| n.get());
+        physical_cores().unwrap_or_else(|| (logical / 2).max(2)).clamp(1, 32)
+    })
+}
+
+/// The PC's physical cores, if the system will say so (`RelationProcessorCore`
+/// returns one record per core, whatever its SMT twins are).
+#[cfg(windows)]
+fn physical_cores() -> Option<usize> {
+    use windows_sys::Win32::System::SystemInformation::{
+        GetLogicalProcessorInformationEx, RelationProcessorCore,
+        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+    };
+    let mut len: u32 = 0;
+    // SAFETY: a null buffer asks for the size; the call fails with
+    // ERROR_INSUFFICIENT_BUFFER and fills `len`.
+    unsafe { GetLogicalProcessorInformationEx(RelationProcessorCore, std::ptr::null_mut(), &mut len) };
+    if len == 0 {
+        return None;
+    }
+    let mut buf = vec![0u8; len as usize];
+    // SAFETY: the buffer is `len` bytes and the call writes at most that.
+    let ok = unsafe {
+        GetLogicalProcessorInformationEx(
+            RelationProcessorCore,
+            buf.as_mut_ptr().cast::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(),
+            &mut len,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    let mut at = 0usize;
+    let mut cores = 0usize;
+    while at + 8 <= buf.len() {
+        // SAFETY: the record's own header; `Size` is its first field.
+        let size = unsafe { std::ptr::read_unaligned(buf.as_ptr().add(at).cast::<u32>()) } as usize;
+        if size < 8 || at + size > buf.len() {
+            break;
+        }
+        cores += 1;
+        at += size;
+    }
+    (cores > 0).then_some(cores)
+}
+
+#[cfg(not(windows))]
+fn physical_cores() -> Option<usize> {
+    None
+}
+>>>>>>> vibr/main
 /// The scheduler, with its workers started on first use; `None` if not
 /// even one worker could start.
 fn scheduler() -> Option<&'static Scheduler> {
@@ -1720,8 +1791,33 @@ fn execute(read: &QueuedRead, pages: Option<&PageRuns>) -> Result<(), HRESULT> {
             return Err(fail(E_INVALIDARG, "source larger than destination"));
         }
         let size = request.source_size as usize;
+<<<<<<< HEAD
         return into_destination(request, pages, size, |out| read_into(request, out).map(|()| size))
             .map_err(|hr| fail(hr, "copying"));
+||||||| merged common ancestors
+        // A file read into a title address is the kernel's write, and the
+        // kernel does not fault into the GPU side's guard: a block guarded
+        // again between `kernel_will_write` and the read (the guard over all
+        // the views of a page protects other views from other threads) made
+        // the read fail with ERROR_INVALID_USER_BUFFER, and the title stops
+        // at the failed request (runs amd-C and amd-C2, seconds after the
+        // world's first frame). It is read beside and copied in: our copy
+        // faults into the guard like the title's own writes.
+        let bounce = options & (PAGE_DESTINATION | MEMORY_SOURCE) == 0;
+        return into_destination(request, size, |out| {
+            if !bounce {
+                return read_into(request, out).map(|()| size);
+            }
+            let mut data = vec![0; size];
+            read_into(request, &mut data)?;
+            out.copy_from_slice(&data);
+            Ok(size)
+        })
+        .map_err(|hr| fail(hr, "copying"));
+=======
+        return into_destination(request, size, |out| copy_into(request, out).map(|()| size))
+            .map_err(|hr| fail(hr, "copying"));
+>>>>>>> vibr/main
     }
     let tables = if bc != 0 { Some(bcpack_tables()?) } else { None };
     let source = read_source(request).map_err(|hr| fail(hr, "reading the source"))?;
@@ -1939,11 +2035,82 @@ fn read_into(request: &Request, out: &mut [u8]) -> Result<(), HRESULT> {
     result
 }
 
+<<<<<<< HEAD
 /// Whether `file` was opened without the file cache.
 fn unbuffered(file: &File) -> bool {
     file.unbuffered
 }
 
+||||||| merged common ancestors
+=======
+/// `HRESULT_FROM_WIN32` of `ERROR_NOACCESS` and `ERROR_INVALID_USER_BUFFER`:
+/// the kernel's read met a page it could not write.
+const NO_ACCESS: HRESULT = 0x8007_03E6_u32 as i32;
+const INVALID_USER_BUFFER: HRESULT = 0x8007_06F8_u32 as i32;
+
+/// [`read_into`] for an uncompressed request, straight into the
+/// destination. The destination was opened for the kernel
+/// (`victory_gpu::kernel_will_write`), but a texture check on another
+/// thread may guard it again before the read lands, and the kernel's write
+/// then fails (`ERROR_INVALID_USER_BUFFER`) where the title's own would
+/// fault into the guard; the title takes a failed request for a fatal one
+/// (an int3, run of 24/11). So such a read is done again into our memory
+/// and copied in by us, which the guard sees like the title's write.
+fn copy_into(request: &Request, out: &mut [u8]) -> Result<(), HRESULT> {
+    match read_into(request, out) {
+        Err(NO_ACCESS | INVALID_USER_BUFFER) => {
+            let mut staged = vec![0; out.len()];
+            read_into(request, &mut staged)?;
+            if victory_gpu::write_title_memory(out.as_mut_ptr(), &staged) {
+                tracing::debug!(len = out.len(), "dstorage: a guarded destination, copied in");
+                Ok(())
+            } else {
+                Err(NO_ACCESS)
+            }
+        }
+        result => result,
+    }
+}
+
+/// Makes the committed pages of `[at, at + len)` that cannot be written
+/// read-write; returns each such region with its old protection.
+fn open_read_only(at: usize, len: usize) -> Vec<(usize, usize, u32)> {
+    use windows_sys::Win32::System::Memory::{
+        MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY, PAGE_GUARD,
+        PAGE_READWRITE, PAGE_WRITECOPY, VirtualProtect, VirtualQuery,
+    };
+    let (mut p, end, mut opened) = (at, at + len, Vec::new());
+    while p < end {
+        // SAFETY: plain data filled in by the query.
+        let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: a valid out pointer of the right size.
+        if unsafe { VirtualQuery(p as *const _, &mut info, size_of_val(&info)) } == 0 {
+            break;
+        }
+        let region_end = (info.BaseAddress as usize + info.RegionSize).min(end);
+        let writable = PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+        if info.State == MEM_COMMIT && (info.Protect & writable == 0 || info.Protect & PAGE_GUARD != 0) {
+            let mut old = 0;
+            // SAFETY: committed title memory the request names; only its protection changes.
+            if unsafe { VirtualProtect(p as *const _, region_end - p, PAGE_READWRITE, &mut old) } != 0 {
+                opened.push((p, region_end - p, old));
+            }
+        }
+        p = region_end;
+    }
+    opened
+}
+
+/// Gives the regions [`open_read_only`] opened their protection back.
+fn close_again(regions: &[(usize, usize, u32)]) {
+    for &(at, len, old) in regions {
+        let mut was = 0;
+        // SAFETY: regions we opened just before.
+        unsafe { windows_sys::Win32::System::Memory::VirtualProtect(at as *const _, len, old, &mut was) };
+    }
+}
+
+>>>>>>> vibr/main
 /// Runs `fill` on the destination's first `len` bytes; `fill` returns how
 /// many it produced. GPU-visible destinations are host memory like the
 /// rest (GPU address = CPU address), so an address is written in place;
@@ -1964,7 +2131,12 @@ fn into_destination(
         // SAFETY: the title's destination holds `destination_size` bytes, at
         // least `len`, and nothing else writes it until completion.
         let out = unsafe { std::slice::from_raw_parts_mut(request.destination.cast::<u8>(), len) };
+        // The console's engine writes past the processor's page protection;
+        // pages the title made read-only (no guard of ours) are opened for
+        // the write and closed again (a fault here, run of 25/11).
+        let closed = open_read_only(request.destination as usize, len);
         let filled = fill(out).map(drop);
+<<<<<<< HEAD
         drop(writing);
         // Again now that the bytes are there: a texture looked at in between
         // was uploaded without them (`xmem::pages_written`).
@@ -1973,9 +2145,26 @@ fn into_destination(
         } else {
             victory_gpu::title_memory_written(request.destination as usize, len, false);
         }
+||||||| merged common ancestors
+        // Said again now that the bytes are there (upstream's c75fdba holds
+        // the blocks open over the read and marks them once more at its
+        // end): a copy or a texture pass that took the memory while the
+        // read was under way took what was there before. Counted; acted on
+        // only with `VICTORY_PAGE_WRITES=all`.
+        victory_gpu::title_memory_written(request.destination as usize, len, false);
+=======
+        close_again(&closed);
+        // Said again now that the bytes are there (upstream's c75fdba holds
+        // the blocks open over the read and marks them once more at its
+        // end): a copy or a texture pass that took the memory while the
+        // read was under way took what was there before. Counted; acted on
+        // only with `VICTORY_PAGE_WRITES=all`.
+        victory_gpu::title_memory_written(request.destination as usize, len, false);
+>>>>>>> vibr/main
         return filled;
     }
     let offset = (request.page_offset & 0xffff) as usize;
+<<<<<<< HEAD
     let late;
     let runs = match pages {
         Some(runs) => Some(runs),
@@ -1985,6 +2174,18 @@ fn into_destination(
             late.as_ref()
         }
     };
+||||||| merged common ancestors
+    // SAFETY: the title passes a page number per 64 KiB of destination,
+    // which holds at least `len` bytes from `offset`.
+    let pages = unsafe {
+        std::slice::from_raw_parts(
+            request.destination.cast::<usize>(),
+            (offset + len).div_ceil(PAGE),
+        )
+    };
+=======
+    let pages = &filled(request.destination.cast(), (offset + len).div_ceil(PAGE))[..];
+>>>>>>> vibr/main
     // Consecutive pages of one allocation (the usual case): written in
     // place through one view.
     if let Some(runs) = runs
@@ -2057,16 +2258,27 @@ fn into_destination(
         tracing::warn!(
             offset,
             len,
+<<<<<<< HEAD
             why = if runs.is_some() { "the host could not map them" } else { "a page number is unknown" },
             tries,
             given_up,
             on_a_retry = RETRIED[0].load(Ordering::Relaxed),
             "dstorage: a destination's physical pages could not be written; its request fails (VICTORY_DSTORAGE_RETRIES)"
+||||||| merged common ancestors
+            pages = pages.len(),
+            "dstorage: a destination's physical pages could not be written (unknown page or a host failure); its request fails"
+=======
+            pages = pages.len(),
+            first = format_args!("{:#x}", pages.first().copied().unwrap_or(0)),
+            options = format_args!("{:#x}", request.options),
+            "dstorage: a destination's physical pages could not be written (unknown page or a host failure); its request fails"
+>>>>>>> vibr/main
         );
         Err(E_INVALIDARG)
     }
 }
 
+<<<<<<< HEAD
 /// Requests whose destination page numbers were read again because one was
 /// not known when a worker took the request.
 static DESTINATION_WAITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -2083,6 +2295,43 @@ fn read_list(list: *const usize, offset: usize, len: usize) -> Vec<usize> {
         .collect()
 }
 
+||||||| merged common ancestors
+=======
+/// The page numbers of a destination. The title fills the array after it
+/// enqueued the request (a copy taken then holds zeros, or the numbers of
+/// the array's last use), so it is read when the request runs; a number
+/// that is still zero then is waited for, a tenth of a second at most.
+fn filled(array: *const usize, n: usize) -> Vec<usize> {
+    static LATE: AtomicU64 = AtomicU64::new(0);
+    let read = || -> Vec<usize> {
+        // SAFETY: the title passes a page number per 64 KiB of destination
+        // and keeps the array until the request completes; it may write it
+        // from another thread meanwhile.
+        (0..n).map(|i| unsafe { array.add(i).read_volatile() }).collect()
+    };
+    let mut pages = read();
+    if !pages.contains(&0) {
+        return pages;
+    }
+    let began = std::time::Instant::now();
+    while pages.contains(&0) && began.elapsed() < std::time::Duration::from_millis(100) {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        pages = read();
+    }
+    let late = LATE.fetch_add(1, Ordering::Relaxed) + 1;
+    if late <= 8 || late.is_power_of_two() {
+        tracing::warn!(
+            requests = late,
+            pages = n,
+            waited_ms = began.elapsed().as_millis() as u64,
+            filled = !pages.contains(&0),
+            "dstorage: a request ran before its page array was filled"
+        );
+    }
+    pages
+}
+
+>>>>>>> vibr/main
 /// Slots by the 2020 order, which the argument shapes at
 /// the title's call sites match (0x18, 0x20, 0x30 and 0x40 are called).
 static QUEUE_VTABLE: Methods<12> = Methods([
@@ -2247,6 +2496,20 @@ mod tests {
     }
 
     #[test]
+    fn a_page_array_filled_late_is_waited_for() {
+        let array: &'static [std::sync::atomic::AtomicUsize] = Box::leak(Box::new([std::sync::atomic::AtomicUsize::new(7), std::sync::atomic::AtomicUsize::new(0)]));
+        let title = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            array[1].store(8, Ordering::Release);
+        });
+        assert_eq!(filled(array.as_ptr().cast(), 2), [7, 8]);
+        title.join().unwrap();
+        // One never filled is given up on.
+        array[0].store(0, Ordering::Release);
+        assert_eq!(filled(array.as_ptr().cast(), 2), [0, 8]);
+    }
+
+    #[test]
     fn request_layout_is_the_titles() {
         assert_eq!(size_of::<Request>(), 0x48);
         assert_eq!(std::mem::offset_of!(Request, destination_size), 0x18);
@@ -2294,6 +2557,40 @@ mod tests {
         assert_eq!(raw, plain[5000..6000]);
         assert_eq!(inflated, plain);
         void(queue, 0x40);
+    }
+
+    fn writable_now(at: usize) -> bool {
+        use windows_sys::Win32::System::Memory::{MEMORY_BASIC_INFORMATION, PAGE_READWRITE, VirtualQuery};
+        // SAFETY: plain data filled in by the query.
+        let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: a valid out pointer of the right size.
+        unsafe { VirtualQuery(at as *const _, &mut info, size_of_val(&info)) };
+        info.Protect == PAGE_READWRITE
+    }
+
+    /// Read-only memory no guard of ours holds is written all the same,
+    /// like the console's engine does, and stays read-only afterwards.
+    #[test]
+    fn reads_into_read_only_memory_land_and_keep_its_protection() {
+        use windows_sys::Win32::System::Memory::{
+            MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READONLY, VirtualAlloc, VirtualFree,
+        };
+        let plain = pattern(6576);
+        let (_dir, file) = file_with(&plain);
+        // SAFETY: a fresh read-only allocation, freed at the end.
+        let at = unsafe { VirtualAlloc(std::ptr::null(), 8192, MEM_RESERVE | MEM_COMMIT, PAGE_READONLY) };
+        assert!(!at.is_null());
+        let (queue, array) = (new_queue(0), status_array(1));
+        enqueue(queue, &request(0, at, plain.len(), file, 0, plain.len()));
+        enqueue_status(queue, array, 0);
+        void(queue, 0x30);
+        assert_eq!(wait(array, 0), S_OK);
+        // SAFETY: our readable allocation.
+        assert_eq!(unsafe { std::slice::from_raw_parts(at.cast::<u8>(), plain.len()) }, &plain[..]);
+        assert!(!writable_now(at as usize), "the title's protection is given back");
+        void(queue, 0x40);
+        // SAFETY: our allocation.
+        unsafe { VirtualFree(at, 0, MEM_RELEASE) };
     }
 
     #[test]

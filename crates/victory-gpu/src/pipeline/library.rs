@@ -495,10 +495,20 @@ fn open(device: &ID3D12Device1, blob: Blob) -> Option<Library> {
                     saving: RwLock::new(()),
                 });
             }
+<<<<<<< HEAD
             Err(e) => {
                 rejected = true;
                 tracing::warn!(error = %e, "host pipeline library rejected; starting an empty one (the rejected file is kept as {REJECTED_FILE})");
             }
+||||||| merged common ancestors
+            Err(e) => tracing::info!(error = %e, "host pipeline library rejected; starting an empty one"),
+=======
+            Err(e) => tracing::warn!(
+                error = %e,
+                why = rejected_why(e.code()),
+                "host pipeline library rejected; starting an empty one (the early list still starts its pipelines during loading)"
+            ),
+>>>>>>> vibr/main
         }
     } else {
         tracing::info!("no host pipeline library yet; starting an empty one");
@@ -524,6 +534,17 @@ fn open(device: &ID3D12Device1, blob: Blob) -> Option<Library> {
         added: AtomicU64::new(0),
         saving: RwLock::new(()),
     })
+}
+
+/// Why the host refused a saved library, for the log: a driver update (the
+/// usual case) or another adapter makes every saved pipeline unusable.
+fn rejected_why(code: windows::core::HRESULT) -> &'static str {
+    use windows::Win32::Foundation::{D3D12_ERROR_ADAPTER_NOT_FOUND, D3D12_ERROR_DRIVER_VERSION_MISMATCH};
+    match code {
+        D3D12_ERROR_DRIVER_VERSION_MISMATCH => "saved by another driver version",
+        D3D12_ERROR_ADAPTER_NOT_FOUND => "saved on another adapter",
+        _ => "damaged or not a library",
+    }
 }
 
 /// A pipeline's name in the library: the hash of what its host
@@ -684,9 +705,18 @@ fn save_pause(took: std::time::Duration) -> std::time::Duration {
 }
 
 /// Writes the library and the early list if pipelines were added since the
+<<<<<<< HEAD
 /// last save and [`save_pause`] has passed (or `now`). One thread saves; the
 /// others do not wait for it.
+||||||| merged common ancestors
+/// last save and `SAVE_EVERY` has passed (or `now`).
+=======
+/// last save and `SAVE_EVERY` has passed (or `now`). The early list is
+/// written even without a host library, or when serialising it fails, so
+/// the next run still starts this run's pipelines early.
+>>>>>>> vibr/main
 pub(crate) fn save(now: bool) {
+<<<<<<< HEAD
     use std::sync::TryLockError;
     // When the last save ended, and how long it took. Held for all of a
     // save: worker saves and shutdown's `save(true)` never race on the
@@ -701,6 +731,24 @@ pub(crate) fn save(now: bool) {
             Ok(last) => last,
             Err(TryLockError::Poisoned(e)) => e.into_inner(),
             Err(TryLockError::WouldBlock) => return,
+||||||| merged common ancestors
+    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    const SAVE_EVERY: std::time::Duration = std::time::Duration::from_secs(20);
+    let (Some(dir), Some(library)) = (DIR.get(), library()) else { return };
+    {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if !now && last.is_some_and(|t| t.elapsed() < SAVE_EVERY) {
+            return;
+=======
+    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    const SAVE_EVERY: std::time::Duration = std::time::Duration::from_secs(20);
+    let Some(dir) = DIR.get() else { return };
+    let library = library();
+    {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if !now && last.is_some_and(|t| t.elapsed() < SAVE_EVERY) {
+            return;
+>>>>>>> vibr/main
         }
     };
     if !now && last.is_some_and(|(ended, took)| ended.elapsed() < save_pause(took)) {
@@ -722,13 +770,26 @@ fn write_out(dir: &std::path::Path, library: &Library) {
     // added: the library on disk is then what it was, and only the early
     // list is written (a title pipeline first drawn with wrote all 1,352 MB
     // of the library again: run 60's second save).
+<<<<<<< HEAD
     let (bytes, write_early) = {
+||||||| merged common ancestors
+    let bytes = {
+=======
+    let bytes = if let Some(library) = library {
+>>>>>>> vibr/main
         let _all = one_call();
         // No store between asking the size and writing; loads go on.
         let _alone = library.saving.write().unwrap_or_else(|e| e.into_inner());
         let added = library.added.load(Ordering::Relaxed);
+<<<<<<< HEAD
         let used_changed = USED_CHANGED.swap(false, Ordering::Relaxed);
         if !used_changed && added == 0 {
+||||||| merged common ancestors
+        if !USED_CHANGED.swap(false, Ordering::Relaxed) && added == 0 {
+=======
+        let listed = USED_CHANGED.swap(false, Ordering::Relaxed);
+        if !listed && added == 0 {
+>>>>>>> vibr/main
             return;
         }
         let bytes = if added == 0 {
@@ -743,11 +804,25 @@ fn write_out(dir: &std::path::Path, library: &Library) {
                 }
                 tracing::warn!(error = %e, "host pipeline library not serialised");
                 let _ = std::fs::remove_file(&tmp);
+<<<<<<< HEAD
                 if used_changed {
                     USED_CHANGED.store(true, Ordering::Relaxed);
                 }
                 return;
+||||||| merged common ancestors
+                return;
+=======
+                if !listed {
+                    return;
+                }
+                0
+            } else {
+                library.added.store(0, Ordering::Relaxed);
+                SAVED.store(size as u64, Ordering::Relaxed);
+                size
+>>>>>>> vibr/main
             }
+<<<<<<< HEAD
             library.added.store(0, Ordering::Relaxed);
             SAVED.store(size as u64, Ordering::Relaxed);
             size
@@ -763,7 +838,30 @@ fn write_out(dir: &std::path::Path, library: &Library) {
         })
     } else {
         Ok(())
+||||||| merged common ancestors
+            library.added.store(0, Ordering::Relaxed);
+            SAVED.store(size as u64, Ordering::Relaxed);
+            size
+        }
+=======
+        }
+    } else if USED_CHANGED.swap(false, Ordering::Relaxed) {
+        0
+    } else {
+        return;
+>>>>>>> vibr/main
     };
+<<<<<<< HEAD
+||||||| merged common ancestors
+    let used: Vec<String> = USED.lock().unwrap_or_else(|e| e.into_inner()).iter().flatten().cloned().collect();
+    let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
+=======
+    // With what earlier runs listed: a run that asks for no title pipeline
+    // (`victory warm`) wrote an empty list over theirs, and the next world
+    // began with every pipeline still to be asked for.
+    let used: Vec<String> = used().iter().flatten().cloned().collect();
+    let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
+>>>>>>> vibr/main
     if bytes > 0 && library_written.is_ok() {
         // In place unless the system refused and the new one waits beside it.
         let in_place = !dir.join(NEXT_FILE).exists();
@@ -868,6 +966,7 @@ fn temp_path(path: &std::path::Path) -> std::path::PathBuf {
 /// `path`: a reader never sees a part. Serialised so concurrent worker and
 /// shutdown saves do not race on the same staging file or target rename.
 fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+<<<<<<< HEAD
     static WRITING: Mutex<()> = Mutex::new(());
     let _guard = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = temp_path(path);
@@ -920,6 +1019,25 @@ pub(crate) fn note_time(key: &str, ms: u64) {
         // With the next save of the early list.
         USED_CHANGED.store(true, Ordering::Relaxed);
     }
+||||||| merged common ancestors
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)
+=======
+    use std::sync::atomic::AtomicU64;
+    static WRITING: Mutex<()> = Mutex::new(());
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let _guard = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".tmp-{}-{n}", std::process::id()));
+    let tmp = path.with_file_name(name);
+    let res = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
+    if res.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    res
+>>>>>>> vibr/main
 }
 
 /// Title pipeline keys requested by draws or dispatches (this run and the last).
@@ -1162,6 +1280,7 @@ mod tests {
             assert!(bytes == &expected[..], "page {page} of the replaced library no longer reads as the old file");
         }
     }
+<<<<<<< HEAD
 
     #[test]
     fn concurrent_write_atomically_never_fails_or_truncates() {
@@ -1209,4 +1328,30 @@ mod tests {
             .collect();
         assert!(leftovers.is_empty(), "leftover tmp files: {leftovers:?}");
     }
+||||||| merged common ancestors
+=======
+
+    #[test]
+    fn concurrent_write_atomically_never_fails_or_truncates() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("host-pipelines.bin");
+        let threads: Vec<_> = (0..4)
+            .map(|t| {
+                let target = target.clone();
+                std::thread::spawn(move || {
+                    let payload = vec![b'a' + t as u8; 4096];
+                    for _ in 0..30 {
+                        write_atomically(&target, &payload).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let final_bytes = std::fs::read(&target).unwrap();
+        assert_eq!(final_bytes.len(), 4096);
+        assert!(final_bytes.iter().all(|&b| b == final_bytes[0]));
+    }
+>>>>>>> vibr/main
 }

@@ -70,9 +70,26 @@ pub(crate) struct Shader {
     /// ([`Shader::walks`]).
     #[cfg(windows)]
     walks: OnceLock<bool>,
+<<<<<<< HEAD
     /// Whether it is the program [`crate::ambient`] follows.
     #[cfg(windows)]
     pub(crate) resolves_light: bool,
+||||||| merged common ancestors
+=======
+    /// Its result gets the least indirect light ([`crate::ambient`]).
+    #[cfg(windows)]
+    pub(crate) resolves_light: bool,
+    /// It draws the sky as the title reflects it ([`crate::ambient::SKY`]).
+    #[cfg(windows)]
+    pub(crate) draws_sky: bool,
+    /// It writes the title's reflections for the last time in a frame
+    /// ([`crate::ambient::REFLECTED`]).
+    #[cfg(windows)]
+    pub(crate) ends_reflections: bool,
+    /// A pixel program of the title's decoration bake ([`bakes`]).
+    #[cfg(windows)]
+    pub(crate) bakes: bool,
+>>>>>>> vibr/main
 }
 
 impl std::fmt::Debug for Shader {
@@ -107,6 +124,38 @@ pub(crate) fn kept() -> [u64; 7] {
     ]
 }
 
+/// Whether a container is the program whose result gets the least
+/// indirect light ([`crate::ambient::PROGRAM`], by its name inside).
+#[cfg(windows)]
+fn resolves_light(bytes: &[u8]) -> bool {
+    named(bytes, crate::ambient::PROGRAM)
+}
+
+/// Whether a container holds `name` (a program's name inside it).
+#[cfg(windows)]
+fn named(bytes: &[u8], name: &[u8]) -> bool {
+    bytes.windows(name.len()).any(|w| w == name)
+}
+
+/// Whether a container is a pixel program of the title's decoration bake,
+/// by its name inside (`PS_DecorationBlend_*`, `PS_BakeDecorations_*`: 51
+/// of them; a list of four hashes missed the one the cutscene's faces were
+/// baked with, and those faces came out black).
+#[cfg(windows)]
+fn bakes(bytes: &[u8]) -> bool {
+    [&b"PS_DecorationBlend_"[..], b"PS_BakeDecorations_"]
+        .iter()
+        .any(|name| bytes.windows(name.len()).any(|w| w == *name))
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn bake_programs_are_known_by_name() {
+    assert!(bakes(b"..\0PS_DecorationBlend_0011_ff00f5de_Wrapped\0.."));
+    assert!(bakes(b"PS_BakeDecorations_0100_583f45fe_Wrapped"));
+    assert!(!bakes(b"PS_DeferredPedTexturedNC_6a40bffd_Wrapped"));
+}
+
 /// The shared container for `bytes`.
 fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
     let full = blake3::hash(bytes);
@@ -117,11 +166,42 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
         .or_insert_with(|| {
             KEPT[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             KEPT[1].fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
+<<<<<<< HEAD
             Arc::new(Shader::new(stage, bytes, full))
+||||||| merged common ancestors
+            Arc::new(Shader {
+                stage,
+                hash: full.to_hex()[..16].to_owned(),
+                container: bytes.to_vec(),
+                #[cfg(windows)]
+                translated: OnceLock::new(),
+                #[cfg(windows)]
+                walks: OnceLock::new(),
+            })
+=======
+            Arc::new(Shader {
+                stage,
+                hash: full.to_hex()[..16].to_owned(),
+                container: bytes.to_vec(),
+                #[cfg(windows)]
+                translated: OnceLock::new(),
+                #[cfg(windows)]
+                walks: OnceLock::new(),
+                #[cfg(windows)]
+                resolves_light: resolves_light(bytes),
+                #[cfg(windows)]
+                draws_sky: named(bytes, crate::ambient::SKY),
+                #[cfg(windows)]
+                ends_reflections: named(bytes, crate::ambient::REFLECTED),
+                #[cfg(windows)]
+                bakes: bakes(bytes),
+            })
+>>>>>>> vibr/main
         })
         .clone()
 }
 
+<<<<<<< HEAD
 impl Shader {
     fn new(stage: &'static str, bytes: &[u8], hash: blake3::Hash) -> Shader {
         Shader {
@@ -140,6 +220,33 @@ impl Shader {
     }
 }
 
+||||||| merged common ancestors
+=======
+/// Puts the translation of a container of the title's into the cache on
+/// disk, and with `compute` its host pipeline into the driver's library,
+/// before any run wants them (`victory warm`). Whether it translated, and
+/// whether it has a pipeline (`None`: not asked for).
+#[cfg(windows)]
+pub fn warm(stage: &'static str, container: &[u8], compute: bool) -> (bool, Option<bool>) {
+    let full = blake3::hash(container);
+    // Not through the table, which lets nothing go.
+    let shader = Arc::new(Shader {
+        stage,
+        hash: full.to_hex()[..16].to_owned(),
+        container: container.to_vec(),
+        translated: OnceLock::new(),
+        walks: OnceLock::new(),
+        resolves_light: resolves_light(container),
+        draws_sky: named(container, crate::ambient::SKY),
+        ends_reflections: named(container, crate::ambient::REFLECTED),
+        bakes: bakes(container),
+    });
+    let translated = shader.translated().is_some();
+    let made = (translated && compute).then(|| make::warm(vec![shader]));
+    (translated, made)
+}
+
+>>>>>>> vibr/main
 /// A translated shader and the console resources its code reads.
 #[cfg(windows)]
 pub(crate) struct Translated {
@@ -150,6 +257,7 @@ pub(crate) struct Translated {
     /// Whether the shader's code can store to buffer memory ([`stores`]);
     /// true when its code is not known.
     pub(crate) stores: bool,
+<<<<<<< HEAD
     /// Whether the code can write anything through unordered access:
     /// [`stores`], or an image store or atomic (a texture shaders write).
     /// True when its code is not known. What `VICTORY_BARRIER_MERGE` asks
@@ -165,6 +273,11 @@ pub(crate) struct Translated {
     pub(crate) used_written: Vec<bool>,
     /// A buffer store whose descriptor could not be matched to `used`.
     pub(crate) write_unknown: bool,
+||||||| merged common ancestors
+=======
+    /// A compute shader's thread-group size (zeros for the others).
+    pub(crate) threads: [u32; 3],
+>>>>>>> vibr/main
 }
 
 #[cfg(windows)]
@@ -236,6 +349,7 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
     };
     let host = crate::shader_cache::host_shader(container)?;
     let stores = programs.is_empty() || programs.iter().any(stores);
+<<<<<<< HEAD
     let writes = stores || programs.iter().any(image_stores);
     let threads = programs.iter().find_map(|p| match &p.io {
         victory_shader::native::StageIo::Cs(cs) if cs.threads.iter().all(|&n| n > 0) => Some(cs.threads),
@@ -281,6 +395,32 @@ fn image_stores(program: &victory_shader::NativeProgram) -> bool {
         matches!(i.encoding, Encoding::Mimg)
             && i.name().is_none_or(|n| n.contains("store") || n.contains("atomic"))
     })
+||||||| merged common ancestors
+    let used = programs
+        .into_iter()
+        .find(|p| {
+            matches!(
+                p.stage,
+                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
+            )
+        })
+        .map(|p| p.used)
+        .unwrap_or_default();
+    Ok(Translated { host, used, stores })
+=======
+    let program = programs.into_iter().find(|p| {
+        matches!(
+            p.stage,
+            HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
+        )
+    });
+    let threads = match program.as_ref().map(|p| &p.io) {
+        Some(victory_shader::native::StageIo::Cs(cs)) => cs.threads,
+        _ => [0; 3],
+    };
+    let used = program.map(|p| p.used).unwrap_or_default();
+    Ok(Translated { host, used, stores, threads })
+>>>>>>> vibr/main
 }
 
 /// The compute pipelines of the console's ray-tracing structure builder

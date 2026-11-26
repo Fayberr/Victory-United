@@ -146,6 +146,10 @@ pub(crate) struct Shadow {
     /// With [`cards`], for a big title buffer: `buffer` is in the card's
     /// own memory, and this is the rest of the copy.
     card: Option<Card>,
+    /// Serializes `merge_under_writes` (write lock) against concurrent
+    /// `card_merge_relay` workers merging disjoint 64 KiB pieces (read lock)
+    /// on a carded copy.
+    card_merge_lock: std::sync::RwLock<()>,
     /// A window of title memory outside buffers, not a title buffer's copy.
     window: bool,
     /// A window whose one buffer is in a GPU upload heap ([`window_upload`]):
@@ -178,9 +182,8 @@ struct Card {
     /// first declared for the copy, and compared with the card's side, on
     /// the card, after each submission that declares some.
     before: Mutex<Option<ID3D12Resource>>,
-    /// Offsets of the copy whose bytes changed on the CPU's side and have
-    /// not gone to the card's side yet.
-    dirty: Mutex<Vec<(usize, usize)>>,
+    /// Pending uploads and comparison-hash refreshes, in offsets into this copy.
+    dirty: Mutex<CardUpdates>,
     /// With [`relay`]: the offsets that went from `dirty` to the card's
     /// side, each with the number of the send that took it
     /// ([`card_dirty`]), kept until a fetch sent after it has been merged.
@@ -902,6 +905,7 @@ fn window_card_most() -> u64 {
 /// Bytes alive of windows' card sides ([`window_card_most`]).
 static WINDOW_CARD_BYTES: AtomicU64 = AtomicU64::new(0);
 
+<<<<<<< HEAD
 /// Whether windows that go to the card's memory are one buffer in a GPU
 /// upload heap, which the CPU fills directly (`VICTORY_WINDOW_UPLOAD=1`;
 /// off by default), where the device has such heaps
@@ -943,6 +947,20 @@ fn window_upload_for(size: u64) -> Option<(ID3D12Resource, *mut u8)> {
     made
 }
 
+||||||| merged common ancestors
+=======
+/// For the line of the card's memory by kind: bytes alive of title buffers'
+/// card sides, of their "before" twins, and of windows' card sides.
+#[cfg(feature = "diagnostics")]
+pub(crate) fn card_bytes() -> [u64; 3] {
+    [
+        CARD_BYTES[0].load(Ordering::Relaxed),
+        CARD_BYTES[1].load(Ordering::Relaxed),
+        WINDOW_CARD_BYTES.load(Ordering::Relaxed),
+    ]
+}
+
+>>>>>>> vibr/main
 /// A buffer in the card's memory for a window of `size` bytes, if it is to
 /// be there ([`window_card_most`]).
 fn window_card_for(size: u64) -> Option<ID3D12Resource> {
@@ -1027,6 +1045,7 @@ fn window_room_for(size: u64) -> Option<ID3D12Resource> {
     buffer
 }
 
+<<<<<<< HEAD
 /// Whether a window of `size` bytes may go to the card's memory
 /// ([`window_card_most`], the card's room); if so its bytes are counted
 /// there from now, and the caller makes the buffer (or takes them off
@@ -1122,6 +1141,60 @@ impl SentRuns {
 /// last asked: each with the changed offsets, in order and joined where
 /// they touch. The ranges are taken: the caller copies them to the card's
 /// side (`Host::card_before`).
+||||||| merged common ancestors
+/// The copies in the card's memory whose CPU side changed since they were
+/// last asked: each with the changed offsets, in order and joined where
+/// they touch. The ranges are taken: the caller copies them to the card's
+/// side (`Host::card_before`).
+=======
+/// Three-way merge of one fetched span. The card's byte wins wherever shaders
+/// changed it. Otherwise the title's current byte wins. Report which destination
+/// still differs from the result before changing either destination.
+fn merged_destinations(old: &mut [u8], gpu: &[u8], title: &mut [u8]) -> (bool, bool) {
+    let (mut title_diff, mut gpu_diff) = (0u8, 0u8);
+    for ((t, g), o) in title.iter_mut().zip(gpu).zip(old.iter_mut()) {
+        let wrote = if *g != *o { 0xffu8 } else { 0 };
+        let merged = (*t & !wrote) | (*g & wrote);
+        title_diff |= merged ^ *t;
+        gpu_diff |= merged ^ *g;
+        *t = merged;
+        *o = merged;
+    }
+    (title_diff != 0, gpu_diff != 0)
+}
+
+/// CPU writes to upload, and changes already in card memory whose comparison hashes
+/// still need refreshing before the next submission.
+#[derive(Default)]
+pub(crate) struct CardUpdates {
+    pub(crate) upload: Vec<(usize, usize)>,
+    hash_only: Vec<(usize, usize)>,
+}
+
+impl CardUpdates {
+    fn mark(&mut self, from: usize, to: usize, already_on_card: bool) {
+        if from >= to {
+            return;
+        }
+        let ranges = if already_on_card { &mut self.hash_only } else { &mut self.upload };
+        match ranges.last_mut() {
+            Some(last) if from <= last.1 && to >= last.0 => *last = (last.0.min(from), last.1.max(to)),
+            _ => ranges.push((from, to)),
+        }
+    }
+
+    pub(crate) fn hash_ranges(&self) -> std::borrow::Cow<'_, [(usize, usize)]> {
+        if self.hash_only.is_empty() {
+            std::borrow::Cow::Borrowed(&self.upload)
+        } else {
+            std::borrow::Cow::Owned(joined(self.upload.iter().chain(&self.hash_only).copied().collect()))
+        }
+    }
+}
+
+/// Take the ranges to upload and rehash before the next submission. Upload ranges
+/// are joined where they touch. A waited fetch can also leave hash-only changes.
+>>>>>>> vibr/main
 ///
 /// With [`relay`], `sent_as` is the number of the send that takes them
 /// (`crate::host`'s order of the queue): each range is noted with it, in
@@ -1129,12 +1202,22 @@ impl SentRuns {
 /// that send knows the card did not hold these bytes yet
 /// ([`Shadow::card_merge_relay`]). Notes of sends that every fetch still to
 /// be merged came after are dropped.
+<<<<<<< HEAD
 pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)> {
     let queued = std::mem::take(&mut *CARD_QUEUE.lock().unwrap_or_else(|e| e.into_inner()));
     let mut out = Vec::with_capacity(queued.len());
     if queued.is_empty() {
         return out;
     }
+||||||| merged common ancestors
+pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)> {
+    let mut out = Vec::new();
+    let mut carded = CARDED.lock().unwrap_or_else(|e| e.into_inner());
+=======
+pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, CardUpdates)> {
+    let mut out = Vec::new();
+    let mut carded = CARDED.lock().unwrap_or_else(|e| e.into_inner());
+>>>>>>> vibr/main
     let fetched = RELAY_FETCHED.load(Ordering::Acquire);
     for at in queued {
         let shadow = CARDED.lock().unwrap_or_else(|e| e.into_inner()).get(&at).and_then(std::sync::Weak::upgrade);
@@ -1156,8 +1239,45 @@ pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)
             }
             ranges
         };
+<<<<<<< HEAD
         if !ranges.is_empty() {
             out.push((shadow, ranges));
+||||||| merged common ancestors
+        let ranges = shadow
+            .card
+            .as_ref()
+            .map(|c| {
+                let mut dirty = c.dirty.lock().unwrap_or_else(|e| e.into_inner());
+                let ranges = std::mem::take(&mut *dirty);
+                if relay() {
+                    let mut sent = c.sent.lock().unwrap_or_else(|e| e.into_inner());
+                    sent.retain(|s| s.2 > fetched);
+                    sent.extend(ranges.iter().map(|&(a, b)| (a, b, sent_as)));
+                }
+                ranges
+            })
+            .unwrap_or_default();
+        if !ranges.is_empty() {
+            out.push((shadow, joined(ranges)));
+=======
+        let mut ranges = shadow
+            .card
+            .as_ref()
+            .map(|c| {
+                let mut dirty = c.dirty.lock().unwrap_or_else(|e| e.into_inner());
+                let ranges = std::mem::take(&mut *dirty);
+                if relay() {
+                    let mut sent = c.sent.lock().unwrap_or_else(|e| e.into_inner());
+                    sent.retain(|s| s.2 > fetched);
+                    sent.extend(ranges.upload.iter().map(|&(a, b)| (a, b, sent_as)));
+                }
+                ranges
+            })
+            .unwrap_or_default();
+        if !ranges.upload.is_empty() || !ranges.hash_only.is_empty() {
+            ranges.upload = joined(ranges.upload);
+            out.push((shadow, ranges));
+>>>>>>> vibr/main
         }
     }
     out
@@ -1368,6 +1488,40 @@ mod card_tests {
         assert_eq!(scratch.len(), 128);
         assert!(scratch[source.len()..].iter().all(|&byte| byte == 0xcc));
         assert_eq!(scratch_prefix(&mut scratch, 129)[128], 0);
+    }
+
+    #[test]
+    fn echo_classification_preserves_each_merge_destination() {
+        // Exhaustively combine title-only, GPU-only, coincident, and conflicting edits.
+        for old_byte in 0..3 {
+            for gpu_byte in 0..3 {
+                for title_byte in 0..3 {
+                    let mut held = [0, old_byte, 0];
+                    let mut title = [0, title_byte, 0];
+                    let gpu = [0, gpu_byte, 0];
+                    let expected = if gpu_byte != old_byte { gpu_byte } else { title_byte };
+                    let destinations = super::merged_destinations(&mut held, &gpu, &mut title);
+                    assert_eq!(held, [0, expected, 0]);
+                    assert_eq!(title, held);
+                    assert_eq!(destinations, (expected != title_byte, expected != gpu_byte));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn skipped_uploads_still_refresh_hashes_and_preserve_pending_cpu_writes() {
+        let p = 1 << 16;
+        let mut updates = super::CardUpdates::default();
+        updates.mark(p - 2, p + 2, false); // A pending CPU upload crosses a piece boundary.
+        updates.mark(p - 4, p + 1, true);
+        updates.mark(p, p + 4, true);
+        assert_eq!(updates.upload, [(p - 2, p + 2)]);
+        assert_eq!(&*updates.hash_ranges(), &[(p - 4, p + 4)]);
+        let mut only_hash = super::CardUpdates::default();
+        only_hash.mark(3, 8, true);
+        assert!(only_hash.upload.is_empty());
+        assert_eq!(&*only_hash.hash_ranges(), &[(3, 8)]);
     }
 
     /// Joined runs hold every piece of the runs given, once, and no other.
@@ -1750,6 +1904,7 @@ impl Flights {
         free.sort_unstable();
         free
     }
+
 }
 
 /// The relay's merge of a stretch of a copy ([`relay`]). `now` is what the
@@ -1766,7 +1921,52 @@ impl Flights {
 /// read, could undo that write. (The merge of a waited-for submission
 /// stores every byte of a differing stretch back into the copy.)
 fn merge_piece(now: &[u8], held: &mut [u8], title: &mut [u8]) -> bool {
+<<<<<<< HEAD
     relay_merge_simd::merge(now, held, title)
+||||||| merged common ancestors
+    let mut differs = 0u8;
+    for ((n, h), t) in now.iter().zip(held.iter_mut()).zip(title.iter_mut()) {
+        let wrote = if *n != *h { 0xffu8 } else { 0 };
+        let merged = (*t & !wrote) | (*n & wrote);
+        differs |= merged ^ *t;
+        *t = merged;
+        *h = (*h & !wrote) | (*n & wrote);
+    }
+    differs != 0
+=======
+    let len = now.len().min(held.len()).min(title.len());
+    let mut differs = 0u8;
+    let mut i = 0;
+    while i + 8 <= len {
+        let nw = u64::from_ne_bytes(now[i..i + 8].try_into().unwrap());
+        let hw = u64::from_ne_bytes(held[i..i + 8].try_into().unwrap());
+        if nw != hw {
+            for k in i..i + 8 {
+                let n = now[k];
+                let h = &mut held[k];
+                let t = &mut title[k];
+                if n != *h {
+                    differs |= n ^ *t;
+                    *t = n;
+                    *h = n;
+                }
+            }
+        }
+        i += 8;
+    }
+    while i < len {
+        let n = now[i];
+        let h = &mut held[i];
+        let t = &mut title[i];
+        if n != *h {
+            differs |= n ^ *t;
+            *t = n;
+            *h = n;
+        }
+        i += 1;
+    }
+    differs != 0
+>>>>>>> vibr/main
 }
 
 mod relay_merge_simd;
@@ -2214,8 +2414,10 @@ unsafe fn copy_wide(src: *const u8, dst: *mut u8, len: usize) {
 /// lists only afterwards).
 pub(crate) fn wide_back() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    // On by default; `VICTORY_WIDE_BACK=0` turns it off.
-    *ON.get_or_init(|| std::env::var_os("VICTORY_WIDE_BACK").is_none_or(|v| v != "0"))
+    // On by default; `VICTORY_WIDE_BACK=0` turns it off. The crate's own
+    // tests run without it unless they ask, as with the relay: their title
+    // memory is freed while the copy-back thread may still write it.
+    *ON.get_or_init(|| std::env::var_os("VICTORY_WIDE_BACK").map_or(!cfg!(test), |v| v != "0"))
 }
 
 type Job = Box<dyn FnOnce() + Send>;
@@ -2870,6 +3072,45 @@ fn back_run_gap() -> usize {
     *GAP.get_or_init(|| std::env::var("VICTORY_BACK_RUN_GAP").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(64))
 }
 
+/// Joins runs (offset, length; in order, apart) that have fewer than `gap`
+/// bytes between them: one run from the first's start to the last's end.
+fn join_runs(runs: &mut Vec<(usize, usize)>, gap: usize) {
+    let mut kept = 0;
+    for i in 1..runs.len() {
+        let (off, len) = runs[i];
+        let end = runs[kept].0 + runs[kept].1;
+        if off - end < gap {
+            runs[kept].1 = off + len - runs[kept].0;
+        } else {
+            kept += 1;
+            runs[kept] = (off, len);
+        }
+    }
+    runs.truncate(kept + 1);
+}
+
+/// How close two runs of a piece [`Shadow::copy_back`] puts back must lie
+/// to be written as one, in bytes between them (`VICTORY_BACK_RUN_GAP`, 64;
+/// `0`: every run is a write of its own, as before).
+///
+/// A shader that writes records leaves many short runs: every byte of a
+/// record that comes out as it was ends one. In the world frames of the
+/// opening scene (RX 7900 XT, Wine) about 250 pieces a frame held 240,000
+/// to 280,000 runs, each a call into the kernel: 0.8 to 1.2 s of a frame of
+/// 1.4 s where that call goes through Wine. Joined over gaps under 64
+/// bytes they are about 4,000 writes a frame and 20 ms (under 8 bytes about
+/// 15,000 writes, under 512 about 1,100).
+///
+/// What it gives up: the bytes between two joined runs are written as they
+/// were read a moment before, so a title write landing on one of them
+/// between the read and the write is lost, as it was for the whole stretch
+/// before only the GPU's bytes were written. That is now a byte less than
+/// `gap` bytes from one the shader wrote, not anywhere in the stretch.
+fn back_run_gap() -> usize {
+    static GAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *GAP.get_or_init(|| std::env::var("VICTORY_BACK_RUN_GAP").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(64))
+}
+
 /// Since the last frame-rate line, of [`Shadow::merge_under_writes`]: pages
 /// compared, changed runs put in, and their bytes.
 static MERGED: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
@@ -3162,6 +3403,7 @@ fn changed_runs_bytes(now: &[u8], was: &[u8]) -> Vec<(usize, usize)> {
     runs
 }
 
+<<<<<<< HEAD
 /// [`changed_runs`] 64 bytes at a time: one mask of the bytes that differ
 /// (four 16-byte compares), and the runs read off the masks. Every byte is
 /// read once. Timed on 48 MB against the walk (2026-11-25, this PC): all
@@ -3195,6 +3437,58 @@ fn changed_runs_wide(now: &[u8], was: &[u8]) -> Vec<(usize, usize)> {
         if differ == 0 {
             if let Some(first) = open.take() {
                 runs.push((first, base - first));
+||||||| merged common ancestors
+#[cfg(test)]
+mod merge_tests {
+    use super::{PIECE, back_piece, changed_chunks, changed_runs};
+
+    #[test]
+    fn changed_chunks_hold_every_changed_byte() {
+        let was: Vec<u8> = (0..2000u32).map(|i| (i * 31 + 7) as u8).collect();
+        for changes in [vec![], vec![0usize], vec![1999], vec![255, 256], vec![5, 300, 301, 1024, 1990]] {
+            let mut now = was.clone();
+            for &at in &changes {
+                now[at] ^= 0x5A;
+=======
+#[cfg(test)]
+mod merge_tests {
+    use super::{PIECE, back_piece, changed_chunks, changed_runs, join_runs};
+
+    /// Runs with fewer bytes between them than the gap become one, from the
+    /// first's start to the last's end; the others stay as they are.
+    #[test]
+    fn runs_closer_than_the_gap_are_joined() {
+        let runs = vec![(0, 1), (4, 1), (8, 2), (74, 3), (100, 1), (1000, 5)];
+        let joined = |gap| {
+            let mut r = runs.clone();
+            join_runs(&mut r, gap);
+            r
+        };
+        // No gap: every run its own.
+        assert_eq!(joined(0), runs);
+        // 3 bytes lie between the first two and between the next two.
+        assert_eq!(joined(3), runs);
+        assert_eq!(joined(4), [(0, 10), (74, 3), (100, 1), (1000, 5)]);
+        // 64 lie between 10 and 74: not under 64.
+        assert_eq!(joined(64), [(0, 10), (74, 27), (1000, 5)]);
+        assert_eq!(joined(65), [(0, 101), (1000, 5)]);
+        assert_eq!(joined(usize::MAX), [(0, 1005)]);
+        let mut none: Vec<(usize, usize)> = Vec::new();
+        join_runs(&mut none, 64);
+        assert!(none.is_empty());
+        let mut one = vec![(7, 2)];
+        join_runs(&mut one, 64);
+        assert_eq!(one, [(7, 2)]);
+    }
+
+    #[test]
+    fn changed_chunks_hold_every_changed_byte() {
+        let was: Vec<u8> = (0..2000u32).map(|i| (i * 31 + 7) as u8).collect();
+        for changes in [vec![], vec![0usize], vec![1999], vec![255, 256], vec![5, 300, 301, 1024, 1990]] {
+            let mut now = was.clone();
+            for &at in &changes {
+                now[at] ^= 0x5A;
+>>>>>>> vibr/main
             }
         } else if differ != u64::MAX || open.is_none() {
             let mut at = 0u32;
@@ -4495,7 +4789,8 @@ pub(crate) fn window_use() -> [u64; 8] {
 /// - only the copy holds its host buffer: no descriptor slot views it (a
 ///   slot keeps the buffer it views, `HostHeap::kept`), so no draw can read
 ///   it through a slot made earlier;
-/// - nothing asked for it for `IDLE_MS` and `IDLE_FRAMES` frames.
+/// - nothing asked for it for the idle time (shorter under memory
+///   pressure, `crate::host::vram_idle_ms` / `ram_idle_ms`) and `IDLE_FRAMES` frames.
 ///
 /// The next read of that memory makes a new copy and copies the window
 /// again. Called before a submission starts, by the thread that submits.
@@ -4509,6 +4804,7 @@ pub(crate) fn let_go_idle() {
             return;
         }
         let idle_ms = crate::host::ram_idle_ms(crate::host::available_physical_ram());
+<<<<<<< HEAD
         let idle = |s: &Arc<Shadow>| {
             Arc::strong_count(s) == 1
                 && crate::host::long_ago(s.used.load(Ordering::Relaxed), idle_ms, IDLE_FRAMES)
@@ -4529,6 +4825,41 @@ pub(crate) fn let_go_idle() {
             }
         }
         gone
+||||||| merged common ancestors
+        let idle: Vec<(u64, u64)> = map
+            .iter()
+            .filter(|(_, s)| {
+                Arc::strong_count(s) == 1
+                    && crate::host::long_ago(s.used.load(Ordering::Relaxed), idle_ms, IDLE_FRAMES)
+                    && crate::host::references(&s.buffer) == 1
+            })
+            .map(|(key, _)| *key)
+            .collect();
+        idle.into_iter().filter_map(|key| map.remove(&key)).collect()
+=======
+        // A window may stand under several keys: the table holds it once
+        // per key, so it is alone when only those keys hold it (it was never
+        // let go before). Port of fxceless #194's window part.
+        let mut keys: std::collections::HashMap<usize, usize> = std::collections::HashMap::with_capacity(map.len());
+        for s in map.values() {
+            *keys.entry(Arc::as_ptr(s) as usize).or_insert(0) += 1;
+        }
+        let idle: Vec<(u64, u64)> = map
+            .iter()
+            .filter(|(_, s)| {
+                Arc::strong_count(s) == keys[&(Arc::as_ptr(s) as usize)]
+                    && crate::host::long_ago(s.used.load(Ordering::Relaxed), idle_ms, IDLE_FRAMES)
+                    && crate::host::references(&s.buffer) == 1
+                    && !s.writes_pending()
+            })
+            .map(|(key, _)| *key)
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        idle.into_iter()
+            .filter_map(|key| map.remove(&key))
+            .filter(|s| seen.insert(Arc::as_ptr(s) as usize))
+            .collect()
+>>>>>>> vibr/main
     };
     if !gone.is_empty() {
         tables_changed();
@@ -4736,6 +5067,7 @@ impl Shadow {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             },
             card: None,
+            card_merge_lock: std::sync::RwLock::new(()),
             window: false,
             uploaded: 0,
             changes_only: Default::default(),
@@ -4960,11 +5292,29 @@ impl Shadow {
                 let at = at + first;
                 crate::host::shaders_write(start + at, &title[..n.min(title.len())]);
                 crate::watch::writing(start + at, n);
+<<<<<<< HEAD
                 // Title memory as read, beside it with the card's bytes put
                 // in: only the dwords that differ are written.
                 let was: Vec<u8> = title.iter().zip(&mask).map(|(now, changed)| now ^ changed).collect();
                 if !runs.is_empty() {
                     written += put_changed(start + at, &was[..n], &title[..n]);
+||||||| merged common ancestors
+                // Only the GPU's bytes (upstream #2009): the rest of the
+                // stretch is the title's as read, and a title write landing
+                // there since stays.
+                for &(off, len) in &runs {
+                    crate::host::write_mapped((start + at + off) as *mut u8, title[off..].as_ptr(), len);
+                    written += len;
+=======
+                // Only the GPU's bytes (upstream #2009): the rest of the
+                // stretch is the title's as read, and a title write landing
+                // there since stays. Runs a few bytes apart go in one write
+                // (`back_run_gap`).
+                join_runs(&mut runs, back_run_gap());
+                for &(off, len) in &runs {
+                    crate::host::write_mapped((start + at + off) as *mut u8, title[off..].as_ptr(), len);
+                    written += len;
+>>>>>>> vibr/main
                 }
                 BACK_RUNS[0].fetch_add(1, Ordering::Relaxed);
                 BACK_RUNS[1].fetch_add(runs.len() as u64, Ordering::Relaxed);
@@ -5453,6 +5803,7 @@ impl Shadow {
                         }
                     }
                 }
+<<<<<<< HEAD
             };
             // (Not on the threads of `wide`: the thread that waits there
             // takes whatever work comes, and a landing's takes the lock.)
@@ -5475,8 +5826,129 @@ impl Shadow {
                 let (lo, hi) = ((stale[i] * PAGE).max(a), ((stale[i] + 1) * PAGE).min(e));
                 runs_in += runs.len() as u64;
                 bytes_in += runs.iter().map(|r| r.1 as u64).sum::<u64>();
+||||||| merged common ancestors
+                let n = hi - lo;
+                let title = &mut title[..n];
+                // The lock of the copy's reference (the snapshot, or the
+                // CPU's side of a copy in the card's memory), from before
+                // title memory is read until the title's bytes are in: with
+                // the copy-back on its own thread ([`relay`]) that thread
+                // puts what the card wrote into title memory and into the
+                // reference under the same lock, and a page read before
+                // such a merge and compared after it would take the card's
+                // bytes for the title's.
+                let mut before = self.before.lock().unwrap_or_else(|e| e.into_inner());
+                // A page that is not there is left as it is, and looked at
+                // again next time.
+                if !crate::host::read_into(lo as *const u8, title) {
+                    continue;
+                }
+                MERGED[0].fetch_add(1, Ordering::Relaxed);
+                let at = lo - start;
+=======
+                let n = hi - lo;
+                let title = &mut title[..n];
+>>>>>>> vibr/main
                 if self.card.is_some() {
+<<<<<<< HEAD
                     changed.extend(runs.into_iter().map(|(r, m)| (lo - start + r, lo - start + r + m)));
+||||||| merged common ancestors
+                    // SAFETY: inside the mapping of the copy's CPU side,
+                    // which only the submitting thread writes.
+                    let held = unsafe { std::slice::from_raw_parts_mut(self.data.add(at), n) };
+                    let runs = joined_over(changed_runs(title, held), merge_gap());
+                    if runs.len() > *runs_left {
+                        return true;
+                    }
+                    *runs_left -= runs.len();
+                    for (r, m) in runs {
+                        held[r..r + m].copy_from_slice(&title[r..r + m]);
+                        self.card_changed(at + r, at + r + m);
+                        MERGED[1].fetch_add(1, Ordering::Relaxed);
+                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
+                    }
+                } else {
+                    let Some(snapshot) = before.as_mut() else {
+                        return true;
+                    };
+                    // SAFETY: the snapshot's allocation holds the copy's
+                    // bytes at the copy's offsets (`writing`), and these
+                    // are in a declared range.
+                    let held = unsafe { std::slice::from_raw_parts_mut(snapshot.as_mut_ptr().add(at), n) };
+                    for (r, m) in changed_runs(title, held) {
+                        // SAFETY: inside the copy's mapping. The card may be
+                        // writing the copy beside these bytes; they are
+                        // written here and nothing around them.
+                        unsafe { std::ptr::copy_nonoverlapping(title.as_ptr().add(r), self.data.add(at + r), m) };
+                        held[r..r + m].copy_from_slice(&title[r..r + m]);
+                        MERGED[1].fetch_add(1, Ordering::Relaxed);
+                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
+                    }
+=======
+                    // The write lock of the copy's carded merge, from before
+                    // title memory is read until the title's bytes are in:
+                    // with the copy-back on its own thread ([`relay`]) that
+                    // thread puts what the card wrote into title memory and
+                    // into the CPU's side under the read lock, on disjoint
+                    // 64 KiB pieces at a time, and a page read before such a
+                    // merge and compared after it would take the card's
+                    // bytes for the title's.
+                    let _side = self.card_merge_lock.write().unwrap_or_else(|e| e.into_inner());
+                    // A page that is not there is left as it is, and looked
+                    // at again next time.
+                    if !crate::host::read_into(lo as *const u8, title) {
+                        continue;
+                    }
+                    MERGED[0].fetch_add(1, Ordering::Relaxed);
+                    let at = lo - start;
+                    // SAFETY: inside the mapping of the copy's CPU side,
+                    // which only the submitting thread writes.
+                    let held = unsafe { std::slice::from_raw_parts_mut(self.data.add(at), n) };
+                    let runs = joined_over(changed_runs(title, held), merge_gap());
+                    if runs.len() > *runs_left {
+                        return true;
+                    }
+                    *runs_left -= runs.len();
+                    for (r, m) in runs {
+                        held[r..r + m].copy_from_slice(&title[r..r + m]);
+                        self.card_changed(at + r, at + r + m);
+                        MERGED[1].fetch_add(1, Ordering::Relaxed);
+                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
+                    }
+                } else {
+                    // The lock of the copy's reference (the snapshot), from
+                    // before title memory is read until the title's bytes
+                    // are in: with the copy-back on its own thread
+                    // ([`relay`]) that thread puts what the card wrote into
+                    // title memory and into the snapshot under the same
+                    // lock, and a page read before such a merge and compared
+                    // after it would take the card's bytes for the title's.
+                    let mut before = self.before.lock().unwrap_or_else(|e| e.into_inner());
+                    // A page that is not there is left as it is, and looked
+                    // at again next time.
+                    if !crate::host::read_into(lo as *const u8, title) {
+                        continue;
+                    }
+                    MERGED[0].fetch_add(1, Ordering::Relaxed);
+                    let at = lo - start;
+                    let Some(snapshot) = before.as_mut() else {
+                        return true;
+                    };
+                    // SAFETY: the snapshot's allocation holds the copy's
+                    // bytes at the copy's offsets (`writing`), and these
+                    // are in a declared range.
+                    let held = unsafe { std::slice::from_raw_parts_mut(snapshot.as_mut_ptr().add(at), n) };
+                    for (r, m) in changed_runs(title, held) {
+                        // SAFETY: inside the copy's mapping. The card may be
+                        // writing the copy beside these bytes; they are
+                        // written here and nothing around them.
+                        unsafe { std::ptr::copy_nonoverlapping(title.as_ptr().add(r), self.data.add(at + r), m) };
+                        held[r..r + m].copy_from_slice(&title[r..r + m]);
+                        MERGED[1].fetch_add(1, Ordering::Relaxed);
+                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
+                    }
+                    drop(before);
+>>>>>>> vibr/main
                 }
                 // Taken, if the range holds all of the page that is in the
                 // copy; else the rest of it is the refresh's, which notes
@@ -5652,11 +6124,42 @@ impl Shadow {
             .copied()
             .filter(|&(a, e)| a < to && e > from)
             .collect();
+<<<<<<< HEAD
         busy.sort_unstable();
         let mut at = from;
         for (a, e) in busy {
             if a > at {
                 f(at, a);
+||||||| merged common ancestors
+        if !busy.is_empty() {
+            // Around ranges shaders are writing: the gaps, each as below
+            // (in the world most submissions have such ranges; copying the
+            // gaps whole cost ~1 s per frame).
+            busy.sort_unstable();
+            let (mut at, mut bytes) = (from, 0);
+            for (a, e) in busy {
+                if a > at {
+                    bytes += self.update_free(at, a);
+                }
+                at = at.max(e);
+=======
+        if !busy.is_empty() {
+            // Around ranges shaders are writing: the gaps, each as below
+            // (in the world most submissions have such ranges; copying the
+            // gaps whole cost ~1 s per frame). Under them, what the title
+            // wrote since it was taken (`update_busy`).
+            busy.sort_unstable();
+            let (mut at, mut bytes) = (from, 0);
+            for (a, e) in busy {
+                let (a, e) = (a.max(from), e.min(to));
+                if a > at {
+                    bytes += self.update_free(at, a);
+                }
+                if e > a.max(at) {
+                    bytes += self.update_busy(a.max(at), e);
+                }
+                at = at.max(e);
+>>>>>>> vibr/main
             }
             at = at.max(e);
         }
@@ -5719,6 +6222,67 @@ impl Shadow {
     fn ranged(&self, from: usize, to: usize) -> u64 {
         let ranged = self.ranged.lock().unwrap_or_else(|e| e.into_inner());
         ranged.iter().filter(|r| r.0 <= from && to <= r.1).map(|r| r.2).max().unwrap_or(0)
+    }
+
+    /// [`Shadow::update`] of `[from, to)` where a list submitted earlier
+    /// declared that shaders write. A submission waits for the one before it,
+    /// so none of this submission's shaders has run yet: the pages the title
+    /// wrote since they were taken are copied as anywhere else. Skipped, the
+    /// title's constants there stayed stale for the whole submission (a
+    /// dispatch read its sizes as zeros and looped until the device was
+    /// removed). The same bytes go into the snapshot `writing` took, so
+    /// copy-back neither takes them for the GPU's nor puts them back over a
+    /// later title write.
+    fn update_busy(&self, from: usize, to: usize) -> usize {
+        // shortcut: write-watched copies with a snapshot in PC memory only;
+        // a copy on the card or memory not watched keeps the old behaviour.
+        if self.card.is_some() || self.watched.load(Ordering::Relaxed) == NOT_WATCHED {
+            return 0;
+        }
+        let Some((now, written)) = crate::watch::writes(from, to, true) else {
+            return 0;
+        };
+        // Only pages the title wrote after their last copy: a page never
+        // written stays as taken (a flight in the air may be writing it;
+        // `stale_under_flights` settles flights under title writes first).
+        let (start, end) = (self.start as usize, (self.start + self.len) as usize);
+        let base = start / PAGE;
+        let mut runs: Vec<(usize, usize)> = Vec::new();
+        {
+            let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
+            for &(page, write) in &written {
+                let Some(at) = copied.get_mut(page.wrapping_sub(base)) else {
+                    continue;
+                };
+                if write == 0 || write <= *at {
+                    continue;
+                }
+                let (a, b) = ((page * PAGE).max(from), ((page + 1) * PAGE).min(to));
+                if a >= b {
+                    continue;
+                }
+                if (page * PAGE).max(start) >= from && ((page + 1) * PAGE).min(end) <= to {
+                    *at = now;
+                }
+                match runs.last_mut() {
+                    Some(last) if last.1 == a => last.1 = b,
+                    _ => runs.push((a, b)),
+                }
+            }
+        }
+        let mut bytes = 0;
+        for (a, b) in runs {
+            bytes += self.copy(a, b);
+            let mut before = self.before.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(snapshot) = before.as_mut() {
+                let (s, e) = (a - start, b - start);
+                debug_assert!(e <= snapshot.capacity());
+                // SAFETY: the copy's mapping and the snapshot's allocation
+                // (`pooled`) both hold the copy's bytes, and `e` is inside it.
+                unsafe { std::ptr::copy_nonoverlapping(self.data.add(s), snapshot.as_mut_ptr().add(s), e - s) };
+            }
+        }
+        bytes
     }
 
     /// [`Shadow::update`] of `[from, to)` (inside the buffer) where no
@@ -6288,12 +6852,20 @@ impl Shadow {
         let Some(card) = &self.card else {
             return;
         };
+<<<<<<< HEAD
         let most = runs.size_hint().0;
         let mut runs = runs.filter(|r| r.0 < r.1).peekable();
         if runs.peek().is_none() {
             return;
         }
+||||||| merged common ancestors
+        if from >= to {
+            return;
+        }
+=======
+>>>>>>> vibr/main
         let mut dirty = card.dirty.lock().unwrap_or_else(|e| e.into_inner());
+<<<<<<< HEAD
         dirty.reserve(most);
         for (from, to) in runs {
             match dirty.last_mut() {
@@ -6356,6 +6928,14 @@ impl Shadow {
     /// yet.
     pub(crate) fn card_dirty_now(&self) -> Vec<(usize, usize)> {
         self.card.as_ref().map_or_else(Vec::new, |c| c.dirty.lock().unwrap_or_else(|e| e.into_inner()).clone())
+||||||| merged common ancestors
+        match dirty.last_mut() {
+            Some(last) if from <= last.1 && to >= last.0 => *last = (last.0.min(from), last.1.max(to)),
+            _ => dirty.push((from, to)),
+        }
+=======
+        dirty.mark(from, to, false);
+>>>>>>> vibr/main
     }
 
     /// Of a copy in the card's memory: the CPU's side (PC memory), the
@@ -6474,12 +7054,13 @@ impl Shadow {
     /// found differing. The bytes shaders wrote (those that differ from the
     /// CPU's side, which is what the card's side held when they started)
     /// go into title memory, from the first to the last of them, as
-    /// [`Shadow::copy_back`] puts them; the CPU's side takes the result and
-    /// sends it up before the next submission. `title` is scratch memory.
+    /// [`Shadow::copy_back`] puts them. The CPU side takes the result, and only
+    /// a result that differs from the card needs uploading. `title` is scratch memory.
     /// Returns the bytes written to title memory.
     pub(crate) fn card_merge(&self, at: usize, gpu: &[u8], title: &mut Vec<u8>) -> usize {
         let start = self.start as usize;
-        if self.card.is_none() || at + gpu.len() > self.len as usize {
+        let Some(card) = &self.card else { return 0 };
+        if at + gpu.len() > self.len as usize {
             return 0;
         }
         // SAFETY: inside the mapping (checked above); only the submitting
@@ -6493,7 +7074,9 @@ impl Shadow {
         let (gpu, old) = (&gpu[first..=last], &mut old[first..=last]);
         let title = scratch_prefix(title, n);
         let mut written = 0;
+        let mut upload = false;
         if crate::host::read_into((start + at) as *const u8, title) {
+<<<<<<< HEAD
             // As in `copy_back`: the card's byte where it is not what it
             // was before the submission, else the title's.
             let mut differs = 0u8;
@@ -6506,16 +7089,39 @@ impl Shadow {
                 *o = merged;
             }
             if differs != 0 {
+||||||| merged common ancestors
+            // The stretch as read: what the card did not change is the
+            // title's, and may have been written again since.
+            let as_read = merge_race_on().then(|| title.clone());
+            // As in `copy_back`: the card's byte where it is not what it
+            // was before the submission, else the title's.
+            let mut differs = 0u8;
+            for ((t, g), o) in title.iter_mut().zip(gpu).zip(old.iter_mut()) {
+                let wrote = if *g != *o { 0xffu8 } else { 0 };
+                let merged = (*t & !wrote) | (*g & wrote);
+                differs |= merged ^ *t;
+                *t = merged;
+                *o = merged;
+            }
+            if differs != 0 {
+=======
+            // The stretch as read: what the card did not change is the
+            // title's, and may have been written again since.
+            let as_read = merge_race_on().then(|| title.clone());
+            let (write_title, write_card) = merged_destinations(old, gpu, title);
+            upload = write_card;
+            if write_title {
+>>>>>>> vibr/main
                 crate::host::shaders_write(start + at, &title[..]);
                 written = put_changed(start + at, &was, title);
             }
         } else {
-            // Title memory is not mapped there: the copy keeps what the
-            // card wrote, as before.
             old.copy_from_slice(gpu);
         }
-        // The card's side and its "before" take the result.
-        self.card_changed(at, at + n);
+        let mut dirty = card.dirty.lock().unwrap_or_else(|e| e.into_inner());
+        // Concurrent relay submissions can change the card after a fetch. Only elide
+        // uploads in non-relay mode, which holds submission ordering through the merge.
+        dirty.mark(at, at + n, !upload && !relay());
         written
     }
 
@@ -6545,6 +7151,7 @@ impl Shadow {
         if at + gpu.len() > self.len as usize {
             return 0;
         }
+<<<<<<< HEAD
         let _side = self.before.lock().unwrap_or_else(|e| e.into_inner());
         self.card_merge_relay_locked(card, start, at, gpu, fetched_after, title)
     }
@@ -6559,9 +7166,17 @@ impl Shadow {
         title: &mut Vec<u8>,
     ) -> usize {
         // SAFETY: inside the mapping (checked by caller). The offsets are in a
+||||||| merged common ancestors
+        let _side = self.before.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: inside the mapping (checked above). The offsets are in a
+=======
+        let _side = self.card_merge_lock.read().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: inside the mapping (checked above). The offsets are in a
+>>>>>>> vibr/main
         // range declared and not done with, which no refresh writes; what
         // does write it (the title's bytes put in under shader writes)
-        // holds the lock held here.
+        // holds the write lock held here, and concurrent callers of this
+        // work on disjoint 64 KiB pieces partitioned by (copy, piece).
         let held = unsafe { std::slice::from_raw_parts_mut(self.data.add(at), gpu.len()) };
         // The same of the bytes that go up through the merge on the card
         // (`merge_on_card`), which are noted one by one: there the card's
@@ -6615,9 +7230,25 @@ impl Shadow {
         let skip: Vec<(usize, usize)> = {
             let dirty = card.dirty.lock().unwrap_or_else(|e| e.into_inner());
             let sent = card.sent.lock().unwrap_or_else(|e| e.into_inner());
+<<<<<<< HEAD
             let mut skip: Vec<(usize, usize)> = dirty.iter().copied().filter(|&(a, b)| a < at + n && b > at).collect();
             sent.near(fetched_after, at, at + n, &mut skip);
             skip
+||||||| merged common ancestors
+            dirty
+                .iter()
+                .copied()
+                .chain(sent.iter().filter(|s| s.2 > fetched_after).map(|s| (s.0, s.1)))
+                .filter(|&(a, b)| a < at + n && b > at)
+                .collect()
+=======
+            dirty.upload
+                .iter()
+                .copied()
+                .chain(sent.iter().filter(|s| s.2 > fetched_after).map(|s| (s.0, s.1)))
+                .filter(|&(a, b)| a < at + n && b > at)
+                .collect()
+>>>>>>> vibr/main
         };
         let was = title.clone();
         let mut changed = false;
@@ -6996,6 +7627,7 @@ struct Entry {
 }
 
 /// Title buffers by (start address, resource), with their copy once made.
+<<<<<<< HEAD
 ///
 /// Read shared by the asks that find the copy made (nearly all of them):
 /// the title's recording threads and the submitting thread ask thousands
@@ -7004,7 +7636,13 @@ struct Entry {
 /// Written only when a buffer is registered or released, and when a copy
 /// is made on first use.
 static BUFFERS: RwLock<BTreeMap<(u64, usize), Entry>> = RwLock::new(BTreeMap::new());
+||||||| merged common ancestors
+static BUFFERS: Mutex<BTreeMap<(u64, usize), Entry>> = Mutex::new(BTreeMap::new());
+=======
+static BUFFERS: RwLock<BTreeMap<(u64, usize), Entry>> = RwLock::new(BTreeMap::new());
+>>>>>>> vibr/main
 
+<<<<<<< HEAD
 fn buffers_read() -> std::sync::RwLockReadGuard<'static, BTreeMap<(u64, usize), Entry>> {
     BUFFERS.read().unwrap_or_else(|e| e.into_inner())
 }
@@ -7040,12 +7678,29 @@ pub(crate) fn buffer_parts(from: u64, to: u64) -> Vec<(u64, u64)> {
         }
     }
     out
+||||||| merged common ancestors
+fn buffers() -> std::sync::MutexGuard<'static, BTreeMap<(u64, usize), Entry>> {
+    BUFFERS.lock().unwrap_or_else(|e| e.into_inner())
+=======
+fn buffers_read() -> std::sync::RwLockReadGuard<'static, BTreeMap<(u64, usize), Entry>> {
+    BUFFERS.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn buffers_write() -> std::sync::RwLockWriteGuard<'static, BTreeMap<(u64, usize), Entry>> {
+    BUFFERS.write().unwrap_or_else(|e| e.into_inner())
+>>>>>>> vibr/main
 }
 
 /// A title buffer exists at `start` (`len` bytes).
 pub(crate) fn register(resource: usize, start: u64, len: u64) {
+<<<<<<< HEAD
     let mut map = buffers_write();
     map.insert(
+||||||| merged common ancestors
+    buffers().insert(
+=======
+    buffers_write().insert(
+>>>>>>> vibr/main
         (start, resource),
         Entry {
             end: start + len,
@@ -7060,16 +7715,28 @@ pub(crate) fn register(resource: usize, start: u64, len: u64) {
 
 /// The title released it; lists that still hold its copy keep it alive.
 pub(crate) fn unregister(resource: usize, start: u64) {
+<<<<<<< HEAD
     let mut map = buffers_write();
     tables_changed();
     map.remove(&(start, resource));
+||||||| merged common ancestors
+    buffers().remove(&(start, resource));
+=======
+    buffers_write().remove(&(start, resource));
+>>>>>>> vibr/main
 }
 
 /// The title buffer holding `address`, as (start, length), without making
 /// its copy (diagnostics: which buffer a dropped program's root view names).
 #[cfg(feature = "diagnostics")]
 pub(crate) fn extent(address: u64) -> Option<(u64, u64)> {
+<<<<<<< HEAD
     buffers_shared()
+||||||| merged common ancestors
+    buffers()
+=======
+    buffers_read()
+>>>>>>> vibr/main
         .range(..=(address, usize::MAX))
         .rev()
         .take(64)
@@ -7098,6 +7765,7 @@ pub(crate) fn in_place_let_go(at: u64, len: u64) -> u64 {
     }
     {
         // As `lookup` finds a buffer: among the 256 that start below.
+<<<<<<< HEAD
         let mut map = buffers_write();
         let placed = |entry: &Entry| entry.end > at && entry.shadow.as_ref().is_some_and(|s| s.place.is_some());
         if map.range(..(end, 0)).rev().take(256).any(|(_, entry)| placed(entry)) {
@@ -7106,6 +7774,17 @@ pub(crate) fn in_place_let_go(at: u64, len: u64) -> u64 {
                 if placed(entry) {
                     gone.extend(entry.shadow.take());
                 }
+||||||| merged common ancestors
+        let mut map = buffers();
+        for (_, entry) in map.range_mut(..(end, 0)).rev().take(256) {
+            if entry.end > at && entry.shadow.as_ref().is_some_and(|s| s.place.is_some()) {
+                gone.extend(entry.shadow.take());
+=======
+        let mut map = buffers_write();
+        for (_, entry) in map.range_mut(..(end, 0)).rev().take(256) {
+            if entry.end > at && entry.shadow.as_ref().is_some_and(|s| s.place.is_some()) {
+                gone.extend(entry.shadow.take());
+>>>>>>> vibr/main
             }
         }
     }
@@ -7120,8 +7799,19 @@ pub(crate) fn in_place_let_go(at: u64, len: u64) -> u64 {
 /// bytes, false) and the windows outside buffers that have a copy (start,
 /// bytes, true).
 pub(crate) fn spans() -> Vec<(u64, u64, bool)> {
+<<<<<<< HEAD
     let mut spans: Vec<(u64, u64, bool)> = buffers_read().iter().map(|(key, entry)| (key.0, entry.end - key.0, false)).collect();
     let loose = LOOSE.read().unwrap_or_else(|e| e.into_inner());
+||||||| merged common ancestors
+    let mut spans: Vec<(u64, u64, bool)> = buffers().iter().map(|(key, entry)| (key.0, entry.end - key.0, false)).collect();
+    let loose = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
+=======
+    let mut spans: Vec<(u64, u64, bool)> = buffers_read()
+        .iter()
+        .map(|(key, entry)| (key.0, entry.end - key.0, false))
+        .collect();
+    let loose = LOOSE.read().unwrap_or_else(|e| e.into_inner());
+>>>>>>> vibr/main
     spans.extend(loose.keys().map(|&(start, len)| (start, len, true)));
     spans
 }
@@ -7131,6 +7821,25 @@ pub(crate) fn spans() -> Vec<(u64, u64, bool)> {
 /// (a root view: the caller reads on to the copy's end).
 pub(crate) fn find(address: u64, len: u64) -> Option<Arc<Shadow>> {
     lookup(address, len, false, None).map(|(shadow, _)| shadow)
+}
+
+/// The host copy, made already, of the one title buffer that holds
+/// `[address, address + len)` when no other title buffer and no window
+/// outside buffers lies over any of it: what is put into that copy is then
+/// all any shader sees of those bytes. Makes nothing.
+pub(crate) fn sole(address: u64, len: u64) -> Option<Arc<Shadow>> {
+    let end = address.checked_add(len)?;
+    let over = |from: u64, to: u64| from < end && to > address;
+    if LOOSE.read().unwrap_or_else(|e| e.into_inner()).keys().any(|&(at, n)| over(at, at + n)) {
+        return None;
+    }
+    let map = buffers_read();
+    let mut holders = map.range(..(end, 0)).filter(|(key, e)| over(key.0, e.end));
+    let (key, entry) = holders.next()?;
+    if holders.next().is_some() || key.0 > address || entry.end < end {
+        return None;
+    }
+    entry.shadow.clone().filter(|shadow| !shadow.window)
 }
 
 /// As [`find`], for an ask that is done with the copy when its list has
@@ -7161,6 +7870,7 @@ pub(crate) fn find_any(address: u64, len: u64) -> Option<Arc<Shadow>> {
 /// The copy [`find`] gives for a range inside a title buffer, if it was made.
 pub(crate) fn peek(address: u64, len: u64) -> Option<Arc<Shadow>> {
     let end = address.checked_add(len.max(1))?;
+<<<<<<< HEAD
     buffers_read().range(..=(address, usize::MAX)).rev().take(64).find(|(_, e)| e.end >= end).and_then(|(_, e)| e.shadow.clone())
 }
 
@@ -7305,6 +8015,30 @@ fn lookup_tables(
         }
     }
     let mut map = buffers_write();
+||||||| merged common ancestors
+    let mut map = buffers();
+=======
+    // Fast path: shared read lock when the buffer's shadow already exists.
+    {
+        let map = buffers_read();
+        let found = map
+            .range(..=(address, usize::MAX))
+            .rev()
+            .take(64)
+            .find(|(_, e)| e.end >= end);
+        match found {
+            None => {
+                drop(map);
+                return loose(address, end, len <= 1, any);
+            }
+            Some((_, entry)) if entry.shadow.is_some() => {
+                return entry.shadow.clone();
+            }
+            Some(_) => {}
+        }
+    }
+    let mut map = buffers_write();
+>>>>>>> vibr/main
     let key = map
         .range(..=(address, usize::MAX))
         .rev()
@@ -7547,6 +8281,7 @@ fn longest_tail(windows: impl Iterator<Item = (u64, u64)>, address: u64, end: u6
         .min()
 }
 
+<<<<<<< HEAD
 /// Whether `[address, address + len)` lies in one title buffer.
 pub(crate) fn in_buffer(address: u64, len: u64) -> Option<(u64, u64)> {
     let end = address.checked_add(len)?;
@@ -7554,7 +8289,15 @@ pub(crate) fn in_buffer(address: u64, len: u64) -> Option<(u64, u64)> {
     let found = map.range(..=(address, usize::MAX)).rev().take(64).find(|(_, e)| e.end >= end);
     found.map(|(k, e)| (k.0, e.end - k.0))
 }
+||||||| merged common ancestors
+/// Copies of title memory outside buffers, by (start, length).
+static LOOSE: Mutex<BTreeMap<(u64, u64), Arc<Shadow>>> = Mutex::new(BTreeMap::new());
+=======
+/// Copies of title memory outside buffers, by (start, length).
+static LOOSE: RwLock<BTreeMap<(u64, u64), Arc<Shadow>>> = RwLock::new(BTreeMap::new());
+>>>>>>> vibr/main
 
+<<<<<<< HEAD
 /// Whether a title buffer of at most `most` bytes lies in `[address, address
 /// + len)`, all of it or in part.
 pub(crate) fn small_buffer_in(address: u64, len: u64, most: u64) -> bool {
@@ -7630,8 +8373,15 @@ fn loose(
     any: bool,
     range: Option<&ExactRange<'_>>,
 ) -> Option<(Arc<Shadow>, bool)> {
+||||||| merged common ancestors
+fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Shadow>> {
+    let mut map = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
+=======
+fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Shadow>> {
+>>>>>>> vibr/main
     let (cell, _) = window_of(address, end, WINDOW);
     let named = window_of(address, end, if unsized_ask { WINDOW } else { window() });
+<<<<<<< HEAD
     // Under the lock, with the handing out: see `let_go_idle`.
     let note = |shadow: &Shadow| {
         // (Read first: the lines are shared by all recording threads.)
@@ -7682,6 +8432,69 @@ fn loose(
     if let Some(own) = exact_for(range, address - start) {
         return Some((own, true));
     }
+||||||| merged common ancestors
+    let (start, len) = if unsized_ask && tails() {
+        let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
+        longest_tail(there, address, end).unwrap_or_else(|| tail_of(address, end))
+    } else if any && fine() && !unsized_ask {
+        // The windows that begin in the ask's cell at or below the ask (one
+        // that begins in a cell below and reaches this far is passed over:
+        // the ask then makes its own).
+        let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
+        holder(there, address, end).unwrap_or(named)
+    } else {
+        named
+    };
+    // Under the lock, with the handing out: see `let_go_idle`.
+    let note = |shadow: &Shadow| {
+        shadow.used.store(crate::host::moment(), Ordering::Relaxed);
+        shadow.asked[0].fetch_min(address, Ordering::Relaxed);
+        shadow.asked[1].fetch_max(end, Ordering::Relaxed);
+        if unsized_ask {
+            shadow.unsized_asks.fetch_add(1, Ordering::Relaxed);
+        }
+    };
+=======
+    // Under the lock, with the handing out: see `let_go_idle`.
+    let note = |shadow: &Shadow| {
+        shadow.used.store(crate::host::moment(), Ordering::Relaxed);
+        shadow.asked[0].fetch_min(address, Ordering::Relaxed);
+        shadow.asked[1].fetch_max(end, Ordering::Relaxed);
+        if unsized_ask {
+            shadow.unsized_asks.fetch_add(1, Ordering::Relaxed);
+        }
+    };
+    // Fast path: shared read lock when the matching window already exists.
+    {
+        let map = LOOSE.read().unwrap_or_else(|e| e.into_inner());
+        let (start, len) = if unsized_ask && tails() {
+            let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
+            longest_tail(there, address, end).unwrap_or_else(|| tail_of(address, end))
+        } else if any && fine() && !unsized_ask {
+            let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
+            holder(there, address, end).unwrap_or(named)
+        } else {
+            named
+        };
+        if let Some(shadow) = map.get(&(start, len)) {
+            note(shadow);
+            return Some(shadow.clone());
+        }
+    }
+    let mut map = LOOSE.write().unwrap_or_else(|e| e.into_inner());
+    let (start, len) = if unsized_ask && tails() {
+        let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
+        longest_tail(there, address, end).unwrap_or_else(|| tail_of(address, end))
+    } else if any && fine() && !unsized_ask {
+        // The windows that begin in the ask's cell at or below the ask (one
+        // that begins in a cell below and reaches this far is passed over:
+        // the ask then makes its own).
+        let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
+        holder(there, address, end).unwrap_or(named)
+    } else {
+        named
+    };
+>>>>>>> vibr/main
     if let Some(shadow) = map.get(&(start, len)) {
         note(shadow);
         return Some((shadow.clone(), false));
@@ -8212,7 +9025,13 @@ mod card_merge_tests {
 /// For device-removed reports: the copy of title memory whose host range
 /// starts closest below host GPU address `va`, and where `va` is in it.
 pub(crate) fn near(va: u64) -> String {
+<<<<<<< HEAD
     let mut all: Vec<(u64, u64, u64)> = buffers_shared()
+||||||| merged common ancestors
+    let mut all: Vec<(u64, u64, u64)> = buffers()
+=======
+    let mut all: Vec<(u64, u64, u64)> = buffers_read()
+>>>>>>> vibr/main
         .values()
         .filter_map(|e| e.shadow.as_deref().map(|s| (s.gpu, s.start, s.len)))
         .collect();
@@ -8240,6 +9059,7 @@ pub(crate) fn near(va: u64) -> String {
     }
     text
 }
+<<<<<<< HEAD
 
 #[cfg(test)]
 mod mask_runs_tests {
@@ -8327,3 +9147,60 @@ mod mask_runs_tests {
         }
     }
 }
+||||||| merged common ancestors
+=======
+
+#[cfg(test)]
+mod busy_tests {
+    use super::{PAGE, find, register, unregister};
+    use windows_sys::Win32::System::Memory::{
+        MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
+    };
+    const MEM_WRITE_WATCH: u32 = 0x20_0000;
+
+    /// The title writes a constant under a range an earlier list of the
+    /// submission declared as written by shaders: the refresh before the
+    /// submission runs still brings it to the copy, a shader's write still
+    /// goes back, and a title write made after the refresh is not undone.
+    #[test]
+    fn title_writes_under_a_busy_range_are_copied() {
+        let len = 2 * PAGE;
+        // SAFETY: a fresh write-watched allocation, freed at the end.
+        let p = unsafe {
+            VirtualAlloc(std::ptr::null(), len, MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH, PAGE_READWRITE)
+        } as usize;
+        assert_ne!(p, 0);
+        let done = || {
+            unregister(p, p as u64);
+            // SAFETY: our allocation.
+            unsafe { VirtualFree(p as *mut _, 0, MEM_RELEASE) };
+        };
+        register(p, p as u64, len as u64);
+        let Some(copy) = find(p as u64, len as u64) else {
+            return done(); // no host GPU here
+        };
+        if copy.place.is_some() || copy.card.is_some() {
+            return done(); // in place or on the card: no PC-side snapshot to check
+        }
+        let title = |at: usize| (p + at) as *mut u8;
+        // SAFETY: (all reads and writes below) bytes of our pool and of the copy's mapping.
+        let host = |at: usize| unsafe { copy.data.add(at).read_volatile() };
+        copy.update(p, len);
+        // An earlier list declares all of it as written by shaders.
+        copy.writing(p, len);
+        unsafe { title(PAGE + 20).write_volatile(0x55) };
+        assert!(copy.update(p + PAGE + 16, 16) > 0, "the title's write is copied");
+        assert_eq!(host(PAGE + 20), 0x55, "the title's constant reaches the copy");
+        // The shaders run: one byte written. The title writes meanwhile.
+        unsafe { copy.data.add(10).write_volatile(0xaa) };
+        unsafe { title(PAGE + 20).write_volatile(0x66) };
+        copy.copy_back(p, len);
+        unsafe {
+            assert_eq!(title(10).read_volatile(), 0xaa, "the shader's write goes back");
+            assert_eq!(title(PAGE + 20).read_volatile(), 0x66, "the title's later write stays");
+        }
+        drop(copy);
+        done();
+    }
+}
+>>>>>>> vibr/main

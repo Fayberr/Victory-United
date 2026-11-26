@@ -1107,6 +1107,19 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
             if unlike(dst, src, true) {
                 return;
             }
+            let host_dst = crate::resource::host_copy(dst);
+            let host_src = crate::resource::host_copy(src);
+            if let (Some(hd), Some(hs)) = (host_dst.as_ref(), host_src.as_ref())
+                && hd.mip_drop != hs.mip_drop
+            {
+                static ONCE: std::sync::Once = std::sync::Once::new();
+                ONCE.call_once(|| {
+                    tracing::warn!(
+                        "copy_resource between textures with different mip_drop skipped"
+                    );
+                });
+                return;
+            }
             // Two title textures over the same memory have one host
             // texture between them: the copy would be of that texture onto
             // itself, which the host does not allow, and it would change
@@ -1340,6 +1353,7 @@ extern "system" fn copy_texture_region(
         if unlike(dst.resource, src.resource, true) {
             return;
         }
+<<<<<<< HEAD
         // Into a host copy without its largest levels: the level it has,
         // or nothing (`crate::resource::drop_levels`).
         let mut dst = dst;
@@ -1349,7 +1363,31 @@ extern "system" fn copy_texture_region(
                 None => return,
             }
         }
+||||||| merged common ancestors
+=======
+        let mut to_sub = dst.footprint.offset as u32;
+        if dst.kind != FOOTPRINT
+            && let Some(host_dst) = crate::resource::host_copy(dst.resource)
+        {
+            let Some(host_sub) = host_dst.host_subresource(to_sub) else {
+                return;
+            };
+            to_sub = host_sub;
+        }
+        let mut from_sub = src.footprint.offset as u32;
+        if src.kind != FOOTPRINT
+            && let Some(host_src) = crate::resource::host_copy(src.resource)
+        {
+            let Some(host_sub) = host_src.host_subresource(from_sub) else {
+                return;
+            };
+            from_sub = host_sub;
+        }
+>>>>>>> vibr/main
         let mut from = src;
+        if src.kind != FOOTPRINT {
+            from.footprint.offset = u64::from(from_sub);
+        }
         // Both sides are the same subresource of one host texture (set below).
         let mut same = false;
         let _upload; // keeps the source alive while this call records it
@@ -1403,7 +1441,7 @@ extern "system" fn copy_texture_region(
             same = texture.as_raw() == to.as_raw()
                 && src.kind != FOOTPRINT
                 && dst.kind != FOOTPRINT
-                && src.footprint.offset as u32 == dst.footprint.offset as u32;
+                && from_sub == to_sub;
             list.twin_use(src.resource, false, false);
             if crate::texture::title_written(texture) {
                 crate::texture::upload(list, src.resource, texture);
@@ -1462,6 +1500,9 @@ extern "system" fn copy_texture_region(
         ensure_state(list, dst.resource, COPY_DEST);
         let mut to_location = dst;
         to_location.resource = to.as_raw().cast_const().cast();
+        if dst.kind != FOOTPRINT {
+            to_location.footprint.offset = u64::from(to_sub);
+        }
         let host_box = (!source_box.is_null()).then(|| source_box.cast::<D3D12_BOX>());
         #[cfg(feature = "diagnostics")]
         {
@@ -1599,6 +1640,22 @@ extern "system" fn resolve(
             crate::resource::host_resource(src),
         )
     {
+        let dst_sub = if let Some(hd) = crate::resource::host_copy(dst) {
+            let Some(mapped) = hd.host_subresource(dst_sub) else {
+                return;
+            };
+            mapped
+        } else {
+            dst_sub
+        };
+        let src_sub = if let Some(hs) = crate::resource::host_copy(src) {
+            let Some(mapped) = hs.host_subresource(src_sub) else {
+                return;
+            };
+            mapped
+        } else {
+            src_sub
+        };
         use windows::Win32::Foundation::RECT;
         use windows::Win32::Graphics::Direct3D12::{
             D3D12_RESOLVE_MODE_AVERAGE, ID3D12GraphicsCommandList1,
@@ -1624,7 +1681,15 @@ extern "system" fn resolve(
         unsafe {
             let (a, b) = (to.GetDesc(), from.GetDesc());
             let format = if crate::resource::stands_in(dst) { a.Format } else { DXGI_FORMAT(format as i32) };
-            if (a.Width, a.Height) == (b.Width, b.Height) {
+            let dst_mips = u32::from(a.MipLevels).max(1);
+            let src_mips = u32::from(b.MipLevels).max(1);
+            let dst_mip = dst_sub % dst_mips;
+            let src_mip = src_sub % src_mips;
+            let dst_w = (a.Width >> dst_mip).max(1);
+            let dst_h = (u64::from(a.Height) >> dst_mip).max(1);
+            let src_w = (b.Width >> src_mip).max(1);
+            let src_h = (u64::from(b.Height) >> src_mip).max(1);
+            if (dst_w, dst_h) == (src_w, src_h) {
                 list.list
                     .ResolveSubresource(to, dst_sub, from, src_sub, format);
             } else if let Ok(list1) = list.list.cast::<ID3D12GraphicsCommandList1>() {
@@ -1632,8 +1697,8 @@ extern "system" fn resolve(
                 let rect = RECT {
                     left: 0,
                     top: 0,
-                    right: a.Width.min(b.Width) as i32,
-                    bottom: a.Height.min(b.Height) as i32,
+                    right: dst_w.min(src_w) as i32,
+                    bottom: dst_h.min(src_h) as i32,
                 };
                 list1.ResolveSubresourceRegion(
                     to,
@@ -1785,15 +1850,45 @@ extern "system" fn driver_hint(_: This, _feature: u64, _value: u64) -> u64 {
     0
 }
 
+<<<<<<< HEAD
 /// `DispatchX(x, y, z, flags)`: a dispatch with console flags, of which the
 /// host follows one: the counts are threads, not groups (`draw.rs`
 /// `THREAD_DIMENSIONS`; the ray-tracing structure builder dispatches this way).
 extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
     count_dispatch();
+||||||| merged common ancestors
+/// `DispatchX(x, y, z, flags)`: a dispatch with console flags, which the
+/// host has no use for (the ray-tracing builder dispatches this way).
+extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, _flags: u32) {
+=======
+/// `DispatchX(x, y, z, flags)`: a dispatch with console flags, bits of the
+/// hardware's dispatch initiator (the ray-tracing builder dispatches this
+/// way). With bit 5, `USE_THREAD_DIMENSIONS`, `x`, `y` and `z` count
+/// threads, not groups; the host has no use for the others.
+extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
+>>>>>>> vibr/main
     #[cfg(windows)]
+<<<<<<< HEAD
     with_state(this, |list, s| s.dispatch(list, x, y, z, flags));
+||||||| merged common ancestors
+    state::dispatch(this, x, y, z);
+=======
+    state::dispatch_x(this, x, y, z, flags & 0x20 != 0);
+>>>>>>> vibr/main
     #[cfg(not(windows))]
+<<<<<<< HEAD
     let _ = (this, x, y, z, flags);
+||||||| merged common ancestors
+    {
+        let _ = (this, x, y, z);
+        count_dispatch();
+    }
+=======
+    {
+        let _ = (this, x, y, z, flags);
+        count_dispatch();
+    }
+>>>>>>> vibr/main
 }
 
 /// `BeginQuery`/`EndQuery(heap, type, index)`: queries are answered when
@@ -1830,10 +1925,7 @@ extern "system" fn resolve_queries(
         PIPELINE_STATISTICS => (Written::Value(0), 88),
         _ => (Written::Value(0), 16),
     };
-    let Some(end) = offset.checked_add(u64::from(count) * bytes) else {
-        return;
-    };
-    if end > size {
+    if offset + u64::from(count) * bytes > size {
         return;
     }
     for i in 0..u64::from(count) {
@@ -1954,8 +2046,9 @@ extern "system" fn allocate_upload(this: This, size: u64, alignment: u64) -> *mu
     at
 }
 
-/// Draw state the host has no use for (root signatures: ours come with
-/// the pipeline; depth order and shading rate hints): any arguments,
+/// Draw state the host has no use for (root signatures, which the draw
+/// state only notes, ours coming with the pipeline; depth order and
+/// shading rate hints): any arguments,
 /// nothing returned.
 extern "system" fn ignored_state(_: This) {}
 
@@ -2006,6 +2099,12 @@ mod state {
     }
     pub(super) extern "system" fn heaps(this: This, count: u32, heaps: *const This) {
         with_state(this, |_, s| s.set_heaps(items(heaps, count)));
+    }
+    pub(super) extern "system" fn compute_root_signature(this: This, signature: This) {
+        with_state(this, |_, s| s.set_root_signature(true, signature));
+    }
+    pub(super) extern "system" fn graphics_root_signature(this: This, signature: This) {
+        with_state(this, |_, s| s.set_root_signature(false, signature));
     }
     pub(super) extern "system" fn compute_table(this: This, slot: u32, handle: u64) {
         with_state(this, |_, s| s.set_table(true, slot, handle));
@@ -2071,6 +2170,40 @@ mod state {
             }
         });
     }
+    pub(super) const MAX_RENDER_TARGETS: usize =
+        windows::Win32::Graphics::Direct3D12::D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT as usize;
+    const RTV_STRIDE: u64 = 128;
+
+    /// Expands `(count, handles, one_range)` into at most 8 descriptor handles
+    /// without dereferencing `handles` when `count == 0`, stepping from a null
+    /// base handle, or overflowing `u64`.
+    pub(super) fn target_handles(
+        count: u32,
+        handles: *const u64,
+        one_range: i32,
+    ) -> ([u64; MAX_RENDER_TARGETS], usize) {
+        let n = (count as usize).min(MAX_RENDER_TARGETS);
+        let mut out = [0u64; MAX_RENDER_TARGETS];
+        if n == 0 || handles.is_null() {
+            return (out, 0);
+        }
+        if one_range != 0 {
+            // SAFETY: `n > 0` and `handles` is non-null: the title passes the first handle.
+            let first = unsafe { *handles };
+            if first != 0 {
+                for (i, slot) in out[..n].iter_mut().enumerate() {
+                    *slot = (i as u64)
+                        .checked_mul(RTV_STRIDE)
+                        .and_then(|off| first.checked_add(off))
+                        .unwrap_or(0);
+                }
+            }
+        } else {
+            out[..n].copy_from_slice(items(handles, n as u32));
+        }
+        (out, n)
+    }
+
     /// `(count, handles, one range, depth)`: with one range, the handles
     /// follow the first at the render target view size (128 bytes).
     pub(super) extern "system" fn targets(
@@ -2080,16 +2213,10 @@ mod state {
         one_range: i32,
         depth: *const u64,
     ) {
-        let handles: Vec<u64> = if one_range != 0 && !handles.is_null() {
-            // SAFETY: the title passes the first handle.
-            let first = unsafe { *handles };
-            (0..u64::from(count)).map(|i| first + 128 * i).collect()
-        } else {
-            items(handles, count).to_vec()
-        };
+        let (handles, len) = target_handles(count, handles, one_range);
         // SAFETY: the title passes a handle or null.
         let depth = unsafe { depth.as_ref() }.copied().unwrap_or(0);
-        with_state(this, |list, s| s.set_targets(list, &handles, depth));
+        with_state(this, |list, s| s.set_targets(list, &handles[..len], depth));
     }
     pub(super) extern "system" fn draw(
         this: This,
@@ -2104,12 +2231,22 @@ mod state {
         });
     }
     pub(super) extern "system" fn dispatch(this: This, x: u32, y: u32, z: u32) {
+        dispatch_x(this, x, y, z, false);
+    }
+    /// A dispatch whose counts are threads (`threads`) or groups.
+    pub(super) fn dispatch_x(this: This, x: u32, y: u32, z: u32, threads: bool) {
         super::count_dispatch();
+<<<<<<< HEAD
         with_state(this, |list, s| s.dispatch(list, x, y, z, 0));
     }
     pub(super) fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
         super::count_dispatch();
         with_state(this, |list, s| s.dispatch_x(list, x, y, z, flags));
+||||||| merged common ancestors
+        with_state(this, |list, s| s.dispatch(list, x, y, z));
+=======
+        with_state(this, |list, s| s.dispatch(list, x, y, z, threads));
+>>>>>>> vibr/main
     }
     /// `DispatchMesh(x, y, z)` (the PC method of List6); the title's mesh
     /// programs take `x` groups only.
@@ -2165,10 +2302,12 @@ mod state {
     pub(super) use super::ignored_state as blend_factor;
     pub(super) use super::ignored_state as compute_constant;
     pub(super) use super::ignored_state as compute_constants;
+    pub(super) use super::ignored_state as compute_root_signature;
     pub(super) use super::ignored_state as compute_table;
     pub(super) use super::ignored_state as compute_view;
     pub(super) use super::ignored_state as graphics_constant;
     pub(super) use super::ignored_state as graphics_constants;
+    pub(super) use super::ignored_state as graphics_root_signature;
     pub(super) use super::ignored_state as graphics_table;
     pub(super) use super::ignored_state as graphics_view;
     pub(super) use super::ignored_state as heaps;
@@ -2612,8 +2751,8 @@ const METHODS: [(usize, *const ()); 52] = [
     (25, set_pipeline as *const ()),              // 0xc8
     (26, barrier as *const ()),                   // 0xd0
     (32, state::heaps as *const ()),              // 0x100
-    (33, ignored_state as *const ()),             // 0x108 compute root signature
-    (34, ignored_state as *const ()),             // 0x110 graphics root signature
+    (33, state::compute_root_signature as *const ()), // 0x108
+    (34, state::graphics_root_signature as *const ()), // 0x110
     (35, state::compute_table as *const ()),      // 0x118
     (36, state::graphics_table as *const ()),     // 0x120
     (37, state::compute_constant as *const ()),   // 0x128
@@ -2758,6 +2897,7 @@ mod tests {
         assert_eq!(release(allocator), 0);
     }
 
+<<<<<<< HEAD
     #[test]
     fn barrier_batches_split_before_duplicate_resource_transitions() {
         let a = 0x1000usize as This;
@@ -2990,25 +3130,540 @@ mod tests {
 
     /// An offset near `u64::MAX` must not overflow and write outside the
     /// query destination buffer.
+||||||| merged common ancestors
+    /// An offset near `u64::MAX` must not overflow and write outside the
+    /// query destination buffer.
+=======
+    #[cfg(windows)]
+>>>>>>> vibr/main
     #[test]
-    fn resolve_queries_rejects_overflowing_offset() {
-        let null = std::ptr::null();
-        let mut allocator = null;
+    fn om_set_render_targets_guards_handles_and_draws_single_range_mrt() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+        use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
+        use windows::Win32::Graphics::Direct3D::ID3DBlob;
+        use windows::Win32::Graphics::Direct3D12::*;
+        use windows::Win32::Graphics::Dxgi::Common::*;
+        use windows::Win32::Graphics::Dxgi::*;
+        use windows::core::{Interface, PCSTR, s};
+
+        // 1. Pure handle-expansion invariants: empty with unaligned non-null pointer,
+        //    null base in single-range mode, near-u64::MAX overflow, and >8 clamping.
+        let invalid_ptr = 0xdead_beef_0001usize as *const u64;
+        assert_eq!(state::target_handles(0, invalid_ptr, 1).1, 0);
+        assert_eq!(state::target_handles(0, invalid_ptr, 0).1, 0);
+        assert_eq!(state::target_handles(3, std::ptr::null(), 1).1, 0);
+
+        let zero_first = 0u64;
+        let (null_out, null_len) = state::target_handles(4, &zero_first, 1);
+        assert_eq!(&null_out[..null_len], &[0, 0, 0, 0]);
+
+        let near_max = u64::MAX - 64;
+        let (ovf_out, ovf_len) = state::target_handles(4, &near_max, 1);
+        assert_eq!(&ovf_out[..ovf_len], &[near_max, 0, 0, 0]);
+
+        let base = 0x1000u64;
+        let (clamped_single, single_len) = state::target_handles(12, &base, 1);
+        assert_eq!(single_len, state::MAX_RENDER_TARGETS);
         assert_eq!(
-            create_allocator(null, 0, &ALLOCATOR_IIDS[0], &mut allocator),
+            clamped_single,
+            [
+                0x1000, 0x1080, 0x1100, 0x1180, 0x1200, 0x1280, 0x1300, 0x1380
+            ]
+        );
+
+        let twelve = [10u64, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120];
+        let (clamped_array, array_len) = state::target_handles(12, twelve.as_ptr(), 0);
+        assert_eq!(array_len, state::MAX_RENDER_TARGETS);
+        assert_eq!(clamped_array, [10, 20, 30, 40, 50, 60, 70, 80]);
+
+        // 2. End-to-end GPU verification: single-range MRT draw (3 targets + DSV),
+        //    followed by count == 0 with an unaligned invalid pointer for a depth-only
+        //    pass, null single-range unbind, and >8 array clamping.
+        static DEBUG_ERRORS: AtomicU32 = AtomicU32::new(0);
+        unsafe extern "system" fn on_debug_message(
+            _: D3D12_MESSAGE_CATEGORY,
+            severity: D3D12_MESSAGE_SEVERITY,
+            id: D3D12_MESSAGE_ID,
+            desc: PCSTR,
+            _: *mut std::ffi::c_void,
+        ) {
+            if severity.0 <= D3D12_MESSAGE_SEVERITY_ERROR.0
+                && id != D3D12_MESSAGE_ID_CREATEPIPELINELIBRARY_INVALIDLIBRARYBLOB
+            {
+                DEBUG_ERRORS.fetch_add(1, Ordering::Relaxed);
+                // SAFETY: D3D12 provides a valid NUL-terminated string during the callback.
+                let msg = unsafe { desc.to_string() }.unwrap_or_default();
+                eprintln!("D3D12 debug error (id={}): {msg}", id.0);
+            }
+        }
+
+        struct DebugGuard(Option<(ID3D12InfoQueue1, u32)>);
+        impl Drop for DebugGuard {
+            fn drop(&mut self) {
+                if let Some((ref q, cookie)) = self.0 {
+                    // SAFETY: cookie belongs to `q`.
+                    let _ = unsafe { q.UnregisterMessageCallback(cookie) };
+                }
+            }
+        }
+
+        struct Held(This);
+        impl Drop for Held {
+            fn drop(&mut self) {
+                slot::<extern "system" fn(This) -> u32>(self.0, 0x10)(self.0);
+            }
+        }
+
+        struct HeapHeld(This);
+        impl Drop for HeapHeld {
+            fn drop(&mut self) {
+                slot::<extern "system" fn(This) -> u32>(self.0, 0x10)(self.0);
+            }
+        }
+
+        let Some(host) = crate::host::host() else {
+            return;
+        };
+        DEBUG_ERRORS.store(0, Ordering::Relaxed);
+        // SAFETY: plain DXGI adapter query for test log traceability.
+        if let Ok(desc) = unsafe {
+            CreateDXGIFactory2::<IDXGIFactory4>(DXGI_CREATE_FACTORY_FLAGS(0))
+                .and_then(|f| f.EnumAdapterByLuid::<IDXGIAdapter1>(host.device.GetAdapterLuid()))
+                .and_then(|a| a.GetDesc1())
+        } {
+            eprintln!(
+                "om_set_render_targets adapter: {} ({:04x}:{:04x}, flags={:#x})",
+                String::from_utf16_lossy(&desc.Description).trim_end_matches('\0'),
+                desc.VendorId,
+                desc.DeviceId,
+                desc.Flags
+            );
+        }
+        let _dbg = DebugGuard(host.device.cast::<ID3D12InfoQueue1>().ok().and_then(|q| {
+            let mut cookie = 0;
+            // SAFETY: static callback function, unregistered on drop.
+            unsafe {
+                q.RegisterMessageCallback(
+                    Some(on_debug_message),
+                    D3D12_MESSAGE_CALLBACK_FLAG_NONE,
+                    std::ptr::null_mut(),
+                    &mut cookie,
+                )
+            }
+            .ok()
+            .map(|()| (q, cookie))
+        }));
+
+        let compile = |hlsl: &str, entry: PCSTR, target: PCSTR| -> ID3DBlob {
+            let mut blob: Option<ID3DBlob> = None;
+            // SAFETY: static HLSL source and valid output blob pointer.
+            unsafe {
+                D3DCompile(
+                    hlsl.as_ptr().cast(),
+                    hlsl.len(),
+                    s!("mrt_probe"),
+                    None,
+                    None,
+                    entry,
+                    target,
+                    0,
+                    0,
+                    &mut blob,
+                    None,
+                )
+            }
+            .expect("compile synthetic shader");
+            blob.unwrap()
+        };
+
+        const SHADER: &str = r#"
+            [RootSignature("")]
+            float4 vs_mrt(uint vid : SV_VertexID) : SV_Position {
+                float2 p = float2((vid << 1) & 2, vid & 2);
+                return float4(p * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.75, 1.0);
+            }
+            float4 vs_depth_only(uint vid : SV_VertexID) : SV_Position {
+                float2 p = float2((vid << 1) & 2, vid & 2);
+                return float4(p * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.25, 1.0);
+            }
+            struct MrtOut {
+                float4 rt0 : SV_Target0;
+                float4 rt1 : SV_Target1;
+                float4 rt2 : SV_Target2;
+            };
+            MrtOut ps_mrt() {
+                MrtOut o;
+                o.rt0 = float4(1.0, 0.0, 0.0, 1.0);
+                o.rt1 = float4(0.0, 1.0, 0.0, 1.0);
+                o.rt2 = float4(0.0, 0.0, 1.0, 1.0);
+                return o;
+            }
+        "#;
+        let vs_mrt = compile(SHADER, s!("vs_mrt"), s!("vs_5_0"));
+        let vs_depth = compile(SHADER, s!("vs_depth_only"), s!("vs_5_0"));
+        let ps_mrt = compile(SHADER, s!("ps_mrt"), s!("ps_5_0"));
+
+        // SAFETY: compiled DXBC blobs contain valid bytecode and root signature.
+        let (root, mrt_pso, depth_pso) = unsafe {
+            let vs_bytes = std::slice::from_raw_parts(
+                vs_mrt.GetBufferPointer().cast::<u8>(),
+                vs_mrt.GetBufferSize(),
+            );
+            let vs_d_bytes = std::slice::from_raw_parts(
+                vs_depth.GetBufferPointer().cast::<u8>(),
+                vs_depth.GetBufferSize(),
+            );
+            let ps_bytes = std::slice::from_raw_parts(
+                ps_mrt.GetBufferPointer().cast::<u8>(),
+                ps_mrt.GetBufferSize(),
+            );
+            let root: ID3D12RootSignature = host.device.CreateRootSignature(0, vs_bytes).unwrap();
+            let mut rtv_formats = [DXGI_FORMAT_UNKNOWN; 8];
+            rtv_formats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+            rtv_formats[1] = DXGI_FORMAT_R8G8B8A8_UNORM;
+            rtv_formats[2] = DXGI_FORMAT_R8G8B8A8_UNORM;
+            let raster = D3D12_RASTERIZER_DESC {
+                FillMode: D3D12_FILL_MODE_SOLID,
+                CullMode: D3D12_CULL_MODE_NONE,
+                DepthClipEnable: true.into(),
+                ..Default::default()
+            };
+            let blend = D3D12_BLEND_DESC {
+                RenderTarget: [D3D12_RENDER_TARGET_BLEND_DESC {
+                    RenderTargetWriteMask: D3D12_COLOR_WRITE_ENABLE_ALL.0 as u8,
+                    ..Default::default()
+                }; 8],
+                ..Default::default()
+            };
+            let depth_state = D3D12_DEPTH_STENCIL_DESC {
+                DepthEnable: true.into(),
+                DepthWriteMask: D3D12_DEPTH_WRITE_MASK_ALL,
+                DepthFunc: D3D12_COMPARISON_FUNC_LESS,
+                ..Default::default()
+            };
+            let mrt_pso: ID3D12PipelineState = host
+                .device
+                .CreateGraphicsPipelineState(&D3D12_GRAPHICS_PIPELINE_STATE_DESC {
+                    pRootSignature: std::mem::transmute_copy(&root),
+                    VS: D3D12_SHADER_BYTECODE {
+                        pShaderBytecode: vs_bytes.as_ptr().cast(),
+                        BytecodeLength: vs_bytes.len(),
+                    },
+                    PS: D3D12_SHADER_BYTECODE {
+                        pShaderBytecode: ps_bytes.as_ptr().cast(),
+                        BytecodeLength: ps_bytes.len(),
+                    },
+                    BlendState: blend,
+                    SampleMask: u32::MAX,
+                    RasterizerState: raster,
+                    DepthStencilState: depth_state,
+                    PrimitiveTopologyType: D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+                    NumRenderTargets: 3,
+                    RTVFormats: rtv_formats,
+                    DSVFormat: DXGI_FORMAT_D32_FLOAT,
+                    SampleDesc: DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
+                    ..Default::default()
+                })
+                .unwrap();
+            let depth_pso: ID3D12PipelineState = host
+                .device
+                .CreateGraphicsPipelineState(&D3D12_GRAPHICS_PIPELINE_STATE_DESC {
+                    pRootSignature: std::mem::transmute_copy(&root),
+                    VS: D3D12_SHADER_BYTECODE {
+                        pShaderBytecode: vs_d_bytes.as_ptr().cast(),
+                        BytecodeLength: vs_d_bytes.len(),
+                    },
+                    BlendState: blend,
+                    SampleMask: u32::MAX,
+                    RasterizerState: raster,
+                    DepthStencilState: depth_state,
+                    PrimitiveTopologyType: D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+                    NumRenderTargets: 0,
+                    DSVFormat: DXGI_FORMAT_D32_FLOAT,
+                    SampleDesc: DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
+                    ..Default::default()
+                })
+                .unwrap();
+            (root, mrt_pso, depth_pso)
+        };
+
+        let make_tex = |format: DXGI_FORMAT, flags: D3D12_RESOURCE_FLAGS| -> Held {
+            let heap = D3D12_HEAP_PROPERTIES {
+                Type: D3D12_HEAP_TYPE_DEFAULT,
+                ..Default::default()
+            };
+            let desc = D3D12_RESOURCE_DESC {
+                Dimension: D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+                Width: 4,
+                Height: 4,
+                DepthOrArraySize: 1,
+                MipLevels: 1,
+                Format: format,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Flags: flags,
+                ..Default::default()
+            };
+            let iid = ID3D12Resource::IID;
+            let mut out = std::ptr::null();
+            assert_eq!(
+                crate::resource::create_committed(
+                    std::ptr::null(),
+                    (&raw const heap).cast(),
+                    0,
+                    (&raw const desc).cast(),
+                    D3D12_RESOURCE_STATE_COMMON.0 as u32,
+                    std::ptr::null(),
+                    (&raw const iid).cast(),
+                    &mut out,
+                ),
+                S_OK
+            );
+            Held(out)
+        };
+
+        let rts = [
+            make_tex(
+                DXGI_FORMAT_R8G8B8A8_UNORM,
+                D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+            ),
+            make_tex(
+                DXGI_FORMAT_R8G8B8A8_UNORM,
+                D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+            ),
+            make_tex(
+                DXGI_FORMAT_R8G8B8A8_UNORM,
+                D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+            ),
+        ];
+        let depth_tex = make_tex(
+            DXGI_FORMAT_D32_FLOAT,
+            D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE,
+        );
+
+        let heap_iid = crate::object::guid(
+            0x8efb471d,
+            0x616c,
+            0x4f49,
+            [0x90, 0xf7, 0x12, 0x7b, 0xb7, 0x63, 0xfa, 0x51],
+        );
+        let make_desc_heap = |kind: u32, count: u32| -> (HeapHeld, u64) {
+            // Trailing zeroed placement words ensure `create_heap` allocates its own backing.
+            let raw_desc = [u64::from(kind) | (u64::from(count) << 32), 0, 0, 0];
+            let mut heap = std::ptr::null();
+            assert_eq!(
+                crate::descriptor::create_heap(
+                    std::ptr::null(),
+                    raw_desc.as_ptr().cast(),
+                    &heap_iid,
+                    &mut heap,
+                ),
+                S_OK
+            );
+            let start = crate::descriptor::heap(heap).start;
+            (HeapHeld(heap), start)
+        };
+        let (_rtv_heap, rtv_start) = make_desc_heap(2, 4);
+        let (_dsv_heap, dsv_start) = make_desc_heap(3, 1);
+        for (i, rt) in rts.iter().enumerate() {
+            crate::descriptor::create_rtv(
+                std::ptr::null(),
+                rt.0,
+                std::ptr::null(),
+                rtv_start + (i as u64) * 128,
+            );
+        }
+        crate::descriptor::create_dsv(std::ptr::null(), depth_tex.0, std::ptr::null(), dsv_start);
+
+        let null = std::ptr::null();
+        let mut alloc = null;
+        assert_eq!(
+            create_allocator(null, 0, &ALLOCATOR_IIDS[0], &mut alloc),
             S_OK
         );
+        let alloc = Held(alloc);
         let mut list = null;
         assert_eq!(
-            create_list(null, 0, 0, allocator, null, &LIST_IIDS[1], &mut list),
+            create_list(null, 0, 0, alloc.0, null, &LIST_IIDS[1], &mut list),
             S_OK
         );
-        let buffer = crate::resource::test_buffer(64);
-        // Used to overflow `offset + count * 8` (panic in debug, wrap in release).
-        resolve_queries(list, null, 0, 0, 2, buffer, u64::MAX - 8);
-        let release = |o: This| slot::<extern "system" fn(This) -> u32>(o, 0x10)(o);
-        for object in [buffer, list, allocator] {
-            assert_eq!(release(object), 0);
+        let list = Held(list);
+        let recorded = host_list(list.0).unwrap();
+        recorded.keep(&root);
+        recorded.keep(&mrt_pso);
+        recorded.keep(&depth_pso);
+
+        for rt in &rts {
+            ensure_state(recorded, rt.0, D3D12_RESOURCE_STATE_RENDER_TARGET.0 as u32);
         }
+        ensure_state(
+            recorded,
+            depth_tex.0,
+            D3D12_RESOURCE_STATE_DEPTH_WRITE.0 as u32,
+        );
+        clear_dsv(list.0, dsv_start, 1, 1.0, 0, 0, std::ptr::null());
+
+        type OmSetRenderTargetsFn = extern "system" fn(This, u32, *const u64, i32, *const u64);
+        let om_set = slot::<OmSetRenderTargetsFn>(list.0, 0x190);
+
+        // Pass 1: bind 3 contiguous RTVs via single-range descriptor handle + DSV.
+        om_set(list.0, 3, &rtv_start, 1, &dsv_start);
+        let vp = D3D12_VIEWPORT {
+            Width: 4.0,
+            Height: 4.0,
+            MaxDepth: 1.0,
+            ..Default::default()
+        };
+        let sc = RECT {
+            left: 0,
+            top: 0,
+            right: 4,
+            bottom: 4,
+        };
+        // SAFETY: open command list with bound RTVs/DSV and valid PSO.
+        unsafe {
+            recorded.list.RSSetViewports(&[vp]);
+            recorded.list.RSSetScissorRects(&[sc]);
+            recorded
+                .list
+                .IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            recorded.list.SetGraphicsRootSignature(&root);
+            recorded.list.SetPipelineState(&mrt_pso);
+            recorded.list.DrawInstanced(3, 1, 0, 0);
+        }
+
+        // Pass 2: count == 0 with unaligned invalid non-null pointer in single-range mode
+        // must not dereference `invalid_ptr`, unbinds RTVs, and keeps DSV active for depth draw.
+        om_set(list.0, 0, invalid_ptr, 1, &dsv_start);
+        // SAFETY: open command list with 0 RTVs and bound DSV matching `depth_pso`.
+        unsafe {
+            recorded.list.SetPipelineState(&depth_pso);
+            recorded.list.DrawInstanced(3, 1, 0, 0);
+        }
+
+        // Null single-range base and >8 non-single-range array must both succeed cleanly.
+        om_set(list.0, 4, &zero_first, 1, std::ptr::null());
+        let mut padded = [0u64; 12];
+        padded[0] = rtv_start;
+        om_set(list.0, 12, padded.as_ptr(), 0, std::ptr::null());
+
+        let read_tex = |tex: &Held, fmt: DXGI_FORMAT| -> ID3D12Resource {
+            ensure_state(recorded, tex.0, D3D12_RESOURCE_STATE_COPY_SOURCE.0 as u32);
+            let host_tex = crate::resource::host_resource(tex.0).unwrap();
+            let mut rb: Option<ID3D12Resource> = None;
+            // SAFETY: plain readback buffer creation and texture copy recording.
+            unsafe {
+                host.device
+                    .CreateCommittedResource(
+                        &D3D12_HEAP_PROPERTIES {
+                            Type: D3D12_HEAP_TYPE_READBACK,
+                            ..Default::default()
+                        },
+                        D3D12_HEAP_FLAG_NONE,
+                        &D3D12_RESOURCE_DESC {
+                            Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
+                            Width: 1024,
+                            Height: 1,
+                            DepthOrArraySize: 1,
+                            MipLevels: 1,
+                            SampleDesc: DXGI_SAMPLE_DESC {
+                                Count: 1,
+                                Quality: 0,
+                            },
+                            Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+                            ..Default::default()
+                        },
+                        D3D12_RESOURCE_STATE_COPY_DEST,
+                        None,
+                        &mut rb,
+                    )
+                    .unwrap();
+                let rb = rb.unwrap();
+                let dst_loc = D3D12_TEXTURE_COPY_LOCATION {
+                    pResource: std::mem::transmute_copy(&rb),
+                    Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+                    Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 {
+                        PlacedFootprint: D3D12_PLACED_SUBRESOURCE_FOOTPRINT {
+                            Offset: 0,
+                            Footprint: D3D12_SUBRESOURCE_FOOTPRINT {
+                                Format: fmt,
+                                Width: 4,
+                                Height: 4,
+                                Depth: 1,
+                                RowPitch: 256,
+                            },
+                        },
+                    },
+                };
+                let src_loc = D3D12_TEXTURE_COPY_LOCATION {
+                    pResource: std::mem::transmute_copy(host_tex),
+                    Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+                    Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 {
+                        SubresourceIndex: 0,
+                    },
+                };
+                recorded
+                    .list
+                    .CopyTextureRegion(&dst_loc, 0, 0, 0, &src_loc, None);
+                rb
+            }
+        };
+
+        let rbs = [
+            read_tex(&rts[0], DXGI_FORMAT_R8G8B8A8_UNORM),
+            read_tex(&rts[1], DXGI_FORMAT_R8G8B8A8_UNORM),
+            read_tex(&rts[2], DXGI_FORMAT_R8G8B8A8_UNORM),
+        ];
+        let depth_rb = read_tex(&depth_tex, DXGI_FORMAT_D32_FLOAT);
+        assert_eq!(close(list.0), S_OK);
+        host.execute(&[recorded]);
+
+        let expected_colors = [[255u8, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]];
+        for (rb, want) in rbs.iter().zip(expected_colors) {
+            let mut ptr = std::ptr::null_mut();
+            // SAFETY: submission finished; `rb` holds 4 rows at 256-byte pitch.
+            unsafe {
+                rb.Map(0, None, Some(&mut ptr)).unwrap();
+                for y in 0..4usize {
+                    for x in 0..4usize {
+                        let px = ptr
+                            .cast::<u8>()
+                            .add(y * 256 + x * 4)
+                            .cast::<[u8; 4]>()
+                            .read_unaligned();
+                        assert_eq!(px, want);
+                    }
+                }
+                rb.Unmap(0, None);
+            }
+        }
+
+        let mut dptr = std::ptr::null_mut();
+        // SAFETY: submission finished; `depth_rb` holds 4 rows of f32 at 256-byte pitch.
+        unsafe {
+            depth_rb.Map(0, None, Some(&mut dptr)).unwrap();
+            for y in 0..4usize {
+                for x in 0..4usize {
+                    let d = dptr
+                        .cast::<u8>()
+                        .add(y * 256 + x * 4)
+                        .cast::<f32>()
+                        .read_unaligned();
+                    assert!((d - 0.25).abs() < 1e-6, "unexpected depth {d}");
+                }
+            }
+            depth_rb.Unmap(0, None);
+        }
+        assert_eq!(DEBUG_ERRORS.load(Ordering::Relaxed), 0);
     }
 }

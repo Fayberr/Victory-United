@@ -67,11 +67,53 @@ pub struct Bools {
 }
 
 /// The tables below have small integer keys; SipHash dominated run time.
+<<<<<<< HEAD
 type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fx>>;
+||||||| merged common ancestors
+type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fx>>;
+type Set<K> = HashSet<K, BuildHasherDefault<Fx>>;
+
+/// A set of what a walk has met: a list scan while it is small (most lane
+/// masks are a handful of nodes), a hash set once it grows.
+struct Seen<T> {
+    list: Vec<T>,
+    set: Set<T>,
+}
+
+impl<T> Default for Seen<T> {
+    fn default() -> Self {
+        Seen {
+            list: Vec::new(),
+            set: Set::default(),
+        }
+    }
+}
+
+impl<T: Copy + Eq + std::hash::Hash> Seen<T> {
+    const SCAN: usize = 32;
+
+    /// Adds `x`; false if it was already in.
+    fn insert(&mut self, x: T) -> bool {
+        if self.set.is_empty() {
+            if self.list.contains(&x) {
+                return false;
+            }
+            if self.list.len() < Self::SCAN {
+                self.list.push(x);
+                return true;
+            }
+            self.set.extend(self.list.drain(..));
+        }
+        self.set.insert(x)
+    }
+}
+=======
+pub(crate) type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fx>>;
+>>>>>>> vibr/main
 
 /// FxHash's multiply-rotate step.
 #[derive(Default)]
-struct Fx(u64);
+pub(crate) struct Fx(u64);
 
 impl Hasher for Fx {
     fn finish(&self) -> u64 {
@@ -941,6 +983,46 @@ impl<'a> Lanes<'a> {
                     })
                 };
                 let derived = exec_write(lo, k.0) || exec_write(hi, k.1);
+                // Halves copied apart from one pair (`s_mov_b32` each, as a wave64 mask parked
+                // in a VGPR's lanes comes back when its slot is not always used as a pair):
+                // the pair they copy.
+                if m.is_none() {
+                    let copy = |v: Value| -> Option<Value> {
+                        let (b, i) = self.defs.get(&v).copied()?;
+                        let inst = &p.blocks[b].insts[i];
+                        match &inst.fields {
+                            Fields::Sop { src, .. } if inst.name() == "s_mov_b32" => match src.first() {
+                                Some(&Operand::Scalar { code, .. }) => inst.read(Reg::S(code)),
+                                _ => None,
+                            },
+                            _ => None,
+                        }
+                    };
+                    let (mut a, mut b) = k;
+                    let mut pair = None;
+                    for _ in 0..8 {
+                        let (Some(x), Some(y)) = (copy(a), copy(b)) else { break };
+                        (a, b) = (x, y);
+                        // (the low and the high dword of what one instruction writes)
+                        let halves = self.defs.get(&a).filter(|&d| self.defs.get(&b) == Some(d)).is_some_and(|&(bl, i)| {
+                            let w = &p.blocks[bl].insts[i].writes;
+                            w.iter().any(|&(r, v)| {
+                                v == a
+                                    && matches!(r, Reg::S(c) if c.checked_add(1).is_some_and(|h| w.contains(&(Reg::S(h), b))))
+                            })
+                        });
+                        if halves {
+                            pair = Some((a, b));
+                            break;
+                        }
+                    }
+                    if let Some(pair) = pair {
+                        let r = self.mask(pair);
+                        let cache = if r.1 { &mut self.masks } else { &mut self.other };
+                        cache.insert(k, r.0);
+                        return r;
+                    }
+                }
                 // shortcut: the atom names the pair by its low dword, and
                 // lowering takes the high dword written beside it. For halves
                 // written apart (two `s_mov_b32`) lanes 32-63 are wrong unless
@@ -1760,6 +1842,32 @@ mod tests {
         }
     }
 
+    /// A wave64 mask whose halves come back apart (the two `s_mov_b32` a VGPR-lane slot
+    /// restores when it is not always used as a pair, `PS_VoxelizeVisiblity`) is the mask they
+    /// copy, not an opaque one; halves of different pairs are not.
+    #[test]
+    fn a_mask_copied_half_by_half_is_the_mask() {
+        for (hi, same) in [(0xBEA5_0323u32, true), (0xBEA5_0322, false)] {
+            let p = build(
+                &[
+                    0xD4C2_0022,
+                    0x0002_0080, // v_cmp_eq_u32 s[34:35], 0, v0
+                    0xBEA4_0322, // s_mov_b32 s36, s34
+                    hi,          // s_mov_b32 s37, s35 (or s34)
+                    0xD501_0001,
+                    0x0092_0480, // v_cndmask_b32 v1, 0, v2, s[36:37]
+                    S_ENDPGM,
+                ],
+                true,
+            );
+            let s = structure(&p).unwrap();
+            let cmp = p.blocks[0].insts[0].write(Reg::S(34)).unwrap();
+            let copy = p.blocks[0].insts[3].read(Reg::S(36)).unwrap();
+            assert!(s.masks.contains_key(&cmp));
+            assert_eq!(s.masks.get(&copy) == s.masks.get(&cmp), same, "{hi:#x}");
+        }
+    }
+
     #[test]
     fn split_scalar_copies_across_a_branch_preserve_both_words_of_a_wave64_mask() {
         for (high, intact) in [(0xBE83_036B, true), (0xBE83_036A, false)] {
@@ -1941,6 +2049,7 @@ mod tests {
             "{edges:?}"
         );
     }
+<<<<<<< HEAD
 
     #[test]
     fn s_bcnt1_preserves_narrowed_exec_in_exits_and_scc_some() {
@@ -2031,4 +2140,8 @@ mod tests {
             "wave64 must not treat s_bcnt1_i32_b32 as a full wave64 lane-mask test"
         );
     }
+||||||| merged common ancestors
+>>>>>>>>> Temporary merge branch 2
+=======
+>>>>>>> vibr/main
 }

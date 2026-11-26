@@ -1954,7 +1954,6 @@ mod host {
             // pad's buttons, by the stand-in pad's table: with a real pad
             // connected the stand-in is not there, and a title that listens
             // to the pad (the title's start screen) saw nothing.
-            #[cfg(feature = "diagnostics")]
             if slot == 0 {
                 for vk in scripted() {
                     for (key, part) in super::binds::layout(|_| false) {
@@ -1968,6 +1967,7 @@ mod host {
         }
 
         fn keys(&mut self) -> Vec<KeyState> {
+<<<<<<< HEAD
             let focus = self.focus();
             self.cursor(focus);
             #[cfg(feature = "diagnostics")]
@@ -1979,6 +1979,16 @@ mod host {
             #[cfg(not(feature = "diagnostics"))]
             let mut down = Vec::new();
             if focus || anywhere() {
+||||||| merged common ancestors
+            #[cfg(feature = "diagnostics")]
+            let mut down = scripted();
+            #[cfg(not(feature = "diagnostics"))]
+            let mut down = Vec::new();
+            if focused() {
+=======
+            let mut down = scripted();
+            if focused() {
+>>>>>>> vibr/main
                 // Left/right modifier keys only, as devices report them; no
                 // mouse buttons (below 0x08; `mouse` has them).
                 let held: Vec<u8> = (0x08..=0xFE_u8)
@@ -2059,7 +2069,7 @@ mod host {
     /// time), with or without focus. A key is a
     /// letter, a digit, or `Enter`, `Esc`, `Tab`, `Back`, `Up`, `Down`,
     /// `Left`, `Right` (the stand-in pad's table maps them to buttons).
-    #[cfg(feature = "diagnostics")]
+    /// In every build: release runs are measured with it too.
     fn scripted() -> Vec<u8> {
         static SCRIPT: LazyLock<(Instant, Vec<(Duration, Duration, u8)>)> = LazyLock::new(|| {
             let list = std::env::var("VICTORY_KEYS").unwrap_or_default();

@@ -1,6 +1,12 @@
 [package]
 name = "xtask"
+<<<<<<< HEAD
 description = "Repository maintenance: asset-policy enforcement, git hooks, and the CI steps run locally."
+||||||| merged common ancestors
+description = "Repository maintenance: asset-policy enforcement and git hooks."
+=======
+description = "Repository maintenance: asset-policy enforcement, git hooks and the README progress tracker."
+>>>>>>> vibr/main
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +16,7 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+serde_json.workspace = true
 walkdir.workspace = true
 
 [lints]

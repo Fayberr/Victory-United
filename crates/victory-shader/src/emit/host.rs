@@ -154,6 +154,7 @@ impl Host {
         }
     }
 
+<<<<<<< HEAD
     /// The device's wave sizes (`WaveLaneCountMin`, `WaveLaneCountMax`); `None` if it does not
     /// say.
     pub fn wave_lanes(&self) -> Option<(u32, u32)> {
@@ -177,6 +178,45 @@ impl Host {
         self.wave_lanes().is_none_or(|(min, max)| (min..=max).contains(&lanes))
     }
 
+||||||| merged common ancestors
+=======
+    /// Tells the translator what a run on this GPU tells it (victory-gpu's device setup and
+    /// `probe_view_limit`): its widest wave and whether it caps view heaps at 1 000 000, so
+    /// offline translations are the ones a run makes.
+    pub fn set_translation_limits(&self) {
+        const PORTABLE_VIEWS: u32 = 1_000_000;
+        // SAFETY: a feature query with a valid out pointer, and a heap released at once.
+        unsafe {
+            let mut o1 = D3D12_FEATURE_DATA_D3D12_OPTIONS1::default();
+            if self
+                .device
+                .CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, (&raw mut o1).cast(), size_of_val(&o1) as u32)
+                .is_ok()
+            {
+                super::set_host_max_wave(o1.WaveLaneCountMax);
+            }
+            let mut o0 = D3D12_FEATURE_DATA_D3D12_OPTIONS::default();
+            if self
+                .device
+                .CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, (&raw mut o0).cast(), size_of_val(&o0) as u32)
+                .is_ok()
+            {
+                super::set_host_rovs(o0.ROVsSupported.as_bool());
+            }
+            let made: windows::core::Result<ID3D12DescriptorHeap> =
+                self.device.CreateDescriptorHeap(&D3D12_DESCRIPTOR_HEAP_DESC {
+                    Type: D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+                    NumDescriptors: PORTABLE_VIEWS + 1,
+                    Flags: D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
+                    NodeMask: 0,
+                });
+            if made.is_err() {
+                super::set_view_heap_limit(PORTABLE_VIEWS - 1);
+            }
+        }
+    }
+
+>>>>>>> vibr/main
     /// The root signature translated shaders expect: user data per stage
     /// at `b0`, immediate samplers per stage at `s<n>`, heaps directly
     /// indexed.

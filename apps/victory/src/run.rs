@@ -61,9 +61,23 @@ pub fn run(
     let original = std::fs::read(exe).with_context(|| format!("reading {}", exe.display()))?;
     let mut prepared = victory_loader::prepare(&original)?;
     let hash = prepared.original_hash.to_hex();
+<<<<<<< HEAD
     let build = victory_game::identify(&hash);
     match build {
         Some(build) => println!("build          {} ({hash})", build.label),
+||||||| merged common ancestors
+    let title_dir = exe.parent().unwrap_or(Path::new("."));
+    match victory_game::identify(&hash) {
+        Some(build) => {
+            println!("build          {} ({hash})", build.label);
+            if execute {
+                check_startup_archive(&title_dir.join(build.startup_archive))?;
+            }
+        }
+=======
+    match victory_game::identify(&hash) {
+        Some(build) => println!("build          {} ({hash})", build.label),
+>>>>>>> vibr/main
         None => println!("build          unknown ({hash})"),
     }
     apply_title_patches(&mut prepared, build)?;
@@ -80,6 +94,9 @@ pub fn run(
     drop(original);
     victory_hle::runtime::set_main_image(image.base());
     victory_hle::runtime::set_image_path(image.base(), exe);
+    if let Some(dir) = exe.parent() {
+        victory_gpu::set_title_dir(dir);
+    }
     println!(
         "mapped at      {:#x} (preferred {:#x})",
         image.base(),
@@ -208,8 +225,14 @@ pub fn run(
     victory_loader::report_crashes();
     victory_loader::log_crashes_to(temp.with_file_name("crashes.log"));
     victory_hle::runtime::use_console_timers();
+    // The title patches (upscaler picker, render scale) in every build: a
+    // release build left them out with the other aids, and Series S then
+    // took FidelityFX, whose passes do not run here, and lost the card.
+    // First, before any thread started below can read or write the image.
+    #[cfg(windows)]
+    crate::title_patch::apply(&image)?;
     #[cfg(feature = "diagnostics")]
-    diagnostics(&image, &cfg);
+    diagnostics(&image, &cfg)?;
     let late = LateDlls {
         host: resolver.host.clone(),
         title_dir: title_dir.to_owned(),
@@ -227,13 +250,44 @@ pub fn run(
         .join()
         .map_err(|_| anyhow::anyhow!("title main thread panicked"))??;
     println!("title exited with {code}");
+<<<<<<< HEAD
     Ok(code)
 }
 
+||||||| merged common ancestors
+    Ok(())
+}
+
+#[cfg(windows)]
+fn check_startup_archive(path: &Path) -> Result<()> {
+    use std::io::Read;
+
+    let mut magic = [0; 4];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut magic))
+        .with_context(|| {
+            format!(
+                "Cannot read startup archive {}. Check that the file from your package is present and readable.",
+                path.display()
+            )
+        })?;
+    anyhow::ensure!(
+        magic == *b"9FPR",
+        "Invalid RPF9 header in {}. Restore the startup archive from your package.",
+        path.display()
+    );
+    Ok(())
+}
+
+=======
+    Ok(())
+}
+
+>>>>>>> vibr/main
 /// The debugging aids (README): scheduled stack dumps, watched values and
 /// memory saved on a crash.
 #[cfg(all(windows, feature = "diagnostics"))]
-fn diagnostics(image: &victory_loader::LoadedImage, cfg: &victory_core::Config) {
+fn diagnostics(image: &victory_loader::LoadedImage, cfg: &victory_core::Config) -> Result<()> {
     victory_loader::dump_stacks_on_schedule();
     victory_loader::profile_on_schedule(victory_hle::frame_phase);
     victory_hle::modules::audio::capture::start();
@@ -256,6 +310,7 @@ fn diagnostics(image: &victory_loader::LoadedImage, cfg: &victory_core::Config) 
             })
             .collect(),
     );
+    Ok(())
 }
 
 /// Debugging aid: `VICTORY_WATCH=<rva>,...` (hex) logs the u32 at each

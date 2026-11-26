@@ -139,7 +139,9 @@ fn present_behind() -> bool {
 /// the queue `this` holds. False if it has to run the old way.
 #[cfg(windows)]
 fn send_behind(this: This, planes: u32, plane_parameters: *const Plane) -> bool {
-    if this.is_null() || planes == 0 || PRESENTS_HELD.load(Ordering::Relaxed) != 0 {
+    // shortcut: a present of several planes runs the old way; hold every
+    // plane's texture in `Held::Present` if such a title is to run ahead.
+    if this.is_null() || planes != 1 || PRESENTS_HELD.load(Ordering::Relaxed) != 0 {
         return false;
     }
     let frame = FRAMES.load(Ordering::Relaxed) + 1;
@@ -899,7 +901,13 @@ fn release_held_now(all: bool) {
                     Held::Present(texture, state, frame) => {
                         let show = || {
                             if let Some(host) = crate::host::host() {
+<<<<<<< HEAD
                                 let _ = host.present(&texture, state, frame, None);
+||||||| merged common ancestors
+                                let _ = host.present(&texture, state, frame);
+=======
+                                let _ = host.present(&[(&texture, state, None)], frame);
+>>>>>>> vibr/main
                             }
                         };
                         if all {
@@ -1169,12 +1177,143 @@ fn execute_now(this: This, count: u32, lists: *const This) {
     }
 }
 
-/// The start of a present plane: frame token, then the plane's resources.
+/// A present plane as the title describes it (the console's
+/// `D3D12XBOX_PRESENT_PLANE_PARAMETERS`): frame token, the plane's
+/// resources, and how the display shows them. A present names its planes
+/// bottom first: the display scales each to the screen and blends it over
+/// the ones before it.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub(crate) struct Plane {
     token: u64,
     count: u32,
     resources: *const This,
+    /// Per resource, the part of it that is shown (left, top, right,
+    /// bottom); null: all of it.
+    parts: *const [u32; 4],
+    /// Where on the screen the plane goes; null: over all of it.
+    placement: *const [u32; 4],
+    color_space: u32,
+    scale_filter: u32,
+    extended_count: u32,
+    extended: *const This,
+    flags: u32,
+}
+const _: () = assert!(size_of::<Plane>() == 0x48);
+
+/// A value of plain data read from title memory; `None` if it cannot be
+/// read there.
+#[cfg(windows)]
+fn peek<T: Copy>(at: *const T) -> Option<T> {
+    let mut value = std::mem::MaybeUninit::<T>::uninit();
+    // SAFETY: the bytes of `value`, all written before it is read.
+    let bytes =
+        unsafe { std::slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), size_of::<T>()) };
+    // SAFETY: every byte was read into; plain data.
+    (!at.is_null() && crate::host::read_into(at.cast(), bytes))
+        .then(|| unsafe { value.assume_init() })
+}
+
+/// The planes of a present that can be shown, bottom first: each one's
+/// first resource and the part of it the title wants shown. None if the first plane has no resource; a later
+/// plane counts only if its resource is an object of the same kind as the
+/// first's (the same method table), so a plane that does not read as one
+/// is left out and not followed.
+///
+/// shortcut: a plane's first resource only (more are the views of a
+/// stereo display), and at most four planes; the console has two.
+#[cfg(windows)]
+fn shown(planes: u32, plane_parameters: *const Plane) -> Vec<(This, Option<[u32; 4]>)> {
+    let read = |i: usize| {
+        let plane = peek(plane_parameters.wrapping_add(i))?;
+        let resource = peek(plane.resources).filter(|r| plane.count > 0 && !r.is_null())?;
+        Some((resource, peek(resource.cast::<usize>())?, peek(plane.parts)))
+    };
+    let Some((first, kind, part)) = (planes > 0).then(|| read(0)).flatten() else {
+        return Vec::new();
+    };
+    let over = (1..planes.min(4) as usize).filter_map(read).filter(|plane| plane.1 == kind);
+    std::iter::once((first, part)).chain(over.map(|(resource, _, part)| (resource, part))).collect()
+}
+
+/// The host state the lists recorded so far leave a title texture in
+/// (looked at, not changed).
+#[cfg(windows)]
+fn state_of(resource: This) -> u32 {
+    const COPY_SOURCE: u32 = 0x800;
+    let state = crate::resource::host_transition(resource, COPY_SOURCE)
+        .map_or(COPY_SOURCE, |(_, before)| before);
+    crate::resource::host_transition(resource, state);
+    state
+}
+
+/// Logs the planes of a present as the title passes them and the textures
+/// of those that can be shown, whenever the planes' description differs from the
+/// present before (resources and frame tokens aside): the first eight
+/// times.
+#[cfg(windows)]
+fn log_planes(
+    frame: u64,
+    planes: u32,
+    plane_parameters: *const Plane,
+    shown: &[(This, Option<[u32; 4]>)],
+) {
+    static LOGGED: AtomicU64 = AtomicU64::new(0);
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    if LOGGED.load(Ordering::Relaxed) >= 8 {
+        return;
+    }
+    let passed: Vec<Plane> =
+        (0..planes.min(4) as usize).map_while(|i| peek(plane_parameters.wrapping_add(i))).collect();
+    let rects = |plane: &Plane| (peek(plane.parts), peek(plane.placement));
+    let mut key = u64::from(planes) << 32 | shown.len() as u64;
+    for plane in &passed {
+        let (part, placement) = rects(plane);
+        let fields =
+            [plane.count, plane.color_space, plane.scale_filter, plane.extended_count, plane.flags];
+        for value in fields.into_iter().chain(part.into_iter().chain(placement).flatten()) {
+            key = (key ^ u64::from(value)).wrapping_mul(0x100_0000_01b3);
+        }
+    }
+    if LAST.swap(key, Ordering::Relaxed) == key {
+        return;
+    }
+    LOGGED.fetch_add(1, Ordering::Relaxed);
+    for (i, plane) in passed.iter().enumerate() {
+        let (part, placement) = rects(plane);
+        // The description as it lies in memory, to check the layout read.
+        let raw: Option<[u64; 9]> = peek(plane_parameters.wrapping_add(i).cast());
+        tracing::info!(
+            frame,
+            plane = i,
+            of = planes,
+            resources = plane.count,
+            ?part,
+            ?placement,
+            color_space = plane.color_space,
+            scale_filter = plane.scale_filter,
+            extended = plane.extended_count,
+            flags = format_args!("{:#x}", plane.flags),
+            raw = format_args!("{:x?}", raw.unwrap_or_default()),
+            "a present's plane as the title passes it"
+        );
+    }
+    for (i, &(resource, part)) in shown.iter().enumerate() {
+        let desc = crate::resource::host_resource(resource)
+            // SAFETY: a live resource.
+            .map(|texture| unsafe { texture.GetDesc() });
+        tracing::info!(
+            frame,
+            layer = i,
+            of = shown.len(),
+            resource = ?resource,
+            width = desc.map(|d| d.Width),
+            height = desc.map(|d| d.Height),
+            format = desc.map(|d| d.Format.0),
+            ?part,
+            "a plane of the present that can be shown, bottom first (without a size: it has no host texture)"
+        );
+    }
 }
 /// Submission tagged with the frame it belongs to `(count, lists, frame
 /// token, flags)`; frames are paced elsewhere, so it runs as a plain one.
@@ -1376,10 +1515,12 @@ pub(crate) fn presented() -> u64 {
     FRAMES.load(Ordering::Relaxed)
 }
 
-/// Shows the first plane's first resource in our window.
+/// Shows the planes' first resources in our window: one plane as it is,
+/// several scaled to the largest and blended bottom first
+/// (`crate::host::Host::present`).
 ///
-/// shortcut: one plane, no scaling or placement, the source expected in
-/// the common state.
+/// shortcut: one plane is shown whole, whatever part of it the title
+/// names, and no plane is placed: each covers the window.
 extern "system" fn present(
     this: This,
     planes: u32,
@@ -1492,6 +1633,7 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         }
     }
     #[cfg(windows)]
+<<<<<<< HEAD
     if !sent_behind && behind::on() && !this.is_null() {
         const COPY_SOURCE: u32 = 0x800;
         let texture = if planes > 0
@@ -1567,6 +1709,49 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         let _ = shown;
         crate::resource::host_transition(resource, state);
         let _ = host;
+||||||| merged common ancestors
+    if !sent_behind
+        && planes > 0
+        // SAFETY: the title passes `planes` plane descriptions.
+        && let Some(plane) = unsafe { plane_parameters.as_ref() }
+        && plane.count > 0
+        && !plane.resources.is_null()
+        // SAFETY: the plane lists `count` resources.
+        && let resource = unsafe { *plane.resources }
+        && let Some(texture) = crate::resource::host_resource(resource)
+        && let Some(host) = crate::host::host()
+    {
+        const COPY_SOURCE: u32 = 0x800;
+        let state = crate::resource::host_transition(resource, COPY_SOURCE)
+            .map_or(COPY_SOURCE, |(_, before)| before);
+        let shown = host.present(texture, state, frame);
+        crate::resource::host_transition(resource, state);
+        #[cfg(feature = "diagnostics")]
+        blinks(frame, resource, state, shown);
+        #[cfg(not(feature = "diagnostics"))]
+        let _ = shown;
+=======
+    if !sent_behind {
+        let shown = shown(planes, plane_parameters);
+        log_planes(frame, planes, plane_parameters, &shown);
+        // Each plane that has a host texture, in the state the lists
+        // leave it in; nothing without the first.
+        let mut textures = shown.iter().map(|&(resource, part)| {
+            Some((crate::resource::host_resource(resource)?, state_of(resource), part))
+        });
+        if let Some(Some(first)) = textures.next()
+            && let Some(host) = crate::host::host()
+        {
+            let (resource, state) = (shown[0].0, first.1);
+            let textures: Vec<crate::host::Shown> =
+                std::iter::once(first).chain(textures.flatten()).collect();
+            let black = host.present(&textures, frame);
+            #[cfg(feature = "diagnostics")]
+            blinks(frame, resource, state, black);
+            #[cfg(not(feature = "diagnostics"))]
+            let _ = (resource, state, black);
+        }
+>>>>>>> vibr/main
     }
     #[cfg(windows)]
     crate::pipeline::frame_drew(crate::draw::drawn());
@@ -1965,5 +2150,35 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(2));
         Written::GpuTimestamp.write(at[1..].as_mut_ptr().cast(), 8);
         assert!(at[1] > first);
+    }
+
+    /// Three planes whose resources are objects with a method table, the
+    /// third's another: the first two are shown, with the part named.
+    #[cfg(windows)]
+    #[test]
+    fn a_present_shows_the_planes_whose_resources_are_like_the_first() {
+        let objects = [0x1000usize, 0x1000, 0x2000];
+        let resources = [0, 1, 2].map(|i| std::ptr::from_ref(&objects[i]).cast::<Object>());
+        let part = [0u32, 0, 960, 540];
+        let plane = |i: usize, parts: *const [u32; 4]| Plane {
+            token: 7,
+            count: 1,
+            resources: &resources[i],
+            parts,
+            placement: std::ptr::null(),
+            color_space: 0,
+            scale_filter: 0,
+            extended_count: 0,
+            extended: std::ptr::null(),
+            flags: 0,
+        };
+        let planes = [plane(0, std::ptr::null()), plane(1, &part), plane(2, std::ptr::null())];
+        let both = vec![(resources[0], None), (resources[1], Some(part))];
+        assert_eq!(shown(3, planes.as_ptr()), both);
+        assert_eq!(shown(1, planes.as_ptr()), both[..1]);
+        assert!(shown(0, planes.as_ptr()).is_empty());
+        assert!(shown(2, std::ptr::null()).is_empty());
+        let empty = Plane { count: 0, ..planes[0] };
+        assert!(shown(1, &empty).is_empty());
     }
 }
