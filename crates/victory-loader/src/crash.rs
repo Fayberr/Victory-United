@@ -421,7 +421,7 @@ fn gpr(context: &mut CONTEXT, n: u8) -> &mut u64 {
 }
 
 /// The status flags `cmp a, b` leaves (CF, PF, AF, ZF, SF, OF) as `EFLAGS` bits.
-fn cmp_flags(a: u64, b: u64) -> u32 {
+pub(crate) fn cmp_flags(a: u64, b: u64) -> u32 {
     let r = a.wrapping_sub(b);
     u32::from(a < b)
         | u32::from((r as u8).count_ones().is_multiple_of(2)) << 2
@@ -430,7 +430,7 @@ fn cmp_flags(a: u64, b: u64) -> u32 {
         | ((r >> 63) as u32) << 7
         | ((((a ^ b) & (a ^ r)) >> 63) as u32) << 11
 }
-const CMP_FLAGS: u32 = 0x8d5;
+pub(crate) const CMP_FLAGS: u32 = 0x8d5;
 
 /// SSE4a's `extrq`/`insertq` (register forms, the only ones there are) on
 /// the saved XMM registers; returns the instruction's length.
@@ -786,6 +786,30 @@ mod tests {
         EXCEPTION_RECORD, RtlCaptureContext, RtlCaptureStackBackTrace,
     };
 
+    /// What [`capture_frames`] saw: our [`unwind`], then the system's walk.
+    type Captured = (Vec<u64>, Vec<usize>);
+
+    /// A frame we expect [`unwind`] to report: the helper it is in, and the
+    /// helper's name for the message.
+    type Expected = (&'static str, fn() -> Captured);
+
+    /// The runtime function entry start covering `at`: the image base the
+    /// lookup writes, plus the entry's `BeginAddress`. Asking the system for
+    /// both sides of the comparison means a thunk or an incremental-link jump
+    /// is not mistaken for a different function.
+    fn entry_start_at(at: u64) -> Option<u64> {
+        let mut image = 0;
+        // SAFETY: looks up the function table entry covering `at`; nothing
+        // keeps a reference to the entry past this call.
+        let entry = unsafe { RtlLookupFunctionEntry(at, &mut image, null_mut()) };
+        if entry.is_null() {
+            return None;
+        }
+        // SAFETY: a non-null entry belongs to `image`, which the lookup wrote,
+        // and `BeginAddress` is an offset into that image.
+        Some(image + u64::from(unsafe { (*entry).BeginAddress }))
+    }
+
     #[test]
     fn concurrent_crash_records_stay_together() {
         const THREADS: usize = 8;
@@ -827,30 +851,6 @@ mod tests {
             }
         }
         assert!(seen.is_empty());
-    }
-
-    /// What [`capture_frames`] saw: our [`unwind`], then the system's walk.
-    type Captured = (Vec<u64>, Vec<usize>);
-
-    /// A frame we expect [`unwind`] to report: the helper it is in, and the
-    /// helper's name for the message.
-    type Expected = (&'static str, fn() -> Captured);
-
-    /// The runtime function entry start covering `at`: the image base the
-    /// lookup writes, plus the entry's `BeginAddress`. Asking the system for
-    /// both sides of the comparison means a thunk or an incremental-link jump
-    /// is not mistaken for a different function.
-    fn entry_start_at(at: u64) -> Option<u64> {
-        let mut image = 0;
-        // SAFETY: looks up the function table entry covering `at`; nothing
-        // keeps a reference to the entry past this call.
-        let entry = unsafe { RtlLookupFunctionEntry(at, &mut image, null_mut()) };
-        if entry.is_null() {
-            return None;
-        }
-        // SAFETY: a non-null entry belongs to `image`, which the lookup wrote,
-        // and `BeginAddress` is an offset into that image.
-        Some(image + u64::from(unsafe { (*entry).BeginAddress }))
     }
 
     #[test]

@@ -291,7 +291,8 @@ impl Layout {
             && matches!(d.block, 1 | 4)
             && d.samples.is_power_of_two()
             && d.samples <= 8
-            && (d.samples == 1 || (d.dimension == Dimension::Tex2d && d.mips == 1))
+            && (d.samples == 1
+                || (d.dimension == Dimension::Tex2d && d.mips == 1 && d.swizzle != Swizzle::LINEAR))
             && (d.dimension != Dimension::Tex1d || d.height == 1)
             && (d.dimension != Dimension::Tex3d
                 || matches!(d.swizzle.0, 0 | 5 | 9 | 17 | 21 | 24..=27));
@@ -702,7 +703,8 @@ impl Layout {
         } else {
             (dst.len(), src.len())
         };
-        if tiled_len < self.bytes_from(mip) as usize || linear_len < need || row_pitch < bytes {
+        let tiled_need = if DETILE { self.bytes_from(mip) } else { self.size };
+        if tiled_len < tiled_need as usize || linear_len < need || row_pitch < bytes {
             return Err(Error::TooSmall);
         }
         let linear = self.desc.swizzle == Swizzle::LINEAR;
@@ -957,6 +959,26 @@ mod tests {
                     stencil: false
                 })
             );
+        }
+    }
+
+    #[test]
+    fn linear_layouts_require_one_sample() {
+        let linear = desc(256, 256, 1, 4, Swizzle::LINEAR);
+        let single = Layout::new(&linear).unwrap();
+        assert!(single.addressable());
+        assert_eq!(single.size, 256 * 256 * 4);
+
+        for samples in [2, 4, 8] {
+            let multisampled = Desc { samples, ..linear };
+            assert_eq!(Layout::new(&multisampled), Err(Error::Invalid));
+
+            let tiled = Layout::new(&Desc {
+                swizzle: Swizzle::SW_64KB_R_X,
+                ..multisampled
+            })
+            .unwrap();
+            assert_eq!(tiled.size, single.size * u64::from(samples));
         }
     }
 

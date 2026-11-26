@@ -123,6 +123,32 @@ fn fallback(keys: &[KeyState]) -> PadState {
     }
 }
 
+/// Two pads as one: buttons of both, and of each axis and trigger the one
+/// pushed further.
+fn merged(a: PadState, b: PadState) -> PadState {
+    let further = |x: f32, y: f32| if y.abs() > x.abs() { y } else { x };
+    PadState {
+        buttons: a.buttons | b.buttons,
+        left_trigger: further(a.left_trigger, b.left_trigger),
+        right_trigger: further(a.right_trigger, b.right_trigger),
+        left_x: further(a.left_x, b.left_x),
+        left_y: further(a.left_y, b.left_y),
+        right_x: further(a.right_x, b.right_x),
+        right_y: further(a.right_y, b.right_y),
+    }
+}
+
+/// Whether the title sees one pad that is always there, fed by the keyboard
+/// and by every host pad (on by default; `VICTORY_ONE_PAD=0` shows each host
+/// pad as a device of its own, and the stand-in only while there is none).
+/// The title keeps to the pad it started with: with the stand-in taken away
+/// when a pad was switched on, it showed its controller-disconnected screen
+/// until the pad was off again. It also keeps a pad the host lists twice (its
+/// own slot and a remapper's) from being two players.
+fn one_pad() -> bool {
+    std::env::var_os("VICTORY_ONE_PAD").is_none_or(|v| v != "0")
+}
+
 #[repr(C)]
 struct Table<const N: usize>([*const (); N]);
 // SAFETY: function addresses only.
@@ -188,7 +214,7 @@ impl Device {
             root_id: id,
             supported_input: kind(index),
             // Low and high frequency.
-            rumble_motors: if index < PADS { 0x3 } else { 0 },
+            rumble_motors: if index <= FALLBACK { 0x3 } else { 0 },
             ..Default::default()
         };
         Device {
@@ -319,8 +345,12 @@ struct State {
     running: Vec<(u64, ThreadId)>,
     /// The keyboard and mouse as a pad; `None`: the old stand-in pad.
     controls: Option<Controls>,
-    /// The last poll's host pads and keys, for pad reads in between.
-    host_pads: [Option<PadState>; PADS],
+    /// The last poll's host pads and keys, for pad reads in between. With
+    /// one pad ([`one_pad`]) the stand-in slot holds every host pad folded
+    /// together and the others are empty.
+    host_pads: [Option<PadState>; PADS + 1],
+    /// Whether the last poll folded the host pads into the stand-in slot.
+    one_pad: bool,
     keys: Vec<KeyState>,
     /// Scripted input as a pad (none when nothing is scripted now).
     script: Option<PadState>,
@@ -334,6 +364,8 @@ pub struct Hub {
     source: Mutex<Box<dyn Source>>,
     /// Mouse motion and wheel steps, added by the host's raw input thread.
     counts: Arc<Counts>,
+    /// The title sees one pad ([`one_pad`]).
+    one_pad: bool,
     state: Mutex<State>,
     /// A device callback returned.
     returned: Condvar,
@@ -361,6 +393,7 @@ impl Hub {
         source: Box<dyn Source>,
         counts: Arc<Counts>,
         settings: super::controls::Settings,
+        one_pad: bool,
     ) -> &'static Hub {
         cursor::ENABLED.store(settings.enabled && settings.capture, Ordering::Relaxed);
         let hub = Box::into_raw(Box::new(Hub {
@@ -371,13 +404,15 @@ impl Hub {
             devices: std::array::from_fn(Device::new),
             source: Mutex::new(source),
             counts,
+            one_pad,
             state: Mutex::new(State {
                 slots: Default::default(),
                 callbacks: Vec::new(),
                 pending: Vec::new(),
                 running: Vec::new(),
                 controls: settings.enabled.then(|| Controls::new(settings)),
-                host_pads: [None; PADS],
+                host_pads: [None; PADS + 1],
+                one_pad: false,
                 keys: Vec::new(),
                 script: None,
             }),
@@ -399,7 +434,7 @@ impl Hub {
         counts: Arc<Counts>,
         settings: super::controls::Settings,
     ) -> &'static Hub {
-        let hub = Hub::new(source, counts, settings);
+        let hub = Hub::new(source, counts, settings, one_pad());
         hub.poll();
         std::thread::spawn(move || {
             loop {
@@ -423,7 +458,8 @@ impl Hub {
         };
         let events = {
             let mut state = self.state();
-            let events = state.poll(&self.devices, pads, keys, &buttons, &self.counts);
+            let events =
+                state.poll(&self.devices, self.one_pad, pads, keys, &buttons, &self.counts);
             if let Some(c) = &mut state.controls
                 && std::mem::take(&mut c.release_cursor)
             {
@@ -473,6 +509,7 @@ impl State {
     fn poll(
         &mut self,
         devices: &[Device; DEVICES],
+        one_pad: bool,
         pads: [Option<PadState>; PADS],
         keys: Vec<KeyState>,
         mouse_buttons: &[u8],
@@ -480,6 +517,24 @@ impl State {
     ) -> Vec<Event> {
         let now = now();
         let mut events = std::mem::take(&mut self.pending);
+        // The title sees one pad ([`one_pad`]): every host pad folds into
+        // the stand-in slot and no other pad device exists. The keyboard and
+        // mouse go in through the controls, or through the stand-in pad.
+        let pads = if one_pad {
+            let base = pads.into_iter().flatten().reduce(merged);
+            let mut one: [Option<PadState>; PADS + 1] = [None; PADS + 1];
+            one[FALLBACK] = match (base, self.controls.is_none()) {
+                (Some(pad), true) => Some(merged(pad, fallback(&keys))),
+                (Some(pad), false) => Some(pad),
+                (None, true) => Some(fallback(&keys)),
+                (None, false) => None,
+            };
+            one
+        } else {
+            let mut all: [Option<PadState>; PADS + 1] = [None; PADS + 1];
+            all[..PADS].copy_from_slice(&pads);
+            all
+        };
         // Scripted input (auto input, press file, fast boot) is a third
         // source beside the host pads and the keyboard and mouse: it never
         // goes through the key layout and never replaces another source.
@@ -497,6 +552,7 @@ impl State {
         }
         self.script = script_pad;
         self.host_pads = pads;
+        self.one_pad = one_pad;
         self.keys.clone_from(&keys);
         self.publish(devices, now, None, &mut events);
         let mut keys = keys;
@@ -516,13 +572,18 @@ impl State {
         events: &mut Vec<Event>,
     ) {
         let pads = self.host_pads;
-        let first = pads.iter().position(Option::is_some);
+        let first = pads[..PADS].iter().position(Option::is_some);
         let mut values = [None; PADS + 1];
-        values[..PADS].copy_from_slice(&pads);
-        let target = first.unwrap_or(FALLBACK);
+        values[..PADS].copy_from_slice(&pads[..PADS]);
+        // One pad: the stand-in slot carries every host pad, and is the target.
+        let (target, host) = if self.one_pad {
+            (FALLBACK, pads[FALLBACK])
+        } else {
+            (first.unwrap_or(FALLBACK), first.and_then(|i| pads[i]))
+        };
         match &mut self.controls {
             Some(c) => {
-                let base = first.and_then(|i| pads[i]);
+                let base = host;
                 values[target] = Some(match take {
                     Some(counts) => c.take(now, base, counts),
                     None => c.peek(base),
@@ -531,9 +592,10 @@ impl State {
             // Keyboard and mouse off: the stand-in pad when no pad is
             // connected; scripted input joins whichever pad there is.
             None => {
-                let base = match first {
-                    Some(i) => pads[i],
-                    None => Some(fallback(&self.keys)),
+                let base = match (self.one_pad, first) {
+                    (true, _) => host,
+                    (false, Some(i)) => pads[i],
+                    (false, None) => Some(fallback(&self.keys)),
                 };
                 values[target] = match (base, self.script) {
                     (Some(pad), Some(script)) => Some(pad.merged(script)),
@@ -1218,7 +1280,8 @@ extern "system" fn device_status(this: *const Device) -> u32 {
 extern "system" fn set_rumble(this: *const Device, params: *const [f32; 4]) {
     // SAFETY: one of our devices.
     let device = unsafe { &*this };
-    if device.index >= PADS {
+    let one_pad = device.hub().one_pad;
+    if device.index >= PADS && !(one_pad && device.index == FALLBACK) {
         return;
     }
     let [low, high, ..] = if params.is_null() {
@@ -1228,7 +1291,17 @@ extern "system" fn set_rumble(this: *const Device, params: *const [f32; 4]) {
         unsafe { *params }
     };
     let speed = |level: f32| (level.clamp(0.0, 1.0) * f32::from(u16::MAX)) as u16;
-    lock(&device.hub().source).rumble(device.index, speed(low), speed(high));
+    let mut source = lock(&device.hub().source);
+    if one_pad {
+        // The one pad is every host pad.
+        for slot in 0..PADS {
+            if source.pad(slot).is_some() {
+                source.rumble(slot, speed(low), speed(high));
+            }
+        }
+    } else {
+        source.rumble(device.index, speed(low), speed(high));
+    }
 }
 extern "system" fn unsupported<const SLOT: usize>(_: *const c_void) -> HRESULT {
     tracing::warn!(
@@ -1822,12 +1895,13 @@ mod host {
     }
 
     /// Debugging aid: `VICTORY_KEYS=<seconds>:<key>,...` holds each key for
-    /// 0.2 s that long after input starts, with or without focus. A key is a
+    /// 0.2 s that long after input starts (`<from>-<to>:<key>`: all that
+    /// time), with or without focus. A key is a
     /// letter, a digit, or `Enter`, `Esc`, `Tab`, `Back`, `Up`, `Down`,
     /// `Left`, `Right` (the stand-in pad's table maps them to buttons).
     #[cfg(feature = "diagnostics")]
     fn scripted() -> Vec<u8> {
-        static SCRIPT: LazyLock<(Instant, Vec<(Duration, u8)>)> = LazyLock::new(|| {
+        static SCRIPT: LazyLock<(Instant, Vec<(Duration, Duration, u8)>)> = LazyLock::new(|| {
             let list = std::env::var("VICTORY_KEYS").unwrap_or_default();
             let keys = list.split(',').filter_map(|entry| {
                 let (at, key) = entry.split_once(':')?;
@@ -1845,18 +1919,20 @@ mod host {
                     }
                     _ => return None,
                 };
-                Some((
-                    Duration::try_from_secs_f64(at.trim().parse().ok()?).ok()?,
-                    vk,
-                ))
+                let time = |t: &str| Duration::try_from_secs_f64(t.trim().parse().ok()?).ok();
+                let (from, to) = match at.split_once('-') {
+                    Some((from, to)) => (time(from)?, time(to)?),
+                    None => (time(at)?, time(at)? + Duration::from_millis(200)),
+                };
+                Some((from, to, vk))
             });
             (Instant::now(), keys.collect())
         });
         let (start, keys) = &*SCRIPT;
         let now = start.elapsed();
         keys.iter()
-            .filter(|&&(at, _)| (at..at + Duration::from_millis(200)).contains(&now))
-            .map(|&(_, vk)| vk)
+            .filter(|&&(from, to, _)| (from..to).contains(&now))
+            .map(|&(_, _, vk)| vk)
             .collect()
     }
 
@@ -2080,23 +2156,27 @@ mod tests {
 
     /// A hub with the old stand-in pad (`[controls] enabled = false`).
     fn fake() -> (&'static Hub, Arc<Mutex<FakeHost>>) {
-        fake_with(super::super::controls::Settings {
-            enabled: false,
-            ..Default::default()
-        })
+        fake_with(
+            super::super::controls::Settings {
+                enabled: false,
+                ..Default::default()
+            },
+            false,
+        )
     }
 
     /// A hub with keyboard and mouse controls (the defaults).
     fn fake_kbm() -> (&'static Hub, Arc<Mutex<FakeHost>>) {
-        fake_with(Default::default())
+        fake_with(Default::default(), false)
     }
 
     fn fake_with(
         settings: super::super::controls::Settings,
+        one_pad: bool,
     ) -> (&'static Hub, Arc<Mutex<FakeHost>>) {
         let host = Arc::new(Mutex::new(FakeHost::default()));
         let counts = Arc::new(Counts::default());
-        let hub = Hub::new(Box::new(Fake(Arc::clone(&host))), counts, settings);
+        let hub = Hub::new(Box::new(Fake(Arc::clone(&host))), counts, settings, one_pad);
         hub.poll();
         (hub, host)
     }
@@ -2384,6 +2464,43 @@ mod tests {
         let r = current(hub, GAMEPAD_KIND, FALLBACK).unwrap();
         assert_eq!(pad(r).right_x, 0.0, "no motion, no turn");
         release(r);
+    }
+
+    #[test]
+    fn a_host_pad_feeds_the_one_pad_which_never_goes() {
+        let (hub, host) = fake_with(
+            super::super::controls::Settings {
+                enabled: false,
+                ..Default::default()
+            },
+            true,
+        );
+        let log = Log::default();
+        register(hub, GAMEPAD_KIND, 2, &log);
+        assert_eq!(*log.lock().unwrap(), [(FALLBACK, STATUS_CONNECTED, 0)]);
+        let pad = |hub: &Hub| match &hub.state().slots[FALLBACK].history.back().unwrap().value {
+            Value::Pad(p) => *p,
+            Value::Keys(_) => unreachable!(),
+        };
+        host.lock().unwrap().keys = vec![key(b'D')];
+        hub.poll();
+        assert_eq!(pad(hub).left_x, 1.0);
+        // A pad is switched on, in any slot: its input arrives, beside the
+        // keyboard's, and no device comes or goes.
+        host.lock().unwrap().pads[2] = Some(PadState { buttons: A, left_y: -0.5, ..Default::default() });
+        hub.poll();
+        let p = pad(hub);
+        assert_eq!((p.buttons, p.left_x, p.left_y), (A, 1.0, -0.5));
+        let device: *const Device = &hub.devices[FALLBACK];
+        set_rumble(device, &[1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(host.lock().unwrap().rumble, [(2, u16::MAX, 0)]);
+        // And off again.
+        host.lock().unwrap().pads[2] = None;
+        host.lock().unwrap().keys.clear();
+        hub.poll();
+        assert_eq!(pad(hub), PadState::default());
+        assert_eq!(log.lock().unwrap().len(), 1);
+        assert!(!hub.state().slots[2].connected);
     }
 
     #[test]

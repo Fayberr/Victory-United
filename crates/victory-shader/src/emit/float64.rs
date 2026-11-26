@@ -149,7 +149,7 @@ impl Lower<'_> {
 
     /// Reads an IEEE-754 binary64 operand as `(lo, hi)` 32-bit words, applying
     /// `abs` and `neg` input modifiers on operand `k`.
-    fn f64_pair(&mut self, inst: &Inst, k: usize) -> Result<(V, V), Why> {
+    pub(super) fn f64_pair(&mut self, inst: &Inst, k: usize) -> Result<(V, V), Why> {
         let Fields::Valu(v) = &inst.fields else {
             unreachable!()
         };
@@ -202,7 +202,7 @@ impl Lower<'_> {
 
     /// Converts IEEE-754 binary64 `(lo, hi)` to binary32 bits with round-to-nearest-even,
     /// without requiring host `DOUBLES` (`f64`) support.
-    fn f64_to_f32_bits(&mut self, lo: V, hi: V) -> V {
+    pub(super) fn f64_to_f32_bits(&mut self, lo: V, hi: V) -> V {
         let c = self.cur;
         let k0 = self.s.m.i32(0);
         let k1 = self.s.m.i32(1);

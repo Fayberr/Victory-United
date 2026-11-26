@@ -73,6 +73,7 @@ pub fn run(
     // and their patched copy are not read again, and were held for the
     // whole run (two blocks of 114.7 MB each for the title, in
     // physical memory: run 65's memory map).
+    let image_name = prepared.file_name();
     drop(prepared);
     drop(original);
     victory_hle::runtime::set_main_image(image.base());
@@ -167,6 +168,11 @@ pub fn run(
     }
     let exe_name = exe.file_name().unwrap_or_default().to_string_lossy();
     show(&exe_name, image.bind_imports(&with_dlls, policy)?);
+    if execute {
+        let size = image.info().size_of_image as usize;
+        // SAFETY: the image stays mapped, and nothing of it has run yet.
+        unsafe { victory_loader::write_sites::apply_asked(&image_name, image.base(), size) };
+    }
     if !execute {
         println!("not executing (pass --execute to start the title)");
         return Ok(0);
@@ -201,8 +207,10 @@ pub fn run(
 #[cfg(all(windows, feature = "diagnostics"))]
 fn diagnostics(image: &victory_loader::LoadedImage, cfg: &victory_core::Config) {
     victory_loader::dump_stacks_on_schedule();
+    victory_loader::profile_on_schedule(victory_hle::frame_phase);
     victory_hle::modules::audio::capture::start();
     watch(image.base(), image.info().size_of_image as usize);
+    poke(image.base(), image.info().size_of_image as usize);
     // Debugging aid: `VICTORY_CRASH_SAVE=<rva>:<len>,...` (hex) writes those
     // title ranges to `crash-<rva>.bin` in the cache dir on a crash.
     let size = image.info().size_of_image as usize;
@@ -246,6 +254,34 @@ fn watch(base: usize, size: usize) {
                 }
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    });
+}
+
+/// Debugging aid: `VICTORY_POKE=<rva>:<byte>,...` (hex) writes the byte at
+/// each title+rva twice a second. A title that ends itself when its main
+/// loop has not ticked for a while (Grand Theft Auto VI: 30 s) runs on
+/// through slower frames with its tick flag poked. The address must be
+/// writable title data.
+#[cfg(all(windows, feature = "diagnostics"))]
+fn poke(base: usize, size: usize) {
+    let Ok(list) = std::env::var("VICTORY_POKE") else {
+        return;
+    };
+    let hex = |s: &str| usize::from_str_radix(s.trim().trim_start_matches("0x"), 16).ok();
+    let pokes: Vec<(usize, u8)> = list
+        .split(',')
+        .filter_map(|p| p.split_once(':'))
+        .filter_map(|(rva, byte)| Some((hex(rva)?, u8::try_from(hex(byte)?).ok()?)))
+        .filter(|&(rva, _)| rva < size)
+        .collect();
+    std::thread::spawn(move || {
+        loop {
+            for &(rva, byte) in &pokes {
+                // SAFETY: a byte inside the mapped image, checked above.
+                unsafe { ((base + rva) as *mut u8).write_volatile(byte) };
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
     });
 }
