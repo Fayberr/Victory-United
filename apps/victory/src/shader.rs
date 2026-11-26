@@ -159,16 +159,6 @@ pub fn run(paths: Vec<PathBuf>, verbose: bool, disasm: bool, effects: bool) -> R
                                 t.programs.entry(key).or_insert_with(|| id.clone());
                             }
                             *t.native_stages.entry(n.stage).or_default() += 1;
-<<<<<<< HEAD
-                            list.push(format!("{:?} {} B", n.stage, n.code.len()));
-                            if disasm {
-                                listing.push(format!("    {:?} stage I/O: {:?}", n.stage, n.io));
-                                listing.extend(n.layout.iter().map(|p| format!("    {p:?}")));
-                                listing.extend(n.used.iter().map(|u| format!("    {u:?}")));
-                            }
-||||||| 465b94f5
-                            list.push(format!("{:?} {} B", n.stage, n.code.len()));
-=======
                             // A pixel program's DB_SHADER_CONTROL too (depth export,
                             // kill, Z order, depth test before the shader).
                             let db = match &n.io {
@@ -178,7 +168,11 @@ pub fn run(paths: Vec<PathBuf>, verbose: bool, disasm: bool, effects: bool) -> R
                                 _ => String::new(),
                             };
                             list.push(format!("{:?} {} B{db}", n.stage, n.code.len()));
->>>>>>> vertex/main
+                            if disasm {
+                                listing.push(format!("    {:?} stage I/O: {:?}", n.stage, n.io));
+                                listing.extend(n.layout.iter().map(|p| format!("    {p:?}")));
+                                listing.extend(n.used.iter().map(|u| format!("    {u:?}")));
+                            }
                             match gfx10::decode(&n.code) {
                                 Ok(insts) => {
                                     t.decoded += 1;
