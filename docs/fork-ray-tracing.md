@@ -37,33 +37,15 @@ shaders and emulates the one instruction.
 
 ## What this fork adds
 
-<<<<<<< HEAD
 1. **The builder programs translate** (all 52, with host pipelines on the RX
    7900 XTX; the title creates 53 such pipelines). They pass buffer addresses in a spilled parameter table
-||||||| merged common ancestors
-1. **The builder programs translate** (49 of 52; all that the title creates in
-   the scenes tested). They pass buffer addresses in a spilled parameter table
-=======
-1. **The builder programs translate** (52 of 52, each with a host pipeline on
-   a 32-lane GPU). They pass buffer addresses in a spilled parameter table
->>>>>>> vibr/main
    rather than in descriptors. Added: the spilled user-data table, root
    unordered-access views (translator and host binding), byte and 16-bit buffer
-<<<<<<< HEAD
    accesses, and several control-flow shapes. On a GPU
    with 32-lane waves, three of them (prefix sums over groups of 256 and 512
    threads, whose 64-lane waves read lanes across their halves) run in the
    paired form: one host wave for each console wave, each thread two of its
    lanes.
-||||||| merged common ancestors
-   accesses, and several control-flow shapes.
-=======
-   accesses, and several control-flow shapes. Some stages are dispatched by
-   thread count (`DispatchX` with the console's thread-dimensions flag): the
-   host runs whole groups, and each builder program starts with the hardware's
-   own test, so the threads past the count are in no wave's EXEC. Run as one
-   group per thread, as before, those stages stored far past their buffers.
->>>>>>> vibr/main
 2. **Title memory by raw address from shaders.** A directory with one entry per
    64 KiB of title address space leads a shader to the layer's host copy of
    that memory; loads, stores, atomic add/sub and float min/max go through it.
@@ -145,7 +127,6 @@ has created and how many of them the host has.
 
 ## Known gaps
 
-<<<<<<< HEAD
 - With `VICTORY_BVH_BUILDER=1` the builder is not usable yet. Until the
   paired form, three of its programs did not translate on a 32-lane GPU,
   which kept it off; every builder pipeline is now created offline
@@ -178,45 +159,10 @@ has created and how many of them the host has.
   run so far.
 - An access to a page that is not there is lost (a read gives zero, a store is
   dropped).
-||||||| merged common ancestors
-- With `VICTORY_BVH_BUILDER=1` the builder still stays off in a real run: a few
-  of its pipelines are refused by the host (they still ask for 64-lane waves on
-  a 32-lane GPU) or do not translate.
-- Five shadow-mask trace programs do not translate yet.
-- An access to a title page that has no host copy is lost (a read gives zero, a
-  store is dropped).
-=======
-- The whole builder ran in the game once (`VICTORY_BVH_BUILDER=1`, RTX 4060
-  Ti: characters lit at dusk, no device loss), at 4 to 6 s a frame: every
-  numbered copy was declared written by every list. Now a store by address
-  marks its page and only marked pages and the copies written root views
-  name are looked through (port of fxceless/victory-fork #814); not run in
-  the game yet.
-- The first stores to a page no root view names stay in the host's copy and
-  reach title memory only when a later store changes them again.
-- At most 1,023 copies are numbered, and none is ever let go: the first run
-  ran out 31 s after the builder started (pages past that read zeros).
-- A dispatch by thread count leaves out threads along x only (the builder's
-  are x by 1 by 1).
-- One shadow-ray trace program (`TraceShadowRays`, FullAdaptive) does not
-  translate yet.
-- An access to a title page that has no host copy is lost (a read gives zero, a
-  store is dropped).
->>>>>>> vibr/main
 - Not publicly documented, and assumed: the instruction's rounding, the order
-<<<<<<< HEAD
   of two boxes entered at the same distance, the result for a ray exactly
   through an edge, and what a child that is not there returns when the ray
   enters its box (here: a miss).
-||||||| merged common ancestors
-  of two boxes entered at the same distance, and the result for a ray exactly
-  through an edge.
-=======
-  of two boxes entered at the same distance, the result for a ray exactly
-  through an edge, and what a child that is not there returns when the ray
-  enters its box (here: a miss), or a box with its minimum above its maximum
-  (here: a miss).
->>>>>>> vibr/main
 - Cost on the GPU is unmeasured.
 
 ## Without rays: the stand-in (`crates/victory-gpu/src/ambient.rs`)
