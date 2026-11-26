@@ -2898,7 +2898,6 @@ fn rdna_forms_give_what_the_spelled_out_ones_give() {
         }
     }
 }
-<<<<<<< HEAD
 
 /// A program that moves a typed buffer's 16-bit channels
 /// (`buffer_load_format_d16_xyzw` from the table's first view,
@@ -2912,13 +2911,6 @@ fn rdna_forms_give_what_the_spelled_out_ones_give() {
 fn halves_go_through_a_table_as_they_are_and_name_their_views() {
     use super::host::Stride;
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16G16B16A16_UINT;
-    /// MUBUF `op vdata, vaddr, s[srsrc:srsrc+3], 0 idxen`.
-    const fn mubuf_idxen(op: u32, vdata: u8, vaddr: u8, srsrc: u8) -> [u32; 2] {
-        [
-            0x38 << 26 | op << 18 | 1 << 13,
-            0x80 << 24 | ((srsrc as u32 >> 2) & 0x1F) << 16 | (vdata as u32) << 8 | vaddr as u32,
-        ]
-    }
     const LOAD_D16_XYZW: u32 = 0x83;
     const STORE_D16_XYZW: u32 = 0x87;
     const THREADS: u32 = 32;
@@ -3044,12 +3036,17 @@ fn halves_go_through_a_table_as_they_are_and_name_their_views() {
                 other => panic!("unexpected user data {other:?}"),
             };
         }
+        let stride_words = [8 | super::VIEW_INTEGER; 2];
+        let mut roots = vec![(0, Root::Constants(ud))];
+        if shader.root_srvs.contains(&super::SLOT_TABLE_STRIDES) {
+            roots.push((1, Root::View { srv: true, data: &stride_words }));
+        }
         let out = host
             .dispatch(
                 &root,
                 &pso,
                 &Dispatch {
-                    roots: vec![(0, Root::Constants(ud))],
+                    roots,
                     views: &[
                         View::Buffer {
                             data: &data,
@@ -3080,13 +3077,6 @@ fn halves_go_through_a_table_as_they_are_and_name_their_views() {
 /// it reads, and in which format, is known only then.
 #[test]
 fn half_places_are_the_descriptors_the_program_loads() {
-    /// MUBUF `op vdata, vaddr, s[srsrc:srsrc+3], 0 idxen`.
-    const fn mubuf_idxen(op: u32, vdata: u8, vaddr: u8, srsrc: u8) -> [u32; 2] {
-        [
-            0x38 << 26 | op << 18 | 1 << 13,
-            0x80 << 24 | ((srsrc as u32 >> 2) & 0x1F) << 16 | (vdata as u32) << 8 | vaddr as u32,
-        ]
-    }
     const LOAD_D16_XYZW: u32 = 0x83;
     const STORE_D16_XYZW: u32 = 0x87;
     let lowered = |words: &[u32]| {
@@ -3193,13 +3183,6 @@ fn half_places_are_the_descriptors_the_program_loads() {
 fn a_format_load_read_as_halves_loads_the_integer() {
     use super::host::Stride;
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16_UINT;
-    /// MUBUF `op vdata, vaddr, s[srsrc:srsrc+3], 0 idxen`.
-    const fn mubuf_idxen(op: u32, vdata: u8, vaddr: u8, srsrc: u8) -> [u32; 2] {
-        [
-            0x38 << 26 | op << 18 | 1 << 13,
-            0x80 << 24 | ((srsrc as u32 >> 2) & 0x1F) << 16 | (vdata as u32) << 8 | vaddr as u32,
-        ]
-    }
     const LOAD_FORMAT_X: u32 = 0x00;
     const V_CVT_F32_F16: u16 = 0x0B;
     const V_ADD_F32: u8 = 0x03;
@@ -3388,27 +3371,23 @@ fn a_format_load_read_as_halves_loads_the_integer() {
     }
     assert!(ran > 0, "no SM 6.6 device available");
 }
-||||||| 0a4356653
-=======
 
 /// MUBUF `op vdata, vaddr, s[srsrc:srsrc+3], 0 idxen`.
-const fn mubuf_idxen(op: u8, vdata: u8, vaddr: u8, srsrc: u8) -> [u32; 2] {
+const fn mubuf_idxen(op: u32, vdata: u8, vaddr: u8, srsrc: u8) -> [u32; 2] {
     [
-        0x38 << 26 | (op as u32) << 18 | 1 << 13,
+        0x38 << 26 | op << 18 | 1 << 13,
         0x80 << 24 | ((srsrc as u32 >> 2) & 0x1F) << 16 | (vdata as u32) << 8 | vaddr as u32,
     ]
 }
 
 /// SMEM `s_load_dwordx4 s[dst:dst+3], s[base:base+1], byte_offset` (soffset = null).
 const fn s_load_dwordx4_off(dst: u8, base: u8, byte_offset: u32) -> [u32; 2] {
-    [
-        0x3D << 26 | 0x02 << 18 | (dst as u32) << 6 | (base as u32 >> 1),
-        (125 << 25) | (byte_offset & 0x1F_FFFF),
-    ]
+    let mut words = s_load_dwordx4(dst, base);
+    words[1] |= byte_offset & 0x1F_FFFF;
+    words
 }
 
-/// Builds a compute shader whose descriptors live in a `RootType::Table` at
-/// `s4` (like `compute_graph_ops` and `ped_standard_head_cs`).
+/// Builds a compute shader whose descriptors live in a `RootType::Table` at `s4`.
 fn build_table_typed_cs(body: &[u32], used: Vec<UsedResource>) -> HostShader {
     let mut words = Vec::new();
     words.push(s_mov_b32(5, 0x80)); // s5 = 0
@@ -3460,7 +3439,10 @@ fn build_table_typed_cs(body: &[u32], used: Vec<UsedResource>) -> HostShader {
         root_cbvs: lowered.root_cbvs,
         root_srvs: lowered.root_srvs,
         root_uavs: lowered.root_uavs,
+        written_root_uavs: lowered.written_root_uavs,
+        writes_guest_memory: lowered.writes_guest_memory,
         root_indexed_views: res.root_indexed_views,
+        half_views: lowered.half_views,
     };
     if let Ok(mut v) = validator::Validator::load(validator::Validator::default_path().as_deref()) {
         let mut copy = shader.dxil.clone();
@@ -3469,13 +3451,9 @@ fn build_table_typed_cs(body: &[u32], used: Vec<UsedResource>) -> HostShader {
     shader
 }
 
-/// `compute_graph_ops` (facial lip-sync & wrapped submesh solver) binds
-/// `R16G16B16A16_UINT` / `R16_UINT` UAVs via `RootType::Table` (which on NVIDIA
-/// are snapshotted into dynamic descriptor slots) and reads/writes FP16 bit
-/// patterns with `buffer_load_format_d16_xyzw` and `buffer_store_format_d16_xyzw`.
-/// Verify bit-exact round-trips for UINT, SINT, and FLOAT views (including
-/// non-zero table offsets matching dynamic descriptor snapshots) on hardware
-/// GPU and WARP.
+/// Round-trip packed halves through a runtime-indexed descriptor table.
+/// Cover UINT, SINT and FLOAT views, including a table at a nonzero heap slot.
+/// The raw UAV also records the load's result before the typed store.
 #[test]
 fn typed_d16_table_uav_roundtrip_uint_sint_and_float() {
     use windows::Win32::Graphics::Dxgi::Common::{
@@ -3486,16 +3464,21 @@ fn typed_d16_table_uav_roundtrip_uint_sint_and_float() {
     let mut body = Vec::new();
     // s[8:11] = table[0] (src typed UAV), s[12:15] = table[1] (dst typed UAV),
     // s[16:19] = table[2] (raw UAV dump of loaded v[2:3]).
-    body.extend_from_slice(&s_load_dwordx4_off(8, 4, 0));
+    // Read the first active lane's thread index (zero for this dispatch) as
+    // a runtime byte offset, so the table uses format metadata at dispatch.
+    body.push(vop1(0x02, 20, vgpr(0))); // v_readfirstlane_b32 s20, v0
+    let mut load = s_load_dwordx4(8, 4);
+    load[1] = 20 << 25;
+    body.extend_from_slice(&load);
     body.extend_from_slice(&s_load_dwordx4_off(12, 4, 32));
     body.extend_from_slice(&s_load_dwordx4_off(16, 4, 64));
     // buffer_load_format_d16_xyzw v[2:3], v0, s[8:11], 0 idxen (op 0x83)
     body.extend_from_slice(&mubuf_idxen(0x83, 2, 0, 8));
     // buffer_store_format_d16_xyzw v[2:3], v0, s[12:15], 0 idxen (op 0x87)
     body.extend_from_slice(&mubuf_idxen(0x87, 2, 0, 12));
-    // Also dump thread 0's loaded v[2:3] into raw UAV (table[2]) to verify the load itself.
+    // Dump each thread's v[2:3] into the raw UAV to verify the load itself.
     // v4 = v0 << 3 (byte offset = thread * 8)
-    body.push(0x3408_0083); // v_lshlrev_b32 v4, 3, v0
+    body.push(vop2(0x1A, 4, 0x83, 0)); // v_lshlrev_b32 v4, 3, v0
     // buffer_store_dwordx2 v[2:3], v4, s[16:19], 0 offen (op 0x1D, offen bit 12)
     body.extend_from_slice(&[
         0x38 << 26 | 0x1D << 18 | 1 << 12,
@@ -3514,6 +3497,7 @@ fn typed_d16_table_uav_roundtrip_uint_sint_and_float() {
         })
         .collect();
     let shader = build_table_typed_cs(&body, used);
+    assert!(shader.half_views.is_empty());
     assert!(
         shader.root_srvs.contains(&super::SLOT_TABLE_STRIDES),
         "table typed d16 shader should request SLOT_TABLE_STRIDES"
@@ -3596,23 +3580,21 @@ fn typed_d16_table_uav_roundtrip_uint_sint_and_float() {
                 )
                 .unwrap_or_else(|e| panic!("{backend} {label}: dispatch failed: {e}"));
             assert_eq!(
-                out[uav_base + 2],
-                input,
+                out[uav_base + 2].as_slice(),
+                input.as_slice(),
                 "{backend} {label}: buffer_load_format_d16_xyzw mismatch"
             );
             assert_eq!(
-                out[uav_base + 1],
-                input,
+                out[uav_base + 1].as_slice(),
+                input.as_slice(),
                 "{backend} {label}: buffer_store_format_d16_xyzw mismatch"
             );
         }
     }
 }
 
-/// Non-`d16` typed loads (`buffer_load_format_x`) are used by
-/// `CS_BlendshapeTranslationsHSSGraphOutputExtract` (reading `HSSGraphOut`
-/// `R16_UINT`) and `CS_PedStandardSkinning_*` (reading bone indices). Verify
-/// exact integer bits for `R16_UINT`, `R16_SINT`, and `R32_UINT`.
+/// A whole-dword typed load used as data preserves UINT and SINT bits
+/// without requesting format metadata.
 #[test]
 fn typed_non_d16_table_load_preserves_integer_bits() {
     use windows::Win32::Graphics::Dxgi::Common::{
@@ -3626,7 +3608,7 @@ fn typed_non_d16_table_load_preserves_integer_bits() {
     // buffer_load_format_x v2, v0, s[8:11], 0 idxen (op 0x00)
     body.extend_from_slice(&mubuf_idxen(0x00, 2, 0, 8));
     // v4 = v0 << 2 (byte offset = thread * 4)
-    body.push(0x3408_0082); // v_lshlrev_b32 v4, 2, v0
+    body.push(vop2(0x1A, 4, 0x82, 0)); // v_lshlrev_b32 v4, 2, v0
     // buffer_store_dword v2, v4, s[12:15], 0 offen (op 0x1C, offen bit 12)
     body.extend_from_slice(&[
         0x38 << 26 | 0x1C << 18 | 1 << 12,
@@ -3655,9 +3637,7 @@ fn typed_non_d16_table_load_preserves_integer_bits() {
         },
     ];
     let shader = build_table_typed_cs(&body, used);
-    // Non-d16 typed loads stay untouched (no SLOT_TABLE_STRIDES root SRV, no
-    // CFG branches) so non-d16 pixel/mesh/particle/skinning shaders keep
-    // identical DXIL and pipeline cache keys while still preserving raw bits.
+    assert!(shader.half_views.is_empty());
     assert!(
         !shader.root_srvs.contains(&super::SLOT_TABLE_STRIDES),
         "non-d16 typed load should not add SLOT_TABLE_STRIDES"
@@ -3724,4 +3704,3 @@ fn typed_non_d16_table_load_preserves_integer_bits() {
         }
     }
 }
->>>>>>> vicetay/main
