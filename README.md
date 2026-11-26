@@ -19,18 +19,29 @@ Early. It boots, plays the intro and the menus and reaches the first playable ro
 playable yet. Shadows are missing some light, because the game's ray tracing does not run yet.
 
 Measured on one machine: Windows 11 Pro (build 26300), NVIDIA GeForce RTX 3080 Ti with 12 GB
-(driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `33f3c35`, Series S profile, default
-settings, no frame generation. The runs used the diagnostics build, which records frames and can
-cost a little speed.
+(driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `db89ba3b`, Series S profile, no frame
+generation, no real save (a fresh copy of the throwaway test data), run in a hidden desktop
+session by a script that presses the same keys every time to reach the first playable room.
+Settings that differ from a plain start: internal render scale 0.5 with the project's own
+upscaler, relay mode 2, late wait 3, 2 GB card buffers, diagnostics logging on (frame log and
+profile), and a few shader stubs (exposure, ambient, shadow mask). Full list in
+`docs/measurements.md`.
 
-- **Speed:** 4.9 to 5.2 frames per second in the first playable room, standing at the window.
-  Two runs of 6 minutes each (median of five-second intervals). The intro cutscenes ran at 3.2
-  to 4.1 frames per second.
-- **Stability:** the longest run without a crash was 8 minutes (a scripted run through the
-  intro). Turning on some experimental speed switches caused GPU hangs within the first few
-  minutes, so they are off by default.
-- **Picture:** the room is lit by daylight through the window, and the character and the window
-  glass are drawn. Some frames show bright blocks outside the window.
+- **Speed:** 4.8 frames per second in the first playable room, standing at the window (median of
+  346 five-second intervals over 31 minutes of play in the room; middle 80 percent between 4.3 and
+  5.1, lowest 3.4, highest 5.3). The first 7 minutes were slower, about 4.2, while the game
+  settled; after that about 4.8 to 4.9. This is one run of one build, so it is a single data
+  point, not a range across machines.
+- **Stability:** one run of 35 minutes without a crash or a GPU hang. It was stopped on purpose
+  at its planned 35 minutes, so the true limit is not known yet. The log shows no crash or device
+  removed message, and the game wrote frames until the last second.
+- **Picture:** lit by daylight through the window, with the character and the window glass drawn.
+  Two frames (from the middle and the end of the run) were looked at and showed no bright blocks.
+  Shadows still miss some light.
+
+Earlier, on commit `33f3c35` with the diagnostics build, the same room measured 4.9 to 5.2 frames
+per second over two 6 minute runs, so the two figures are close, and this repository has no
+paired measurement that shows the newer commits to be faster.
 
 ## Build
 
