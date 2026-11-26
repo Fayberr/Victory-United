@@ -1,23 +1,12 @@
 //! `gameinput.dll`: input devices from the host. Gamepads come from XInput
-<<<<<<< HEAD
 //! (host slots 0-3). The keyboard and mouse play as a pad (`controls`): on
 //! the first connected host pad, or on one stand-in gamepad while none is
 //! connected. With `[controls] enabled = false` the stand-in pad is the old
-//! fixed layout (`FALLBACK_BUTTONS`). The keyboard is a device of its own
-//! too. A poll thread turns host state into readings (a new one per change)
-//! and runs device callbacks on connect and disconnect; a title's pad read
-//! makes one too, carrying the mouse motion since its last read.
-||||||| 465b94f5
-//! (host slots 0-3); while none is connected, the keyboard drives one
-//! stand-in gamepad (`FALLBACK_BUTTONS`). The keyboard is a device of its own
-//! too. A poll thread turns host state into readings (a new one per change)
-//! and runs device callbacks on connect and disconnect.
-=======
-//! (host slots 0-3); while none is connected, the keyboard and the mouse
-//! drive one stand-in gamepad ([`binds`]). The keyboard is a device
-//! of its own too. A poll thread turns host state into readings (a new one
-//! per change) and runs device callbacks on connect and disconnect.
->>>>>>> vertex/main
+//! fixed layout, and the mouse drives it through the player's own keys
+//! ([`binds`]). The keyboard is a device of its own too. A poll thread turns
+//! host state into readings (a new one per change) and runs device callbacks
+//! on connect and disconnect; a title's pad read makes one too, carrying the
+//! mouse motion since its last read.
 #![allow(non_snake_case)]
 // Title code calls these through the objects, passing pointers the real API
 // would trust.
@@ -92,20 +81,16 @@ trait Source: Send {
     fn pad(&mut self, slot: usize) -> Option<PadState>;
     /// Keys held down; none while the title's window lacks focus.
     fn keys(&mut self) -> Vec<KeyState>;
-<<<<<<< HEAD
     /// Mouse buttons held down (`controls::MOUSE_BUTTONS`); none while the
     /// cursor is not captured.
     fn mouse_buttons(&mut self) -> Vec<u8> {
         Vec::new()
     }
-||||||| 465b94f5
-=======
     /// The mouse's share of the stand-in pad; `wanted` while no pad is
     /// connected. The title looks at the pad about every `window`.
     fn mouse(&mut self, _now: u64, _wanted: bool, _window: Duration) -> Mouse {
         Mouse::default()
     }
->>>>>>> vertex/main
     /// Motor speeds: low frequency (left), high frequency (right).
     fn rumble(&mut self, slot: usize, low: u16, high: u16);
 }
@@ -414,7 +399,6 @@ struct State {
     pending: Vec<Event>,
     /// Device callbacks running now: token and thread.
     running: Vec<(u64, ThreadId)>,
-<<<<<<< HEAD
     /// The keyboard and mouse as a pad; `None`: the old stand-in pad.
     controls: Option<Controls>,
     /// The last poll's host pads and keys, for pad reads in between.
@@ -422,12 +406,11 @@ struct State {
     keys: Vec<KeyState>,
     /// Scripted input as a pad (none when nothing is scripted now).
     script: Option<PadState>,
-||||||| 465b94f5
-=======
+    /// The last poll's mouse, for the stand-in pad.
+    mouse: Mouse,
     /// The title's looks at the stand-in pad.
     pace: Pace,
     unseen: Unseen,
->>>>>>> vertex/main
 }
 
 pub struct Hub {
@@ -480,16 +463,13 @@ impl Hub {
                 callbacks: Vec::new(),
                 pending: Vec::new(),
                 running: Vec::new(),
-<<<<<<< HEAD
                 controls: settings.enabled.then(|| Controls::new(settings)),
                 host_pads: [None; PADS],
                 keys: Vec::new(),
                 script: None,
-||||||| 465b94f5
-=======
+                mouse: Mouse::default(),
                 pace: Pace::default(),
                 unseen: Unseen::default(),
->>>>>>> vertex/main
             }),
             returned: Condvar::new(),
         }));
@@ -526,41 +506,30 @@ impl Hub {
 
     /// Reads the host once; device callbacks run on the calling thread.
     fn poll(&self) {
-<<<<<<< HEAD
-        let (pads, keys, buttons) = {
-||||||| 465b94f5
-        let (pads, keys) = {
-=======
         let window = self.state().pace.interval();
-        let (pads, keys, mouse) = {
->>>>>>> vertex/main
+        let (pads, keys, buttons, mouse) = {
             let mut source = lock(&self.source);
             let pads: [_; PADS] = std::array::from_fn(|slot| source.pad(slot));
-<<<<<<< HEAD
-            (pads, source.keys(), source.mouse_buttons())
+            let wanted = pads.iter().all(Option::is_none);
+            (
+                pads,
+                source.keys(),
+                source.mouse_buttons(),
+                source.mouse(now(), wanted, window),
+            )
         };
         let events = {
             let mut state = self.state();
-            let events = state.poll(&self.devices, pads, keys, &buttons, &self.counts);
+            let events =
+                state.poll(&self.devices, pads, keys, &buttons, &mouse, &self.counts);
             if let Some(c) = &mut state.controls
                 && std::mem::take(&mut c.release_cursor)
             {
                 cursor::release("Alt key");
             }
             events
-||||||| 465b94f5
-            (pads, source.keys())
-=======
-            let wanted = pads.iter().all(Option::is_none);
-            (pads, source.keys(), source.mouse(now(), wanted, window))
->>>>>>> vertex/main
         };
-<<<<<<< HEAD
-||||||| 465b94f5
-        let events = self.state().poll(&self.devices, pads, keys);
-=======
-        let events = self.state().poll(&self.devices, pads, keys, &mouse);
->>>>>>> vertex/main
+
         self.deliver(events);
     }
 
@@ -605,13 +574,9 @@ impl State {
         devices: &[Device; DEVICES],
         pads: [Option<PadState>; PADS],
         keys: Vec<KeyState>,
-<<<<<<< HEAD
         mouse_buttons: &[u8],
-        counts: &Counts,
-||||||| 465b94f5
-=======
         mouse: &Mouse,
->>>>>>> vertex/main
+        counts: &Counts,
     ) -> Vec<Event> {
         let now = now();
         let mut events = std::mem::take(&mut self.pending);
@@ -620,7 +585,10 @@ impl State {
         // goes through the key layout and never replaces another source.
         let mut script = Vec::new();
         auto_input_inject(&mut script);
-        let script_pad = (!script.is_empty()).then(|| fallback(&script));
+        let script_pad = (!script.is_empty()).then(|| {
+            let layout = binds::layout(|vk| pressed(&script, &Mouse::default(), vk));
+            fallback(&script, &Mouse::default(), &layout)
+        });
         if let Some(c) = &mut self.controls {
             let held: Vec<u8> = keys
                 .iter()
@@ -630,23 +598,13 @@ impl State {
             c.feed(&held, counts);
             c.set_script(script_pad.unwrap_or_default());
         }
-<<<<<<< HEAD
         self.script = script_pad;
         self.host_pads = pads;
         self.keys.clone_from(&keys);
+        self.mouse.clone_from(mouse);
         self.publish(devices, now, None, &mut events);
         let mut keys = keys;
         keys.extend(script);
-||||||| 465b94f5
-        let fallback = (!any_pad).then(|| Value::Pad(fallback(&keys)));
-        self.update(devices, FALLBACK, fallback, now, &mut events);
-=======
-        let fallback = (!any_pad).then(|| {
-            let layout = binds::layout(|vk| pressed(&keys, mouse, vk));
-            Value::Pad(self.unseen.add(fallback(&keys, mouse, &layout), now))
-        });
-        self.update(devices, FALLBACK, fallback, now, &mut events);
->>>>>>> vertex/main
         self.update(devices, KEYBOARD, Some(Value::Keys(keys)), now, &mut events);
         events
     }
@@ -675,11 +633,17 @@ impl State {
                 });
             }
             // Keyboard and mouse off: the stand-in pad when no pad is
-            // connected; scripted input joins whichever pad there is.
+            // connected, the player's own keys ([`binds`]) with the mouse
+            // and the presses the title has not looked at yet; scripted
+            // input joins whichever pad there is.
             None => {
                 let base = match first {
                     Some(i) => pads[i],
-                    None => Some(fallback(&self.keys)),
+                    None => {
+                        let layout = binds::layout(|vk| pressed(&self.keys, &self.mouse, vk));
+                        let pad = fallback(&self.keys, &self.mouse, &layout);
+                        Some(self.unseen.add(pad, now))
+                    }
                 };
                 values[target] = match (base, self.script) {
                     (Some(pad), Some(script)) => Some(pad.merged(script)),
@@ -1039,17 +1003,10 @@ extern "system" fn current_reading(
 ) -> HRESULT {
     LOOKS.fetch_add(1, Ordering::Relaxed);
     let hub = hub(this);
-<<<<<<< HEAD
     let mut state = hub.state();
     if kind & GAMEPAD_KIND != 0 {
         state.title_read(&hub.devices, &hub.counts);
     }
-    let state = state;
-||||||| 465b94f5
-    let state = hub.state();
-=======
-    let mut state = hub.state();
->>>>>>> vertex/main
     let newest = |i: usize| {
         state.slots[i]
             .history
@@ -1646,7 +1603,6 @@ mod host {
         /// Why focus was last judged lost (for the release log).
         lost: String,
         empty_until: [Option<Instant>; PADS],
-<<<<<<< HEAD
         /// Where scripted mouse motion goes (diagnostics).
         #[cfg_attr(not(feature = "diagnostics"), allow(dead_code))]
         counts: Arc<Counts>,
@@ -1658,6 +1614,11 @@ mod host {
         swallowed: Vec<u8>,
         #[cfg(feature = "diagnostics")]
         kbm: kbm::Script,
+        mouse: mouse::Host,
+        /// Key presses the title has not seen yet ([`Latch`]).
+        keys: Latch,
+        /// Button presses, per pad.
+        buttons: [Latch; PADS],
     }
 
     impl Host {
@@ -1674,6 +1635,9 @@ mod host {
                 swallowed: Vec::new(),
                 #[cfg(feature = "diagnostics")]
                 kbm: kbm::Script::from_env(),
+                mouse: mouse::Host::default(),
+                keys: Latch::default(),
+                buttons: std::array::from_fn(|_| Latch::default()),
             }
         }
 
@@ -1882,14 +1846,6 @@ mod host {
                 counts.add_wheel(steps);
             }
         }
-||||||| 465b94f5
-=======
-        mouse: mouse::Host,
-        /// Key presses the title has not seen yet ([`Latch`]).
-        keys: Latch,
-        /// Button presses, per pad.
-        buttons: [Latch; PADS],
->>>>>>> vertex/main
     }
 
     impl Source for Host {
@@ -1950,24 +1906,22 @@ mod host {
                     // SAFETY: plain queries.
                     .filter(|&vk| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0)
                     .collect();
-<<<<<<< HEAD
-                down.extend(held);
-            } else {
-                unfocused_key_hint();
-||||||| 465b94f5
-                down.extend(held);
-=======
                 // A key tapped between two of the title's looks stays down
                 // until it has looked.
-                let held: Vec<u32> = held.into_iter().map(u32::from).collect();
                 let looks = LOOKS.load(Ordering::Relaxed);
-                let latched = self.keys.report(&held, looks, Instant::now());
+                let latched = self.keys.report(
+                    &held.iter().map(|&vk| u32::from(vk)).collect::<Vec<_>>(),
+                    looks,
+                    Instant::now(),
+                );
+                down.extend(held);
                 for vk in latched.into_iter().map(|vk| vk as u8) {
                     if !down.contains(&vk) {
                         down.push(vk);
                     }
                 }
->>>>>>> vertex/main
+            } else {
+                unfocused_key_hint();
             }
             down.into_iter()
                 .map(|vk| KeyState {
@@ -1981,7 +1935,6 @@ mod host {
                 .collect()
         }
 
-<<<<<<< HEAD
         fn mouse_buttons(&mut self) -> Vec<u8> {
             let captured = cursor::FOCUSED.load(Ordering::Relaxed) && cursor::captured();
             let mut down = Vec::new();
@@ -2006,13 +1959,11 @@ mod host {
             down
         }
 
-||||||| 465b94f5
-=======
+
         fn mouse(&mut self, now: u64, wanted: bool, window: Duration) -> Mouse {
             self.mouse.poll(now, wanted, window)
         }
 
->>>>>>> vertex/main
         fn rumble(&mut self, slot: usize, low: u16, high: u16) {
             let speeds = XINPUT_VIBRATION {
                 wLeftMotorSpeed: low,
@@ -2199,9 +2150,11 @@ mod host {
         if HINT.is_completed() {
             return;
         }
-        let used = super::FALLBACK_BUTTONS
+        let used = super::binds::Binds::read(super::binds::DEFAULT)
+            .0
+            .walk
             .iter()
-            .map(|&(vk, _)| vk)
+            .map(|b| b.0)
             .chain(*b"WASDIJKLZC");
         // SAFETY: plain queries.
         if used.into_iter().any(|vk| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0) {
@@ -2259,12 +2212,8 @@ mod tests {
     struct FakeHost {
         pads: [Option<PadState>; PADS],
         keys: Vec<KeyState>,
-<<<<<<< HEAD
         buttons: Vec<u8>,
-||||||| 465b94f5
-=======
         mouse: Mouse,
->>>>>>> vertex/main
         rumble: Vec<(usize, u16, u16)>,
     }
 
@@ -2277,12 +2226,9 @@ mod tests {
         fn keys(&mut self) -> Vec<KeyState> {
             self.0.lock().unwrap().keys.clone()
         }
-<<<<<<< HEAD
         fn mouse_buttons(&mut self) -> Vec<u8> {
             self.0.lock().unwrap().buttons.clone()
         }
-||||||| 465b94f5
-=======
         fn mouse(&mut self, _: u64, wanted: bool, _: Duration) -> Mouse {
             if wanted {
                 self.0.lock().unwrap().mouse.clone()
@@ -2290,7 +2236,6 @@ mod tests {
                 Mouse::default()
             }
         }
->>>>>>> vertex/main
         fn rumble(&mut self, slot: usize, low: u16, high: u16) {
             self.0.lock().unwrap().rumble.push((slot, low, high));
         }
