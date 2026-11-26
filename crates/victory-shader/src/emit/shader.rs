@@ -35,7 +35,6 @@ pub const VIEW_SIGNED: u32 = 1 << 30;
 /// Dwords of the [`SLOT_STRIDES`] buffer: heap indices are clamped to it.
 pub const SLOT_STRIDES_COUNT: u32 = 1 << 21;
 
-<<<<<<< HEAD
 /// Title addresses of the buffer views of the view heap by slot, for
 /// console code that reads a descriptor's address out of a table at an
 /// index it computes (ray-tracing structures and the programs that walk
@@ -50,23 +49,9 @@ pub const SLOT_VIEWS_COUNT: u32 = SLOT_STRIDES_COUNT;
 /// Bytes of one [`SLOT_VIEWS`] record (four dwords); a power of two, the
 /// shader indexes it by shifting.
 pub const SLOT_VIEWS_RECORD_BYTES: u32 = 16;
-
-||||||| 085ee7c4
-=======
-/// Title addresses of the buffer views of the view heap by slot, for
-/// console code that reads a descriptor's address out of a table at an
-/// index it computes (ray-tracing structures and the programs that walk
-/// them) and finds no root view to ask the host about. Two dwords per
-/// slot: the title address of the view's first byte. Slots without a
-/// buffer view read zero. Like [`SLOT_STRIDES`], the host readies the
-/// buffer views of the whole heap when a shader has this root SRV.
-pub const SLOT_VIEWS: u8 = 252;
-/// Slots of the [`SLOT_VIEWS`] buffer (heap indices are clamped to it).
-pub const SLOT_VIEWS_COUNT: u32 = SLOT_STRIDES_COUNT;
-/// Byte stride of a view entry: address low and high, byte length, and stride.
-pub const SLOT_VIEW_BYTES: u32 = 4 * size_of::<u32>() as u32;
-
->>>>>>> vitoriabr/main
+/// Byte stride of a view entry: address low and high, byte length, and stride
+/// (the same record, under the name the earlier code uses).
+pub const SLOT_VIEW_BYTES: u32 = SLOT_VIEWS_RECORD_BYTES;
 /// Title memory by address (`resource::MEMORY`): console code reads and
 /// writes through raw 40-bit addresses it takes from root constants,
 /// descriptors and other memory (the ray-tracing structure builder and the
@@ -112,7 +97,6 @@ pub const USER_VIEW_ADDRESS: u32 = 0x101;
 /// 4 and c). The shader adds the dword to every byte offset through that
 /// view. Asked for every root UAV.
 pub const USER_VIEW_BIAS: u32 = 0x103;
-<<<<<<< HEAD
 /// `RootType::Other` code of a user-data dword the host sets: the number of
 /// the first thread group in x. The console dispatches any number of groups
 /// in one dimension; the host at most 65,535, so a larger dispatch runs in
@@ -139,15 +123,6 @@ pub const USER_DISPATCH_THREADS_X: u32 = 0x106;
 /// `DispatchX` call with `USE_THREAD_DIMENSIONS` (`flags & 0x20`), or 0
 /// for a normal thread-group dispatch (all threads in every group active).
 pub const USER_DISPATCH_THREADS: u32 = 0x105;
-||||||| 085ee7c4
-=======
-/// `RootType::Other` code of a user-data dword the host computes: the
-/// actual X thread count of a one-dimensional partial dispatch. Zero keeps
-/// every thread of every dispatched group active; otherwise threads whose
-/// global X index is at or past it do nothing. The metadata `dword` holds
-/// the group's X width.
-pub const USER_DISPATCH_THREADS_X: u32 = 0x104;
->>>>>>> vitoriabr/main
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {
@@ -278,15 +253,11 @@ pub(crate) struct Shader {
     /// A translated store or atomic can write through the guest page directory.
     pub writes_guest_memory: bool,
     pub flags: u64,
-<<<<<<< HEAD
     /// A pixel shader whose writes to views the console orders by primitive (POPS): its
     /// heap views written or read as UAVs are rasterizer-ordered views.
     pub ordered: bool,
-||||||| 085ee7c4
-=======
     /// Every UAV the shader opens is rasterizer ordered ([`Self::annotate`]).
     pub rov: bool,
->>>>>>> vitoriabr/main
     /// Heap handles made with a non-uniform index.
     pub nonuniform_handles: u32,
     /// A compute shader with this thread-group size.
@@ -345,12 +316,8 @@ impl Shader {
             written_root_uavs: Vec::new(),
             writes_guest_memory: false,
             flags: 0,
-<<<<<<< HEAD
             ordered: false,
-||||||| 085ee7c4
-=======
             rov: false,
->>>>>>> vitoriabr/main
             nonuniform_handles: 0,
             threads: None,
             wave_size: None,
@@ -522,17 +489,8 @@ impl Shader {
         h
     }
 
-<<<<<<< HEAD
     /// The handle of immediate sampler `n` (a comparison sampler when
     /// `self.sampler_cmp[n]` is `true`).
-||||||| 085ee7c4
-    /// The handle of immediate sampler `n` (a comparison sampler when its
-    /// bit in `cmp_samplers` is set).
-=======
-    /// The handle of immediate sampler `n` (a comparison sampler when its
-    /// bit in `cmp_samplers` is set).
-    /// A handle to the static sampler at `n`.
->>>>>>> vitoriabr/main
     pub fn sampler_handle(&mut self, block: usize, n: u32) -> V {
         let bind = [
             self.m.i32(n),
