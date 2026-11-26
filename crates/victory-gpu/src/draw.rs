@@ -4488,8 +4488,12 @@ impl State {
         // back (`crate::indirect`).
         if kind == DISPATCH {
             DISPATCHED.fetch_add(1, Ordering::Relaxed);
-            if p.stages.first().is_some_and(|s| s.shader.ends_reflections) {
-                self.ambient(list, p);
+            if let Some(role) = p.stages.first().and_then(|s| s.shader.ambient)
+                && crate::ambient::on()
+                && self.ambient(list, p, role)
+            {
+                self.host_pipeline = 0;
+                self.host_roots[1] = 0;
             }
         } else {
             DRAWN.fetch_add(1, Ordering::Relaxed);
