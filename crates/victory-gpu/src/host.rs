@@ -500,7 +500,6 @@ pub(crate) fn retire<T: 'static>(object: T) {
         .push_back((started, Retired::Any(Box::new(object))));
 }
 
-<<<<<<< HEAD
 /// [`retire`] for a resource.
 pub(crate) fn retire_resource(object: ID3D12Resource) {
     let queued = crate::queue::queued();
@@ -528,12 +527,6 @@ fn bury_lag() -> u64 {
     })
 }
 
-/// Drops what waited for submissions up to `finished` ([`bury_lag`]). The
-/// numbers come in order, but for threads that overtake each other: one of
-/// those is dropped a little later than it could be.
-||||||| 9c184b35b
-/// Drops what waited for submissions up to `finished`.
-=======
 /// Whether descriptor slots written again with the object they already
 /// held let the old reference go at once instead of retiring it, and
 /// [`bury`] sorts what it drops outside the lock (`VICTORY_RETIRE_LEAN=1`;
@@ -603,13 +596,11 @@ pub(crate) fn slot_rewritten(old: &ID3D12Resource, new: Option<&ID3D12Resource>)
     lean
 }
 
-/// Drops what waited for submissions up to `finished`.
->>>>>>> origin/exp/fork-head
+/// Drops what waited for submissions up to `finished` ([`bury_lag`]). The
+/// numbers come in order, but for threads that overtake each other: one of
+/// those is dropped a little later than it could be.
 fn bury(finished: u64) {
-<<<<<<< HEAD
     let finished = finished.saturating_sub(bury_lag());
-||||||| 9c184b35b
-=======
     if retire_lean() {
         // Taken out whole, sorted with no lock held, what still waits put
         // back (beside what was retired meanwhile; the order means nothing).
@@ -625,7 +616,6 @@ fn bury(finished: u64) {
         reap(done.into_iter().map(|(_, object)| object).collect());
         return;
     }
->>>>>>> origin/exp/fork-head
     let done: Vec<(u64, Retired)> = {
         let mut retired = RETIRED.lock().unwrap_or_else(|e| e.into_inner());
         let n = retired.iter().take_while(|(at, _)| *at <= finished).count();
@@ -1206,15 +1196,6 @@ pub(crate) fn log_removal_context() {
     if !(trail_on() || dred_any()) || SAID.swap(true, Ordering::Relaxed) {
         return;
     }
-<<<<<<< HEAD
-    tracing::error!("when the host device went: {}", removal_context());
-    if dred_any() {
-        let data = host().map(|h| h.removal_data(&[])).unwrap_or_default();
-        tracing::error!("device-removed data{}", if data.is_empty() { "; none" } else { &data });
-    }
-||||||| 9c184b35b
-    tracing::error!("when the host device went: {}", removal_context());
-=======
     if trail_on() {
         tracing::error!("when the host device went: {}", removal_context());
     }
@@ -1246,7 +1227,6 @@ pub(crate) fn log_removal_context() {
             host.removal_data_of(&[], false)
         );
     }
->>>>>>> origin/exp/fork-head
 }
 
 /// Whether [`Host::removal_data`] was asked for (once is enough for
@@ -1504,49 +1484,29 @@ fn create() -> windows::core::Result<Host> {
         }
         // Diagnostics: device-removed data (the command that faulted, the
         // faulting address), read when the device is removed.
-<<<<<<< HEAD
-        if dred_any() {
-||||||| 9c184b35b
-        if dred_on() {
-=======
         if dred_any() {
             let mode = dred_mode();
->>>>>>> origin/exp/fork-head
             let mut dred: Option<ID3D12DeviceRemovedExtendedDataSettings> = None;
             if D3D12GetDebugInterface(&mut dred).is_ok()
                 && let Some(dred) = dred
             {
-<<<<<<< HEAD
-                if dred_on() || dred_light() {
-                    dred.SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
-                }
-||||||| 9c184b35b
-                dred.SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
-=======
                 // `faults`: no breadcrumbs (the runtime then adds nothing
                 // to the commands), only the faulting address.
                 if mode != Dred::Faults {
                     dred.SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
                 }
->>>>>>> origin/exp/fork-head
                 dred.SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
-<<<<<<< HEAD
                 tracing::info!(
                     breadcrumbs = dred_on() || dred_light(),
                     markers = dred_on(),
+                    form = mode.text(),
                     "crash tracing on (device-removed data)"
                 );
-            } else {
-                tracing::warn!("crash tracing asked for and not there: no device-removed data settings");
-||||||| 9c184b35b
-=======
-                tracing::info!("device-removed data on: {}", mode.text());
             } else {
                 tracing::warn!(
                     "device-removed data was asked for ({}) and the runtime gave no settings for it: none will be kept",
                     mode.text()
                 );
->>>>>>> origin/exp/fork-head
             }
         }
         let mut device: Option<ID3D12Device> = None;
@@ -1679,7 +1639,6 @@ pub(crate) fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
 
 #[cfg(test)]
 mod tests {
-<<<<<<< HEAD
     /// A list of ours is found by its name, with the debug layer's note or not.
     #[cfg(feature = "diagnostics")]
     #[test]
@@ -1743,8 +1702,6 @@ mod tests {
         }
     }
 
-||||||| 9c184b35b
-=======
     /// Run once with VICTORY_CARD_SYNC_BATCH=0 and once with it set to 1.
     #[test]
     #[ignore = "requires a D3D12 adapter and the card hash pipeline; run alone"]
@@ -1828,7 +1785,6 @@ mod tests {
         unsafe { VirtualFree(allocation, 0, MEM_RELEASE); }
     }
 
->>>>>>> origin/exp/fork-head
     #[test]
     fn sparse_copies_preserve_islands_and_observe_remaps() {
         use windows_sys::Win32::System::Memory::*;
@@ -1920,6 +1876,9 @@ pub(crate) struct HostList {
     prelude: OnceLock<Option<Prelude>>,
     /// The pipelines the list binds, for reports of slow submissions.
     pipelines: std::sync::Arc<Mutex<std::collections::BTreeSet<String>>>,
+    /// The records its draws read from slots that its prelude fills
+    /// (`crate::indirect::gather`).
+    gather: Mutex<Gather>,
     /// What its indirect executions ran, for the report of a removed device.
     #[cfg(feature = "diagnostics")]
     indirects: indirects::Shared,
@@ -1934,7 +1893,6 @@ pub(crate) struct HostList {
     /// Device-local scratch buffer for clamped indirect arguments (`indirect`),
     /// grown to the largest indirect execution recorded on the list.
     indirect_args: Mutex<Option<(ID3D12Resource, u64)>>,
-<<<<<<< HEAD
     /// Scratch buffers of the batched clamps (`crate::indirect::batch`), and
     /// how many batches of this recording have a place in them.
     batch_args: Mutex<(Vec<ID3D12Resource>, u32)>,
@@ -1945,10 +1903,6 @@ pub(crate) struct HostList {
     /// depends on ([`HostList::changed_something`]); no two lists have the
     /// same.
     epoch: std::sync::atomic::AtomicU64,
-||||||| 9c184b35b
-    /// The buffers of `crate::indirect::window_check`, made at its first use.
-    window_check: OnceLock<Option<crate::indirect::WindowCheck>>,
-=======
     /// The buffers of `crate::indirect::window_check`, made at its first use.
     window_check: OnceLock<Option<crate::indirect::WindowCheck>>,
     /// The window of indirect draws clamped together (`crate::indirect::clamp_window`), if one is open.
@@ -1956,7 +1910,6 @@ pub(crate) struct HostList {
     /// Occlusion queries begun on the host in this list and not ended in it (`crate::query`, `VICTORY_OCCLUSION`):
     /// host heap, console kind, index, console heap.
     open_queries: Mutex<Vec<(ID3D12QueryHeap, u32, u32, usize)>>,
->>>>>>> origin/exp/fork-head
     /// Counts the list in [`ALIVE`] while it lives.
     _alive: Counted,
     /// The texts of the markers `note_op` set, in order (for device-removed
@@ -1972,27 +1925,6 @@ pub(crate) struct HostList {
 /// A list's prelude: an allocator and a closed list.
 type Prelude = (ID3D12CommandAllocator, ID3D12GraphicsCommandList);
 
-<<<<<<< HEAD
-||||||| 9c184b35b
-/// What a list gathers for its prelude to clamp (`crate::indirect::gather`).
-#[derive(Default)]
-struct Gather {
-    /// Something recorded in the list may write arguments: no record is
-    /// gathered from here on (the ones gathered before are read before
-    /// the list runs, which is before that).
-    closed: bool,
-    /// One set per argument buffer, kind and stride.
-    sets: Vec<crate::indirect::GatherSet>,
-    /// The budget words the gathered records are charged to.
-    budget: Option<ID3D12Resource>,
-    /// Scratch buffers of earlier recordings, kept for the next sets.
-    spare: Vec<ID3D12Resource>,
-}
-
-/// The most argument buffers a list gathers from.
-const GATHER_SETS: usize = 8;
-
-=======
 /// What a list gathers for its prelude to clamp (`crate::indirect::gather`).
 #[derive(Default)]
 struct Gather {
@@ -2015,7 +1947,6 @@ struct Gather {
 /// The most argument buffers a list gathers from.
 const GATHER_SETS: usize = 8;
 
->>>>>>> origin/exp/fork-head
 /// Whether a host list's prelude is made when the list first needs one. A
 /// prelude runs the texture transitions and twin copies a list needs before
 /// it; lists that name no texture never have one, and every host list was
@@ -2465,26 +2396,6 @@ fn record_twin_copy(
 
 /// The forms of device-removed data (`VICTORY_D3D12_DRED`, diagnostics
 /// builds).
-<<<<<<< HEAD
-pub(crate) fn dred_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| cfg!(feature = "diagnostics") && crate::switch::on("VICTORY_D3D12_DRED") && !dred_faults() && !dred_light())
-}
-
-/// Breadcrumbs and the faulting address, but no markers and no texts
-/// (`VICTORY_D3D12_DRED=light`): which list a removed device stopped in, at
-/// which of its commands, and the pipelines the list binds; formatting a text
-/// for every command is what makes the whole of it slow.
-pub(crate) fn dred_light() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        cfg!(feature = "diagnostics") && std::env::var_os("VICTORY_D3D12_DRED").is_some_and(|v| v == "light")
-||||||| 9c184b35b
-pub(crate) fn dred_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        cfg!(feature = "diagnostics") && std::env::var_os("VICTORY_D3D12_DRED").is_some()
-=======
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Dred {
     /// Not set.
@@ -2524,16 +2435,33 @@ pub(crate) fn dred_mode() -> Dred {
         }
         match std::env::var_os("VICTORY_D3D12_DRED") {
             None => Dred::Off,
+            Some(v) if v == "0" => Dred::Off,
             Some(v) if v == "light" => Dred::Light,
             Some(v) if v == "faults" => Dred::Faults,
             // Any other value, as before the two above were known.
             Some(_) => Dred::Full,
         }
->>>>>>> origin/exp/fork-head
     })
 }
 
-<<<<<<< HEAD
+/// Whether device-removed data is on in its full form (`VICTORY_D3D12_DRED`
+/// set to anything but `light`, `faults` or `0`, diagnostics builds): the
+/// one in which every noted command gets a marker and a text
+/// (`HostList::note_op`).
+pub(crate) fn dred_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| dred_mode() == Dred::Full)
+}
+
+/// Breadcrumbs and the faulting address, but no markers and no texts
+/// (`VICTORY_D3D12_DRED=light`): which list a removed device stopped in, at
+/// which of its commands, and the pipelines the list binds; formatting a text
+/// for every command is what makes the whole of it slow.
+pub(crate) fn dred_light() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| dred_mode() == Dred::Light)
+}
+
 /// Any of the three.
 pub(crate) fn dred_any() -> bool {
     dred_on() || dred_light() || dred_faults()
@@ -2544,9 +2472,7 @@ pub(crate) fn dred_any() -> bool {
 /// it costs next to nothing and can stay on while the title is played.
 pub(crate) fn dred_faults() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        cfg!(feature = "diagnostics") && std::env::var_os("VICTORY_D3D12_DRED").is_some_and(|v| v == "faults")
-    })
+    *ON.get_or_init(|| dred_mode() == Dred::Faults)
 }
 
 /// The lists alive while device-removed data is on, by the number their name
@@ -2574,23 +2500,6 @@ fn list_number(name: &str) -> Option<u32> {
     (rest.len() == digits.len() || rest[digits.len()..].starts_with(" (")).then(|| digits.parse().ok()).flatten()
 }
 
-||||||| 9c184b35b
-=======
-/// Whether device-removed data is on in its full form (`VICTORY_D3D12_DRED`
-/// set to anything but `light` or `faults`, diagnostics builds): the one
-/// in which every noted command gets a marker and a text
-/// (`HostList::note_op`).
-pub(crate) fn dred_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| dred_mode() == Dred::Full)
-}
-
-/// Whether device-removed data is on in any form ([`Dred`]).
-pub(crate) fn dred_any() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| dred_mode() != Dred::Off)
-}
-
 /// Whether objects made while frames are drawn are named too
 /// ([`name_frame`]): always in the full form (as before); in `light` and
 /// `faults` unless `VICTORY_D3D12_DRED_FRAME_NAMES=0`.
@@ -2605,7 +2514,6 @@ fn frame_names() -> bool {
 /// while frames are drawn ([`name_frame`]): each is one `SetName` call.
 static NAMED: [std::sync::atomic::AtomicU64; 2] = [const { std::sync::atomic::AtomicU64::new(0) }; 2];
 
->>>>>>> origin/exp/fork-head
 /// Indirect mesh dispatches since the last frame line: the largest group
 /// count a record asked for, and the groups asked in all (from the lists'
 /// budget buffers, a run late).
@@ -2635,17 +2543,10 @@ fn timing() -> bool {
 }
 
 /// Names a host object for the device-removed report, which names the
-<<<<<<< HEAD
-/// allocations a page fault hit (only with device-removed data on), or for
-/// the frame recorder (`VICTORY_RECORD`).
-||||||| 9c184b35b
-/// allocations a page fault hit (only with device-removed data on).
-=======
 /// allocations a page fault hit (only with device-removed data on, in any
-/// of its forms: the names are what a faulting address is read by).
->>>>>>> origin/exp/fork-head
+/// of its forms: the names are what a faulting address is read by), or for
+/// the frame recorder (`VICTORY_RECORD`).
 pub(crate) fn name(object: &impl Interface, text: impl FnOnce() -> String) {
-<<<<<<< HEAD
     #[cfg(feature = "diagnostics")]
     if crate::book::on()
         && let Ok(resource) = object.cast::<ID3D12Resource>()
@@ -2671,11 +2572,6 @@ fn name_it(object: &impl Interface, text: impl FnOnce() -> String) {
         return;
     }
     if dred_any()
-||||||| 9c184b35b
-    if dred_on()
-=======
-    if dred_any()
->>>>>>> origin/exp/fork-head
         && let Ok(object) = object.cast::<ID3D12Object>()
     {
         // Counted, so that a log says what naming costs: one text and one
@@ -3132,7 +3028,6 @@ pub(crate) fn card_compare_groups(pieces: u32) -> u32 {
 /// Whether the pieces a flight's compare flags come down to the PC inside
 /// the flight itself (`VICTORY_CARD_FETCH_INFLIGHT=1`; off by default, and
 /// only with [`relay`]).
->>>>>>> origin/exp/fork-head
 ///
 /// # Safety
 /// The list is open with the compare's root signature, pipeline and buffers
@@ -5610,6 +5505,7 @@ impl Host {
                 twins: Mutex::default(),
                 prelude,
                 pipelines,
+                gather: Mutex::default(),
                 #[cfg(feature = "diagnostics")]
                 indirects,
                 budget: OnceLock::new(),
