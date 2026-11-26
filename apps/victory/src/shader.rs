@@ -225,10 +225,24 @@ pub fn run(paths: Vec<PathBuf>, verbose: bool, disasm: bool, effects: bool) -> R
                     }
                     None => "no parsable DXIL program".to_owned(),
                 } + &native;
+<<<<<<< HEAD
                 if verbose {
                     // As a run's log and a replay name it (`hash=`).
                     let hash = blake3::hash(&bytes).to_hex();
                     println!("{}{} #{}: {line}", path.display(), source.label(), &hash[..16]);
+||||||| merged common ancestors
+                if verbose {
+                    println!("{}{}: {line}", path.display(), source.label());
+=======
+                // The hash the runtime logs for this container (first 16 hex
+                // digits of its BLAKE3); `VICTORY_SHADER_HASHES` (comma-separated)
+                // limits the listing to those.
+                let hash = blake3::hash(&bytes).to_hex()[..16].to_owned();
+                let wanted = std::env::var("VICTORY_SHADER_HASHES")
+                    .map_or(true, |list| list.split(',').any(|h| h.trim() == hash));
+                if verbose && wanted {
+                    println!("{}{} [{hash}]: {line}", path.display(), source.label());
+>>>>>>> belobug/main
                     for l in &listing {
                         println!("{l}");
                     }

@@ -59,7 +59,15 @@ pub fn run(
     }
     let cfg = victory_core::Config::load()?;
     let original = std::fs::read(exe).with_context(|| format!("reading {}", exe.display()))?;
+<<<<<<< HEAD
     let mut prepared = victory_loader::prepare(&original)?;
+||||||| merged common ancestors
+    let prepared = victory_loader::prepare(&original)?;
+=======
+    let prepared = victory_loader::prepare(&original)?;
+    // The title's exe is hundreds of MB: keep no copy of it for the run.
+    drop(original);
+>>>>>>> belobug/main
     let hash = prepared.original_hash.to_hex();
     let build = victory_game::identify(&hash);
     match build {
@@ -71,6 +79,7 @@ pub fn run(
     let images = cfg.cache_subdir("images")?;
     victory_hle::modules::d3d12x::use_shader_cache(cfg.cache_subdir("shaders")?);
     let image = victory_loader::load(&prepared, &images)?;
+<<<<<<< HEAD
     // The program is mapped from the copy `load` wrote: the file's bytes
     // and their patched copy are not read again, and were held for the
     // whole run (two blocks of 114.7 MB each for the title, in
@@ -78,6 +87,10 @@ pub fn run(
     let image_name = prepared.file_name();
     drop(prepared);
     drop(original);
+||||||| merged common ancestors
+=======
+    drop(prepared);
+>>>>>>> belobug/main
     victory_hle::runtime::set_main_image(image.base());
     victory_hle::runtime::set_image_path(image.base(), exe);
     println!(

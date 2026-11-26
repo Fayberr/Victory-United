@@ -16,13 +16,19 @@ pub mod ir;
 pub mod merged;
 pub mod native;
 pub mod resource;
+<<<<<<< HEAD
 pub mod spill;
+||||||| merged common ancestors
+=======
+pub mod sgpr_spill;
+>>>>>>> belobug/main
 pub mod structure;
+pub mod unspill;
 
 pub use dxbc::{Container, FourCC, Part};
 pub use dxil::{DxilProgram, ShaderKind, XboxExtras};
 pub use native::{
-    HwStage, NativeProgram, ResourceType, RootParam, RootType, UsedResource, native_programs,
+    HwStage, NativeProgram, ResourceType, RootParam, RootType, UsedResource, container_programs, native_programs,
 };
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

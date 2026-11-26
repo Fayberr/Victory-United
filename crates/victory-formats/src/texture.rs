@@ -788,6 +788,20 @@ impl Layout {
         (u64::from(x / bw) << self.alignment.trailing_zeros()) | u64::from(flip(&flips[0], x))
     }
 
+    /// Bytes from the texture's start that mips `first` and smaller take up
+    /// (of all slices). Mips are stored smallest first: titles that stream
+    /// textures give memory to the small ones only, and what follows is
+    /// another texture's, or nothing.
+    pub fn reach(&self, first: u32) -> u64 {
+        match first.min(self.first_tail_mip) {
+            0 => self.size,
+            k => match self.mips.get(k as usize - 1) {
+                Some(m) if m.offset != 0 => self.size - self.slice_size + m.offset,
+                _ => self.size,
+            },
+        }
+    }
+
     /// Depth slices a subresource of mip `mip` covers: the mip's depth for
     /// 3D textures, else 1 (one array slice).
     pub fn subresource_depth(&self, mip: u32) -> u32 {
@@ -821,8 +835,14 @@ impl Layout {
     }
 
     /// Copies one subresource out of tiled memory (the whole texture,
+<<<<<<< HEAD
     /// [`Layout::size`] bytes, or the [`Layout::bytes_from`] of the mip)
     /// into linear rows: mip `mip` of array slice
+||||||| merged common ancestors
+    /// [`Layout::size`] bytes) into linear rows: mip `mip` of array slice
+=======
+    /// [`Layout::reach`] bytes of the mip at least) into linear rows: mip `mip` of array slice
+>>>>>>> belobug/main
     /// `slice` (3D: every depth slice of the mip, `slice` 0). Rows are
     /// `row_pitch` bytes apart, depth slices `depth_pitch`.
     pub fn detile(
@@ -883,9 +903,15 @@ impl Layout {
             .checked_mul(row_pitch)
             .and_then(|offset| offset.checked_add(bytes))
             .ok_or(Error::TooSmall)?;
+<<<<<<< HEAD
 
         // Multiple depth slices must not overwrite each other.
         if depth > 1 && depth_pitch < slice_bytes {
+||||||| merged common ancestors
+        if tiled_len < self.size as usize || linear_len < need || row_pitch < bytes {
+=======
+        if tiled_len < self.reach(mip) as usize || linear_len < need || row_pitch < bytes {
+>>>>>>> belobug/main
             return Err(Error::TooSmall);
         }
 
@@ -1569,6 +1595,12 @@ mod tests {
         assert_eq!(l.mips[2].offset, 4096);
         assert_eq!(l.mips[1].offset, 8192);
         assert_eq!(l.mips[0].offset, 8192 + 16384);
+        // What the small mips alone take up.
+        assert_eq!(l.reach(0), l.size);
+        assert_eq!(l.reach(1), 8192 + 16384);
+        assert_eq!(l.reach(2), 8192);
+        assert_eq!(l.reach(3), 4096);
+        assert_eq!(l.reach(8), 4096);
     }
 
     /// A volume deeper than its block keeps its whole chain in the tail when
@@ -2293,6 +2325,41 @@ mod tests {
                     linear.len() as f64 / secs / 1e6
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod peek {
+    use super::*;
+    /// Diagnostics: `VICTORY_PEEK_LUT=<file>` (a 256x16 BGRA8 SW_4KB_S
+    /// texture's memory), detiled to `<file>.rgb` (256x16 RGB, per mips).
+    #[test]
+    fn detile_a_peeked_texture() {
+        let Ok(path) = std::env::var("VICTORY_PEEK_LUT") else { return };
+        let bytes = std::fs::read(&path).unwrap();
+        for mips in [1u32, 0] {
+            let t = Texture::new(&TextureDesc {
+                dimension: Dimension::Tex2d,
+                width: 256,
+                height: 16,
+                depth_or_array: 1,
+                mips,
+                format: 87,
+                samples: 1,
+                swizzle: Swizzle::SW_4KB_S,
+            })
+            .unwrap();
+            let l = &t.planes[0].layout;
+            let mut out = Vec::new();
+            for y in 0..16 {
+                for x in 0..256 {
+                    let o = l.offset(0, x, y, 0).unwrap() as usize;
+                    out.extend_from_slice(&[bytes[o + 2], bytes[o + 1], bytes[o]]);
+                }
+            }
+            eprintln!("mips {mips} size {} first offsets {:?}", t.size, (0..4).map(|x| l.offset(0, x, 0, 0).unwrap()).collect::<Vec<_>>());
+            std::fs::write(format!("{path}.{mips}.rgb"), out).unwrap();
         }
     }
 }

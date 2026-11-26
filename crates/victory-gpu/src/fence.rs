@@ -87,7 +87,70 @@ extern "system" fn query(this: This, iid: *const Iid, out: *mut This) -> HRESULT
 extern "system" fn release(this: This) -> u32 {
     object::release_boxed::<Fence>(this)
 }
+<<<<<<< HEAD
 pub(crate) extern "system" fn completed(this: This) -> u64 {
+||||||| merged common ancestors
+extern "system" fn completed(this: This) -> u64 {
+=======
+
+impl Drop for Fence {
+    fn drop(&mut self) {
+        let this = &raw const *self as usize;
+        waited().retain(|&f| f != this);
+    }
+}
+
+/// Fences with events waiting for them.
+static WAITED: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+fn waited() -> std::sync::MutexGuard<'static, Vec<usize>> {
+    WAITED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Sets the events of fences whose value was written in memory (by a list's
+/// bottom-of-pipe write, say).
+pub(crate) fn wake() {
+    waited().retain(|&f| {
+        // SAFETY: fences leave the list before they are freed.
+        let fence = unsafe { &*(f as *const Fence) };
+        let mut waiters = fence.waiters.lock().unwrap_or_else(|e| e.into_inner());
+        fence.set_reached(&mut waiters);
+        !waiters.is_empty()
+    });
+}
+
+impl Fence {
+    fn set_reached(&self, waiters: &mut Vec<(u64, usize)>) {
+        let value = self.value.load(Ordering::Acquire);
+        waiters.retain(|&(wanted, event)| {
+            let reached = wanted <= value;
+            if reached {
+                set_event(event);
+            }
+            !reached
+        });
+    }
+}
+
+/// A fence a queue's pending work names.
+pub(crate) struct Held(object::Ref);
+
+impl Held {
+    /// `this` is a fence, not null.
+    pub(crate) fn new(this: This) -> Held {
+        Held(object::Ref::new(this))
+    }
+
+    pub(crate) fn reached(&self, value: u64) -> bool {
+        completed(self.0.get()) >= value
+    }
+
+    /// Moves the fence and sets its events; wakes no queue.
+    pub(crate) fn signal(&self, value: u64) {
+        set(self.0.get(), value);
+    }
+}
+extern "system" fn completed(this: This) -> u64 {
+>>>>>>> belobug/main
     fence(this).value.load(Ordering::Acquire)
 }
 /// The title's `GetCompletedValue`.
@@ -113,6 +176,7 @@ extern "system" fn set_event_on_completion(this: This, value: u64, event: *mut c
     #[cfg(all(windows, feature = "diagnostics"))]
     crate::timeline::told("an event asked for", this as usize, value);
     if event.is_null() {
+<<<<<<< HEAD
         // With submissions sent to the card and not waited for
         // (`crate::host::late`) the signal may be behind them: they are
         // settled, which sets it.
@@ -131,17 +195,60 @@ extern "system" fn set_event_on_completion(this: This, value: u64, event: *mut c
         // reach it while no GPU work runs, so fail instead of hanging.
         tracing::warn!(value, "blocking fence wait not implemented");
         return E_NOTIMPL;
+||||||| merged common ancestors
+        // shortcut: a null event means "block until reached"; nothing can
+        // reach it while no GPU work runs, so fail instead of hanging.
+        tracing::warn!(value, "blocking fence wait not implemented");
+        return E_NOTIMPL;
+=======
+        // A null event means "block until reached".
+        // shortcut: only work still to run on a queue can reach it later (the
+        // title's other threads aside), so fail instead of hanging if there
+        // is none.
+        drop(waiters);
+        while fence.value.load(Ordering::Acquire) < value {
+            if !crate::timeline::active() {
+                // It may just have run.
+                if fence.value.load(Ordering::Acquire) >= value {
+                    break;
+                }
+                tracing::warn!(value, "blocking fence wait not implemented");
+                return E_NOTIMPL;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(200));
+        }
+        return S_OK;
+>>>>>>> belobug/main
     }
     waiters.push((value, event as usize));
+    drop(waiters);
+    let mut all = waited();
+    let at = &raw const *fence as usize;
+    if !all.contains(&at) {
+        all.push(at);
+    }
+    drop(all);
+    // The value may have been written since (nothing locks memory writes).
+    if fence.value.load(Ordering::Acquire) >= value {
+        let mut waiters = fence.waiters.lock().unwrap_or_else(|e| e.into_inner());
+        fence.set_reached(&mut waiters);
+    }
     S_OK
 }
+<<<<<<< HEAD
 /// Moves the fence to `value` and sets the events that waited for it.
 pub(crate) fn set(this: This, value: u64) {
+||||||| merged common ancestors
+pub(crate) extern "system" fn signal(this: This, value: u64) -> HRESULT {
+=======
+fn set(this: This, value: u64) {
+>>>>>>> belobug/main
     let fence = fence(this);
     #[cfg(all(windows, feature = "diagnostics"))]
     crate::timeline::told("a fence set", this as usize, value);
     let mut waiters = fence.waiters.lock().unwrap_or_else(|e| e.into_inner());
     fence.value.store(value, Ordering::Release);
+<<<<<<< HEAD
     #[cfg(all(windows, feature = "diagnostics"))]
     pace::reached(this, &fence.asked, value);
     waiters.retain(|&(wanted, event)| {
@@ -158,6 +265,24 @@ pub(crate) extern "system" fn signal(this: This, value: u64) -> HRESULT {
     // A queue may have waited for it: what it held runs now.
     #[cfg(windows)]
     crate::queue::release_held(false);
+||||||| merged common ancestors
+    waiters.retain(|&(wanted, event)| {
+        let reached = wanted <= value;
+        if reached {
+            set_event(event);
+        }
+        !reached
+    });
+=======
+    fence.set_reached(&mut waiters);
+}
+/// The CPU's signal: queues may wait for it.
+extern "system" fn signal(this: This, value: u64) -> HRESULT {
+    set(this, value);
+    if crate::timeline::held() {
+        crate::timeline::pump();
+    }
+>>>>>>> belobug/main
     S_OK
 }
 

@@ -21,6 +21,8 @@ pub(crate) mod dsp_convolve;
 #[cfg(windows)]
 pub mod dstorage;
 #[cfg(windows)]
+pub mod dualsense;
+#[cfg(windows)]
 pub mod files;
 pub mod gameinput;
 pub mod kernel;

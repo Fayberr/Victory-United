@@ -11,7 +11,7 @@ use victory_shader::emit::host::{self, Host};
 use victory_shader::emit::{self, validator::Validator};
 use victory_shader::structure::{self, Atom, LaneExit};
 use victory_shader::{
-    Container, FourCC, HwStage, NativeProgram, RootType, ShaderError, ir, native_programs,
+    Container, FourCC, HwStage, NativeProgram, RootType, ShaderError, ir,
 };
 use victory_shader::{io, resource};
 
@@ -145,6 +145,8 @@ type Kept = std::sync::Arc<Mutex<Vec<(String, emit::HostShader, Vec<u8>)>>>;
 
 /// The optional checks after emission, one set per thread.
 struct Checks {
+    /// The wave sizes to translate for.
+    target: emit::Target,
     /// Shaders named in `VICTORY_PAIRS` (`vs+ps,...`, label substrings),
     /// kept to build those pipelines after the walk: the names, and the
     /// container being translated when its label holds one of them.
@@ -161,6 +163,7 @@ pub fn run(
     pipelines: bool,
     list: bool,
     jobs: Option<usize>,
+    host_lanes: Option<(u32, u32)>,
 ) -> Result<()> {
     // Dumped shaders and validator reports are game-derived (rule #1).
     if let Some(dir) = std::env::var_os("VICTORY_EMIT_DUMP") {
@@ -183,8 +186,21 @@ pub fn run(
                 .map_or("dxil.dll".into(), |p| p.display().to_string())
         );
     }
+    let mut target = emit::Target::ANY;
     if pipelines {
-        Host::new(false).map_err(anyhow::Error::msg)?;
+        target = Host::new(false).map_err(anyhow::Error::msg)?.target();
+    }
+    if let Some((lanes_min, lanes_max)) = host_lanes {
+        target = emit::Target {
+            lanes_min,
+            lanes_max,
+        };
+    }
+    if target != emit::Target::ANY {
+        println!(
+            "host waves   {}-{} lanes",
+            target.lanes_min, target.lanes_max
+        );
     }
     let pairs: Vec<(String, String)> = std::env::var("VICTORY_PAIRS")
         .unwrap_or_default()
@@ -218,6 +234,7 @@ pub fn run(
                             ..Tally::default()
                         };
                         let mut checks = Checks {
+                            target,
                             keep: (!pairs.is_empty()).then(|| kept.clone()),
                             names: pairs.iter().flat_map(|(v, p)| [v.clone(), p.clone()]).collect(),
                             current: None,
@@ -341,6 +358,7 @@ pub fn run(
     Ok(())
 }
 
+<<<<<<< HEAD
 /// Every shader found into the cache runs translate from.
 pub fn precompile(paths: Vec<PathBuf>, jobs: Option<usize>) -> Result<()> {
     let cfg = victory_core::Config::load()?;
@@ -583,6 +601,30 @@ pub fn warm(_: Vec<PathBuf>, _: Option<usize>, _: bool, _: bool) -> Result<()> {
     anyhow::bail!("precompiling shaders requires Windows D3D12")
 }
 
+||||||| merged common ancestors
+=======
+/// The instructions around `offset` (`VICTORY_AROUND=<count>`, before and
+/// half as many after), with the block each starts in.
+fn disassemble(p: &ir::Program, offset: usize) {
+    let Some(around) = std::env::var("VICTORY_AROUND").ok().and_then(|v| v.parse::<usize>().ok()) else {
+        return;
+    };
+    let all: Vec<(usize, &ir::Inst)> = p
+        .blocks
+        .iter()
+        .enumerate()
+        .flat_map(|(b, block)| block.insts.iter().map(move |i| (b, i)))
+        .collect();
+    let at = all
+        .iter()
+        .position(|(_, i)| i.machine.offset == offset)
+        .unwrap_or(0);
+    for (b, i) in &all[at.saturating_sub(around)..(at + around / 2).min(all.len())] {
+        println!("  {:#x} b{b} {} {:?}", i.machine.offset, i.name(), i.fields);
+    }
+}
+
+>>>>>>> belobug/main
 fn translate(
     source: &Source,
     path: &Path,
@@ -616,7 +658,17 @@ fn translate(
     let Ok(container) = Container::parse(&bytes) else {
         return t.fail("no DXIL part (SM5 or older)".into(), example);
     };
+<<<<<<< HEAD
     let Some(dxil) = container.part(FourCC::DXIL).or(container.part(FourCC::ACCC)).map(|p| p.data) else {
+||||||| merged common ancestors
+    let Some(dxil) = container.part(FourCC::DXIL).map(|p| p.data) else {
+=======
+    let Some(dxil) = container
+        .part(FourCC::DXIL)
+        .or_else(|| container.part(FourCC::ACCC))
+        .map(|p| p.data)
+    else {
+>>>>>>> belobug/main
         return t.fail("no DXIL part (SM5 or older)".into(), example);
     };
     // `~`: the hash of the code alone; containers that differ only around
@@ -654,10 +706,11 @@ fn translate(
         }
         return;
     }
-    let programs = match native_programs(dxil) {
+    let programs = match victory_shader::container_programs(&container) {
         Ok(p) => p,
         Err(e) => return t.fail(e.to_string(), example),
     };
+<<<<<<< HEAD
     // `VICTORY_FAIL_DUMP=<dir>`: the first 3 containers of each failure reason, as the title
     // has them (`.cdxil`), to work on a translator gap offline
     let dump = std::env::var_os("VICTORY_FAIL_DUMP");
@@ -676,22 +729,59 @@ fn translate(
 }
 
 fn translate_programs(container: &Container, programs: Vec<NativeProgram>, example: &dyn Fn() -> String, t: &mut Tally, checks: &mut Checks) {
+||||||| merged common ancestors
+=======
+    let failures = |t: &Tally| t.failed.values().map(|f| f.0).sum::<usize>();
+    let before = failures(t);
+>>>>>>> belobug/main
     for p in programs {
         t.programs += 1;
+<<<<<<< HEAD
         match victory_shader::spill::build(&p) {
             Ok(program) => {
                 let structured = structure::structure(&program);
+||||||| merged common ancestors
+        match ir::build(&p.patched_code(), p.wave64, p.vgprs) {
+            Ok(program) => {
+=======
+        match ir::build(&p.patched_code(), p.wave64, p.vgprs) {
+            Ok(mut program) => {
+                if std::env::var_os("VICTORY_DISASM").is_some() {
+                    for (b, block) in program.blocks.iter().enumerate() {
+                        for i in &block.insts {
+                            println!("  {:#x} b{b} {} {:?}", i.machine.offset, i.name(), i.fields);
+                        }
+                    }
+                }
+                victory_shader::unspill::unspill(&mut program, &p.layout, p.stage);
+                victory_shader::sgpr_spill::forward(&mut program);
+>>>>>>> belobug/main
                 t.translated += 1;
                 t.instructions += program.blocks.iter().map(|b| b.insts.len()).sum::<usize>();
+<<<<<<< HEAD
                 // Per-lane descriptors are traced on the per-lane form; its
                 // failure is listed after the resources' and I/O's.
                 let lanes = structured.as_ref().ok();
                 let res = match resource::track(&program, &p.layout, p.stage, lanes) {
+||||||| merged common ancestors
+                let res = match resource::track(&program, &p.layout, p.stage) {
+=======
+                // As `emit::translate_for`: by address where nothing else does.
+                let traces = resource::traces_rays(&program) && p.stage == HwStage::Cs;
+                let mut by_address = traces;
+                let mut tracked = resource::track_with(&program, &p.layout, p.stage, traces);
+                if tracked.is_err() && p.stage == HwStage::Cs {
+                    by_address = !traces;
+                    tracked = resource::track_with(&program, &p.layout, p.stage, by_address);
+                }
+                let res = match tracked {
+>>>>>>> belobug/main
                     Ok(r) => {
                         tally_resources(&p, &r, t);
                         Some(r)
                     }
                     Err(ShaderError::Unsupported { offset, what }) => {
+                        disassemble(&program, offset);
                         t.fail(format!("resources: {what}"), || {
                             format!("{} {:?} at {offset:#x}", example(), p.stage)
                         });
@@ -739,16 +829,35 @@ fn translate_programs(container: &Container, programs: Vec<NativeProgram>, examp
                 if let (Some(r), Some(i), Some(s)) = (res, raised, structured) {
                     let label = || format!("{} {:?}", example(), p.stage);
                     *counter(t, p.stage, 0) += 1;
+<<<<<<< HEAD
                     match emit::emit(container, &p, &program, &s, &i, &r) {
+||||||| merged common ancestors
+                    match emit::emit(&container, &p, &program, &s, &i, &r) {
+=======
+                    let mut made = emit::emit(&container, &p, &program, &s, &i, &r, checks.target);
+                    if matches!(made, Err(ShaderError::Unsupported { .. }))
+                        && p.stage == HwStage::Cs
+                        && let Ok(r) =
+                            resource::track_with(&program, &p.layout, p.stage, !by_address)
+                    {
+                        let other = emit::emit(&container, &p, &program, &s, &i, &r, checks.target);
+                        if other.is_ok() || !by_address {
+                            made = other;
+                        }
+                    }
+                    match made {
+>>>>>>> belobug/main
                         Ok(shader) => {
                             census_line(&label(), &p, &program, &shader);
                             *counter(t, p.stage, 1) += 1;
                             check(shader, t, checks, label);
                         }
-                        Err(ShaderError::Unsupported { offset, what }) => t
-                            .fail(format!("emit: {what}"), || {
+                        Err(ShaderError::Unsupported { offset, what }) => {
+                            disassemble(&program, offset);
+                            t.fail(format!("emit: {what}"), || {
                                 format!("{} at {offset:#x}", label())
-                            }),
+                            })
+                        }
                         Err(e) => t.fail(format!("emit: {e}"), label),
                     }
                 }
@@ -761,6 +870,18 @@ fn translate_programs(container: &Container, programs: Vec<NativeProgram>, examp
                 t.fail(reason, || format!("{} {:?}", example(), p.stage));
             }
         }
+    }
+    // `VICTORY_DUMP_REFUSED`: what fails, each in a file of that folder.
+    if failures(t) > before
+        && let Ok(dir) = std::env::var("VICTORY_DUMP_REFUSED")
+    {
+        let label = source.label();
+        let name: String = label
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        let hash = blake3::hash(&bytes).to_hex()[..16].to_owned();
+        let _ = std::fs::write(format!("{dir}/{hash}-{name}.dxbc"), &bytes);
     }
 }
 
@@ -965,16 +1086,31 @@ fn tally_resources(p: &NativeProgram, r: &resource::Resources, t: &mut Tally) {
                 t.dynamic += usize::from(address.dynamic.is_some());
                 Some(address)
             }
+            resource::Source::Address => None,
             resource::Source::Constant(_) => {
                 t.constant += 1;
                 None
             }
+<<<<<<< HEAD
             resource::Source::Phi { .. }
             | resource::Source::Select { .. }
             | resource::Source::Lanes { .. }
             | resource::Source::LanePhi { .. } => {
                 unreachable!("leaves are no phis, selects or per-lane choices")
             }
+||||||| merged common ancestors
+            resource::Source::Phi { .. } => unreachable!("leaves are no phis"),
+=======
+            // The previous loop pass's value or an unwritten register:
+            // no source of their own.
+            resource::Source::Carried { .. } | resource::Source::Unset => None,
+            resource::Source::Phi { .. }
+            | resource::Source::Select { .. }
+            | resource::Source::Lanes { .. }
+            | resource::Source::Paths { .. } => {
+                unreachable!("leaves are no phis, selects or per-lane choices")
+            }
+>>>>>>> belobug/main
         };
         // Heaps hold dynamic resources, which no used entry lists; code
         // tables are no root parameter.

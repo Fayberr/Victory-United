@@ -92,11 +92,21 @@ runs both, again where a bound on the index of a register-relative move
 (`v_movrel*`) is proven on the per-lane form, so the move names only the
 registers it can reach. `victory_shader::resource`
 traces each descriptor and scalar memory address to the root parameter it
+<<<<<<< HEAD
 comes from (table, heap, root descriptor or constant). A descriptor a
 waterfall loop reads from the first lane (`v_readfirstlane_b32`) is traced
 to the per-lane load or choice that gives each lane its own (a mask's
 `v_cndmask_b32`, or an if/else whose arms each set it: traced on the paths
 the lanes take, from structurisation), and accessed with a non-uniform heap
 index in one pass. `victory translate`
+||||||| merged common ancestors
+comes from (table, heap, root descriptor or constant). `victory translate`
+=======
+comes from (table, heap, root descriptor or constant). A descriptor a
+waterfall loop reads from the first lane (`v_readfirstlane_b32`) is traced
+to the per-lane load or choice that gives each lane its own (a
+`v_cndmask_b32`, or VGPR phis: per path into their block, a loop's back
+edge included), and accessed with a non-uniform heap index in one pass. `victory translate`
+>>>>>>> belobug/main
 runs every shader it finds (containers, SGD5 files) through these and
 lists what they cannot handle yet.

@@ -56,7 +56,7 @@ pub(crate) struct Heap {
     /// descriptor order when a draw first uses them (decision 0007, step
     /// 3); slots written before wait in `pending`.
     #[cfg(windows)]
-    host: std::sync::OnceLock<Option<host::HostHeap>>,
+    host: std::sync::OnceLock<Option<std::sync::Arc<host::HostHeap>>>,
     #[cfg(windows)]
     pending: std::sync::Mutex<Vec<u32>>,
     /// Changed pages of a placed shader-visible heap. Some titles copy
@@ -81,26 +81,49 @@ impl Heap {
     /// costs over 100 MB of commit, which its boot needs for its page pool.
     #[cfg(windows)]
     pub(crate) fn host(&self) -> Option<&host::HostHeap> {
-        if let Some(h) = self.host.get() {
-            return h.as_ref();
-        }
+        self.host_arc_ref().map(std::sync::Arc::as_ref)
+    }
+
+    /// Shared reference to the host heap for submission-time bindless sync.
+    #[cfg(windows)]
+    pub(crate) fn host_arc(&self) -> Option<std::sync::Arc<host::HostHeap>> {
+        self.host_arc_ref().cloned()
+    }
+
+    #[cfg(windows)]
+    fn host_arc_ref(&self) -> Option<&std::sync::Arc<host::HostHeap>> {
         if self.desc.flags & SHADER_VISIBLE == 0 || !matches!(self.desc.kind, VIEWS_KIND | SAMPLERS)
         {
             return None;
         }
+        // `mirror` queues only while the host heap is unset, under the lock
+        // that makes it, so nothing waits in `pending` once it is set.
+        if let Some(h) = self.host.get() {
+            return h.as_ref();
+        }
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         // A recorder can take the fast path as soon as the OnceLock is
-        // initialized. Publish only after replaying the queued writes.
-        self.host
+        // initialized: queued writes are replayed before it is published,
+        // and any queued since are replayed here.
+        let h = self
+            .host
             .get_or_init(|| {
                 let step = u64::from(increment(self.desc.kind)?);
                 let h = host::HostHeap::new(self.samplers(), self.desc.count)?;
                 for i in pending.drain(..) {
                     h.mirror(i, self.start + u64::from(i) * step, false);
                 }
-                Some(h)
+                Some(std::sync::Arc::new(h))
             })
-            .as_ref()
+            .as_ref()?;
+        if !pending.is_empty()
+            && let Some(step) = increment(self.desc.kind).map(u64::from)
+        {
+            for i in pending.drain(..) {
+                h.mirror(i, self.start + u64::from(i) * step, false);
+            }
+        }
+        Some(h)
     }
 
     /// The handle of descriptor `index` of this heap.
@@ -1134,8 +1157,16 @@ impl RtvRecord {
                 0,
             ]
         };
+<<<<<<< HEAD
         // A target or depth view: of a target, in its stand-in format.
         words[0] = crate::resource::target_format(crate::resource::pc_format(words[0]));
+||||||| merged common ancestors
+        words[0] = crate::resource::pc_format(words[0]);
+=======
+        // Render target and depth views: a packed 16-bit target may be
+        // R8G8B8A8_UNORM on this GPU (`resource::target_format`).
+        words[0] = crate::resource::target_format(words[0]);
+>>>>>>> belobug/main
         // SAFETY: both host view descriptions are 24 bytes in this layout.
         Some(unsafe { (&raw const words).cast::<T>().read_unaligned() })
     }
@@ -1253,11 +1284,20 @@ struct Views {
     shape_index: std::collections::BTreeMap<Shape, u32>,
 }
 
+<<<<<<< HEAD
 /// Read far more often than written: every slot a draw reads through a
 /// table is looked up here, on several recording threads at once in the
 /// world. Readers share it; only a view not seen before (a new table entry
 /// or shape) and a released resource take it alone.
 static VIEWS: std::sync::RwLock<Views> = std::sync::RwLock::new(Views {
+||||||| merged common ancestors
+static VIEWS: std::sync::Mutex<Views> = std::sync::Mutex::new(Views {
+=======
+// Read by every list recorder for every descriptor it binds: readers share
+// it. As a mutex it made the title's five recording threads take turns
+// (6,600 context switches a second each, PIX timing capture, 2026-11-25).
+static VIEWS: std::sync::RwLock<Views> = std::sync::RwLock::new(Views {
+>>>>>>> belobug/main
     list: Vec::new(),
     index: std::collections::BTreeMap::new(),
     by_resource: std::collections::BTreeMap::new(),
@@ -1614,7 +1654,55 @@ fn record(handle: u64, view: View) {
     if handle == 0 {
         return;
     }
+<<<<<<< HEAD
     let [i, generation] = words_for(view);
+||||||| merged common ancestors
+    let mut views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
+    let i = match views.index.get(&view) {
+        Some(&i) => i,
+        None => {
+            let i = match views.free.pop() {
+                Some(i) => {
+                    views.list[i as usize].0 = view.clone();
+                    i
+                }
+                None => {
+                    views.list.push((view.clone(), 1));
+                    views.list.len() as u32 - 1
+                }
+            };
+            for r in view.resources().into_iter().filter(|&r| r != 0) {
+                views.by_resource.entry(r).or_default().push(i);
+            }
+            views.index.insert(view, i);
+            i
+        }
+    };
+    let generation = views.list[i as usize].1;
+=======
+    let mut views = VIEWS.write().unwrap_or_else(|e| e.into_inner());
+    let i = match views.index.get(&view) {
+        Some(&i) => i,
+        None => {
+            let i = match views.free.pop() {
+                Some(i) => {
+                    views.list[i as usize].0 = view.clone();
+                    i
+                }
+                None => {
+                    views.list.push((view.clone(), 1));
+                    views.list.len() as u32 - 1
+                }
+            };
+            for r in view.resources().into_iter().filter(|&r| r != 0) {
+                views.by_resource.entry(r).or_default().push(i);
+            }
+            views.index.insert(view, i);
+            i
+        }
+    };
+    let generation = views.list[i as usize].1;
+>>>>>>> belobug/main
     // SAFETY: the handle is a descriptor slot, at least 16 bytes.
     unsafe { (handle as *mut [u32; 3]).write_unaligned([VIEW_TAG, i, generation]) };
     #[cfg(windows)]
@@ -1623,15 +1711,23 @@ fn record(handle: u64, view: View) {
 
 /// The title released `resource`: the views naming it go stale.
 pub(crate) fn forget(resource: usize) {
+<<<<<<< HEAD
     #[cfg(windows)]
     WAITING
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&resource);
     let mut views = views_write();
+||||||| merged common ancestors
+    let mut views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
+=======
+    let mut views = VIEWS.write().unwrap_or_else(|e| e.into_inner());
+>>>>>>> belobug/main
     let Some(entries) = views.by_resource.remove(&resource) else {
         return;
     };
+    #[cfg(windows)]
+    host::bindless_viewed_changed();
     for i in entries {
         let (view, generation) = views.list[i as usize].clone();
         // Entries freed through a view's other resource may hold another
@@ -1649,6 +1745,7 @@ pub(crate) fn forget(resource: usize) {
     }
 }
 
+<<<<<<< HEAD
 /// Table entries freed since the pass over the heap's buffer views last
 /// asked ([`take_forgotten`]): records that name them read nothing now,
 /// though no slot was written. Kept only once a pass has asked.
@@ -1701,7 +1798,32 @@ pub(crate) fn record_entry(record: [u32; 3]) -> Option<u32> {
 
 /// The view the record words `i` and `generation` name: the one they hold
 /// whole, or the view of entry `i` if `generation` is still its own.
+||||||| merged common ancestors
+/// The view of entry `i` if `generation` is still its own.
+#[cfg(windows)]
+=======
+/// Of `entries` (slot, (view entry, generation)), those whose view went
+/// stale: one look at the views for all.
+#[cfg(windows)]
+fn stale_views(entries: &[(u32, (u32, u32))]) -> Vec<(u32, (u32, u32))> {
+    let views = VIEWS.read().unwrap_or_else(|e| e.into_inner());
+    entries
+        .iter()
+        .filter(|(_, (i, generation))| {
+            views
+                .list
+                .get(*i as usize)
+                .is_none_or(|(_, current)| current != generation)
+        })
+        .copied()
+        .collect()
+}
+
+/// The view of entry `i` if `generation` is still its own.
+#[cfg(windows)]
+>>>>>>> belobug/main
 fn view_at(i: u32, generation: u32) -> Option<View> {
+<<<<<<< HEAD
     match generation >> KIND_SHIFT {
         0 => {
             let views = views_read();
@@ -1722,6 +1844,15 @@ pub(crate) fn record_view_at(handle: u64) -> Option<[u32; 3]> {
     // SAFETY: the handle is a descriptor slot the title passes back.
     let words = unsafe { (handle as *const [u32; 3]).read_unaligned() };
     (words[0] == VIEW_TAG).then_some(words)
+||||||| merged common ancestors
+    let views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
+    let (view, current) = views.list.get(i as usize)?;
+    (*current == generation).then(|| view.clone())
+=======
+    let views = VIEWS.read().unwrap_or_else(|e| e.into_inner());
+    let (view, current) = views.list.get(i as usize)?;
+    (*current == generation).then(|| view.clone())
+>>>>>>> belobug/main
 }
 
 /// The view recorded at `handle`, if one is (and its resource is alive).
@@ -1731,6 +1862,7 @@ pub(crate) fn view(handle: u64) -> Option<View> {
     }
     // SAFETY: the handle is a descriptor slot the title passes back.
     let [tag, i, generation] = unsafe { (handle as *const [u32; 3]).read_unaligned() };
+<<<<<<< HEAD
     if tag != VIEW_TAG {
         return None;
     }
@@ -1750,6 +1882,15 @@ pub(crate) fn view_and_key(handle: u64) -> Option<(View, u64)> {
         return None;
     }
     Some((view_at(i, generation)?, u64::from(generation) << 32 | u64::from(i)))
+||||||| merged common ancestors
+    let views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
+    let (view, current) = views.list.get(i as usize)?;
+    (tag == VIEW_TAG && *current == generation).then(|| view.clone())
+=======
+    let views = VIEWS.read().unwrap_or_else(|e| e.into_inner());
+    let (view, current) = views.list.get(i as usize)?;
+    (tag == VIEW_TAG && *current == generation).then(|| view.clone())
+>>>>>>> belobug/main
 }
 
 /// A description of `N` words, if the title passes one.
@@ -1788,6 +1929,13 @@ pub(crate) extern "system" fn create_uav(
     record(handle, view);
 }
 
+/// A resource description's padding (after the dimension and the flags):
+/// whatever was on the title's stack.
+fn clear_padding(resource: &mut [u32; 14]) {
+    resource[1] = 0;
+    resource[13] = 0;
+}
+
 /// Device methods 0x230 and 0x238: shader resource and unordered access
 /// views of memory the title placed itself, `(resource desc, view desc,
 /// handle)`.
@@ -1797,7 +1945,17 @@ pub(crate) extern "system" fn create_placed_srv(
     desc: *const [u32; 16],
     handle: u64,
 ) {
-    if let (Some(resource), Some(desc)) = (words(resource), words(desc)) {
+    if let (Some(mut resource), Some(mut desc)) = (words::<14>(resource), words::<16>(desc)) {
+        clear_padding(&mut resource);
+        // After the component mapping, and what the dimension does not use.
+        desc[3] = 0;
+        match desc[1] {
+            1 => desc[9] = 0,
+            4 => desc[8..10].fill(0),
+            8 | 9 => desc[7..10].fill(0),
+            10 => desc[9] = 0,
+            _ => {}
+        }
         record(handle, View::Placed(false, resource, desc));
     }
 }
@@ -1808,7 +1966,8 @@ pub(crate) extern "system" fn create_placed_uav(
     desc: *const [u32; 16],
     handle: u64,
 ) {
-    if let (Some(resource), Some(desc)) = (words(resource), words(desc)) {
+    if let (Some(mut resource), Some(desc)) = (words::<14>(resource), words::<16>(desc)) {
+        clear_padding(&mut resource);
         record(handle, View::Placed(true, resource, desc));
     }
 }

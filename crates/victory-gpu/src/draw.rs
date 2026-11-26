@@ -5,8 +5,8 @@
 //! user data the translated shaders read, the host copies of the buffers
 //! and descriptors they read, and the states of the textures involved.
 //! State the host keeps across draws (viewports, scissors, blend factor,
-//! stencil reference, topology, targets) is set on the host list as the
-//! title sets it.
+//! stencil reference, depth bounds, topology, targets) is set on the host
+//! list as the title sets it.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -51,6 +51,7 @@ pub(crate) struct IndexView {
     format: u32,
 }
 
+<<<<<<< HEAD
 /// Host states of a depth target, and of a texture shaders read.
 const DEPTH_WRITE: u32 = 0x10;
 const DEPTH_READ: u32 = 0x20;
@@ -637,9 +638,37 @@ fn argument_copies(first: &std::sync::Arc<crate::shadow::Shadow>) -> Vec<(u64, I
     live.iter().map(|s| (s.id(), s.buffer.clone())).collect()
 }
 
+||||||| merged common ancestors
+=======
+/// Fixed-function state and the views bound for output.
+#[derive(Default)]
+struct Fixed {
+    viewports: Vec<D3D12_VIEWPORT>,
+    scissors: Vec<RECT>,
+    blend: Option<Option<[f32; 4]>>,
+    stencil: Option<u32>,
+    views: Option<(Vec<crate::descriptor::RtvRecord>, Option<crate::descriptor::RtvRecord>)>,
+}
+
+// SAFETY: the views only name title resources.
+unsafe impl Send for Fixed {}
+
+/// Where the clamps of a run of indirect draws go: the list `clamps`, open,
+/// that runs before the host list at `into`, as long as that one has
+/// `writes` dispatches and copies (a later one may write the arguments).
+pub(crate) struct Hoist {
+    pub(crate) clamps: std::sync::Arc<HostList>,
+    pub(crate) into: usize,
+    pub(crate) writes: u64,
+}
+
+>>>>>>> belobug/main
 /// What one title list has set, and what its host list was last given.
 #[derive(Default)]
 pub(crate) struct State {
+    /// The list before the host list recorded into that holds the clamps of
+    /// its indirect draws (`crate::indirect::hoisting`), still open.
+    hoist: Option<Hoist>,
     pipeline: usize,
     /// View heap, sampler heap.
     heaps: [usize; 2],
@@ -650,10 +679,17 @@ pub(crate) struct State {
     /// Bound render target and depth resources, for their host states.
     targets: Vec<usize>,
     depth: usize,
+<<<<<<< HEAD
     /// The host state the bound depth view needs ([`depth_state`]).
     depth_state: u32,
+||||||| merged common ancestors
+=======
+    /// None leaves the host list's default bounds (0..1) in place.
+    depth_bounds: Option<(f32, f32)>,
+>>>>>>> belobug/main
     /// The title's primitive topology (the host's may differ).
     topology: u32,
+<<<<<<< HEAD
     /// What the title set that goes straight onto the host list, kept for
     /// the host list that continues this one after a cut ([`State::replay`]):
     /// whether a topology was set, the render target and depth handles, the
@@ -705,17 +741,42 @@ pub(crate) struct State {
     /// the indirect light follows (`crate::ambient`): root parameter, bytes
     /// into the view heap.
     ambient_tables: Vec<(u8, u32)>,
+||||||| merged common ancestors
+=======
+    /// What was set on the host list at once, for the one a cut list goes on
+    /// in.
+    fixed: Fixed,
+>>>>>>> belobug/main
     /// What the host list has: pipeline, root signature, heaps.
     host_pipeline: usize,
     /// Graphics, compute.
     host_roots: [usize; 2],
     host_heaps: [usize; 2],
+<<<<<<< HEAD
     /// Tables made afresh in this list, keyed by their address, entry count
     /// and record hash.
     fresh_tables: std::collections::HashMap<(u64, u32, u64), FreshTable, std::hash::BuildHasherDefault<crate::host::AddressHash>>,
+||||||| merged common ancestors
+    /// Tables made afresh in this list: (table, what it holds) → first
+    /// dynamic slot.
+    fresh_tables: std::collections::HashMap<(u64, u64), u32>,
+=======
+    /// Tables made afresh in this list, by a hash of the table and what it
+    /// holds ([`table_hash`]).
+    fresh_tables: std::collections::HashMap<u64, Fresh, std::hash::BuildHasherDefault<Plain>>,
+    /// The record words of [`Fresh`] tables, one after the other.
+    fresh_records: Vec<[u32; 3]>,
+    /// Of them, large ones by table: the records it was made from and the
+    /// first dynamic slot. A shader that reads less of one takes the same.
+    large_tables: std::collections::HashMap<u64, Vec<(Vec<[u32; 3]>, u32)>>,
+    /// What [`State::tables`] made for the stage being bound: root slot, byte
+    /// offset of its fresh table. Kept to reuse its storage across draws.
+    made: Vec<(u8, u32)>,
+>>>>>>> belobug/main
     /// The dynamic slots the list holds: title heap, first, count; given
     /// back when the list has run, is reset or released.
     dynamic: Vec<(usize, u32, u32)>,
+<<<<<<< HEAD
     /// Root SRVs bound as one-view tables in this list: (title heap, title
     /// address; 0 for none) → dynamic slot, and the host copy the slot
     /// shows: later draws of the list bring that one up to date, whatever
@@ -732,6 +793,14 @@ pub(crate) struct State {
     /// Raw thread counts `[x, y, z]` for a partial `DispatchX` call with
     /// `USE_THREAD_DIMENSIONS` (`0` along an axis means full groups / no cap).
     dispatch_threads: [u32; 3],
+||||||| merged common ancestors
+    /// A fresh table of the stage being bound could not be made.
+    table_failed: bool,
+=======
+    /// Whether the last [`State::bind`] left a used unordered access view
+    /// with nothing behind it (a null view).
+    null_uav: bool,
+>>>>>>> belobug/main
 }
 
 impl Drop for State {
@@ -1487,8 +1556,51 @@ pub(crate) static HEAP_TEXTURES_QUEUE: [AtomicU64; 5] = [const { AtomicU64::new(
 pub(crate) static HEAP_TEXTURES_PARTLY: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 static DROPPED: AtomicU64 = AtomicU64::new(0);
 
+<<<<<<< HEAD
 /// Counts a draw not run on the host by its reason, and marks the last
 /// traced draw (diagnostics).
+||||||| merged common ancestors
+/// Marks the last traced draw as not run on the host.
+#[cfg(feature = "diagnostics")]
+=======
+/// Groups the host runs per dimension of a dispatch (and of a mesh
+/// dispatch). A count past it is undefined behaviour on the host; drivers
+/// may run it for seconds and reset the display driver.
+const MAX_GROUPS: u32 = 65_535;
+
+/// Whether dispatches that write through a null unordered access view are
+/// dropped (the default; `VICTORY_NULL_UAV_DISPATCH=1` runs them). Reads of
+/// a null view give zeros and its atomics return zero, so a compute pass
+/// that loops on a counter or flag kept there (work queues, spin waits)
+/// never sees it move and runs to the translator's loop limit in every
+/// lane: seconds of GPU time, and the host resets the display driver
+/// (DXGI_ERROR_DEVICE_HUNG, 2026-11-24, in the world on an RX 7600; the
+/// device-removed data named a dispatch with two null views in its table).
+/// shortcut: what such a pass writes to its other views is lost too.
+fn skip_null_uav_dispatches() -> bool {
+    static SKIP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SKIP.get_or_init(|| std::env::var_os("VICTORY_NULL_UAV_DISPATCH").is_none_or(|v| v != "1"))
+}
+
+/// Logs, once per pipeline, a dispatch dropped for a null unordered access
+/// view.
+fn null_uav_dropped(pipeline: &str) {
+    static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    if seen.len() < 256 && !seen.iter().any(|s| s == pipeline) {
+        seen.push(pipeline.to_owned());
+        tracing::warn!(pipeline, "a dispatch writing through a null unordered access view dropped");
+    }
+}
+
+/// Whether the host can run a dispatch of `x * y * z` groups.
+fn dispatch_fits(x: u32, y: u32, z: u32) -> bool {
+    x <= MAX_GROUPS && y <= MAX_GROUPS && z <= MAX_GROUPS
+}
+
+/// Marks the last traced draw as not run on the host.
+#[cfg(feature = "diagnostics")]
+>>>>>>> belobug/main
 fn dropped(pipeline: usize) {
     crate::pipeline::note_drop(pipeline as This);
     #[cfg(feature = "diagnostics")]
@@ -1529,6 +1641,7 @@ type TargetKey = (usize, (usize, [u32; 7]));
 /// The host address of a root view: its buffer's host copy, or for a
 /// constant buffer not 256-byte aligned there (the console needs 16) a
 /// copy in upload memory.
+<<<<<<< HEAD
 /// shortcut: a root view has no size; constant buffers are taken as 64 KiB
 /// (cut at their buffer's end), other views as all that is left of their
 /// buffer. (They were taken as 1 MiB: 1,452 of the 2,021 mesh vertex
@@ -1547,14 +1660,174 @@ fn root_view(list: &HostList, address: u64, srv: bool) -> Option<u64> {
     let len = shadow
         .left(address)
         .min(if srv { limit } else { 1 << 16 });
+||||||| merged common ancestors
+/// shortcut: a root view has no size; constant buffers are taken as 64 KiB,
+/// other views as 1 MiB (both cut at their buffer's end).
+fn root_view(list: &HostList, address: u64, srv: bool) -> Option<u64> {
+    let shadow = crate::shadow::find(address, 1)?;
+    let len = shadow
+        .left(address)
+        .min(if srv { 1 << 20 } else { 1 << 16 });
+=======
+/// shortcut: a root view has no size; constant buffers are taken as 64 KiB,
+/// other views as 1 MiB (both cut at their buffer's end).
+fn root_view(list: &HostList, address: u64, kind: u8) -> Option<u64> {
+    let reach = if kind == 0 { 1 << 16 } else { 1 << 20 };
+    let shadow = crate::shadow::find_reaching(address, reach)?;
+    let mut len = shadow.left(address).min(reach);
+    // In a sparse copy only the tiles asked for are there, and a shader that
+    // reads a root view past them faults (the structure builders' views have
+    // no length: Radeon GPU Detective, run rt10, a read at an address of no
+    // resource). To the end of the title's buffer then, within reason.
+    // shortcut: 64 MiB at most; a longer buffer is cut there.
+    if kind != 0
+        && shadow.is_sparse()
+        && let Some(end) = crate::shadow::buffer_end(address)
+    {
+        len = len.max((end - address).min(64 << 20)).min(shadow.left(address));
+    }
+>>>>>>> belobug/main
     let gpu = shadow.gpu(address);
-    if srv || gpu % 256 == 0 {
+    if kind != 0 || gpu % 256 == 0 {
+        // The list holds the copy it gives the address of: the title may
+        // release the buffer before it submits the list, and a retired copy
+        // only outlives the submissions started by then and a few frames
+        // (menus present a hundred a second). The structure builders' lists
+        // read and wrote freed copies (page fault in a copy loop of root
+        // views, Radeon GPU Detective, run rt2, 2026-11-25).
+        if kind != 0 && list.first_use(shadow.buffer.as_raw() as usize) {
+            list.keep(&shadow.buffer);
+        }
         shadow.refresh(list, address, len);
+<<<<<<< HEAD
         #[cfg(feature = "diagnostics")]
         crate::book::root(gpu, len);
+||||||| merged common ancestors
+=======
+        if kind == 2 {
+            shadow.gpu_writes(list, address, len);
+        }
+>>>>>>> belobug/main
         return Some(gpu);
     }
+<<<<<<< HEAD
     list.fill_scratch(address as *const u8, len)
+||||||| merged common ancestors
+    let (gpu, to) = list.scratch(len)?;
+    list.defer_fill(to, address as *const u8, len as usize);
+    Some(gpu)
+=======
+    list.fill_scratch(address as *const u8, len)
+}
+
+/// Tables from this many entries on are made once for every length shaders
+/// read them to.
+const LARGE: u32 = 64;
+
+/// Root slots (bytes) as a set that lives on the stack: a draw collects them
+/// without the heap, and they come out in order.
+#[derive(Default)]
+struct Slots([u64; 4]);
+
+impl Slots {
+    fn insert(&mut self, slot: u8) {
+        self.0[usize::from(slot / 64)] |= 1 << (slot % 64);
+    }
+
+    fn contains(&self, slot: u8) -> bool {
+        (self.0[usize::from(slot / 64)] >> (slot % 64)) & 1 != 0
+    }
+
+    fn iter(&self) -> impl Iterator<Item = u8> {
+        let words = self.0;
+        (0..4u8).flat_map(move |w| {
+            let mut bits = words[usize::from(w)];
+            std::iter::from_fn(move || {
+                (bits != 0).then(|| {
+                    let bit = bits.trailing_zeros() as u8;
+                    bits &= bits - 1;
+                    w * 64 + bit
+                })
+            })
+        })
+    }
+}
+
+/// A table made afresh: what it was made from (the `n` records at `at` in
+/// [`State::fresh_records`]) and its first dynamic slot.
+struct Fresh {
+    table: u64,
+    n: u32,
+    at: usize,
+    first: u32,
+}
+
+/// A hash that is mixed already, used as it is.
+#[derive(Default)]
+struct Plain(u64);
+
+impl std::hash::Hasher for Plain {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = self.0 << 8 | u64::from(b);
+        }
+    }
+    fn write_u64(&mut self, x: u64) {
+        self.0 = x;
+    }
+}
+
+/// A quick hash of `table` and its `n` records. It only finds the table
+/// made before: the records are compared too, so a collision costs a copy,
+/// not wrong descriptors.
+fn table_hash(table: u64, n: u32) -> u64 {
+    let mix = |h: u64, x: u64| (h.rotate_left(5) ^ x).wrapping_mul(0x517c_c1b7_2722_0a95);
+    let h = (0..n).fold(table, |h, k| {
+        let [a, b, c] = record(table, k);
+        mix(mix(h, u64::from(a) | u64::from(b) << 32), u64::from(c))
+    });
+    h ^ h >> 32
+}
+
+/// The words of entry `k` of `table`.
+fn record(table: u64, k: u32) -> [u32; 3] {
+    // SAFETY: a descriptor slot in title memory.
+    unsafe { ((table + u64::from(k) * 32) as *const [u32; 3]).read_unaligned() }
+}
+
+/// The longest `table` of `heap` was asked for, now for `n` entries.
+fn longest(heap: &crate::descriptor::Heap, table: u64, n: u32) -> u32 {
+    static LONGEST: std::sync::Mutex<Option<std::collections::HashMap<u64, u32>>> =
+        std::sync::Mutex::new(None);
+    let mut all = LONGEST.lock().unwrap_or_else(|e| e.into_inner());
+    let most = all.get_or_insert_default().entry(table).or_insert(n);
+    *most = (*most).max(n);
+    if heap.index(table + u64::from(*most - 1) * 32).is_some() { *most } else { n }
+}
+
+/// The last byte of the root view at `address` four dwords can be read from:
+/// to the end of its host copy ([`root_view`]).
+fn root_limit(address: u64) -> u32 {
+    const REACH: u64 = 1 << 20;
+    crate::shadow::find_reaching(address, REACH).map_or(0, |s| {
+        s.left(address)
+            .saturating_sub(16)
+            .min(u64::from(u32::MAX) - 16) as u32
+            & !3
+    })
+}
+
+/// Why the last draw was not prepared.
+static WHY_NOT: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
+
+/// `false`, for `reason`.
+fn no(reason: &'static str) -> bool {
+    *WHY_NOT.lock().unwrap_or_else(|e| e.into_inner()) = reason;
+    false
+>>>>>>> belobug/main
 }
 
 macro_rules! once {
@@ -1834,12 +2107,114 @@ impl State {
         self.index = view.copied().unwrap_or_default();
     }
 
+<<<<<<< HEAD
     /// Render targets and depth, set on the host list at once, unless it has
     /// the same ones already: the title sets the same targets again and
     /// again, each time a host view per target and a call of the driver
     /// (25,662 times in a frame of another fork). `VICTORY_BIND_CACHE=0`
     /// sets them every time.
+||||||| merged common ancestors
+    /// Render targets and depth, set on the host list at once.
+=======
+    /// Whether the clamps of indirect draws recorded in `list` now go to
+    /// the list before it.
+    pub(crate) fn hoists_into(&self, list: &HostList) -> bool {
+        self.hoist
+            .as_ref()
+            .is_some_and(|h| h.into == std::ptr::from_ref(list) as usize && h.writes == list.writes())
+    }
+
+    /// From here on the clamps of `into`'s indirect draws go to `clamps`.
+    pub(crate) fn hoist(&mut self, clamps: std::sync::Arc<HostList>, into: &HostList) {
+        self.end_hoist();
+        // The clamped arguments live as long as the list that reads them.
+        into.keep_until_run(Box::new(clamps.clone()));
+        self.hoist = Some(Hoist {
+            clamps,
+            into: std::ptr::from_ref(into) as usize,
+            writes: into.writes(),
+        });
+    }
+
+    /// Ends and closes the list of hoisted clamps, if any.
+    pub(crate) fn end_hoist(&mut self) {
+        if let Some(h) = self.hoist.take() {
+            h.clamps.clamp_end();
+            h.clamps.close();
+        }
+    }
+
+    /// Goes on in another host list, open: gives it the state set so far.
+    pub(crate) fn continue_in(&mut self, list: &HostList) {
+        self.host_pipeline = 0;
+        self.host_roots = [0; 2];
+        self.host_heaps = [0; 2];
+        // Making one refreshes what it names, which is each list's own work.
+        self.fresh_tables.clear();
+        self.fresh_records.clear();
+        self.large_tables.clear();
+        if self.topology != 0 {
+            self.set_topology(list, self.topology);
+        }
+        if !self.fixed.viewports.is_empty() {
+            viewports(list, &self.fixed.viewports);
+        }
+        if !self.fixed.scissors.is_empty() {
+            scissors(list, &self.fixed.scissors);
+        }
+        if let Some(factor) = &self.fixed.blend {
+            blend_factor(list, factor.as_ref());
+        }
+        if let Some(reference) = self.fixed.stencil {
+            stencil_ref(list, reference);
+        }
+        if let Some((targets, depth)) = self.fixed.views.take() {
+            self.bind_targets(list, targets, depth);
+        }
+    }
+
+    pub(crate) fn set_viewports(&mut self, list: &HostList, items: &[D3D12_VIEWPORT]) {
+        self.fixed.viewports = items.to_vec();
+        viewports(list, items);
+    }
+
+    pub(crate) fn set_scissors(&mut self, list: &HostList, rects: &[RECT]) {
+        self.fixed.scissors = rects.to_vec();
+        scissors(list, rects);
+    }
+
+    pub(crate) fn set_blend_factor(&mut self, list: &HostList, factor: Option<&[f32; 4]>) {
+        self.fixed.blend = Some(factor.copied());
+        blend_factor(list, factor);
+    }
+
+    pub(crate) fn set_stencil_ref(&mut self, list: &HostList, reference: u32) {
+        self.fixed.stencil = Some(reference);
+        stencil_ref(list, reference);
+    }
+
+    /// Render targets and depth, set on the host list at once.
+>>>>>>> belobug/main
     pub(crate) fn set_targets(&mut self, list: &HostList, handles: &[u64], depth: u64) {
+        let mut targets = Vec::new();
+        for &h in handles {
+            match crate::descriptor::rtv_record(h) {
+                Some(record) => targets.push(record),
+                None => once!(
+                    handle = format_args!("{h:#x}"),
+                    "render target without a recorded view"
+                ),
+            }
+        }
+        self.bind_targets(list, targets, crate::descriptor::dsv_record(depth));
+    }
+
+    fn bind_targets(
+        &mut self,
+        list: &HostList,
+        targets: Vec<crate::descriptor::RtvRecord>,
+        depth: Option<crate::descriptor::RtvRecord>,
+    ) {
         let Some(host) = crate::host::host() else {
             return;
         };
@@ -1848,6 +2223,7 @@ impl State {
         self.depth_handle = depth;
         self.targets_set = true;
         self.targets.clear();
+<<<<<<< HEAD
         let mut views = Vec::with_capacity(handles.len());
         let mut keys = Vec::with_capacity(handles.len());
         // The formats of the host views, for the draws' pipelines.
@@ -1860,6 +2236,20 @@ impl State {
                 );
                 continue;
             };
+||||||| merged common ancestors
+        let mut rtvs = Vec::new();
+        for &h in handles {
+            let Some(record) = crate::descriptor::rtv_record(h) else {
+                once!(
+                    handle = format_args!("{h:#x}"),
+                    "render target without a recorded view"
+                );
+                continue;
+            };
+=======
+        let mut rtvs = Vec::new();
+        for record in &targets {
+>>>>>>> belobug/main
             let Some(texture) = crate::resource::host_resource(record.resource) else {
                 // A typed null view (or a target without a host copy) still
                 // takes its slot: left out, the next live target would move
@@ -1890,8 +2280,14 @@ impl State {
             keys.push((texture.as_raw() as usize, record.key()));
         }
         self.depth = 0;
+<<<<<<< HEAD
         self.depth_state = DEPTH_WRITE;
         let dsv = crate::descriptor::dsv_record(depth).and_then(|record| {
+||||||| merged common ancestors
+        let dsv = crate::descriptor::dsv_record(depth).and_then(|record| {
+=======
+        let dsv = depth.and_then(|record| {
+>>>>>>> belobug/main
             let texture = crate::resource::host_resource(record.resource)?;
             self.depth = record.resource as usize;
             let desc = record.depth_desc();
@@ -1924,6 +2320,7 @@ impl State {
                 dsv.as_ref().map(std::ptr::from_ref),
             )
         };
+        self.fixed.views = Some((targets, depth));
     }
 
     /// Viewports, scissors, the blend factor and the stencil reference: set
@@ -2028,6 +2425,7 @@ impl State {
                     0
                 }
             },
+            (Some(Root::View(address)), RootType::Descriptor) => (address >> (32 * dword.min(1))) as u32,
             (Some(Root::Constants(c)), RootType::Constants) => {
                 c.get(dword as usize).copied().unwrap_or(0)
             }
@@ -2044,6 +2442,7 @@ impl State {
         }
     }
 
+<<<<<<< HEAD
     /// A user-data dword the host computes for a translated shader
     /// (`victory_shader::emit::USER_MEMORY_BASE`, `USER_VIEW_ADDRESS`).
     fn host_word(
@@ -2178,6 +2577,117 @@ impl State {
         crate::memory::ready(list, heap, &addresses, written, &constants, use_, t.threads)
     }
 
+||||||| merged common ancestors
+=======
+    /// For shaders that reach memory by its address: the memory the roots
+    /// lead to made reachable, and the bound heap's first slot of it (a
+    /// heap of ours bound if the title bound none).
+    fn memory(&mut self, list: &HostList, compute: bool) -> Option<u32> {
+        // How much a root view or a pointer leads to is not known.
+        const REACH: u64 = 1 << 20;
+        for root in self.roots_ref(compute) {
+            match root {
+                Root::View(address) => crate::shadow::declare(list, *address, REACH),
+                Root::Constants(words) => {
+                    for w in words.windows(2) {
+                        let address = u64::from(w[0]) | u64::from(w[1]) << 32;
+                        if (1..=0xff).contains(&w[1]) && w[0] != u32::MAX && address % 4 == 0 {
+                            crate::shadow::declare(list, address, REACH);
+                        }
+                    }
+                    // Pointers over 256, as the acceleration structures'.
+                    for &w in words {
+                        if (0x50_0000..0xff_0000).contains(&(w >> 4)) {
+                            crate::shadow::declare(list, u64::from(w) << 8, REACH);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if self.heaps[0] != 0 {
+            return Some(crate::descriptor::heap(self.heaps[0] as This).host()?.memory());
+        }
+        static OURS: std::sync::OnceLock<Option<crate::descriptor::host::HostHeap>> =
+            std::sync::OnceLock::new();
+        let heap = OURS
+            .get_or_init(|| crate::descriptor::host::HostHeap::new(false, 16))
+            .as_ref()?;
+        const OURS_BOUND: [usize; 2] = [usize::MAX, 0];
+        if self.host_heaps != OURS_BOUND {
+            // SAFETY: an open list and a shader-visible heap.
+            unsafe { list.list.SetDescriptorHeaps(&[Some(heap.heap.clone())]) };
+            self.host_heaps = OURS_BOUND;
+            self.host_roots = [0; 2];
+        }
+        Some(heap.memory())
+    }
+
+    /// After a dispatch of `p`: the least indirect light, if it is the
+    /// program that resolves that.
+    fn ambient(&self, list: &HostList, p: &crate::pipeline::host::HostPipeline) -> bool {
+        let Some(stage) = p
+            .stages
+            .first()
+            .filter(|s| s.shader.resolves_light || s.shader.ends_reflections)
+        else {
+            return false;
+        };
+        let view = |kind: ResourceType, (slot, offset): (u8, u32)| {
+            let u = stage.translated().used.iter().find(|u| {
+                u.kind == kind
+                    && u.root == RootType::Table
+                    && (u.slot, u.table_offset_dwords) == (slot, offset)
+            })?;
+            let Some(Root::Table(table)) = self.roots_ref(true).get(usize::from(u.slot)) else {
+                return None;
+            };
+            crate::descriptor::view(table + u64::from(u.table_offset_dwords) * 4)
+        };
+        #[cfg(feature = "diagnostics")]
+        {
+            static LISTED: std::sync::Once = std::sync::Once::new();
+            LISTED.call_once(|| {
+                for u in stage.translated().used.iter().filter(|u| u.root == RootType::Table) {
+                    let r = match view(u.kind, (u.slot, u.table_offset_dwords)) {
+                        Some(View::Shader(r, _)) | Some(View::Unordered(r, ..)) => r,
+                        _ => continue,
+                    };
+                    let Some(t) = crate::resource::host_resource(r as This) else { continue };
+                    // SAFETY: a live resource.
+                    let d = unsafe { t.GetDesc() };
+                    tracing::info!(
+                        kind = ?u.kind, slot = u.slot, offset = u.table_offset_dwords,
+                        format = d.Format.0, width = d.Width, height = d.Height,
+                        depth = d.DepthOrArraySize, flags = d.Flags.0,
+                        "the light resolve reads"
+                    );
+                }
+            });
+        }
+        if !stage.shader.resolves_light {
+            // The reflections, held to the light around.
+            return match view(ResourceType::Uav, crate::ambient::REFLECTIONS) {
+                Some(View::Unordered(r, ..)) if r != 0 => crate::ambient::hold(list, r as This),
+                _ => false,
+            };
+        }
+        let light = match view(ResourceType::Uav, crate::ambient::LIGHT) {
+            Some(View::Unordered(r, ..)) => r,
+            _ => 0,
+        };
+        if light == 0 {
+            once!("no ambient light: other tables");
+            return false;
+        }
+        let depth = match view(ResourceType::Srv, crate::ambient::DEPTH) {
+            Some(View::Shader(r, _)) => Some(r as This),
+            _ => None,
+        };
+        crate::ambient::raise(list, light as This, depth)
+    }
+
+>>>>>>> belobug/main
     /// The bound heap holding `handle`.
     fn heap_of(&self, handle: u64) -> Option<&'static crate::descriptor::Heap> {
         self.heaps
@@ -2185,6 +2695,21 @@ impl State {
             .filter(|&&h| h != 0)
             .map(|&h| crate::descriptor::heap(h as This))
             .find(|h| h.index(handle).is_some())
+    }
+
+    pub(crate) fn set_depth_bounds(&mut self, list: &HostList, min: f32, max: f32) {
+        self.depth_bounds = Some((min, max));
+        if list.depth_bounds.is_none() {
+            crate::host::warn_depth_bounds();
+        }
+        self.apply_depth_bounds(list);
+    }
+
+    fn apply_depth_bounds(&self, list: &HostList) {
+        if let (Some(list), Some((min, max))) = (&list.depth_bounds, self.depth_bounds) {
+            // SAFETY: the host supports depth bounds and the list is open.
+            unsafe { list.OMSetDepthBounds(min, max) };
+        }
     }
 
     /// Brings the host list up to date for a draw; false if the draw cannot
@@ -2197,14 +2722,25 @@ impl State {
     fn prepare_for(&mut self, list: &HostList, indexed: bool, mesh: bool) -> bool {
         #[cfg(feature = "diagnostics")]
         if crate::pipeline::is_skipped(self.pipeline as This) {
-            return false;
+            return no("skipped by name");
         }
+<<<<<<< HEAD
         let Some(p) = crate::pipeline::host_pipeline_for(self.pipeline as This, &self.target_formats) else {
             return false;
+||||||| merged common ancestors
+        let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) else {
+            return false;
+=======
+        let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) else {
+            return no("no host pipeline");
+>>>>>>> belobug/main
         };
         if p.compute || p.mesh != mesh {
-            once!(mesh, "a draw or mesh dispatch with another kind of pipeline");
-            return false;
+            once!(
+                mesh,
+                "a draw or mesh dispatch with another kind of pipeline"
+            );
+            return no("another kind of pipeline");
         }
         if p.rects && self.topology != RECTANGLES {
             // Its geometry stage would turn each triangle into a rectangle.
@@ -2212,6 +2748,11 @@ impl State {
         }
         if !self.bind(list, p, false) {
             return false;
+        }
+        if p.stages.iter().any(|s| s.shader.draws_sky)
+            && let Some(&sky) = self.targets.first()
+        {
+            crate::ambient::sky_drawn(sky);
         }
         let l = &list.list;
         // Vertex buffers the input layout reads.
@@ -2243,8 +2784,16 @@ impl State {
         }
         if indexed {
             let v = self.index;
+<<<<<<< HEAD
             let Some(shadow) = crate::shadow::find_any(v.address, u64::from(v.size)) else {
                 return false;
+||||||| merged common ancestors
+            let Some(shadow) = crate::shadow::find(v.address, u64::from(v.size)) else {
+                return false;
+=======
+            let Some(shadow) = crate::shadow::find(v.address, u64::from(v.size)) else {
+                return no("no index buffer");
+>>>>>>> belobug/main
             };
             shadow.refresh(list, v.address, u64::from(v.size));
             let view = D3D12_INDEX_BUFFER_VIEW {
@@ -2287,10 +2836,20 @@ impl State {
     /// What draws and dispatches share: heaps, our root signature, the
     /// pipeline, and per stage the user data, root views and the
     /// descriptors its tables hold.
+<<<<<<< HEAD
     /// False if the draw or dispatch must not run: a root SRV it reads
     /// could not be given a view.
     pub(crate) fn bind(&mut self, list: &HostList, p: &HostPipeline, compute: bool) -> bool {
+||||||| merged common ancestors
+    /// False if the draw or dispatch must not run: a table it reads could
+    /// not be made.
+    fn bind(&mut self, list: &HostList, p: &HostPipeline, compute: bool) -> bool {
+=======
+    fn bind(&mut self, list: &HostList, p: &HostPipeline, compute: bool) -> bool {
+        self.null_uav = false;
+>>>>>>> belobug/main
         let l = &list.list;
+<<<<<<< HEAD
         // Textures picked by index, before anything asks for them.
         self.early_textures(list, p, compute);
         if crate::host::walls_trace() {
@@ -2305,9 +2864,23 @@ impl State {
             once!("a dispatch without a view heap that needs one gets the title's");
             self.heaps[0] = heap;
         }
+||||||| merged common ancestors
+=======
+        let by_address = p.stages.iter().any(|s| {
+            s.translated()
+                .host
+                .user_data
+                .iter()
+                .any(|u| u.root == RootType::MEMORY)
+        });
+>>>>>>> belobug/main
         // Heaps first: a root signature with directly indexed heaps must be
         // set after them.
-        if self.host_heaps != self.heaps {
+        let memory = by_address.then(|| self.memory(list, compute)).flatten();
+        if by_address && memory.is_none() {
+            return no("no view of memory");
+        }
+        if self.host_heaps != self.heaps && !(by_address && self.heaps[0] == 0) {
             let heaps: Vec<Option<ID3D12DescriptorHeap>> = self
                 .heaps
                 .iter()
@@ -2346,12 +2919,32 @@ impl State {
         if self.host_pipeline != p.pso.as_raw() as usize {
             // SAFETY: an open list and a live pipeline.
             unsafe { l.SetPipelineState(&p.pso) };
+            // Also reached after the indirect clamp invalidates the pipeline.
+            if !compute {
+                self.apply_depth_bounds(list);
+            }
             self.host_pipeline = p.pso.as_raw() as usize;
             // The title may release the pipeline before it submits the list.
+<<<<<<< HEAD
             list.bind_pipeline(&p.name, &p.pso, &p.root);
+||||||| merged common ancestors
+            list.keep(&p.pso);
+            list.keep(&p.root);
+=======
+            list.bind_pipeline(p);
+        }
+        if p.stages.iter().any(|s| s.translated().resource_heap)
+            && self.heaps[0] != 0
+            && let Some(host_heap) = crate::descriptor::heap(self.heaps[0] as This).host_arc()
+        {
+            host_heap.prepare_bindless_record(list);
+            let writes = p.stages.iter().any(|s| s.translated().writes_memory);
+            list.defer_bindless(&host_heap, writes);
+>>>>>>> belobug/main
         }
         for stage in &p.stages {
             let t = stage.translated();
+<<<<<<< HEAD
             STORES.set(t.stores);
             if t.stores && crate::picked::on() && crate::picked::picks(&stage.shader, &t.picks) {
                 crate::picked::runs_in(list);
@@ -2371,6 +2964,23 @@ impl State {
             if made.iter().any(|m| m.1 == u32::MAX) {
                 once!("a draw whose descriptor table found no free slots is dropped");
                 return false;
+||||||| merged common ancestors
+            self.table_failed = false;
+            let made = self.tables(list, &t.used, compute);
+            if self.table_failed {
+                static DROPPED_TABLES: AtomicU64 = AtomicU64::new(0);
+                let n = DROPPED_TABLES.fetch_add(1, Ordering::Relaxed) + 1;
+                if n.is_power_of_two() {
+                    tracing::warn!(
+                        dropped = n,
+                        "a draw or dispatch dropped: no dynamic slots for its tables"
+                    );
+                }
+                return false;
+=======
+            if !self.tables(list, &t.used, compute) {
+                return no("a table not made");
+>>>>>>> belobug/main
             }
             if stage.shader.ambient.is_some() {
                 self.ambient_tables.clear();
@@ -2413,6 +3023,7 @@ impl State {
                 None
             };
             if let Some((param, dwords)) = stage.user_data {
+<<<<<<< HEAD
                 // (A root signature holds 64 dwords.)
                 let mut room = [0u32; 64];
                 let mut more = Vec::new();
@@ -2423,15 +3034,48 @@ impl State {
                         &mut more
                     }
                 };
+||||||| merged common ancestors
+                let mut values = vec![0u32; dwords as usize];
+=======
+                // A root signature holds at most 64 dwords, constants included.
+                let mut stack = [0u32; 64];
+                let values = &mut stack[..dwords as usize];
+>>>>>>> belobug/main
                 for u in &t.host.user_data {
+<<<<<<< HEAD
                     if let RootType::Other(kind) = u.root {
                         values[u.index as usize] =
                             self.host_word(compute, kind, u.slot, u.dword, memory.as_ref());
                         continue;
                     }
                     let fresh = made
+||||||| merged common ancestors
+                    let fresh = made
+=======
+                    let fresh = self
+                        .made
+>>>>>>> belobug/main
                         .iter()
                         .find(|m| m.0 == u.slot && u.root == RootType::Table);
+                    if u.root == RootType::MEMORY {
+                        values[u.index as usize] = memory.unwrap_or(0);
+                        continue;
+                    }
+                    if u.root == RootType::THREADS {
+                        values[u.index as usize] = u32::MAX;
+                        continue;
+                    }
+                    if u.root == RootType::GROUPS {
+                        continue;
+                    }
+                    if u.root == RootType::LIMIT {
+                        values[u.index as usize] =
+                            match self.roots_ref(compute).get(u.dword as usize) {
+                                Some(Root::View(address)) => root_limit(*address),
+                                _ => 0,
+                            };
+                        continue;
+                    }
                     values[u.index as usize] = match fresh {
                         Some(&(_, offset)) => offset,
                         None => self.user_value(compute, u.slot, u.root, u.dword),
@@ -2451,7 +3095,11 @@ impl State {
                     }
                 }
             }
-            for (views, srv) in [(&stage.root_cbvs, false), (&stage.root_srvs, true)] {
+            for (views, kind) in [
+                (&stage.root_cbvs, 0u8),
+                (&stage.root_srvs, 1u8),
+                (&stage.root_uavs, 2u8),
+            ] {
                 for &(slot, param) in views {
                     if srv && slot == victory_shader::emit::SLOT_MEMORY {
                         // Ours: the directory of title memory by address.
@@ -2505,13 +3153,22 @@ impl State {
                     let tabled = srv && crate::pipeline::host::bounded_root_srvs();
                     let Some(&Root::View(address)) = self.roots_ref(compute).get(usize::from(slot))
                     else {
+<<<<<<< HEAD
                         once!(slot, "a shader reads a root view the title did not set");
                         // A table left unset is undefined: a null view.
                         if tabled && !self.root_srv_table(list, None, param, compute, false) {
                             return false;
                         }
                         continue;
+||||||| merged common ancestors
+                        once!(slot, "a shader reads a root view the title did not set");
+                        continue;
+=======
+                        once!(slot, kind, "a shader reads a root view the title did not set");
+                        return no("a root view not set");
+>>>>>>> belobug/main
                     };
+<<<<<<< HEAD
                     // The shader adds the bytes a raw view begins early by.
                     let biased = srv
                         && t.host.user_data.iter().any(|u| {
@@ -2526,6 +3183,19 @@ impl State {
                     }
                     let Some(mut gpu) = root_view(list, address, srv) else {
                         continue;
+||||||| merged common ancestors
+                    let Some(gpu) = root_view(list, *address, srv) else {
+                        continue;
+=======
+                    let Some(gpu) = root_view(list, *address, kind) else {
+                        once!(
+                            slot,
+                            kind,
+                            address = format_args!("{address:#x}"),
+                            "a shader reads a root view outside title buffers"
+                        );
+                        return no("a root view outside title buffers");
+>>>>>>> belobug/main
                     };
                     if biased {
                         gpu -= u64::from(self.host_word(
@@ -2538,15 +3208,18 @@ impl State {
                     }
                     // SAFETY: an open list; the address is in live memory.
                     unsafe {
-                        match (compute, srv) {
-                            (false, false) => l.SetGraphicsRootConstantBufferView(param, gpu),
-                            (false, true) => l.SetGraphicsRootShaderResourceView(param, gpu),
-                            (true, false) => l.SetComputeRootConstantBufferView(param, gpu),
-                            (true, true) => l.SetComputeRootShaderResourceView(param, gpu),
+                        match (compute, kind) {
+                            (false, 0) => l.SetGraphicsRootConstantBufferView(param, gpu),
+                            (false, 1) => l.SetGraphicsRootShaderResourceView(param, gpu),
+                            (false, _) => l.SetGraphicsRootUnorderedAccessView(param, gpu),
+                            (true, 0) => l.SetComputeRootConstantBufferView(param, gpu),
+                            (true, 1) => l.SetComputeRootShaderResourceView(param, gpu),
+                            (true, _) => l.SetComputeRootUnorderedAccessView(param, gpu),
                         }
                     }
                 }
             }
+<<<<<<< HEAD
             for &(slot, param) in &stage.root_uavs {
                 if slot == victory_shader::emit::SLOT_FAULTS {
                     // Ours: where shaders note the pages they found empty.
@@ -2698,6 +3371,27 @@ impl State {
             } else {
                 list.list.SetGraphicsRootDescriptorTable(param, handle);
             }
+||||||| merged common ancestors
+=======
+            if let Some(param) = stage.stride_table {
+                let gpu = (self.heaps[0] != 0)
+                    .then(|| crate::descriptor::heap(self.heaps[0] as This).host())
+                    .flatten()
+                    .and_then(|h| h.stride_table_gpu());
+                if let Some(gpu) = gpu {
+                    // SAFETY: an open list; the stride table buffer lives with the host heap.
+                    unsafe {
+                        if compute {
+                            l.SetComputeRootShaderResourceView(param, gpu);
+                        } else {
+                            l.SetGraphicsRootShaderResourceView(param, gpu);
+                        }
+                    }
+                } else {
+                    once!("a shader reads the runtime stride table without a host view heap");
+                }
+            }
+>>>>>>> belobug/main
         }
         true
     }
@@ -3971,10 +4665,19 @@ impl State {
     }
 
     /// Runs a dispatch on the host.
+<<<<<<< HEAD
     pub(crate) fn dispatch(&mut self, list: &HostList, x: u32, y: u32, z: u32, flags: u32) {
         // It may write the arguments a window holds clamped.
         self.end_window(list);
         self.gather_ends(list, true);
+||||||| merged common ancestors
+    pub(crate) fn dispatch(&mut self, list: &HostList, x: u32, y: u32, z: u32) {
+=======
+    /// With `threads`, `x` counts threads, not groups (the console's
+    /// `USE_THREAD_DIMENSIONS`).
+    // shortcut: y and z stay groups; such dispatches are one-dimensional.
+    pub(crate) fn dispatch(&mut self, list: &HostList, x: u32, y: u32, z: u32, threads: bool) {
+>>>>>>> belobug/main
         #[cfg(feature = "diagnostics")]
         if crate::pipeline::is_skipped(self.pipeline as This) {
             DROPPED.fetch_add(1, Ordering::Relaxed);
@@ -4002,14 +4705,21 @@ impl State {
             );
             DROPPED.fetch_add(1, Ordering::Relaxed);
             crate::pipeline::note_drop(self.pipeline as This);
+<<<<<<< HEAD
             #[cfg(feature = "diagnostics")]
             self.list_dropped_roots([x, y, z]);
+||||||| merged common ancestors
+=======
+            #[cfg(feature = "diagnostics")]
+            self.note_dropped(x, y, z);
+>>>>>>> belobug/main
             return;
         };
         if !p.compute {
             once!("a dispatch with a graphics pipeline");
             return;
         }
+<<<<<<< HEAD
         let t = p.stages[0].translated();
         let Some(([gx, gy, gz], partial)) = dispatch_dimensions([x, y, z], t.threads.unwrap_or([0; 3]), flags) else {
             return;
@@ -4030,6 +4740,38 @@ impl State {
         let bound = self.bind(list, p, true);
         self.dispatch_threads = [0; 3];
         if !bound {
+||||||| merged common ancestors
+        if !self.bind(list, p, true) {
+=======
+        let limit = p.stages.first().and_then(|s| {
+            let data = &s.translated().host.user_data;
+            let t = data.iter().find(|u| u.root == RootType::THREADS)?;
+            Some((s.user_data?.0, t.index, t.dword))
+        });
+        let (x, most) = match limit {
+            Some((_, _, group)) if threads => (x.div_ceil(group.max(1)), Some(x)),
+            _ => (x, None),
+        };
+        if threads && limit.is_none() {
+            once!(name = p.name, x, y, z, "a dispatch of threads runs as groups: dropped");
+            DROPPED.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        // Programs that take their groups' start from us run in parts.
+        let start = p.stages.first().and_then(|s| {
+            let groups = s.translated().host.user_data.iter().find(|u| u.root == RootType::GROUPS);
+            Some((s.user_data?.0, groups?.index))
+        });
+        if !dispatch_fits(if start.is_some() { 1 } else { x }, y, z) {
+            #[cfg(feature = "diagnostics")]
+            tracing::info!(name = p.name, x, "past the group limits");
+            once!(x, y, z, "a dispatch past the host's group limits dropped");
+            DROPPED.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        crate::twin::begin();
+        if !self.bind(list, p, true) {
+>>>>>>> belobug/main
             DROPPED.fetch_add(1, Ordering::Relaxed);
             // A stage of the structure builder that cannot be bound is a
             // dropped stage: the others stop too.
@@ -4038,7 +4780,13 @@ impl State {
             }
             return;
         }
+        if self.null_uav && skip_null_uav_dispatches() {
+            null_uav_dropped(&p.name);
+            DROPPED.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
         #[cfg(feature = "diagnostics")]
+<<<<<<< HEAD
         list.note_op(|| self.op_text(format!("dispatch {gx}x{gy}x{gz}"), true));
         #[cfg(feature = "diagnostics")]
         if crate::pipeline::is_builder(self.pipeline as This) {
@@ -4074,7 +4822,36 @@ impl State {
         }
         self.note_writes(list);
         self.buffers_written();
+||||||| merged common ancestors
+        list.note_op(|| self.op_text(format!("dispatch {x}x{y}x{z}"), true));
+        // SAFETY: an open list with everything set.
+        unsafe { list.list.Dispatch(x, y, z) };
+=======
+        list.note_op(|| self.op_text(format!("dispatch {x}x{y}x{z}"), true, false));
+        #[cfg(feature = "diagnostics")]
+        crate::capture::pass(list, self.targets.first().copied().unwrap_or(0), || self.op_text(format!("dispatch {x}x{y}x{z}"), true, true));
+        if let (Some((param, index, _)), Some(most)) = (limit, most) {
+            // SAFETY: an open list; a dword of the program's user data.
+            unsafe { list.list.SetComputeRoot32BitConstant(param, most, index) };
+        }
+        // SAFETY: an open list with everything set.
+        unsafe { list.list.Dispatch(x.min(MAX_GROUPS), y, z) };
+        if let Some((param, index)) = start {
+            let mut at = MAX_GROUPS;
+            while at < x {
+                // SAFETY: as before; a dword of the program's user data.
+                unsafe {
+                    list.list.SetComputeRoot32BitConstant(param, at, index);
+                    list.list.Dispatch((x - at).min(MAX_GROUPS), y, z);
+                }
+                at += MAX_GROUPS;
+            }
+        }
+        list.count_write();
+        list.count_work();
+>>>>>>> belobug/main
         DISPATCHED.fetch_add(1, Ordering::Relaxed);
+<<<<<<< HEAD
         if let Some(role) = p.stages.first().and_then(|s| s.shader.ambient)
             && crate::ambient::on()
             && self.ambient(list, p, role)
@@ -4156,6 +4933,51 @@ impl State {
         if writes {
             list.set_uav_pending(true);
         }
+||||||| merged common ancestors
+=======
+        // Depth textures it wrote as images get what it wrote; then the
+        // title's state goes back on the list.
+        let lit = self.ambient(list, p);
+        if crate::twin::resolve(list) | lit {
+            self.continue_in(list);
+        }
+    }
+
+    /// Diagnostics (`VICTORY_DROPPED=<n>`): the roots of the first dispatches
+    /// of each pipeline not run.
+    #[cfg(feature = "diagnostics")]
+    fn note_dropped(&self, x: u32, y: u32, z: u32) {
+        use std::fmt::Write;
+        static MOST: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+        let most = *MOST.get_or_init(|| {
+            std::env::var("VICTORY_DROPPED").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
+        });
+        static SEEN: std::sync::Mutex<Option<std::collections::HashMap<usize, u32>>> =
+            std::sync::Mutex::new(None);
+        {
+            let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+            let n = seen.get_or_insert_default().entry(self.pipeline).or_default();
+            if *n >= most {
+                return;
+            }
+            *n += 1;
+        }
+        let mut text = String::new();
+        for (i, root) in self.roots_ref(true).iter().enumerate() {
+            match root {
+                Root::View(a) => {
+                    let host = crate::shadow::find_reaching(*a, 1)
+                        .map(|s| if s.is_direct() { "in place" } else if s.is_sparse() { "sparse" } else { "copy" });
+                    let _ = write!(text, " {i}:view {a:#x} {host:?}");
+                }
+                Root::Constants(w) => {
+                    let _ = write!(text, " {i}:constants {w:x?}");
+                }
+                _ => {}
+            }
+        }
+        tracing::info!("dropped {} {x}x{y}x{z}{text}", crate::pipeline::names(self.pipeline as This));
+>>>>>>> belobug/main
     }
 
     /// What a draw or dispatch runs, for the device-removed report
@@ -4163,12 +4985,13 @@ impl State {
     /// (with the view at that heap index, if one is), the host addresses
     /// of its root views and the views its tables name.
     #[cfg(feature = "diagnostics")]
-    fn op_text(&self, kind: String, compute: bool) -> String {
+    fn op_text(&self, kind: String, compute: bool, full: bool) -> String {
         use std::fmt::Write;
         let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) else {
             return kind;
         };
         let mut text = format!("{kind} {}", p.name);
+<<<<<<< HEAD
         // What it draws into (a dispatch writes through its views below).
         if !compute {
             let described = |t: usize| {
@@ -4195,12 +5018,21 @@ impl State {
                 );
             }
         }
+||||||| merged common ancestors
+=======
+        // What it reads takes far longer to write down than the draw.
+        static FULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !full && !*FULL.get_or_init(|| std::env::var_os("VICTORY_OP_TEXT").is_some()) {
+            return text;
+        }
+>>>>>>> belobug/main
         let views = (self.heaps[0] != 0)
             .then(|| crate::descriptor::heap(self.heaps[0] as This).host())
             .flatten();
+        HEAP.store(self.heaps[0], Ordering::Relaxed);
         for stage in &p.stages {
             let t = stage.translated();
-            let _ = write!(text, " | {}:", stage.shader.hash);
+            let _ = write!(text, " | {} {}:", stage.shader.name(), stage.shader.hash);
             for u in &t.host.user_data {
                 let v = match u.root {
                     RootType::Other(kind) => self.host_word(compute, kind, u.slot, u.dword, None),
@@ -4212,18 +5044,57 @@ impl State {
                     let _ = write!(text, " [heap {index}: {slot}]");
                 }
             }
+<<<<<<< HEAD
             for &(slot, _) in stage.root_cbvs.iter().chain(&stage.root_srvs).chain(&stage.root_uavs) {
+||||||| merged common ancestors
+            for &(slot, _) in stage.root_cbvs.iter().chain(&stage.root_srvs) {
+=======
+            for &(slot, _) in stage
+                .root_cbvs
+                .iter()
+                .chain(&stage.root_srvs)
+                .chain(&stage.root_uavs)
+            {
+>>>>>>> belobug/main
                 if let Some(Root::View(address)) = self.roots_ref(compute).get(usize::from(slot)) {
                     let host = crate::shadow::find(*address, 1)
-                        .map(|s| (s.gpu(*address), s.left(*address)));
-                    let _ = write!(text, " root{slot}={address:#x} host {host:#x?}");
+                        .map(|s| {
+                            let kind = if s.is_direct() {
+                                "in place"
+                            } else if s.is_sparse() {
+                                "sparse"
+                            } else {
+                                "copy"
+                            };
+                            format!("{kind} {:#x} left {:#x}", s.gpu(*address), s.left(*address))
+                        });
+                    let _ = write!(text, " root{slot}={address:#x} host {host:?}");
+                    let _ = write!(text, " holds {}", title_words(*address, 24));
                 }
             }
         }
+        if !compute && self.index.size != 0 {
+            let v = self.index;
+            let _ = write!(
+                text,
+                " index {:#x}+{:#x} f{} holds {}",
+                v.address,
+                v.size,
+                v.format,
+                title_words(v.address, 24)
+            );
+        }
         let _ = write!(text, " tables {:?}", self.reads(compute));
+<<<<<<< HEAD
         if !compute && !list_slots().is_empty() {
             text.push_str(&self.slots_text());
         }
+||||||| merged common ancestors
+=======
+        if !compute {
+            let _ = write!(text, " targets {:#x?} depth {:#x}", self.targets, self.depth);
+        }
+>>>>>>> belobug/main
         text
     }
 
@@ -4463,12 +5334,24 @@ impl State {
         self.gather_ends(list, self.may_store());
         #[cfg(feature = "diagnostics")]
         self.trace("mesh", x, 0);
+<<<<<<< HEAD
         let ran = mesh_test() != 1
             && mesh_kept(self.pipeline)
             && self.prepare_for(list, false, true)
+||||||| merged common ancestors
+        let ran = self.prepare_for(list, false, true)
+=======
+        if x > MAX_GROUPS {
+            once!(x, "a mesh dispatch past the host's group limit dropped");
+            DROPPED.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        let ran = self.prepare_for(list, false, true)
+>>>>>>> belobug/main
             && match list.list.cast::<ID3D12GraphicsCommandList6>() {
                 Ok(l6) => {
                     #[cfg(feature = "diagnostics")]
+<<<<<<< HEAD
                     list.note_op(|| self.op_text(format!("mesh {x}"), false));
                     self.mesh_scissor(list, true);
                     #[cfg(feature = "diagnostics")]
@@ -4480,11 +5363,25 @@ impl State {
                     if x > 65_535 {
                         once!(x, "a mesh dispatch of more groups than the host takes: cut");
                     }
+||||||| merged common ancestors
+                    list.note_op(|| self.op_text(format!("mesh {x}"), false));
+=======
+                    list.note_op(|| self.op_text(format!("mesh {x}"), false, false));
+        #[cfg(feature = "diagnostics")]
+        crate::capture::pass(list, self.targets.first().copied().unwrap_or(0), || self.op_text(format!("mesh {x}"), false, true));
+>>>>>>> belobug/main
                     // SAFETY: an open list with everything set.
+<<<<<<< HEAD
                     unsafe { l6.DispatchMesh(x.min(65_535), 1, 1) };
                     self.note_writes(list);
                     self.drew(crate::pipeline::host_pipeline(self.pipeline as This));
                     self.mesh_scissor(list, false);
+||||||| merged common ancestors
+                    unsafe { l6.DispatchMesh(x, 1, 1) };
+=======
+                    unsafe { l6.DispatchMesh(x, 1, 1) };
+                    list.count_work();
+>>>>>>> belobug/main
                     DRAWN.fetch_add(1, Ordering::Relaxed);
                     true
                 }
@@ -4492,6 +5389,13 @@ impl State {
             };
         if !ran {
             DROPPED.fetch_add(1, Ordering::Relaxed);
+<<<<<<< HEAD
+||||||| merged common ancestors
+            #[cfg(feature = "diagnostics")]
+=======
+            list.missed_draw();
+            #[cfg(feature = "diagnostics")]
+>>>>>>> belobug/main
             dropped(self.pipeline);
         }
     }
@@ -4572,7 +5476,7 @@ impl State {
         }
     }
 
-    fn table_entry(&self, list: &HostList, u: &UsedResource, compute: bool) {
+    fn table_entry(&mut self, list: &HostList, u: &UsedResource, compute: bool) {
         let Some(Root::Table(table)) = self.roots_ref(compute).get(usize::from(u.slot)) else {
             return;
         };
@@ -4583,6 +5487,7 @@ impl State {
         let (Some(host), Some(index)) = (heap.host(), heap.index(handle)) else {
             return;
         };
+<<<<<<< HEAD
         #[cfg(feature = "diagnostics")]
         tally(19, 1);
         if let Some(view) = host.mirror(index, handle, true) {
@@ -4594,9 +5499,18 @@ impl State {
                 host.slot_tabled(index);
                 host.buffer_slot_tabled(index);
             }
+||||||| merged common ancestors
+        if let Some(view) = host.mirror(index, handle, true) {
+            readable(list, u, &view);
+=======
+        match host.mirror(index, handle, true) {
+            Some(view) => readable(list, u, &view),
+            None => self.null_uav |= u.kind == ResourceType::Uav,
+>>>>>>> belobug/main
         }
     }
 
+<<<<<<< HEAD
     /// The descriptors a shader reads through tables. Tables holding a
     /// constant buffer are made afresh for the draw in dynamic slots, with
     /// the constant data copied to upload memory when the list is
@@ -4634,7 +5548,32 @@ impl State {
                 .and_then(|i| written.get(i).copied())
                 .unwrap_or(true)
         };
+||||||| merged common ancestors
+    /// The descriptors a shader reads through tables. Tables holding a
+    /// constant buffer are made afresh for the draw in dynamic slots, with
+    /// the constant data copied to upload memory when the list is
+    /// submitted: the host wants constant buffers 256-byte aligned, the
+    /// console only 16. Returns those tables' new byte offsets by root
+    /// parameter; the other tables' slots are made from the title's.
+    ///
+    /// Within a list, the same table holding the same descriptors is made
+    /// once: its constant data is copied at submission either way, and the
+    /// big tables the world binds would otherwise take hundreds of slots per
+    /// draw, wrapping the dynamic slots onto lists not yet submitted.
+    fn tables(&mut self, list: &HostList, used: &[UsedResource], compute: bool) -> Vec<(u8, u32)> {
+=======
+    /// Gives tables with shader resources or constants slots owned by the
+    /// command list. Later title descriptor writes cannot change what a
+    /// recorded draw samples. Constants also get 256-byte-aligned storage,
+    /// filled at submission (the host wants constant buffers 256-byte
+    /// aligned, the console only 16). Identical descriptors share slots
+    /// within a list. Returns the fresh tables' new byte offsets by root
+    /// parameter in `self.made`, or `false` when the draw must be dropped (a
+    /// constant table found no dynamic slots).
+    fn tables(&mut self, list: &HostList, used: &[UsedResource], compute: bool) -> bool {
+>>>>>>> belobug/main
         let tables = |u: &&UsedResource| u.root == RootType::Table;
+<<<<<<< HEAD
         let mut fresh = TableSlots::default();
         for u in used.iter().filter(tables).filter(|u| u.kind == ResourceType::Cbv) {
             fresh.insert(u.slot);
@@ -4667,9 +5606,31 @@ impl State {
                 );
             }
         }
+||||||| merged common ancestors
+        let mut fresh: Vec<u8> = used
+            .iter()
+            .filter(tables)
+            .filter(|u| u.kind == ResourceType::Cbv)
+            .map(|u| u.slot)
+            .collect();
+=======
+        // Taken out so `self` stays free to borrow; a draw dropped below
+        // leaves it empty, and it grows again.
+        let mut made = std::mem::take(&mut self.made);
+        made.clear();
+        let mut fresh = Slots::default();
+        for u in used
+            .iter()
+            .filter(tables)
+            .filter(|u| matches!(u.kind, ResourceType::Cbv | ResourceType::Srv))
+        {
+            fresh.insert(u.slot);
+        }
+>>>>>>> belobug/main
         // Tables reaching past a host heap smaller than the title's (the
-        // host's limit, 1,000,000 views on NVIDIA) are made afresh too: the
-        // title's slots there have no host slot of their own.
+        // host's limit, 1,000,000 views on NVIDIA, 2,048 samplers anywhere)
+        // are made afresh too: the title's slots there have no host slot of
+        // their own.
         for u in used.iter().filter(tables) {
             if fresh.contains(u.slot) {
                 continue;
@@ -4689,13 +5650,26 @@ impl State {
             }
         }
         for u in used.iter().filter(tables) {
+<<<<<<< HEAD
             if !fresh.contains(u.slot) {
                 BINDING_WRITES.set(writes(u));
+||||||| merged common ancestors
+            if !fresh.contains(&u.slot) {
+=======
+            if !fresh.contains(u.slot) {
+>>>>>>> belobug/main
                 self.table_entry(list, u, compute);
             }
         }
+<<<<<<< HEAD
         let mut made = MadeTables::default();
         for slot in fresh.ordered() {
+||||||| merged common ancestors
+        let mut made = Vec::new();
+        for slot in fresh {
+=======
+        for slot in fresh.iter() {
+>>>>>>> belobug/main
             let Some(&Root::Table(table)) = self.roots_ref(compute).get(usize::from(slot)) else {
                 continue;
             };
@@ -4734,6 +5708,7 @@ impl State {
             // first; review on #927).
             let half_at: Vec<u32> = half
                 .iter()
+<<<<<<< HEAD
                 .filter(|&&(s, _)| s == slot)
                 .map(|&(_, at)| at / 8)
                 .collect();
@@ -4775,12 +5750,53 @@ impl State {
                     let at = table + u64::from(k) * 32;
                     // SAFETY: a descriptor slot in title memory.
                     h.add(unsafe { (at as *const [u32; 3]).read_unaligned() });
+||||||| merged common ancestors
+                .map(|u| u.table_offset_dwords / 8 + 1)
+                .max()
+                .unwrap_or(1);
+            // The table and what its entries hold (record words).
+            let key = {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                for k in 0..n {
+                    let at = table + u64::from(k) * 32;
+                    // SAFETY: a descriptor slot in title memory.
+                    unsafe { (at as *const [u32; 3]).read_unaligned() }.hash(&mut h);
+=======
+                .map(|u| u.table_offset_dwords / 8 + 1)
+                .max()
+                .unwrap_or(1);
+            let last = table + u64::from(n - 1) * 32;
+            // Shaders read such a table to many lengths, and a copy for each
+            // ran out of slots: the longest seen serves all.
+            let n = if n >= LARGE { longest(heap, table, n) } else { n };
+            if heap.index(last).is_none() {
+                for u in entries {
+                    self.table_entry(list, u, compute);
+>>>>>>> belobug/main
                 }
+<<<<<<< HEAD
                 let h = half.iter().filter(|&&(s, _)| s == slot).fold(h.0, |h, &(_, at)| {
                     (h.rotate_left(7) ^ u64::from(at)).wrapping_mul(0x517c_c1b7_2722_0a95)
                 });
                 (table, n, h)
+||||||| merged common ancestors
+                (table, h.finish())
+=======
+                continue;
+            }
+            let records: Vec<[u32; 3]> = if n >= LARGE {
+                (0..n)
+                    // SAFETY: descriptor slots in title memory.
+                    .map(|k| unsafe {
+                        ((table + u64::from(k) * 32) as *const [u32; 3]).read_unaligned()
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+>>>>>>> belobug/main
             };
+<<<<<<< HEAD
             // Who reads of it, and as what, as far as [`readable`] goes by it.
             let reader = (used.as_ptr() as usize, used.len(), STORES.get(), TESTED_DEPTH.get().0);
             #[cfg(feature = "diagnostics")]
@@ -4805,7 +5821,27 @@ impl State {
                 let depth_before = TESTED_DEPTH.get();
                 TESTED_DEPTH.set((depth_before.0, false));
                 for u in entries().filter(|u| u.kind != ResourceType::Cbv) {
+||||||| merged common ancestors
+            if let Some(&first) = self.fresh_tables.get(&key) {
+                for u in entries.iter().filter(|u| u.kind != ResourceType::Cbv) {
+=======
+            let needed = entries
+                .iter()
+                .map(|u| u.table_offset_dwords as usize / 8 + 1)
+                .max()
+                .unwrap_or(1);
+            let same = self.large_tables.get(&table).and_then(|made| {
+                made.iter()
+                    .find(|(r, _)| r.len() >= needed && r[..needed] == records[..needed.min(records.len())])
+                    .map(|&(_, first)| first)
+            });
+            if n >= LARGE
+                && let Some(first) = same
+            {
+                for u in entries.iter().filter(|u| u.kind != ResourceType::Cbv) {
+>>>>>>> belobug/main
                     let handle = table + u64::from(u.table_offset_dwords) * 4;
+<<<<<<< HEAD
                     if let Some(view) = crate::descriptor::view(handle) {
                         BINDING_WRITES.set(writes(u));
                         readable(list, u.kind, &view);
@@ -4839,6 +5875,35 @@ impl State {
                     }
                     if known.ready.len() < 16 {
                         known.ready.push((reader, depth));
+||||||| merged common ancestors
+                    if let Some(view) = crate::descriptor::view(handle) {
+                        readable(list, u, &view);
+=======
+                    match crate::descriptor::view(handle) {
+                        Some(view) => readable(list, u, &view),
+                        None => self.null_uav |= u.kind == ResourceType::Uav,
+                    }
+                }
+                made.push((slot, first * 32));
+                continue;
+            }
+            // The table and what its entries hold (record words).
+            let key = table_hash(table, n);
+            let same = self.fresh_tables.get(&key).filter(|f| {
+                f.table == table
+                    && f.n == n
+                    && self.fresh_records[f.at..f.at + n as usize]
+                        .iter()
+                        .enumerate()
+                        .all(|(k, r)| *r == record(table, k as u32))
+            });
+            if let Some(&Fresh { first, .. }) = same {
+                for u in entries.iter().filter(|u| u.kind != ResourceType::Cbv) {
+                    let handle = table + u64::from(u.table_offset_dwords) * 4;
+                    match crate::descriptor::view(handle) {
+                        Some(view) => readable(list, u, &view),
+                        None => self.null_uav |= u.kind == ResourceType::Uav,
+>>>>>>> belobug/main
                     }
                 }
                 made.push((slot, first * 32));
@@ -4847,16 +5912,48 @@ impl State {
             #[cfg(feature = "diagnostics")]
             let mut clock = table_asked(&mut self.recording, table, n);
             let Some(first) = host.dynamic(n) else {
+<<<<<<< HEAD
                 // No room: the draw must not run with the title's own
                 // offsets (slots never made for it); `bind` drops it.
                 made.push((slot, u32::MAX));
                 #[cfg(feature = "diagnostics")]
                 tally(25, 1);
+||||||| merged common ancestors
+                // Without its fresh table the shader would read the title's
+                // slots, which for constant buffer tables hold no constant
+                // view: a texture or null descriptor read as a buffer gives
+                // a wild address on AMD and the device is removed (#59).
+                // The draw or dispatch is dropped instead.
+                self.table_failed = true;
+=======
+                // A table holding constants made from the title's slots
+                // would view them misaligned: the draw is dropped. Other
+                // tables fall back to the title's slots.
+                if entries.iter().any(|u| u.kind == ResourceType::Cbv) {
+                    once!(n, "a constant table did not fit in command-list slots; draw dropped");
+                    return false;
+                }
+                once!(n, "descriptor table did not fit in command-list slots");
+                for u in entries {
+                    self.table_entry(list, u, compute);
+                }
+>>>>>>> belobug/main
                 continue;
             };
+<<<<<<< HEAD
             #[cfg(feature = "diagnostics")]
             clock.lap(21);
             self.fresh_tables.insert(key, FreshTable { first, epoch: 0, ready: Vec::new() });
+||||||| merged common ancestors
+            self.fresh_tables.insert(key, first);
+=======
+            let at = self.fresh_records.len();
+            self.fresh_records.extend((0..n).map(|k| record(table, k)));
+            self.fresh_tables.insert(key, Fresh { table, n, at, first });
+            if n >= LARGE {
+                self.large_tables.entry(table).or_default().push((records, first));
+            }
+>>>>>>> belobug/main
             self.dynamic
                 .push((std::ptr::from_ref(heap) as usize, first, n));
             // The title's own slots of this table: what the draw reads of
@@ -4932,11 +6029,19 @@ impl State {
                 };
                 match crate::descriptor::view(table + u64::from(k) * 32) {
                     Some(View::Constant(address, size)) => {
+<<<<<<< HEAD
                         // The host takes at most 64 KiB for a constant buffer
                         // view; a title view past that is bound at that size.
                         let size = crate::descriptor::host::constant_view_bytes(size);
                         if size == 0 || address == 0 {
                             host.make_null(index);
+||||||| merged common ancestors
+                        let Some((gpu, to)) = list.scratch(u64::from(size)) else {
+                            host.make_null(index);
+=======
+                        let Some((gpu, to)) = list.scratch(u64::from(size)) else {
+                            host.make_null_kind(index, ResourceType::Cbv, 4);
+>>>>>>> belobug/main
                             continue;
                         }
                         // Mirror `root_view`: when the constant buffer lives in
@@ -5010,6 +6115,7 @@ impl State {
                         }
                     }
                     None => {
+<<<<<<< HEAD
                         host.make_null(index);
                         #[cfg(feature = "diagnostics")]
                         {
@@ -5017,16 +6123,33 @@ impl State {
                             clock.lap(22);
                         }
                         if used.is_some() {
+||||||| merged common ancestors
+                        host.make_null(index);
+                        if used.is_some() {
+=======
+                        if let Some(u) = used {
+                            host.make_null_kind(index, u.kind, u.dwords);
+>>>>>>> belobug/main
                             once!(slot, "a table entry without a view");
+                            self.null_uav |= u.kind == ResourceType::Uav;
+                        } else {
+                            host.make_null(index);
                         }
                     }
                 }
             }
             made.push((slot, first * 32));
         }
+<<<<<<< HEAD
         #[cfg(feature = "diagnostics")]
         tally_done();
         made
+||||||| merged common ancestors
+        made
+=======
+        self.made = made;
+        true
+>>>>>>> belobug/main
     }
 
     /// The first draws, at debug level: what they bind and read
@@ -5107,11 +6230,19 @@ impl State {
         self.gather_ends(list, self.may_store());
         #[cfg(feature = "diagnostics")]
         self.trace("draw", vertices, first);
+<<<<<<< HEAD
         let ready = self.prepare(list, false);
         // A pipeline with the rectangle geometry stage draws the title's
         // vertices as they are; any other gets its rectangles expanded.
         let rects = self.topology == RECTANGLES && !self.completes_rects();
         let ran = ready && (!rects || self.rectangles(list, vertices, first));
+||||||| merged common ancestors
+        let rects = self.topology == RECTANGLES;
+        let ran = self.prepare(list, false) && (!rects || self.rectangles(list, vertices, first));
+=======
+        let rects = self.topology == RECTANGLES && !self.draws_rectangles();
+        let ran = self.prepare(list, false) && (!rects || self.rectangles(list, vertices, first));
+>>>>>>> belobug/main
         if ran {
             // Rectangles were expanded into their own vertex buffers.
             let (count, from) = if rects {
@@ -5120,28 +6251,51 @@ impl State {
                 (vertices, first)
             };
             #[cfg(feature = "diagnostics")]
-            list.note_op(|| self.op_text(format!("draw {count}x{instances}"), false));
+            list.note_op(|| self.op_text(format!("draw {count}x{instances}"), false, false));
+        #[cfg(feature = "diagnostics")]
+        crate::capture::pass(list, self.targets.first().copied().unwrap_or(0), || self.op_text(format!("draw {count}x{instances}"), false, true));
             // SAFETY: an open list with everything set.
             unsafe {
                 list.list
                     .DrawInstanced(count, instances, from, first_instance)
             };
+<<<<<<< HEAD
             self.note_writes(list);
             self.drew(crate::pipeline::host_pipeline(self.pipeline as This));
+||||||| merged common ancestors
+=======
+            list.count_work();
+>>>>>>> belobug/main
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         if !ran {
             DROPPED.fetch_add(1, Ordering::Relaxed);
+<<<<<<< HEAD
+||||||| merged common ancestors
+            #[cfg(feature = "diagnostics")]
+=======
+            list.missed_draw();
+            #[cfg(feature = "diagnostics")]
+>>>>>>> belobug/main
             dropped(self.pipeline);
         }
     }
 
+<<<<<<< HEAD
     /// Whether the bound pipeline completes rectangles itself, in the
     /// geometry stage rectangle pipelines get (`HostPipeline::rects`).
     fn completes_rects(&self) -> bool {
         crate::pipeline::host_pipeline(self.pipeline as This).is_some_and(|p| p.rects)
     }
 
+||||||| merged common ancestors
+=======
+    /// The pipeline takes rectangle lists as they are.
+    fn draws_rectangles(&self) -> bool {
+        crate::pipeline::host_pipeline(self.pipeline as This).is_some_and(|p| p.rectangles)
+    }
+
+>>>>>>> belobug/main
     /// Binds vertex buffers holding the rectangles of vertices `first..first
     /// + count` as triangles, made when the list is submitted.
     fn rectangles(&self, list: &HostList, count: u32, first: u32) -> bool {
@@ -5218,33 +6372,61 @@ impl State {
         self.gather_ends(list, self.may_store());
         #[cfg(feature = "diagnostics")]
         self.trace("indexed", indices, first);
+<<<<<<< HEAD
         // Indexed rectangles are drawn by the rectangle geometry stage
         // alone (nothing expands them on the CPU).
         let lost = self.topology == RECTANGLES && !self.completes_rects();
         if lost {
+||||||| merged common ancestors
+        if self.topology == RECTANGLES {
+=======
+        let rects = self.topology == RECTANGLES && !self.draws_rectangles();
+        if rects {
+>>>>>>> belobug/main
             once!("indexed rectangles not drawn");
         }
+<<<<<<< HEAD
         let ran = !lost && self.prepare(list, true);
+||||||| merged common ancestors
+        let ran = self.topology != RECTANGLES && self.prepare(list, true);
+=======
+        let ran = !rects && self.prepare(list, true);
+>>>>>>> belobug/main
         if ran {
             #[cfg(feature = "diagnostics")]
-            list.note_op(|| self.op_text(format!("indexed {indices}x{instances}"), false));
+            list.note_op(|| self.op_text(format!("indexed {indices}x{instances}"), false, false));
+        #[cfg(feature = "diagnostics")]
+        crate::capture::pass(list, self.targets.first().copied().unwrap_or(0), || self.op_text(format!("indexed {indices}x{instances}"), false, true));
             // SAFETY: an open list with everything set.
             unsafe {
                 list.list
                     .DrawIndexedInstanced(indices, instances, first, base, first_instance)
             };
+<<<<<<< HEAD
             self.note_writes(list);
             self.drew(crate::pipeline::host_pipeline(self.pipeline as This));
+||||||| merged common ancestors
+=======
+            list.count_work();
+>>>>>>> belobug/main
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         if !ran {
             DROPPED.fetch_add(1, Ordering::Relaxed);
+<<<<<<< HEAD
+||||||| merged common ancestors
+            #[cfg(feature = "diagnostics")]
+=======
+            list.missed_draw();
+            #[cfg(feature = "diagnostics")]
+>>>>>>> belobug/main
             dropped(self.pipeline);
         }
     }
 }
 
 impl State {
+<<<<<<< HEAD
     /// Shaders that can write buffers were recorded: arguments may be others
     /// from here on.
     fn buffers_written(&mut self) {
@@ -5330,6 +6512,66 @@ impl State {
         }
     }
 
+||||||| merged common ancestors
+=======
+    /// For an indirect draw of rectangles: every per-vertex buffer the
+    /// pipeline reads expanded into triangles, and the records rewritten
+    /// for them, both on the GPU ([`crate::rects`]). Records before the
+    /// pipeline is bound (it replaces it). `None` if this draw cannot be
+    /// expanded (indexed, unaligned, too many elements, no pipeline).
+    #[allow(clippy::type_complexity)]
+    fn indirect_rectangles(
+        &self,
+        list: &HostList,
+        kind: u32,
+        bounded: &ID3D12Resource,
+        stride: u32,
+        max: u32,
+    ) -> Option<(ID3D12Resource, Vec<(u32, D3D12_VERTEX_BUFFER_VIEW)>)> {
+        if kind != 0 {
+            return None;
+        }
+        let host = crate::host::host()?;
+        let p = crate::pipeline::host_pipeline(self.pipeline as This)?;
+        if p.compute || p.mesh {
+            return None;
+        }
+        let mut views = Vec::new();
+        for slot in 0..32u32 {
+            let elements: Vec<(u32, u32)> = p
+                .inputs
+                .iter()
+                .filter(|e| e.slot == slot && !e.per_instance)
+                .map(|e| (e.offset, e.format))
+                .collect();
+            if elements.is_empty() {
+                continue;
+            }
+            let v = self.vertex[slot as usize];
+            if v.address == 0 || v.size == 0 || v.stride == 0 {
+                return None;
+            }
+            let shadow = crate::shadow::find(v.address, u64::from(v.size))?;
+            shadow.refresh(list, v.address, u64::from(v.size));
+            let (_, gpu, size) =
+                crate::rects::vertices(list, host, shadow.gpu(v.address), u64::from(v.size), v.stride, &elements)?;
+            views.push((
+                slot,
+                D3D12_VERTEX_BUFFER_VIEW {
+                    BufferLocation: gpu,
+                    SizeInBytes: size,
+                    StrideInBytes: v.stride,
+                },
+            ));
+        }
+        // The clamped records (`crate::indirect::bound`'s scratch, from 0).
+        // SAFETY: a live buffer.
+        let from = unsafe { bounded.GetGPUVirtualAddress() };
+        let records = crate::rects::records(list, host, bounded, from, stride, max)?;
+        Some((records, views))
+    }
+
+>>>>>>> belobug/main
     /// Indirect execution of a one-argument signature of `kind` (PC
     /// numbering: 0 draw, 1 indexed draw, 2 dispatch, 10 mesh dispatch) with
     /// records `stride` bytes apart at title address `arguments`, and the
@@ -5364,6 +6606,7 @@ impl State {
         const DISPATCH: u32 = 2;
         const MESH: u32 = 10;
         let why = |what: &str| crate::pipeline::note_why(format!("indirect kind {kind}: {what}"));
+<<<<<<< HEAD
         let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) else {
             crate::pipeline::note_drop(self.pipeline as This);
             return false;
@@ -5398,6 +6641,31 @@ impl State {
             ));
             return false;
         }
+||||||| merged common ancestors
+        #[cfg(not(feature = "diagnostics"))]
+        let why = |_: &str| {};
+=======
+        #[cfg(not(feature = "diagnostics"))]
+        let why = |_: &str| {};
+        let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) else {
+            #[cfg(feature = "diagnostics")]
+            crate::pipeline::note_drop(self.pipeline as This);
+            return false;
+        };
+        let matches_kind = match kind {
+            DRAW | INDEXED => !p.compute && !p.mesh,
+            MESH => !p.compute && p.mesh,
+            DISPATCH => p.compute,
+            _ => false,
+        };
+        if !matches_kind {
+            why(&format!(
+                "pipeline mismatch (compute {}, mesh {}, topology {})",
+                p.compute, p.mesh, self.topology
+            ));
+            return false;
+        }
+>>>>>>> belobug/main
         let len = u64::from(stride) * u64::from(max.max(1));
         let Some(args) = crate::shadow::find_any(arguments, len) else {
             why("arguments outside title buffers");
@@ -5420,10 +6688,96 @@ impl State {
             why("no host signature");
             return false;
         };
+<<<<<<< HEAD
         if kind == MESH && (mesh_test() == 1 || !mesh_kept(self.pipeline)) {
             why("mesh draws are switched off (VICTORY_MESH_TEST=skip)");
             return false;
+||||||| merged common ancestors
+        args.refresh(list, arguments, len);
+        if let Some((s, at)) = &counter {
+            s.refresh(list, *at, 4);
         }
+        // Bounded first: the clamp binds a compute pipeline of its own.
+        if !crate::indirect::bound(list, &args.buffer, args.gpu(arguments), (kind, stride, max)) {
+            why("not bounded (no clamp, or arguments not 4-byte aligned)");
+            return false;
+=======
+        if let Some((s, at)) = &counter {
+            s.refresh(list, *at, 4);
+        }
+        let count_arg = counter.as_ref().map(|(s, at)| (&s.buffer, s.offset(*at)));
+        // Draws of a run: clamped in the list before, which the run's first
+        // draw opened (`crate::list`), so that nothing of ours comes between
+        // the draws.
+        let before = (kind != DISPATCH
+            && match crate::indirect::hoist_mode() {
+                0 | 6 => false,
+                3 => kind == MESH,
+                4 => kind != MESH,
+                _ => true,
+            }
+            && !(matches!(kind, DRAW | INDEXED) && self.topology == RECTANGLES)
+            && self.hoists_into(list))
+        .then(|| self.hoist.as_ref().map(|h| h.clamps.clone()))
+        .flatten()
+        .and_then(|clamps| {
+            args.refresh(&clamps, arguments, len);
+            if let Some((s, at)) = &counter {
+                s.refresh(&clamps, *at, 4);
+            }
+            #[cfg(feature = "diagnostics")]
+            clamps.note_op(|| format!("hoisted clamp of kind {kind}"));
+            crate::indirect::bound_before(
+                &clamps,
+                (&args.buffer, args.offset(arguments)),
+                count_arg,
+                (kind, stride, max),
+            )
+        });
+        let inline = before.is_none();
+        let (bounded, bounded_at) = match before {
+            Some(b) => b,
+            None => {
+                args.refresh(list, arguments, len);
+                // Bounded first: the clamp binds a compute pipeline of its own and
+                // copies clamped active records into a scratch buffer at offset 0.
+                #[cfg(feature = "diagnostics")]
+                list.note_op(|| format!("clamp of kind {kind}"));
+                let Some(bounded) = crate::indirect::bound(
+                    list,
+                    (&args.buffer, args.offset(arguments)),
+                    count_arg,
+                    (kind, stride, max),
+                ) else {
+                    why("not bounded (no clamp, or arguments not 4-byte aligned)");
+                    return false;
+                };
+                (bounded, 0)
+            }
+        };
+        // Rectangle lists: their vertices expanded and the records rewritten
+        // on the GPU, before the draw's own pipeline is bound.
+        let mut rect_args: Option<ID3D12Resource> = None;
+        let mut rect_vertices: Vec<(u32, D3D12_VERTEX_BUFFER_VIEW)> = Vec::new();
+        if matches!(kind, DRAW | INDEXED) && self.topology == RECTANGLES && !self.draws_rectangles() {
+            match self.indirect_rectangles(list, kind, &bounded, stride, max) {
+                Some((a, views)) => {
+                    rect_args = Some(a);
+                    rect_vertices = views;
+                }
+                None => {
+                    crate::indirect::done(list, &bounded);
+                    why("a rectangle list (not expanded: indexed, unaligned or unknown inputs)");
+                    return false;
+                }
+            }
+        }
+        if inline {
+            self.host_pipeline = 0;
+            self.host_roots[1] = 0;
+>>>>>>> belobug/main
+        }
+<<<<<<< HEAD
         // One record without a count: clamped in a batch (`batches`).
         let batch = if batches() > 0 && max == 1 && count.is_none() {
             args.refresh(list, arguments, len);
@@ -5737,23 +7091,97 @@ impl State {
         {
             self.last_indirect = (args.id(), offset);
         }
+||||||| merged common ancestors
+        self.host_pipeline = 0;
+        self.host_roots[1] = 0;
+=======
+>>>>>>> belobug/main
         let ran = match kind {
+<<<<<<< HEAD
             DRAW | INDEXED => self.prepare(list, kind == INDEXED),
+||||||| merged common ancestors
+            DRAW | INDEXED => self.topology != RECTANGLES && self.prepare(list, kind == INDEXED),
+=======
+            DRAW if rect_args.is_some() => {
+                let ok = self.prepare(list, false);
+                if ok {
+                    for (slot, view) in &rect_vertices {
+                        // SAFETY: an open list; the view names a buffer the list keeps.
+                        unsafe { list.list.IASetVertexBuffers(*slot, Some(&[*view])) };
+                    }
+                }
+                ok
+            }
+            DRAW | INDEXED => {
+                (self.topology != RECTANGLES || self.draws_rectangles())
+                    && self.prepare(list, kind == INDEXED)
+            }
+>>>>>>> belobug/main
             MESH => self.prepare_for(list, false, true),
+<<<<<<< HEAD
             DISPATCH => self.bind(list, p, true),
+||||||| merged common ancestors
+            DISPATCH => match crate::pipeline::host_pipeline(self.pipeline as This) {
+                Some(p) if p.compute => self.bind(list, p, true),
+                _ => false,
+            },
+=======
+            DISPATCH => match crate::pipeline::host_pipeline(self.pipeline as This) {
+                Some(p) if p.compute => {
+                    crate::twin::begin();
+                    if !self.bind(list, p, true) {
+                        false
+                    } else {
+                        let skip = self.null_uav && skip_null_uav_dispatches();
+                        if skip {
+                            null_uav_dropped(&p.name);
+                        }
+                        !skip
+                    }
+                }
+                _ => false,
+            },
+>>>>>>> belobug/main
             _ => false,
         };
         if !ran {
+<<<<<<< HEAD
             if self.window.as_ref().is_none_or(|w| w.scratch != bounded) {
                 crate::indirect::done(list, &bounded);
+||||||| merged common ancestors
+            crate::indirect::done(list, &args.buffer);
+            #[cfg(feature = "diagnostics")]
+            match crate::pipeline::host_pipeline(self.pipeline as This) {
+                None => crate::pipeline::note_drop(self.pipeline as This),
+                Some(p) => why(&format!("prepare failed (compute {}, mesh {})", p.compute, p.mesh)),
+=======
+            if inline {
+                crate::indirect::done(list, &bounded);
+            }
+            #[cfg(feature = "diagnostics")]
+            match crate::pipeline::host_pipeline(self.pipeline as This) {
+                None => crate::pipeline::note_drop(self.pipeline as This),
+                Some(p) => why(&format!(
+                    "prepare failed: {} (topology {}, vertex slots {:#x}, {})",
+                    std::mem::take(&mut *WHY_NOT.lock().unwrap_or_else(|e| e.into_inner())),
+                    self.topology,
+                    p.slots,
+                    p.name
+                )),
+>>>>>>> belobug/main
             }
             why("prepare failed");
             return false;
         }
         #[cfg(feature = "diagnostics")]
         list.note_op(|| {
-            self.op_text(format!("indirect kind {kind} max {max} at {arguments:#x}"), kind == DISPATCH)
+            self.op_text(
+                format!("indirect kind {kind} max {max} at {arguments:#x}"),
+                kind == DISPATCH,
+                false,
+            )
         });
+<<<<<<< HEAD
         #[cfg(feature = "diagnostics")]
         list.ran_indirect(p.pso.as_raw() as usize, &p.name, kind, max, &self.user);
         if kind == MESH {
@@ -5777,7 +7205,36 @@ impl State {
         }
         // SAFETY: an open list with everything set; the scratch buffer and
         // host copies are kept alive by the list, and the signature is cached.
+||||||| merged common ancestors
+        // SAFETY: an open list with everything set; the buffers are host
+        // copies the list keeps alive (refresh), the signature is cached.
+=======
+        #[cfg(feature = "diagnostics")]
+        crate::capture::pass(list, self.targets.first().copied().unwrap_or(0), || {
+            self.op_text(
+                format!(
+                    "indirect kind {kind} max {max} stride {stride} at {arguments:#x} args {} all {}",
+                    crate::shadow::args_text(arguments),
+                    title_words(arguments, 8)
+                ),
+                kind == DISPATCH,
+                true,
+            )
+        });
+        let arg_buffer = rect_args.as_ref().unwrap_or(&bounded);
+        if !inline && crate::indirect::hoist_mode() == 2 {
+            let barrier = D3D12_RESOURCE_BARRIER {
+                Type: D3D12_RESOURCE_BARRIER_TYPE_UAV,
+                ..Default::default()
+            };
+            // SAFETY: an open list; the barrier names no resource.
+            unsafe { list.list.ResourceBarrier(&[barrier]) };
+        }
+        // SAFETY: an open list with everything set; the scratch buffers and
+        // host copies are kept alive by the list, and the signature is cached.
+>>>>>>> belobug/main
         unsafe {
+<<<<<<< HEAD
             if let Some(((param, dword), signature)) = &parts {
                 for part in 0..crate::indirect::SPLIT {
                     list.list.SetComputeRoot32BitConstant(*param, part * crate::indirect::PART, *dword);
@@ -5795,7 +7252,27 @@ impl State {
                     counter.as_ref().map_or(0, |(s, at)| s.offset(*at)),
                 )
             }
+||||||| merged common ancestors
+            list.list.ExecuteIndirect(
+                &signature,
+                max,
+                &args.buffer,
+                args.offset(arguments),
+                counter.as_ref().map(|(s, _)| &s.buffer),
+                counter.as_ref().map_or(0, |(s, at)| s.offset(*at)),
+            )
+=======
+            list.list.ExecuteIndirect(
+                &signature,
+                max,
+                arg_buffer,
+                bounded_at,
+                counter.as_ref().map(|(s, _)| &s.buffer),
+                counter.as_ref().map_or(0, |(s, at)| s.offset(*at)),
+            )
+>>>>>>> belobug/main
         };
+<<<<<<< HEAD
         BATCH.recorded(1);
         self.note_writes(list);
         if kind == MESH {
@@ -5812,9 +7289,23 @@ impl State {
         // The scratch buffer stays readable as arguments: the next draw of
         // the window reads it with no barrier, and the next clamp moves it
         // back (`crate::indirect`).
+||||||| merged common ancestors
+        crate::indirect::done(list, &args.buffer);
+=======
+        if inline {
+            crate::indirect::done(list, &bounded);
+        }
+>>>>>>> belobug/main
         if kind == DISPATCH {
+            list.count_write();
+            list.count_work();
             DISPATCHED.fetch_add(1, Ordering::Relaxed);
+            let lit = self.ambient(list, p);
+            if crate::twin::resolve(list) | lit {
+                self.continue_in(list);
+            }
         } else {
+            list.count_work();
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         true
@@ -5873,6 +7364,18 @@ mod thread_tests {
 
 /// The host command signature for one argument of `kind` with records
 /// `stride` bytes apart (no root arguments, so no root signature), made
+/// `n` dwords of title memory at `address` (diagnostics).
+#[cfg(feature = "diagnostics")]
+fn title_words(address: u64, n: usize) -> String {
+    let mut words = vec![0u32; n];
+    // SAFETY: plain words.
+    let bytes = unsafe { std::slice::from_raw_parts_mut(words.as_mut_ptr().cast::<u8>(), 4 * n) };
+    if !crate::host::read_into(address as *const u8, bytes) {
+        return "unreadable".into();
+    }
+    format!("{words:x?}")
+}
+
 /// once.
 fn host_signature(kind: u32, stride: u32) -> Option<ID3D12CommandSignature> {
     static MADE: std::sync::Mutex<Vec<((u32, u32), ID3D12CommandSignature)>> =
@@ -6106,15 +7609,26 @@ fn readable(list: &HostList, kind: ResourceType, view: &View) {
                 }
             }
         }
-        (View::Unordered(resource, _, _), ResourceType::Uav) => {
+        (View::Unordered(resource, _, desc), ResourceType::Uav) => {
             #[cfg(feature = "diagnostics")]
             crate::capture::note_target(*resource as This);
+<<<<<<< HEAD
             // Read by the title's CPU code: copied back into title memory.
             list.texture_written(*resource as This);
             // Unordered access to a depth texture is its colour twin's.
             if !list.twin_use(*resource as This, true, true) {
                 crate::list::ensure_state(list, *resource as This, UNORDERED_ACCESS);
             }
+||||||| merged common ancestors
+            crate::list::ensure_state(list, *resource as This, UNORDERED_ACCESS);
+=======
+            // Written through its twins, copied in after the dispatch.
+            if crate::resource::depth_twin(*resource as This).is_some() {
+                crate::twin::note(*resource as This, desc.as_ref());
+                return;
+            }
+            crate::list::ensure_state(list, *resource as This, UNORDERED_ACCESS);
+>>>>>>> belobug/main
         }
         _ => {}
     }
@@ -6233,13 +7747,23 @@ fn describe(view: Option<&View>) -> String {
         crate::resource::host_made(r).map(|t| {
             // SAFETY: a live resource.
             let d = unsafe { t.GetDesc() };
+<<<<<<< HEAD
             format!("{}x{} f{} flags {:#x} of {r:?}", d.Width, d.Height, d.Format.0, d.Flags.0)
+||||||| merged common ancestors
+            format!("{}x{} f{} flags {:#x}", d.Width, d.Height, d.Format.0, d.Flags.0)
+=======
+            format!(
+                "{}x{} f{} flags {:#x} data {:#x}",
+                d.Width, d.Height, d.Format.0, d.Flags.0, crate::resource::data_of(r)
+            )
+>>>>>>> belobug/main
         })
     };
     match view {
         None => "no view".into(),
         Some(v @ View::Shader(r, _)) => texture(*r as This)
             .unwrap_or_else(|| format!("buffer {:?}", crate::descriptor::host::buffer_range(v))),
+<<<<<<< HEAD
         Some(v @ View::Unordered(r, ..)) => match texture(*r as This) {
             Some(t) => format!("uav texture {t}"),
             None => format!(
@@ -6255,17 +7779,78 @@ fn describe(view: Option<&View>) -> String {
             r[8],
             r[11],
             u64::from(d[10]) | u64::from(d[11]) << 32
+||||||| merged common ancestors
+        // A buffer has no host texture: its title range, as for a shader view.
+        Some(v @ View::Unordered(r, ..)) => texture(*r as This).map_or_else(
+            || format!("uav buffer {:?}", crate::descriptor::host::buffer_range(v)),
+            |t| format!("uav {t}"),
         ),
+        Some(View::Placed(u, r, d)) => format!(
+            "placed uav={u} dim {} {}x{} f{} layout {:#x} at {:#x}",
+            r[0],
+            u64::from(r[4]) | u64::from(r[5]) << 32,
+            r[6],
+            r[8],
+            r[11],
+            u64::from(d[10]) | u64::from(d[11]) << 32
+=======
+        Some(v @ View::Unordered(r, ..)) => format!(
+            "uav {}",
+            texture(*r as This).unwrap_or_else(|| format!(
+                "buffer {:?}",
+                crate::descriptor::host::buffer_range(v)
+            ))
+>>>>>>> belobug/main
+        ),
+        Some(v @ View::Placed(u, r, d)) => {
+            let is = (!*u && r[0] != 1)
+                .then(|| crate::descriptor::host::placed_texture(v))
+                .flatten();
+            let is = match is {
+                Some(View::Shader(t, _)) => format!(
+                    " is {t:#x} {}",
+                    texture(t as This).unwrap_or_else(|| "no host texture".into())
+                ),
+                _ => String::new(),
+            };
+            format!(
+                "placed uav={u} dim {} {}x{} f{} layout {:#x}{is} at {:#x}",
+                r[0],
+                u64::from(r[4]) | u64::from(r[5]) << 32,
+                r[6],
+                r[8],
+                r[11],
+                u64::from(d[10]) | u64::from(d[11]) << 32
+            )
+        }
         // The first four values, as a colour rectangle's constants are.
         Some(View::Constant(address, size))
             if *size >= 16 && crate::texture::committed(*address as *const u8, 16) =>
         {
             // SAFETY: 16 committed bytes of title memory.
             let v = unsafe { (*address as *const [f32; 4]).read_unaligned() };
-            format!("Constant({address:#x}, {size}) {v:?}")
+            let words = crate::shadow::words_text(*address, *size as usize);
+            format!("Constant({address:#x}, {size}) {v:?} words {words}")
         }
         Some(v) => format!("{v:?}").chars().take(60).collect(),
     }
+}
+
+/// The view heap the last noted command used.
+#[cfg(feature = "diagnostics")]
+static HEAP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// What the slots `indices` of that heap view.
+#[cfg(feature = "diagnostics")]
+pub(crate) fn report_slots(indices: &[u32]) -> String {
+    let heap = HEAP.load(Ordering::Relaxed);
+    if heap == 0 {
+        return String::new();
+    }
+    let Some(h) = crate::descriptor::heap(heap as This).host() else {
+        return String::new();
+    };
+    indices.iter().map(|&i| format!(" SLOT {i:#x} {}", h.report_slot(i))).collect()
 }
 
 /// The console's own primitive topologies.
@@ -6276,27 +7861,34 @@ const QUADS: u32 = 19;
 const QUAD_STRIP: u32 = 20;
 
 /// Fixed-function state, straight onto the host list.
-pub(crate) fn viewports(list: &HostList, viewports: &[D3D12_VIEWPORT]) {
+fn viewports(list: &HostList, viewports: &[D3D12_VIEWPORT]) {
     // SAFETY: an open list.
     unsafe { list.list.RSSetViewports(viewports) };
 }
 
-pub(crate) fn scissors(list: &HostList, rects: &[RECT]) {
+fn scissors(list: &HostList, rects: &[RECT]) {
     // SAFETY: an open list.
     unsafe { list.list.RSSetScissorRects(rects) };
 }
 
-pub(crate) fn blend_factor(list: &HostList, factor: Option<&[f32; 4]>) {
+fn blend_factor(list: &HostList, factor: Option<&[f32; 4]>) {
     // SAFETY: an open list.
     unsafe { list.list.OMSetBlendFactor(factor) };
 }
 
+<<<<<<< HEAD
 pub(crate) fn stencil_ref(list: &HostList, reference: u32) {
     #[cfg(feature = "diagnostics")]
     crate::capture::op(std::ptr::from_ref(list) as usize, || format!("STENCIL REF {reference:#x}"));
+||||||| merged common ancestors
+pub(crate) fn stencil_ref(list: &HostList, reference: u32) {
+=======
+fn stencil_ref(list: &HostList, reference: u32) {
+>>>>>>> belobug/main
     // SAFETY: an open list.
     unsafe { list.list.OMSetStencilRef(reference) };
 }
+<<<<<<< HEAD
 
 pub(crate) fn depth_bounds(list: &HostList, min: f32, max: f32) {
     #[cfg(feature = "diagnostics")]
@@ -6877,3 +8469,18 @@ mod record_hash_tests {
         assert!(zeros.iter().all(|h| seen.insert(*h)));
     }
 }
+||||||| merged common ancestors
+=======
+
+#[cfg(test)]
+mod group_limit_tests {
+    #[test]
+    fn dispatches_past_the_host_limit_do_not_fit() {
+        assert!(super::dispatch_fits(65_535, 65_535, 65_535));
+        assert!(super::dispatch_fits(0, 0, 0));
+        assert!(!super::dispatch_fits(65_536, 1, 1));
+        assert!(!super::dispatch_fits(1, u32::MAX, 1));
+        assert!(!super::dispatch_fits(1, 1, 65_536));
+    }
+}
+>>>>>>> belobug/main

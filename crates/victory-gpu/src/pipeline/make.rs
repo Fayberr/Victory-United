@@ -12,6 +12,7 @@
 //! bake) are there at once as before; past the budget a draw or dispatch
 //! whose pipeline is not ready is dropped, as an untranslated one is.
 //!
+<<<<<<< HEAD
 //! The default budget is 12 s per title frame and kind, a window the
 //! recording threads wait in together ([`DEFAULT_WAIT_MS`]); it was half
 //! a second. A pass the title runs only once and whose pipeline takes
@@ -28,6 +29,21 @@
 //! behind a world's worth of pipelines they were dropped; that run had no
 //! lamps and no diffuse light to its end (run textures-d2, the first after a
 //! new translation; Belobug 18e57db8 found the same).
+||||||| merged common ancestors
+//! shortcut: the budget (half a second of waiting per title frame) is a
+//! guess; a pass the title runs only once and whose pipeline takes longer
+//! is lost.
+=======
+//! Passes over the screen (no vertex input, no depth) have workers and a
+//! longer budget of their own: the title fills its lighting tables with
+//! such draws once, at the world's first frame, and behind a world's worth
+//! of pipelines they waited minutes; a run that lost them had no diffuse
+//! light at all.
+//!
+//! shortcut: the budgets (half a second of waiting per title frame, 20 s
+//! for screen passes) are guesses; another pass the title runs only once
+//! and whose pipeline takes longer is lost.
+>>>>>>> belobug/main
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
@@ -48,6 +64,10 @@ pub(crate) struct Pending {
     /// workers make the most wanted one first.
     asked: AtomicU64,
     made: OnceLock<Option<HostPipeline>>,
+    /// Its worker was lost to it: it will not be made.
+    lost: AtomicBool,
+    /// A pass over the screen (see [`GraphicsState::screen_pass`]).
+    screen: bool,
     /// What identifies it across runs (shader containers and state), and
     /// whether a draw or dispatch has requested it yet.
     pub(super) key: String,
@@ -125,9 +145,14 @@ impl Pending {
         let key = key(&shaders, graphics.as_deref());
         let left_out = left_out(&shaders);
         Pending {
+<<<<<<< HEAD
             screen: graphics.as_ref().is_some_and(|g| g.screen_pass()),
             formats: graphics.as_ref().map_or([0; 9], |g| g.formats()),
             variant: OnceLock::new(),
+||||||| merged common ancestors
+=======
+            screen: graphics.as_ref().is_some_and(|g| g.screen_pass()),
+>>>>>>> belobug/main
             shaders,
             graphics,
             left_out,
@@ -135,7 +160,14 @@ impl Pending {
             was_slow: AtomicBool::new(false),
             asked: AtomicU64::new(0),
             made: OnceLock::new(),
+<<<<<<< HEAD
             key,
+||||||| merged common ancestors
+            key: key.finalize().to_hex()[..32].to_owned(),
+=======
+            lost: AtomicBool::new(false),
+            key: key.finalize().to_hex()[..32].to_owned(),
+>>>>>>> belobug/main
             used: AtomicBool::new(false),
             begun: OnceLock::new(),
         }
@@ -157,6 +189,7 @@ impl Pending {
     }
 
     fn make(&self) {
+<<<<<<< HEAD
         let _ = self.begun.set(Instant::now());
         self.make_with(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
     }
@@ -178,6 +211,14 @@ impl Pending {
             super::library::note_time(&self.key, began.elapsed().as_millis() as u64);
             made
         });
+||||||| merged common ancestors
+        self.made
+            .get_or_init(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
+=======
+        // Not `get_or_init`: a worker lost in it would leave it locked.
+        let made = HostPipeline::new(&self.shaders, self.graphics.as_deref());
+        let _ = self.made.set(made);
+>>>>>>> belobug/main
         let (lock, done) = &DONE;
         let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
         done.notify_all();
@@ -246,6 +287,7 @@ fn wait_budget() -> Duration {
     })
 }
 
+<<<<<<< HEAD
 /// The default of [`wait_budget`]: the picture before frame rate. A frame
 /// waits for pipelines still being made rather than drop their draws and
 /// dispatches, up to 12 s for each kind (graphics, compute), the threads
@@ -325,6 +367,12 @@ fn screen_budget() -> Duration {
 fn screens_first() -> bool {
     !screen_budget().is_zero()
 }
+||||||| merged common ancestors
+=======
+/// The same for passes over the screen (below the title's 30 s watchdog).
+const SCREEN_BUDGET: Duration = Duration::from_secs(20);
+
+>>>>>>> belobug/main
 /// Pipelines queued and not made yet.
 static WAITING: AtomicU64 = AtomicU64::new(0);
 
@@ -336,8 +384,23 @@ pub(crate) fn waiting() -> u64 {
 /// The host pipeline if it is made (or is made within the frame's budget);
 /// queues it on first use.
 pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
+<<<<<<< HEAD
     if p.left_out.is_some() {
         return None;
+||||||| merged common ancestors
+    if p.made.get().is_none() {
+        start(p);
+        wait(p, crate::frame::current());
+=======
+    if p.made.get().is_none() {
+        start(p);
+        if p.lost.load(Ordering::Relaxed) {
+            return None;
+        }
+        // Also with a world's worth queued: passes the title runs only once
+        // set up what later ones loop over.
+        wait(p, crate::frame::current());
+>>>>>>> belobug/main
     }
     // A still-pending pipeline was requested by the title too. Prewarm it
     // on the next launch, even if this run never got to use it.
@@ -458,6 +521,7 @@ pub(crate) fn early(p: &Arc<Pending>) {
     }
 }
 
+<<<<<<< HEAD
 /// How the threads that wait in one frame share its budget
 /// (`VICTORY_PIPELINE_WAIT_SHARED`): by default a window of waiting time
 /// ([`Sharing::Window`]); `reserve` the way before it, `0` the way before
@@ -499,7 +563,26 @@ fn sharing_from(value: Option<&str>) -> Sharing {
         Some("0") => Sharing::PerThread,
         Some("reserve") => Sharing::Reserve,
         _ => Sharing::Window,
+||||||| merged common ancestors
+/// Waits for `p` while frame `frame` has budget left.
+fn wait(p: &Pending, frame: u64) {
+    static FRAME: AtomicU64 = AtomicU64::new(u64::MAX);
+    static WAITED_US: AtomicU64 = AtomicU64::new(0);
+    if FRAME.swap(frame, Ordering::Relaxed) != frame {
+        WAITED_US.store(0, Ordering::Relaxed);
+=======
+/// Waits for `p` while frame `frame` has budget of its kind left.
+fn wait(p: &Pending, frame: u64) {
+    static FRAME: [AtomicU64; 2] = [const { AtomicU64::new(u64::MAX) }; 2];
+    static WAITED_US: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+    let kind = usize::from(p.screen);
+    let budget = [BUDGET, SCREEN_BUDGET][kind];
+    let waited = &WAITED_US[kind];
+    if FRAME[kind].swap(frame, Ordering::Relaxed) != frame {
+        waited.store(0, Ordering::Relaxed);
+>>>>>>> belobug/main
     }
+<<<<<<< HEAD
 }
 
 /// One frame's waiting for one kind of pipeline.
@@ -637,6 +720,11 @@ fn wait(p: &Pending, frame: u64) {
     let kind = usize::from(compute) * 2 + usize::from(screen);
     let frame_wait = &FRAMES[kind];
     let sharing = shared_budget();
+||||||| merged common ancestors
+    let left = BUDGET.saturating_sub(Duration::from_micros(WAITED_US.load(Ordering::Relaxed)));
+=======
+    let left = budget.saturating_sub(Duration::from_micros(waited.load(Ordering::Relaxed)));
+>>>>>>> belobug/main
     let started = Instant::now();
     let left = frame_wait.lock().unwrap_or_else(|e| e.into_inner()).begin(sharing, frame, budget, started);
     if left.is_zero() {
@@ -653,6 +741,7 @@ fn wait(p: &Pending, frame: u64) {
         let rest = rest.min(Duration::from_millis(250));
         held = done.wait_timeout(held, rest).unwrap_or_else(|e| e.into_inner()).0;
     }
+<<<<<<< HEAD
     drop(held);
     let waited = started.elapsed().min(left);
     if screen && waited > Duration::from_millis(500) {
@@ -671,8 +760,14 @@ fn wait(p: &Pending, frame: u64) {
         crate::copystat::C::PipelineWaitUs,
         started.elapsed().as_micros() as u64,
     );
+||||||| merged common ancestors
+    WAITED_US.fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
+=======
+    waited.fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
+>>>>>>> belobug/main
 }
 
+<<<<<<< HEAD
 const NOT_QUEUED: u8 = 0;
 const EARLY: u8 = 1;
 const REQUESTED: u8 = 2;
@@ -914,7 +1009,115 @@ fn workers() -> bool {
                 tracing::warn!(error = %e, "no pipeline worker");
             } else {
                 running = true;
+||||||| merged common ancestors
+/// Hands `p` to the workers (half the logical processors, 2 to 8), started
+/// on first use.
+fn queue(p: Arc<Pending>) {
+    static SENDER: OnceLock<std::sync::mpsc::Sender<Arc<Pending>>> = OnceLock::new();
+    let sender = SENDER.get_or_init(|| {
+        let (sender, receiver) = std::sync::mpsc::channel::<Arc<Pending>>();
+        let receiver = Arc::new(Mutex::new(receiver));
+        let workers = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(2, 8));
+        for i in 0..workers {
+            let receiver = receiver.clone();
+            let spawned = std::thread::Builder::new()
+                .name(format!("victory-pipelines-{i}"))
+                .spawn(move || {
+                    // Below the title's own threads (loading, recording).
+                    // SAFETY: a plain call on our own thread.
+                    unsafe {
+                        use windows::Win32::System::Threading::*;
+                        let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+                    }
+                    loop {
+                        let next = receiver.lock().unwrap_or_else(|e| e.into_inner()).recv();
+                        let Ok(p) = next else { return };
+                        p.make();
+                        if WAITING.fetch_sub(1, Ordering::Relaxed) == 1 {
+                            drained();
+                        } else {
+                            super::library::save(false);
+                        }
+                    }
+                });
+            if let Err(e) = spawned {
+                tracing::warn!(error = %e, "no pipeline worker");
+=======
+/// What the workers take from: the ordinary pipelines, the screen passes.
+static RECEIVER: [OnceLock<Mutex<std::sync::mpsc::Receiver<Arc<Pending>>>>; 2] =
+    [const { OnceLock::new() }; 2];
+
+/// What the workers (by thread) are making.
+static AT_WORK: Mutex<Vec<(u32, Arc<Pending>)>> = Mutex::new(Vec::new());
+
+/// Starts worker `i`, for screen passes or for the others.
+fn worker(i: usize, screen: bool) {
+    let spawned = std::thread::Builder::new()
+        .name(format!("victory-pipelines-{i}"))
+        .spawn(move || {
+            // Below the title's own threads (loading, recording).
+            // SAFETY: a plain call on our own thread.
+            unsafe {
+                use windows::Win32::System::Threading::*;
+                let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+>>>>>>> belobug/main
             }
+            let Some(receiver) = RECEIVER[usize::from(screen)].get() else { return };
+            loop {
+                let next = receiver.lock().unwrap_or_else(|e| e.into_inner()).recv();
+                let Ok(p) = next else { return };
+                // SAFETY: a plain call.
+                let id = unsafe { windows::Win32::System::Threading::GetCurrentThreadId() };
+                AT_WORK.lock().unwrap_or_else(|e| e.into_inner()).push((id, p.clone()));
+                p.make();
+                AT_WORK.lock().unwrap_or_else(|e| e.into_inner()).retain(|w| w.0 != id);
+                if WAITING.fetch_sub(1, Ordering::Relaxed) == 1 {
+                    drained();
+                } else {
+                    super::library::save(false);
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "no pipeline worker");
+    }
+}
+
+/// A worker is lost to a compile that crashed or never ends: another takes
+/// its place (its pipeline stays unmade). With all of them lost, the rest of
+/// a world's pipelines waited forever.
+pub(super) fn worker_lost(id: u32) {
+    static LOST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(100);
+    let mut lost = None;
+    AT_WORK.lock().unwrap_or_else(|e| e.into_inner()).retain(|w| {
+        if w.0 == id {
+            w.1.lost.store(true, Ordering::Relaxed);
+            lost = Some(w.1.screen);
+        }
+        w.0 != id
+    });
+    if let Some(screen) = lost {
+        WAITING.fetch_sub(1, Ordering::Relaxed);
+        worker(LOST.fetch_add(1, Ordering::Relaxed), screen);
+    }
+}
+
+/// Hands `p` to the workers (half the logical processors, 2 to 8, and two
+/// for screen passes), started on first use.
+fn queue(p: Arc<Pending>) {
+    static SENDER: [OnceLock<std::sync::mpsc::Sender<Arc<Pending>>>; 2] =
+        [const { OnceLock::new() }; 2];
+    let screen = p.screen;
+    let sender = SENDER[usize::from(screen)].get_or_init(|| {
+        let (sender, receiver) = std::sync::mpsc::channel::<Arc<Pending>>();
+        let _ = RECEIVER[usize::from(screen)].set(Mutex::new(receiver));
+        let workers = if screen {
+            2
+        } else {
+            std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(2, 8))
+        };
+        for i in 0..workers {
+            worker(i + if screen { 50 } else { 0 }, screen);
         }
         running
     })
