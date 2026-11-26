@@ -76,9 +76,19 @@ impl<'a> Lower<'a> {
                 .find_map(|(s, _)| use_of(*s))
         };
         let use_at = use_of(site).or_else(twin);
+        // A view whose kind no use tells, but what is read of it does.
+        let sized = match use_at {
+            Some(_) => None,
+            None => self.sized_view(inst, site, code, count),
+        };
+        // Only an image whose layers or depth (dword 4) are not read: those are no 2D
+        // texture's; and no buffer `sized_view` did not take (a stride of 4 or less may be a
+        // typed view's component count, and the address is `view_address`'s below).
+        let layers = inst.write(Reg::S(code + 4)).is_some_and(|v| self.read_as_number(v));
         // `sized`: no instruction uses the descriptor, the code reads a size from it
         // ([`Self::unused_descriptor_kind`]).
-        let (first, used, uav, props, image, sized) = if let Some((at, first)) = use_at {
+        let (first, used, uav, props, image, sized) =
+            if let Some((at, first)) = use_at.or(sized.map(|_| (site, 0))) {
             let src = Source::Loaded { load: site, first };
             let used = self.used_kind(&src);
             let ui: &Inst = &self.x.p.blocks[at.0].insts[at.1];
@@ -88,6 +98,8 @@ impl<'a> Lower<'a> {
                 || used.is_some_and(|u| u.kind == ResourceType::Uav);
             let u = if uav { 0x1000 } else { 0 };
             let (props, image) = match &ui.fields {
+                _ if sized.is_some_and(|image| image) => ((2 | u, 0x409), Some(2)),
+                _ if sized.is_some() => ((11 | u, 0), None),
                 // A ray-tracing structure in a buffer of the host: read raw.
                 Fields::Image { .. } if un.starts_with("image_bvh") => ((11, 0), None),
                 Fields::Image { dim, .. } => {
@@ -103,14 +115,25 @@ impl<'a> Lower<'a> {
                 }
                 Fields::Buffer { idxen, format, .. } => {
                     let stride = used.map_or(0, |u| u.stride);
+                    let counted = inst
+                        .write(Reg::S(code + first + 2))
+                        .is_some_and(|v| self.read_as_number(v));
                     let props = if un.starts_with("buffer_load_format")
                         || un.starts_with("buffer_store_format")
                     {
                         (10 | u, 0x409)
-                    } else if *idxen && format.is_none() && stride >= 4 && stride.is_multiple_of(4)
+                    } else if !counted
+                        && *idxen
+                        && format.is_none()
+                        && stride >= 4
+                        && stride.is_multiple_of(4)
                     {
+                        // Nothing reads the count: the query is cleaned up.
                         (12 | u, stride)
                     } else {
+                        // Structured ones too: the host's views of them are raw
+                        // (see `buffer`), which count bytes, and a size asked
+                        // for as a structured view's is that count on AMD.
                         (11 | u, 0)
                     };
                     if used.is_some_and(|u| u.kind == ResourceType::Cbv) {
@@ -158,8 +181,12 @@ impl<'a> Lower<'a> {
                 self.stale.extend(inst.writes.iter().map(|w| w.1));
                 return Err("a sampler's descriptor read as data");
             }
-            if let Some((used, uav, props, image)) =
-                self.unused_descriptor_kind(inst, site, code, count)
+            if use_at.is_none()
+                && sized.is_none()
+                && count == 8
+                && !layers
+                && let Some((used, uav, props, image)) =
+                    self.unused_descriptor_kind(inst, site, code, count)
             {
                 (0, used, uav, props, image, true)
             } else if count <= 4
@@ -286,8 +313,19 @@ impl<'a> Lower<'a> {
                 // A raw view counts bytes; the descriptor's record count is in elements.
                 let n = field(self, 0);
                 let stride = used.map_or(0, |u| u.stride);
+                let counted = inst
+                    .write(Reg::S(code + first + 2))
+                    .is_some_and(|v| self.read_as_number(v));
                 let n = if props.0 & 0xFF == 11 && stride > 1 {
                     let k = self.s.m.i32(stride);
+                    self.s.m.bin(c, Bin::UDiv, n, k)
+                } else if props.0 & 0xFF == 11
+                    && counted
+                    && let Some(stride) = self.slot_stride(&src)?
+                {
+                    // Picked from the heap: the host's table has the stride.
+                    let (i32t, one) = (self.s.t.i32, self.s.m.i32(1));
+                    let k = self.s.op(c, "binary.i32", Attr::ReadNone, i32t, 39, &[stride, one]);
                     self.s.m.bin(c, Bin::UDiv, n, k)
                 } else {
                     n
