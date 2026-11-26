@@ -1154,7 +1154,6 @@ fn create() -> windows::core::Result<Host> {
     }
 }
 
-<<<<<<< HEAD
 impl Host {
     /// The driver's version, as the system counts it (0: not known).
     pub(crate) fn driver(&self) -> i64 {
@@ -1164,15 +1163,12 @@ impl Host {
     }
 }
 
-||||||| 085ee7c4
-=======
 /// Serializes unit tests that open the singleton `EnumWarpAdapter()` D3D12
 /// device so `d3d10warp.dll` does not race across concurrent `VirtualFree`,
 /// `OpenExistingHeapFromAddress`, and queue/PSO teardown calls.
 #[cfg(test)]
 pub(crate) static WARP_SERIAL: Mutex<()> = Mutex::new(());
 
->>>>>>> vitoriabr/main
 /// DXGI may return hardware for `EnumWarpAdapter` (notably under Proton).
 /// Reject it before creating a device in diagnostics' software-only mode.
 pub(crate) fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
@@ -2488,7 +2484,6 @@ void main(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID) {
 }
 "#;
 
-<<<<<<< HEAD
 /// Dispatch [`CARD_COMPARE`] for `pieces` pieces (one thread group per piece),
 /// chunking at D3D12's 65,535-group per-dimension limit if ever exceeded.
 /// `hashed`: the bytes of the copy the shader walks (a copy whose hashes
@@ -2522,8 +2517,6 @@ unsafe fn dispatch_card_compare(
     }
 }
 
-||||||| 085ee7c4
-=======
 /// [`CARD_COMPARE`] with a group of 64 threads to a piece
 /// (`VICTORY_CARD_HASH_WIDE`, on by default; `=0` for the thread a piece).
 ///
@@ -2592,24 +2585,13 @@ void main(uint3 group : SV_GroupID, uint t : SV_GroupIndex) {
 }
 "#;
 
-/// Whether [`CARD_COMPARE_WIDE`] is the compare (`VICTORY_CARD_HASH_WIDE`;
-/// on unless `0`). Chosen once: stored and compared hashes must agree.
-pub(crate) fn card_hash_wide() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("VICTORY_CARD_HASH_WIDE").is_none_or(|v| v != "0"))
-}
-
-/// The compare's source for this process ([`card_hash_wide`]).
+/// The compare's source for this process: the form ours dispatches
+/// (`dispatch_card_compare`), which carries the inline read-back offsets.
+/// [`CARD_COMPARE_WIDE`] is kept for the WARP tests but is not wired in here.
 pub(crate) fn card_compare_source() -> &'static str {
-    if card_hash_wide() { CARD_COMPARE_WIDE } else { CARD_COMPARE }
+    CARD_COMPARE
 }
 
-/// The groups a compare pass over `pieces` pieces is dispatched with.
-pub(crate) fn card_compare_groups(pieces: u32) -> u32 {
-    if card_hash_wide() { pieces } else { pieces.div_ceil(64) }
-}
-
->>>>>>> vitoriabr/main
 /// Whether the pieces a flight's compare flags come down to the PC inside
 /// the flight itself (`VICTORY_CARD_FETCH_INFLIGHT=1`; off by default, and
 /// only with [`relay`]).
@@ -2751,7 +2733,6 @@ void main(uint3 group : SV_GroupID, uint t : SV_GroupIndex) {
 }
 "#;
 
-<<<<<<< HEAD
 /// The hash [`CARD_COMPARE`] gives of a piece with its flag.
 #[cfg(test)]
 pub(crate) fn piece_hash(bytes: &[u8]) -> u32 {
@@ -2780,8 +2761,6 @@ unsafe fn card_pass(list: &ID3D12GraphicsCommandList, span: &crate::shadow::Card
     }
 }
 
-||||||| 085ee7c4
-=======
 /// The merge on the card (`crate::shadow::merge_on_card`), run in the list
 /// that brings the copies in the card's memory up to date, ahead of a
 /// submission's lists and behind those of the flights in the air: the
@@ -2830,7 +2809,6 @@ const CARD_MERGE_MOST: usize = 64 << 20;
 /// submissions whose bytes went up as copies for want of a mask buffer.
 static CARD_MERGES: [std::sync::atomic::AtomicU64; 4] = [const { std::sync::atomic::AtomicU64::new(0) }; 4];
 
->>>>>>> vitoriabr/main
 /// Whether the pieces hashed again after ranges were sent up to a copy in
 /// the card's memory are hashed in runs of pieces that touch, each piece
 /// once (`VICTORY_CARD_REHASH_RUNS=1`; off by default), and not in a pass
@@ -3630,16 +3608,10 @@ struct Sent {
     number: u64,
     card: Option<CardPlan>,
     back: Vec<Declared>,
-<<<<<<< HEAD
     /// Title-memory ranges written when its shader textures are copied back.
     texture_back_ranges: Vec<(usize, usize)>,
     /// What was taken off it to be done on the card.
     own: Option<card_steps::Taken>,
-||||||| 085ee7c4
-=======
-    /// Title-memory ranges written when its shader textures are copied back.
-    texture_back_ranges: Vec<(usize, usize)>,
->>>>>>> vitoriabr/main
     /// Its bottom-of-pipe writes.
     writes: Vec<(usize, crate::queue::Written, usize)>,
 }
@@ -3655,14 +3627,9 @@ struct Flight {
     order: Vec<usize>,
     card: Option<CardPlan>,
     back: Vec<Declared>,
-<<<<<<< HEAD
     /// The list of ours that ran ahead of them ([`card_steps`]).
     own: Option<card_steps::Taken>,
     texture_back_ranges: Vec<(usize, usize)>,
-||||||| 085ee7c4
-=======
-    texture_back_ranges: Vec<(usize, usize)>,
->>>>>>> vitoriabr/main
 }
 
 /// One thing in the line of what waits for the card, in order.
@@ -5626,7 +5593,6 @@ impl Host {
         })
     }
 
-<<<<<<< HEAD
     /// Whether the host GPU lets a view of a typed texture use another
     /// format of the same family (D3D12's relaxed casting rules, reported
     /// in Options3); logged once.
@@ -5650,7 +5616,7 @@ impl Host {
         })
     }
 
-/// Whether the host device is backed by a software adapter (WARP /
+    /// Whether the host device is backed by a software adapter (WARP /
     /// Microsoft Basic Render Driver), either via `VICTORY_D3D12_WARP` or
     /// because the host has no hardware GPU (such as hosted CI runners).
     #[cfg(test)]
@@ -5679,21 +5645,6 @@ impl Host {
             };
             adapter.GetDesc1().map_or(true, |desc| is_software(&desc))
         }
-    }
-
-||||||| 085ee7c4
-=======
-    /// Whether the device runs on a software adapter (WARP) or no DXGI adapter
-    /// handle was retained (e.g. headless CI WARP runners).
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn is_software_adapter(&self) -> bool {
-        self.adapter.as_ref().is_none_or(|a| {
-            // SAFETY: live DXGI adapter.
-            unsafe { a.GetDesc1() }.is_ok_and(|d| {
-                d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 || d.VendorId == 0x1414
-            })
-        })
     }
 
     /// Short uppercase GPU name for the on-screen HUD (`fpsbox`).
@@ -5730,7 +5681,6 @@ impl Host {
         Some((info.CurrentUsage >> 20).min(u64::from(u32::MAX)) as u32)
     }
 
->>>>>>> vitoriabr/main
     /// A new list, open for recording.
     pub(crate) fn new_list(&self) -> windows::core::Result<HostList> {
         crate::census::made(8, 0);
@@ -6250,14 +6200,10 @@ impl Host {
         };
         let gathering = crate::timeline::span("copies in the card's memory: what changed");
         let mut dirty = crate::shadow::card_dirty(sent_as);
-<<<<<<< HEAD
         gathering.end();
-||||||| 085ee7c4
-=======
         // The title's bytes put in under flights' shader writes that go up
         // through the merge on the card (`shadow::merge_on_card`).
         let masked = crate::shadow::card_masked(sent_as);
->>>>>>> vitoriabr/main
         // With fetches on a copy queue (`crate::queue2`, bit 1 of
         // `VICTORY_QUEUE2`): the send's number is signalled on the direct
         // queue behind the send, so that a fetch knows which sends the card
@@ -6269,13 +6215,7 @@ impl Host {
                 second.sent_up(&self.queue, sent_as);
             }
         };
-<<<<<<< HEAD
-        if declared.is_empty() && dirty.is_empty() && looked.is_empty() && owed.is_empty() {
-||||||| 085ee7c4
-        if declared.is_empty() && dirty.is_empty() {
-=======
-        if declared.is_empty() && dirty.is_empty() && masked.is_empty() {
->>>>>>> vitoriabr/main
+        if declared.is_empty() && dirty.is_empty() && looked.is_empty() && owed.is_empty() && masked.is_empty() {
             numbered();
             return None;
         }
@@ -6455,28 +6395,8 @@ impl Host {
                         let bytes: u64 = ranges.iter().map(|&(a, b)| (b - a) as u64).sum();
                         crate::shadow::CARD_STATS[0].fetch_add(bytes, Ordering::Relaxed);
                         crate::shadow::CARD_STATS[1].fetch_add(ranges.len() as u64, Ordering::Relaxed);
-<<<<<<< HEAD
                         #[cfg(feature = "diagnostics")]
                         traffic::moved(traffic::UP, shadow.span(), ranges.iter().copied());
-                        if own.is_none() && before.is_some() && !ranges.is_empty() {
-                            sent.push(transition(
-                                &shadow.buffer,
-                                D3D12_RESOURCE_STATE_COPY_DEST,
-                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                            ));
-                        }
-                    }
-                    if !sent.is_empty() {
-                        list.ResourceBarrier(&sent);
-                    }
-                    list.SetComputeRootSignature(&work.root);
-                    list.SetPipelineState(&work.pso);
-                    list.SetComputeRootUnorderedAccessView(3, work.differs.0.GetGPUVirtualAddress());
-                    for (shadow, ranges) in &dirty {
-                        let Some((_, Some(before), _)) = shadow.card_sides() else {
-||||||| 085ee7c4
-                        let Some(before) = before else {
-=======
                         // The merge on the card, behind the copies: both
                         // take their bytes from the CPU's side.
                         let merged = match (merges.iter().find(|(s, _)| Arc::ptr_eq(s, shadow)), &work.merge, &mask) {
@@ -6509,8 +6429,28 @@ impl Host {
                             }
                             _ => None,
                         };
-                        let Some(before) = before else {
->>>>>>> vitoriabr/main
+                        if merged.is_some() {
+                            sent.push(transition(
+                                &shadow.buffer,
+                                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                            ));
+                        } else if own.is_none() && before.is_some() && !ranges.is_empty() {
+                            sent.push(transition(
+                                &shadow.buffer,
+                                D3D12_RESOURCE_STATE_COPY_DEST,
+                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                            ));
+                        }
+                    }
+                    if !sent.is_empty() {
+                        list.ResourceBarrier(&sent);
+                    }
+                    list.SetComputeRootSignature(&work.root);
+                    list.SetPipelineState(&work.pso);
+                    list.SetComputeRootUnorderedAccessView(3, work.differs.0.GetGPUVirtualAddress());
+                    for (shadow, ranges) in &dirty {
+                        let Some((_, Some(before), _)) = shadow.card_sides() else {
                             continue;
                         };
                         let size = shadow.card_hash_size();
@@ -6520,34 +6460,6 @@ impl Host {
                         // hashed again, all of them the first time; the
                         // compare after the lists hashes the declared
                         // pieces and flags those whose hash is another.
-<<<<<<< HEAD
-||||||| 085ee7c4
-                        if !ranges.is_empty() {
-                            list.ResourceBarrier(&[transition(
-                                &shadow.buffer,
-                                D3D12_RESOURCE_STATE_COPY_DEST,
-                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                            )]);
-                        }
-                        list.SetComputeRootSignature(&work.root);
-                        list.SetPipelineState(&work.pso);
-=======
-                        if merged.is_some() {
-                            list.ResourceBarrier(&[transition(
-                                &shadow.buffer,
-                                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                            )]);
-                        } else if !ranges.is_empty() {
-                            list.ResourceBarrier(&[transition(
-                                &shadow.buffer,
-                                D3D12_RESOURCE_STATE_COPY_DEST,
-                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                            )]);
-                        }
-                        list.SetComputeRootSignature(&work.root);
-                        list.SetPipelineState(&work.pso);
->>>>>>> vitoriabr/main
                         list.SetComputeRootShaderResourceView(1, shadow.buffer.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(2, before.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(3, work.differs.0.GetGPUVirtualAddress());
@@ -6556,7 +6468,6 @@ impl Host {
                         let runs: Vec<crate::shadow::CardSpan> = if whole.iter().any(|s| Arc::ptr_eq(s, shadow)) {
                             vec![shadow.card_run(0, usize::MAX)]
                         } else {
-<<<<<<< HEAD
                             // (In order: the next of the same piece, of the
                             // tens of thousands there are, says nothing.)
                             let mut runs: Vec<crate::shadow::CardSpan> = Vec::new();
@@ -6566,6 +6477,12 @@ impl Host {
                                     _ => runs.push(run),
                                 }
                             }
+                            // What the merge went over, each piece once.
+                            if let Some((_, stretches)) = merges.iter().find(|(s, _)| Arc::ptr_eq(s, shadow)) {
+                                runs.extend(crate::shadow::joined_piece_runs(
+                                    stretches.iter().map(|s| shadow.card_run(s.at, s.at + s.bytes)).collect(),
+                                ));
+                            }
                             runs
                         };
                         // The same pieces in fewer passes (`rehash_runs` + `rehash_gap`).
@@ -6573,36 +6490,14 @@ impl Host {
                             crate::shadow::joined_piece_runs_within(runs, rehash_gap())
                         } else {
                             runs
-||||||| 085ee7c4
-                            ranges.iter().map(|&(a, b)| shadow.card_run(a, b)).collect()
-=======
-                            let mut runs: Vec<crate::shadow::CardSpan> = ranges.iter().map(|&(a, b)| shadow.card_run(a, b)).collect();
-                            // What the merge went over, each piece once.
-                            if let Some(stretches) = merged {
-                                runs.extend(crate::shadow::joined_piece_runs(
-                                    stretches.iter().map(|s| shadow.card_run(s.at, s.at + s.bytes)).collect(),
-                                ));
-                            }
-                            runs
->>>>>>> vitoriabr/main
                         };
                         CARD_PASSES[0].fetch_add(runs.len() as u64, Ordering::Relaxed);
                         CARD_PASSES[1].fetch_add(runs.iter().map(|r| u64::from(r.pieces)).sum::<u64>(), Ordering::Relaxed);
                         for run in runs {
-<<<<<<< HEAD
                             if run.pieces == 0 {
                                 continue;
                             }
                             dispatch_card_compare(list, run.first, run.skew, size as u32, run.pieces, 0, 0, 0);
-||||||| 085ee7c4
-                            let constants = [run.first, run.skew, size as u32, run.pieces, 0, 0];
-                            list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
-                            list.Dispatch(run.pieces.div_ceil(64), 1, 1);
-=======
-                            let constants = [run.first, run.skew, size as u32, run.pieces, 0, 0];
-                            list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
-                            list.Dispatch(card_compare_groups(run.pieces), 1, 1);
->>>>>>> vitoriabr/main
                         }
                     }
                     crate::cardmeter::end(list, timed);
@@ -6738,7 +6633,6 @@ impl Host {
                         let m = if r.picked { 1 } else { mode };
                         list.SetComputeRootShaderResourceView(1, r.shadow.buffer.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(2, before.GetGPUVirtualAddress());
-<<<<<<< HEAD
                         dispatch_card_compare(
                             list,
                             r.span.first,
@@ -6749,11 +6643,6 @@ impl Host {
                             m,
                             inline_limit,
                         );
-||||||| 085ee7c4
-                        list.Dispatch(r.span.pieces.div_ceil(64), 1, 1);
-=======
-                        list.Dispatch(card_compare_groups(r.span.pieces), 1, 1);
->>>>>>> vitoriabr/main
                         CARD_PASSES[2].fetch_add(1, Ordering::Relaxed);
                     }
                     // The fetch inside the flight (`inflight_fetch`): behind
@@ -7328,7 +7217,6 @@ impl Host {
                         }
                     }
                 }
-<<<<<<< HEAD
                 let mut hand_back = relay_hand_back(&back);
                 stage.next("landing: copies in the card's memory");
                 self.relay_card_back(&plans, fetch, &mut || {
@@ -7341,26 +7229,9 @@ impl Host {
                 hand_back.merge();
                 stage.next("landing: ranges done with");
                 let finishing = std::time::Instant::now();
-                // Only now, and flight by flight: a range another flight
-                // in the air declared too stays closed to refreshes.
-                for flight in &flights {
-                    for (shadow, ranges) in &flight.back {
-                        shadow.copy_back_done(ranges);
-                    }
-                }
+                // (The ranges are released only after `line.written` no
+                // longer names them: see the `backs` loop below.)
                 crate::land::spent(crate::land::stat::DONE, finishing);
-||||||| 085ee7c4
-                relay_hand_back(&back);
-                // Only now, and flight by flight: a range another flight
-                // in the air declared too stays closed to refreshes.
-                for flight in &flights {
-                    for (shadow, ranges) in &flight.back {
-                        shadow.copy_back_done(ranges);
-                    }
-                }
-=======
-                relay_hand_back(&back);
->>>>>>> vitoriabr/main
                 copy_back(0, landing.elapsed().as_micros() as u64);
                 RELAY_STATS[0].fetch_add(1, Ordering::Relaxed);
                 RELAY_STATS[1].fetch_add(flights.len() as u64, Ordering::Relaxed);
@@ -7370,17 +7241,13 @@ impl Host {
         stage.next("landing: read-backs, telling the title");
         let mut last = 0;
         let mut landed = Vec::new();
-<<<<<<< HEAD
         let mut telling = std::time::Instant::now();
-||||||| 085ee7c4
-=======
         // Collect each flight's back ranges before consuming `items` (without
         // deduplicating across flights: `Shadow::copy_back_done` decrements
         // `Flights` per flight!). Calling `copy_back_done` after `line.written`
         // is updated and waiters are woken ensures no concurrent refresh sees a
         // range as free while its merge is still in flight.
         let mut backs: Vec<(std::sync::Arc<crate::shadow::Shadow>, Vec<(usize, usize)>)> = Vec::new();
->>>>>>> vitoriabr/main
         for item in items {
             telling = match item {
                 Late::Run(flight) => {
@@ -7395,12 +7262,8 @@ impl Host {
                         own.landed();
                     }
                     landed.push((flight.lists, flight.order));
-<<<<<<< HEAD
-                    crate::land::spent(crate::land::stat::READ_BACKS, telling)
-||||||| 085ee7c4
-=======
                     backs.extend(flight.back);
->>>>>>> vitoriabr/main
+                    crate::land::spent(crate::land::stat::READ_BACKS, telling)
                 }
                 Late::Write(at, what, bytes) => {
                     what.write(at as *mut u8, bytes);
@@ -7746,13 +7609,8 @@ impl Host {
                 order,
                 card: sent.card,
                 back: sent.back,
-<<<<<<< HEAD
                 own: sent.own,
                 texture_back_ranges: sent.texture_back_ranges,
-||||||| 085ee7c4
-=======
-                texture_back_ranges: sent.texture_back_ranges,
->>>>>>> vitoriabr/main
             }));
             items.extend(sent.writes.into_iter().map(|(at, what, bytes)| Late::Write(at, what, bytes)));
             *flying >= late_most()
@@ -7806,13 +7664,8 @@ impl Host {
                 order: Vec::new(),
                 card: sent.card,
                 back: sent.back,
-<<<<<<< HEAD
                 own: sent.own,
                 texture_back_ranges: sent.texture_back_ranges,
-||||||| 085ee7c4
-=======
-                texture_back_ranges: sent.texture_back_ranges,
->>>>>>> vitoriabr/main
             }));
             items.extend(sent.writes.into_iter().map(|(at, what, bytes)| Late::Write(at, what, bytes)));
         }
@@ -8346,7 +8199,6 @@ impl Host {
             if let Err(e) = signalled {
                 fail(format_args!("a submission sent ahead could not be followed by a signal ({e})"));
             }
-<<<<<<< HEAD
             for list in runs {
                 for step in &list.deferred().copies {
                     if let Step::Texture { staging, uploads: true } = step {
@@ -8361,15 +8213,6 @@ impl Host {
             for list in runs {
                 texture_back_ranges.extend(list.deferred().texture_backs.iter().map(crate::texback::Back::range));
             }
-||||||| 085ee7c4
-            let back = declared_writes(runs);
-=======
-            let back = declared_writes(runs);
-            let mut texture_back_ranges = Vec::new();
-            for list in runs {
-                texture_back_ranges.extend(list.deferred().texture_backs.iter().map(crate::texback::Back::range));
-            }
->>>>>>> vitoriabr/main
             let writes = runs.iter().flat_map(|l| l.deferred().writes.clone()).collect();
             submission_us(0, (prepared - started).saturating_sub(settled).as_micros() as u64);
             submitting(0, 0);
@@ -8379,13 +8222,8 @@ impl Host {
                 number: this_submission,
                 card,
                 back,
-<<<<<<< HEAD
                 own,
                 texture_back_ranges,
-||||||| 085ee7c4
-=======
-                texture_back_ranges,
->>>>>>> vitoriabr/main
                 writes,
             };
             working(was_working);
@@ -9151,18 +8989,10 @@ impl HostList {
     /// as [`HostList::transition`] does a title resource's host copy, and
     /// records the barrier: for textures that are not a title resource's
     /// host copy (colour twins) and for the copies between the two.
-<<<<<<< HEAD
-    fn settle(&self, copy: &std::sync::Arc<crate::resource::HostTexture>, wanted: u32) {
+    pub(crate) fn settle(&self, copy: &std::sync::Arc<crate::resource::HostTexture>, wanted: u32) {
         let wanted = legal_for(copy.flags(), wanted);
         self.changed_something();
         self.note_write(std::sync::Arc::as_ptr(copy) as usize, wanted);
-||||||| 085ee7c4
-    fn settle(&self, copy: &std::sync::Arc<crate::resource::HostTexture>, wanted: u32) {
-        let wanted = legal_state(&copy.texture, wanted);
-=======
-    pub(crate) fn settle(&self, copy: &std::sync::Arc<crate::resource::HostTexture>, wanted: u32) {
-        let wanted = legal_state(&copy.texture, wanted);
->>>>>>> vitoriabr/main
         let mut states = self.states.lock().unwrap_or_else(|e| e.into_inner());
         let before = match states.entry(std::sync::Arc::as_ptr(copy) as usize) {
             std::collections::hash_map::Entry::Vacant(v) => {
@@ -9344,37 +9174,6 @@ impl HostList {
         }
     }
 
-<<<<<<< HEAD
-    /// A draw or dispatch being prepared writes title texture `resource`
-    /// through unordered access: if it is of a kind copied back
-    /// ([`crate::texback`]), the list copies it when it closes.
-    pub(crate) fn texture_written(&self, resource: crate::object::This) {
-        if !crate::texback::wanted(resource) {
-            return;
-        }
-        let mut deferred = self.deferred();
-        if !deferred.back_wanted.iter().any(|target| target.owner() == resource as usize)
-            && let Some(target) = crate::texback::Target::new(resource)
-        {
-            deferred.back_wanted.push(target);
-        }
-    }
-
-    /// Before the list closes: the textures its shaders wrote that are copied
-    /// back go into read-back buffers ([`crate::texback::record`]).
-    fn textures_back(&self) {
-        const COPY_SOURCE: u32 = 0x800;
-        let wanted = std::mem::take(&mut self.deferred().back_wanted);
-        for target in wanted {
-            self.settle(&target.copy, COPY_SOURCE);
-            if let Some(back) = crate::texback::record(&self.list, target) {
-                self.deferred().texture_backs.push(back);
-            }
-        }
-    }
-
-||||||| 085ee7c4
-=======
     /// A draw or dispatch being prepared writes title texture `resource`
     /// through unordered access: if it is of a kind copied back
     /// ([`crate::texback`]), the list copies it when it closes.
@@ -9410,7 +9209,6 @@ impl HostList {
         }
     }
 
->>>>>>> vitoriabr/main
     /// The draw or dispatch just prepared is recorded: the twins it writes
     /// now hold what their depth textures lack.
     pub(crate) fn twins_written(&self) {
@@ -12739,7 +12537,6 @@ impl Host {
     /// Shows `texture`, which is in `state` (a host state) and stays in it,
     /// as frame `frame` (saved if captures are on). `None` if nothing was
     /// shown; else, in diagnostics builds, whether the frame was black.
-<<<<<<< HEAD
     pub(crate) fn present(
         &self,
         texture: &ID3D12Resource,
@@ -12747,36 +12544,12 @@ impl Host {
         frame: u64,
         over: Option<(&ID3D12Resource, u32)>,
     ) -> Option<bool> {
-||||||| 085ee7c4
-    pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-=======
-    pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-        self.present_over(texture, state, None, frame)
-    }
-
-    /// [`Self::present`], with the title's second plane laid over `texture`
-    /// when there is one (`crate::compose`). Its state is left as it was.
-    pub(crate) fn present_over(
-        &self,
-        texture: &ID3D12Resource,
-        state: u32,
-        over: Option<(&ID3D12Resource, u32)>,
-        frame: u64,
-    ) -> Option<bool> {
->>>>>>> vitoriabr/main
         let showing = std::time::Instant::now();
-<<<<<<< HEAD
         let shown = self.present_now(texture, state, frame, over);
-||||||| 085ee7c4
-        let shown = self.present_now(texture, state, frame);
-=======
-        let shown = self.present_now(texture, state, over, frame);
->>>>>>> vitoriabr/main
         crate::framelog::add(crate::framelog::T::PresentShowUs, showing.elapsed().as_micros() as u64);
         shown
     }
 
-<<<<<<< HEAD
     fn present_now(
         &self,
         texture: &ID3D12Resource,
@@ -12784,17 +12557,6 @@ impl Host {
         frame: u64,
         over: Option<(&ID3D12Resource, u32)>,
     ) -> Option<bool> {
-||||||| 085ee7c4
-    fn present_now(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-=======
-    fn present_now(
-        &self,
-        texture: &ID3D12Resource,
-        state: u32,
-        over: Option<(&ID3D12Resource, u32)>,
-        frame: u64,
-    ) -> Option<bool> {
->>>>>>> vitoriabr/main
         // SAFETY: a live resource.
         let desc = unsafe { texture.GetDesc() };
         let Some(format) = swap_format(desc.Format) else {
