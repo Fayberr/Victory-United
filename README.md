@@ -44,6 +44,9 @@ cabelo e luz bem melhores. Por cima dela vieram os ajustes para NVIDIA de 8 GB.
   deixava texturas com bytes velhos depois de a memória mudar.
 - **Composição de planos do present** (Series S: o mundo e a interface em planos separados),
   enviada à frente como o present de um plano só, sem esperar a placa.
+- **Vídeo da abertura sem voltar quadros**: cada lista tem o seu próprio buffer de upload
+  para os planos de vídeo escritos pela CPU; com vários quadros em voo, um quadro
+  sobrescrevia o anterior e os letreiros da abertura voltavam no meio do fade.
 - **Textura nova só aparece depois do upload** (`VICTORY_SHOW_AFTER`, agora ligado; `0`
   desliga): um pedaço reaproveitado do pool mostrava bytes velhos, e o banco do carro
   da abertura virava um quadriculado verde e azul.
