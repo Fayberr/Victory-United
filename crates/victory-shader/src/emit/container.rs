@@ -64,7 +64,6 @@ impl SigElement {
     }
 }
 
-<<<<<<< HEAD
 /// Read the mesh shader's declared interpolation instead of deriving it from the value type.
 /// The vertex outputs follow the input records in PSV0. OSG1 can list the same elements
 /// in a different order, so apply the modes only after matching the two descriptions.
@@ -168,8 +167,6 @@ pub(super) fn mesh_output_modes(psv: &[u8], osg: &[u8], outputs: &[SigElement]) 
     Some(modes)
 }
 
-||||||| 85d564167
-=======
 /// Gives the elements of a row whose interpolation mode nothing decided
 /// (float elements, unless `read` and read) the mode the row's other
 /// elements agree on: DXIL wants one mode per row, and the console's
@@ -194,8 +191,6 @@ pub(crate) fn same_mode_per_row(elements: &mut [SigElement], read: bool) {
         }
     }
 }
-
->>>>>>> avatar/main
 /// `ISG1`/`OSG1`: 32-byte rows, then the names.
 pub(crate) fn signature(elements: &[SigElement], input: bool) -> Vec<u8> {
     let mut out = Vec::new();
@@ -814,8 +809,6 @@ mod tests {
             .collect();
         assert_eq!(hex, "900150983cd24fb0d6963f7d28e17f72");
     }
-<<<<<<< HEAD
-
     #[test]
     fn signature_keeps_the_console_element_order_within_a_row() {
         // Two semantics share row 2 (columns 0 and 3). The module's signature
@@ -850,8 +843,6 @@ mod tests {
         assert_eq!(name_at(0), "TEXCOORD");
         assert_eq!(name_at(1), "COLOR");
     }
-||||||| 85d564167
-=======
 
     fn el(name: &str, kind: u8, comp: u8, interp: u8, row: u32, col: u8, usage: u8) -> SigElement {
         SigElement {
@@ -891,5 +882,4 @@ mod tests {
         same_mode_per_row(&mut outputs, false);
         assert_eq!(outputs.iter().map(|e| e.interp).collect::<Vec<_>>(), [1, 1]);
     }
->>>>>>> avatar/main
 }
