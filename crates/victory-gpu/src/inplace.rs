@@ -915,9 +915,10 @@ pub(crate) fn beside_page(page: usize) -> Option<(usize, [usize; 8])> {
             }
             let offset = offset + within as u64;
             if let Some(whole) = v.whole.iter().find(|w| w.0 == section) {
+                let mut all = Vec::new();
+                v.pages.get(&(section, offset))?.extend_into(&mut all);
                 let mut shown = [0; 8];
-                let all = v.pages.get(&(section, offset))?;
-                shown.get_mut(..all.len())?.copy_from_slice(&all.to_vec());
+                shown.get_mut(..all.len())?.copy_from_slice(&all);
                 return (whole.1 != 0).then(|| (whole.1 + offset as usize, shown));
             }
         }
