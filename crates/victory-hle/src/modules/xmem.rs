@@ -8,7 +8,7 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use std::alloc::{Layout, alloc, dealloc};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -175,7 +175,6 @@ fn virtual_alloc(
             constrained.into(),
         )
     };
-<<<<<<< HEAD
     let mut at = allocate(&mut parameter);
     // A 32-bit request that found no room below 4 GiB: the guards there
     // make way for it.
@@ -196,23 +195,6 @@ fn virtual_alloc(
             );
         }
     }
-||||||| a26859fc
-=======
-    if at.is_null() {
-        let error = std::io::Error::last_os_error();
-        if kind & MEM_COMMIT != 0 {
-            commit_refused(size, "virtual memory", error);
-        } else {
-            tracing::warn!(
-                size,
-                kind = format_args!("{kind:#x}"),
-                flags = format_args!("{flags:#x}"),
-                %error,
-                "XMemVirtualAlloc refused"
-            );
-        }
-    }
->>>>>>> avatar/main
     if base.is_null() {
         // The census keeps what the title asked for (`VICTORY_CENSUS`).
         #[cfg(windows)]
@@ -225,7 +207,6 @@ fn virtual_alloc(
             "XMemVirtualAlloc"
         );
     }
-<<<<<<< HEAD
     // Committed: what the GPU side found uncommitted there is no longer so
     // (it looks again only now and then otherwise).
     if !at.is_null() && kind & MEM_COMMIT != 0 {
@@ -234,13 +215,10 @@ fn virtual_alloc(
         let start = if base.is_null() { at } else { base };
         on_commit(start as usize, size);
     }
-||||||| a26859fc
-=======
     if !at.is_null() && !placeholder {
         victory_gpu::title_memory_allocated(at as usize, size);
     }
     note_protection(asked, kind, flags, at as usize, size);
->>>>>>> avatar/main
     at
 }
 
@@ -585,79 +563,10 @@ impl Physical {
     }
 }
 
-<<<<<<< HEAD
-/// Addresses of views showing one 64 KiB physical page. Stores the common
-/// single-view case inline with zero heap allocation and promotes to a
-/// `HashSet` only when aliased across multiple views.
-enum ShownPages {
-    One(usize),
-    Many(HashSet<usize>),
-}
-
-impl ShownPages {
-    fn insert(&mut self, addr: usize) {
-        match self {
-            Self::One(only) if *only == addr => {}
-            Self::One(only) => {
-                let mut set = HashSet::new();
-                set.insert(*only);
-                set.insert(addr);
-                *self = Self::Many(set);
-            }
-            Self::Many(set) => {
-                set.insert(addr);
-            }
-        }
-    }
-
-    fn remove(&mut self, addr: usize) -> bool {
-        match self {
-            Self::One(only) => *only == addr,
-            Self::Many(set) => {
-                set.remove(&addr);
-                if set.len() == 1 {
-                    let only = *set.iter().next().unwrap();
-                    *self = Self::One(only);
-                    false
-                } else {
-                    set.is_empty()
-                }
-            }
-        }
-    }
-}
-
-#[derive(Default)]
-struct Physical {
-||||||| a26859fc
-#[derive(Default)]
-struct Physical {
-=======
 /// The title's pages by number.
 struct Pages {
->>>>>>> avatar/main
     next_page: usize,
     pages: HashMap<usize, Slice>,
-<<<<<<< HEAD
-    /// Mapped views by address: their length and what they show.
-    views: BTreeMap<usize, (usize, Slice)>,
-    /// Where each page shows: by its section and its index there, the
-    /// address of that page in every view that shows it now ([`shown_at`];
-    /// as upstream's c75fdba keeps it). The title maps pages where the
-    /// card reads them and has them filled afterwards by DirectStorage,
-    /// which writes through views of our own.
-    shown: HashMap<(usize, usize), ShownPages>,
-||||||| a26859fc
-    /// Mapped views by address: their length and what they show.
-    views: BTreeMap<usize, (usize, Slice)>,
-    /// Where each page shows: by its section and its index there, the
-    /// address of that page in every view that shows it now ([`shown_at`];
-    /// as upstream's c75fdba keeps it). The title maps pages where the
-    /// card reads them and has them filled afterwards by DirectStorage,
-    /// which writes through views of our own.
-    shown: HashMap<(usize, usize), Vec<usize>>,
-=======
->>>>>>> avatar/main
 }
 
 /// Where the title sees its pages: [`Physical::views`] the other way.
@@ -1056,16 +965,7 @@ pub(crate) fn shown_at(pages: &[usize], offset: usize, len: usize) -> Vec<(usize
             // The bytes of this page that the write covers.
             let lo = if i == 0 { offset % PAGE } else { 0 };
             let hi = (end - (first + i) * PAGE).min(PAGE);
-<<<<<<< HEAD
-            match addresses {
-                ShownPages::One(at) => pieces.push((at + lo, hi - lo)),
-                ShownPages::Many(set) => pieces.extend(set.iter().map(|&at| (at + lo, hi - lo))),
-            }
-||||||| a26859fc
-            pieces.extend(addresses.iter().map(|&at| (at + lo, hi - lo)));
-=======
             pieces.extend(shown.at(slice).into_iter().map(|(at, _)| (at + lo, hi - lo)));
->>>>>>> avatar/main
         }
     }
     pieces.sort_unstable();
@@ -1338,7 +1238,6 @@ pub fn map_alias(to: u64, from: u64, len: u64) -> bool {
         if at >= base + size {
             return None;
         }
-<<<<<<< HEAD
         let avail = (base + size - at) / PAGE;
         Some((
             Slice {
@@ -1352,22 +1251,6 @@ pub fn map_alias(to: u64, from: u64, len: u64) -> bool {
     let mut page = 0;
     while page < total_pages {
         let Some((first, mut run)) = slice_at(&physical.views, from + page * PAGE) else {
-||||||| a26859fc
-        let at = from + k;
-        let Some(slice) = physical
-            .views
-            .range(..=at)
-            .next_back()
-            .filter(|(base, (size, _))| at < *base + size)
-            .map(|(base, (_, s))| Slice {
-                index: s.index + (at - base) / PAGE,
-                section: s.section.clone(),
-            })
-        else {
-=======
-        let at = from + k;
-        let Some(slice) = physical.slice_at(at) else {
->>>>>>> avatar/main
             return false;
         };
         run = run.min(total_pages - page);
@@ -1396,15 +1279,12 @@ pub fn map_alias(to: u64, from: u64, len: u64) -> bool {
     true
 }
 
-<<<<<<< HEAD
 #[derive(Clone, Copy)]
 enum PageCommitment {
     Required,
     Existing,
 }
 
-||||||| a26859fc
-=======
 /// [`map_alias`] of many ranges, in order.
 pub fn map_aliases(ranges: &[(u64, u64, u64)]) -> bool {
     let _costed = Costed::begin(None);
@@ -1616,7 +1496,7 @@ impl Op {
         let Some(slice) = &self.slice else {
             return true;
         };
-        show(self.at, PAGE, slice, self.own)
+        show(self.at, PAGE, slice, self.own, PageCommitment::Required)
     }
 }
 
@@ -1799,11 +1679,8 @@ mod pool {
     }
 }
 
->>>>>>> avatar/main
 /// Maps `slice` and the slices after it over `[base, base + len)`, which
-<<<<<<< HEAD
-/// must lie in placeholder memory. Coalesces previously split placeholders
-/// or falls back page-by-page if `[base, base + len)` spans split boundaries.
+/// must lie in one placeholder. Coalesces placeholders split earlier.
 fn map(
     physical: &mut Physical,
     base: usize,
@@ -1811,22 +1688,8 @@ fn map(
     slice: Slice,
     commitment: PageCommitment,
 ) -> bool {
-    // SAFETY: splits the placeholder around the range (failing harmlessly
-    // when the range is the whole placeholder), then maps the section
-    // there; both act only on placeholders.
-    let mut view = unsafe {
-||||||| a26859fc
-/// must lie in one placeholder.
-fn map(physical: &mut Physical, base: usize, len: usize, slice: Slice) -> bool {
-    // SAFETY: splits the placeholder around the range (failing harmlessly
-    // when the range is the whole placeholder), then maps the section
-    // there; both act only on placeholders.
-    let view = unsafe {
-=======
-/// must lie in one placeholder.
-fn map(physical: &mut Physical, base: usize, len: usize, slice: Slice) -> bool {
     let own = physical.holes.remove(&base) == Some(len) && lean();
-    if !show(base, len, &slice, own) {
+    if !show(base, len, &slice, own, commitment) {
         return false;
     }
     // Noted before the GPU side is told: bytes DirectStorage put in earlier,
@@ -1846,7 +1709,6 @@ fn map(physical: &mut Physical, base: usize, len: usize, slice: Slice) -> bool {
 fn split(base: usize, len: usize) {
     // SAFETY: acts only on a placeholder.
     counted(Call::Split, || unsafe {
->>>>>>> avatar/main
         VirtualFree(
             base as *mut c_void,
             len,
@@ -1857,7 +1719,7 @@ fn split(base: usize, len: usize) {
 
 /// The system calls of [`map`]; `own`: the placeholder at `base` is `len`
 /// long already.
-fn show(base: usize, len: usize, slice: &Slice, own: bool) -> bool {
+fn show(base: usize, len: usize, slice: &Slice, own: bool, commitment: PageCommitment) -> bool {
     let map_view = || {
         // SAFETY: maps the section over a placeholder; acts only on one.
         counted(Call::Map, || unsafe {
@@ -1874,10 +1736,14 @@ fn show(base: usize, len: usize, slice: &Slice, own: bool) -> bool {
             )
         })
     };
-<<<<<<< HEAD
+    let mut view = if own { map_view() } else { MEMORY_MAPPED_VIEW_ADDRESS { Value: std::ptr::null_mut() } };
+    if view.Value as usize != base {
+        split(base, len);
+        view = map_view();
+    }
     if view.Value as usize != base && len > PAGE {
-        // `[base, base + len)` may consist of previously split adjacent
-        // placeholders; coalesce them and retry once before falling back.
+        // `[base, base + len)` may consist of placeholders split earlier;
+        // coalesce them and retry once, then page by page.
         // SAFETY: coalesces adjacent placeholders and maps the section there.
         view = unsafe {
             VirtualFree(
@@ -1886,7 +1752,7 @@ fn show(base: usize, len: usize, slice: &Slice, own: bool) -> bool {
                 MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS,
             );
             MapViewOfFile3(
-                slice.section.0,
+                slice.section.handle,
                 GetCurrentProcess(),
                 base as *const c_void,
                 (slice.index * PAGE) as u64,
@@ -1910,14 +1776,6 @@ fn show(base: usize, len: usize, slice: &Slice, own: bool) -> bool {
             return true;
         }
     }
-||||||| a26859fc
-=======
-    let mut view = if own { map_view() } else { MEMORY_MAPPED_VIEW_ADDRESS { Value: std::ptr::null_mut() } };
-    if view.Value as usize != base {
-        split(base, len);
-        view = map_view();
-    }
->>>>>>> avatar/main
     if view.Value as usize != base {
         tracing::warn!(
             address = format_args!("{base:#x}"),
@@ -1927,44 +1785,14 @@ fn show(base: usize, len: usize, slice: &Slice, own: bool) -> bool {
         );
         return false;
     }
-<<<<<<< HEAD
-    if matches!(commitment, PageCommitment::Required) && !commit(base, len) {
-||||||| a26859fc
-    if !commit(base, len) {
-=======
-    if !slice.section.commit_shown(slice.index, base, len) {
->>>>>>> avatar/main
+    // `Existing`: the source view committed these pages of the same section.
+    if matches!(commitment, PageCommitment::Required)
+        && !slice.section.commit_shown(slice.index, base, len)
+    {
         // SAFETY: the view just mapped, back to a placeholder.
         unsafe { UnmapViewOfFile2(GetCurrentProcess(), view, MEM_PRESERVE_PLACEHOLDER) };
         return false;
     }
-<<<<<<< HEAD
-    // New contents, read-write: the GPU side's copies no longer guard it.
-    victory_gpu::title_memory_remapped(base, len);
-    // What the range shows now, for the GPU side's in-place census.
-    victory_gpu::title_memory_view(base, len, slice.section.0 as usize, (slice.index * PAGE) as u64);
-    for k in 0..len.div_ceil(PAGE) {
-        let key = slice.key(k);
-        let addr = base + k * PAGE;
-        match physical.shown.get_mut(&key) {
-            Some(shown) => shown.insert(addr),
-            None => {
-                physical.shown.insert(key, ShownPages::One(addr));
-            }
-        }
-    }
-    physical.views.insert(base, (len, slice));
-||||||| a26859fc
-    // New contents, read-write: the GPU side's copies no longer guard it.
-    victory_gpu::title_memory_remapped(base, len);
-    // What the range shows now, for the GPU side's in-place census.
-    victory_gpu::title_memory_view(base, len, slice.section.0 as usize, (slice.index * PAGE) as u64);
-    for k in 0..len.div_ceil(PAGE) {
-        physical.shown.entry(slice.key(k)).or_default().push(base + k * PAGE);
-    }
-    physical.views.insert(base, (len, slice));
-=======
->>>>>>> avatar/main
     true
 }
 
@@ -2061,29 +1889,10 @@ fn unmap(physical: &mut Physical, base: usize, len: usize) {
         let Some((size, slice)) = physical.views.remove(&at) else {
             continue;
         };
-<<<<<<< HEAD
-        for k in 0..size.div_ceil(PAGE) {
-            let key = slice.key(k);
-            if let Some(addresses) = physical.shown.get_mut(&key)
-                && addresses.remove(at + k * PAGE)
-            {
-                physical.shown.remove(&key);
-            }
-||||||| a26859fc
-        for k in 0..size.div_ceil(PAGE) {
-            let key = slice.key(k);
-            if let Some(addresses) = physical.shown.get_mut(&key) {
-                addresses.retain(|&a| a != at + k * PAGE);
-                if addresses.is_empty() {
-                    physical.shown.remove(&key);
-                }
-            }
-=======
         shown_mut().forget(at, size, &slice);
         if at < base || at + size > end {
             // Parts of it stay, and are mapped again below.
             victory_gpu::title_memory_splitting(at, size);
->>>>>>> avatar/main
         }
         victory_gpu::title_memory_unmapping(at, size);
         // SAFETY: a view we mapped; it becomes a placeholder again.
