@@ -903,7 +903,6 @@ pub(crate) fn writes(start: usize, end: usize, guarded: bool) -> Option<(u64, Ve
     Some(answer)
 }
 
-<<<<<<< HEAD
 /// VU's callers that name the guarded path (`texture.rs`, `shadow.rs`), or
 /// ask whether the range is view memory the guards hold: [`writes`] does the
 /// first, [`guarded`] says the second.
@@ -929,29 +928,6 @@ pub(crate) fn nothing_new(start: usize, end: usize, base: usize, copied: &[u64],
     #[cfg(feature = "diagnostics")]
     if known {
         crate::faultbook::note(crate::faultbook::What::Known, first, last, 1);
-||||||| merged common ancestors
-/// Diagnostics: one in 2,048 of the askings the kernel's write watch
-/// refused for memory the guards did not know (some 200 a frame in the
-/// first rooms, each followed by a question to Windows about the memory):
-/// what the memory is and what the guards hold of its first block.
-#[cfg(feature = "diagnostics")]
-fn failed_asking(start: usize, end: usize) {
-    use windows_sys::Win32::System::Memory::{MEMORY_BASIC_INFORMATION, VirtualQuery};
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 2048 != 0 {
-        return;
-=======
-/// Diagnostics: one in 2,048 of the askings the kernel's write watch
-/// refused for memory the guards did not know (some 200 a frame in the
-/// first rooms, each followed by a question to Windows about the memory):
-/// what the memory is and what the guards hold of its first block.
-#[cfg(feature = "diagnostics")]
-fn failed_asking(start: usize, end: usize) {
-    use windows_sys::Win32::System::Memory::{MEMORY_BASIC_INFORMATION, VirtualQuery};
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    if !N.fetch_add(1, std::sync::atomic::Ordering::Relaxed).is_multiple_of(2048) {
-        return;
->>>>>>> vibr/main
     }
     let j = journal();
     if !known && !j.ahead.iter().any(|&(a, b)| a <= first && last <= b) {
@@ -1688,7 +1664,6 @@ struct Guards {
     /// runtime last mapped or unmapped them. They are view memory whether
     /// their guard stands now or a write has opened it.
     viewed: BTreeSet<usize>,
-<<<<<<< HEAD
     /// With [`holes_level`] 1 and 2: runs of uncommitted blocks as Windows
     /// described them in frame `holes_frame`, first block to end.
     holes: BTreeMap<usize, usize>,
@@ -1699,9 +1674,6 @@ struct Guards {
     /// With [`views_recheck`]: the frame whose share of the clean guarded
     /// blocks was last made due ([`views_due`]).
     views_frame: u64,
-||||||| merged common ancestors
-=======
-    /// Kernel answers of [`uncommitted_end`] for absent blocks, kept for a frame.
     uncommitted: Uncommitted,
 }
 
@@ -1748,7 +1720,6 @@ impl Uncommitted {
         }
         end
     }
->>>>>>> vibr/main
 }
 
 impl Guards {
@@ -1761,7 +1732,6 @@ impl Guards {
         !rest.is_zero() && self.opened.get(&block).is_some_and(|at| at.elapsed() < rest)
     }
 
-<<<<<<< HEAD
     /// A write fault opened `block`.
     fn opened(&mut self, block: usize) {
         const MANY: usize = 1 << 13;
@@ -1769,31 +1739,6 @@ impl Guards {
             self.opened.retain(|_, at| at.elapsed().as_millis() < 50);
             if self.opened.len() >= MANY {
                 self.opened.clear();
-||||||| merged common ancestors
-    fn uncovered(&self, from: usize, to: usize) -> Vec<(usize, usize)> {
-        let mut next = self.0.range(..=from).next_back().map_or(from, |(_, &end)| from.max(end));
-        let mut missing = Vec::new();
-        if next >= to {
-            return missing;
-        }
-        for (&start, &end) in self.0.range(from + 1..to) {
-            if next < start {
-                missing.push((next, start));
-=======
-    fn contains(&self, block: &usize) -> bool {
-        self.0.range(..=*block).next_back().is_some_and(|(_, &end)| *block < end)
-    }
-
-    fn uncovered(&self, from: usize, to: usize) -> Vec<(usize, usize)> {
-        let mut next = self.0.range(..=from).next_back().map_or(from, |(_, &end)| from.max(end));
-        let mut missing = Vec::new();
-        if next >= to {
-            return missing;
-        }
-        for (&start, &end) in self.0.range(from + 1..to) {
-            if next < start {
-                missing.push((next, start));
->>>>>>> vibr/main
             }
         }
         put_count(block).store(0, std::sync::atomic::Ordering::Relaxed);
@@ -1858,18 +1803,14 @@ static GUARDS: std::sync::RwLock<Guards> = std::sync::RwLock::new(Guards {
     parked_ordinary: BTreeSet::new(),
     parked_at: 0,
     viewed: BTreeSet::new(),
-<<<<<<< HEAD
     holes: BTreeMap::new(),
     holes_frame: 0,
     due_frame: 0,
     views_frame: 0,
-||||||| merged common ancestors
-=======
     uncommitted: Uncommitted {
         frame: 0,
         runs: BTreeMap::new(),
     },
->>>>>>> vibr/main
 });
 
 fn guards() -> std::sync::RwLockWriteGuard<'static, Guards> {
@@ -2310,7 +2251,6 @@ fn guard(start: usize, end: usize, known: bool) -> Option<Vec<usize>> {
         return None;
     }
     install();
-<<<<<<< HEAD
     // The holes that an ordinary commit may have filled, with no word of the
     // runtime's. Windows is asked with the lock not held (the range is, no
     // other thread asks about it: `ASKING`); what the runtime tells meanwhile
@@ -2327,75 +2267,6 @@ fn guard(start: usize, end: usize, known: bool) -> Option<Vec<usize>> {
             #[cfg(feature = "diagnostics")]
             tally(3, 1);
             return Some(Vec::new());
-||||||| merged common ancestors
-    let mut g = guards();
-    let mut written = Vec::new();
-    let (first, last) = (start / BLOCK, end.div_ceil(BLOCK));
-    // Large heaps are usually clean. Walk only gaps between clean runs.
-    let mut uncommitted_until = first;
-    for (from, to) in g.clean.uncovered(first, last) {
-        let mut run = None;
-        for block in from..to {
-            let mut open = true;
-            if g.absent.contains(&block) {
-                // Ordinary commits need no runtime mapping notification. Reuse
-                // this asking's query for the following blocks in the same region.
-                if block >= uncommitted_until {
-                    uncommitted_until = uncommitted_end(block);
-                }
-                open = block >= uncommitted_until;
-                if open {
-                    g.absent.remove(&block);
-                }
-            }
-            if open {
-                written.extend(block * BLOCK / PAGE..(block + 1) * BLOCK / PAGE);
-                if g.protected.contains(&block) {
-                    // Written through the runtime, still read-only.
-                    g.clean.insert(block, block + 1);
-                } else {
-                    run.get_or_insert(block);
-                    continue;
-                }
-            }
-            if let Some(begin) = run.take() {
-                protect(&mut g, begin, block);
-            }
-=======
-    let mut g = guards();
-    let mut written = Vec::new();
-    let (first, last) = (start / BLOCK, end.div_ceil(BLOCK));
-    // Large heaps are usually clean. Walk only gaps between clean runs.
-    let mut uncommitted_until = first;
-    for (from, to) in g.clean.uncovered(first, last) {
-        let mut run = None;
-        for block in from..to {
-            let mut open = true;
-            if g.absent.contains(&block) {
-                // Ordinary commits need no runtime mapping notification. Reuse
-                // this asking's query for the following blocks in the same region.
-                if block >= uncommitted_until {
-                    uncommitted_until = g.uncommitted.end(block);
-                }
-                open = block >= uncommitted_until;
-                if open {
-                    g.absent.remove(&block);
-                }
-            }
-            if open {
-                written.extend(block * BLOCK / PAGE..(block + 1) * BLOCK / PAGE);
-                if g.protected.contains(&block) {
-                    // Written through the runtime, still read-only.
-                    g.clean.insert(block, block + 1);
-                } else {
-                    run.get_or_insert(block);
-                    continue;
-                }
-            }
-            if let Some(begin) = run.take() {
-                protect(&mut g, begin, block);
-            }
->>>>>>> vibr/main
         }
         g.absent.range(first..last).filter(|block| !g.held.contains(*block)).collect()
     };
@@ -2769,7 +2640,6 @@ fn protect_here(g: &mut Guards, from: usize, to: usize) {
     while block < to {
         if set(block, block + 1) {
             note(g, block, block + 1);
-<<<<<<< HEAD
             block += 1;
             continue;
         }
@@ -2789,39 +2659,6 @@ fn protect_here(g: &mut Guards, from: usize, to: usize) {
                 // Out of the unclean set while it stays so ([`Guards::parked`]).
                 if g.unclean.contains(&absent) {
                     park(g, absent);
-||||||| merged common ancestors
-        } else {
-            #[cfg(feature = "diagnostics")]
-            let error = std::io::Error::last_os_error();
-            if block < uncommitted_end(block) {
-                g.absent.insert(block);
-            } else {
-                // Diagnostics: a committed block that will not be made
-                // read-only is reported written at every asking and never
-                // known to the guards (one in 1,024 said).
-                #[cfg(feature = "diagnostics")]
-                {
-                    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 1024 == 0 {
-                        tracing::info!("a block of title memory could not be made read-only (one in 1024): {:#x}: {error}", block * BLOCK);
-                    }
-=======
-        } else {
-            #[cfg(feature = "diagnostics")]
-            let error = std::io::Error::last_os_error();
-            if block < uncommitted_end(block) {
-                g.absent.insert(block);
-            } else {
-                // Diagnostics: a committed block that will not be made
-                // read-only is reported written at every asking and never
-                // known to the guards (one in 1,024 said).
-                #[cfg(feature = "diagnostics")]
-                {
-                    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed).is_multiple_of(1024) {
-                        tracing::info!("a block of title memory could not be made read-only (one in 1024): {:#x}: {error}", block * BLOCK);
-                    }
->>>>>>> vibr/main
                 }
             }
             if holes_level() == 2 {
@@ -3194,10 +3031,11 @@ pub fn writing(at: usize, len: usize) {
     // Copies checked in this submission check again (`crate::stamp`).
     crate::stamp::advance();
     // The length is the title's (`fread`'s size times count, saturated).
-<<<<<<< HEAD
     let last = at.saturating_add(len).div_ceil(BLOCK);
     if !light() || PROTECTED.any(at / BLOCK, last) {
         let mut g = guards_timed();
+        // Written through a view of our own: the pages may be committed now.
+        g.uncommitted.forget(at, at.saturating_add(len));
         let opened = open(&mut g, at, at.saturating_add(len));
         #[cfg(feature = "diagnostics")]
         {
@@ -3206,14 +3044,6 @@ pub fn writing(at: usize, len: usize) {
         }
         let _ = opened;
     }
-||||||| merged common ancestors
-    open(&mut guards(), at, at.saturating_add(len));
-=======
-    let mut g = guards();
-    g.uncommitted.forget(at, at.saturating_add(len));
-    open(&mut g, at, at.saturating_add(len));
-    drop(g);
->>>>>>> vibr/main
     // A placed texture there changes with no descriptor written.
     crate::descriptor::host::remapped(at, len);
 }
@@ -3324,24 +3154,6 @@ pub fn title_memory_written(at: usize, len: usize, pages: bool) {
             return;
         }
     }
-<<<<<<< HEAD
-    let guarded = guards_shared().protected.range(at / BLOCK..end.div_ceil(BLOCK)).count() as u64;
-    if pages {
-        WRITTEN[2].fetch_add(guarded, Relaxed);
-    }
-    if mode & 1 != 0 && guarded != 0 {
-        open(&mut guards(), at, end);
-||||||| merged common ancestors
-    {
-        let mut g = guards();
-        let guarded = g.protected.range(at / BLOCK..end.div_ceil(BLOCK)).count() as u64;
-        if pages {
-            WRITTEN[2].fetch_add(guarded, Relaxed);
-        }
-        if mode & 1 != 0 && guarded != 0 {
-            open(&mut g, at, end);
-        }
-=======
     {
         let mut g = guards();
         // Written through a view of our own: the pages may be committed now.
@@ -3353,7 +3165,6 @@ pub fn title_memory_written(at: usize, len: usize, pages: bool) {
         if mode & 1 != 0 && guarded != 0 {
             open(&mut g, at, end);
         }
->>>>>>> vibr/main
     }
     // A placed texture there changed with no descriptor written.
     crate::descriptor::host::page_written(at, len);
@@ -3528,24 +3339,14 @@ pub(crate) static REMAPS: [std::sync::atomic::AtomicU64; 3] = [const { std::sync
 
 /// What the runtime holds while it changes what title memory shows
 /// ([`title_memory_remapping`]).
-<<<<<<< HEAD
 pub struct Remapping {
     _held: Held<std::sync::RwLockWriteGuard<'static, ()>>,
     asked: std::time::Instant,
     since: std::time::Instant,
 }
-||||||| merged common ancestors
-pub struct Remapping(#[allow(dead_code)] std::sync::RwLockWriteGuard<'static, ()>, std::time::Instant);
-=======
-pub struct Remapping {
-    _held: Held<std::sync::RwLockWriteGuard<'static, ()>>,
-    since: std::time::Instant,
-}
->>>>>>> vibr/main
 
 impl Drop for Remapping {
     fn drop(&mut self) {
-<<<<<<< HEAD
         REMAPS[2].fetch_add(self.since.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed);
         // From asking for the lock until it is let go (the frame log).
         crate::framelog::add(crate::framelog::T::RemapUs, self.asked.elapsed().as_micros() as u64);
@@ -3554,13 +3355,6 @@ impl Drop for Remapping {
             guards().changing.clear();
         }
         CHANGES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-||||||| merged common ancestors
-        // From asking for the lock until it is let go (the frame log).
-        crate::framelog::add(crate::framelog::T::RemapUs, self.1.elapsed().as_micros() as u64);
-=======
-        REMAPS[2].fetch_add(self.since.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed);
-        crate::framelog::add(crate::framelog::T::RemapUs, self.since.elapsed().as_micros() as u64);
->>>>>>> vibr/main
     }
 }
 
@@ -3695,7 +3489,6 @@ pub(crate) fn lost(what: &'static str, at: usize, len: usize) {
 
 
 /// The runtime is about to map, unmap or move physical pages of title
-<<<<<<< HEAD
 /// memory `[at, at + len)`: until what it returns is dropped, no read of
 /// those bytes in place is under way and none begins
 /// ([`title_memory_reading`]). Taken around the whole change, the unmapping
@@ -3733,44 +3526,7 @@ pub fn title_memory_remapping(at: usize, len: usize) -> Remapping {
     };
     REMAPS[0].fetch_add(1, Relaxed);
     REMAPS[1].fetch_add(started.elapsed().as_micros() as u64, Relaxed);
-||||||| merged common ancestors
-/// memory: until what it returns is dropped, no read of title memory in
-/// place is under way and none begins ([`title_memory_reading`]). Taken
-/// around the whole change, the unmapping and the mapping again.
-pub fn title_memory_remapping() -> Remapping {
-    let asked = std::time::Instant::now();
-    let held = MAPPING.write().unwrap_or_else(|e| e.into_inner());
-=======
-/// memory `[at, at + len)`: until what it returns is dropped, no read of
-/// those bytes in place is under way and none begins
-/// ([`title_memory_reading`]). Taken around the whole change, the unmapping
-/// and the mapping again, over all the bytes whose mapping it changes.
-pub fn title_memory_remapping(at: usize, len: usize) -> Remapping {
-    use std::sync::atomic::Ordering::Relaxed;
-    let started = std::time::Instant::now();
-    let held = if by_range() {
-        let end = at.saturating_add(len);
-        let mut s = spans();
-        s.next += 1;
-        let id = s.next;
-        s.changes.push((id, at, end, false));
-        while s.reads.iter().any(|r| meet(r.1, r.2, at, end))
-            || s.changes.iter().any(|c| c.3 && meet(c.1, c.2, at, end))
-        {
-            s = spans_wait(s);
-        }
-        if let Some(c) = s.changes.iter_mut().find(|c| c.0 == id) {
-            c.3 = true;
-        }
-        Held::Bytes(Span(id, true))
-    } else {
-        Held::All(MAPPING.write().unwrap_or_else(|e| e.into_inner()))
-    };
-    REMAPS[0].fetch_add(1, Relaxed);
-    REMAPS[1].fetch_add(started.elapsed().as_micros() as u64, Relaxed);
->>>>>>> vibr/main
     crate::framelog::add(crate::framelog::T::Remaps, 1);
-<<<<<<< HEAD
     crate::framelog::add(crate::framelog::T::RemapWaitUs, started.elapsed().as_micros() as u64);
     CHANGES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     CHANGING.set((true, false));
@@ -3779,16 +3535,6 @@ pub fn title_memory_remapping(at: usize, len: usize) -> Remapping {
         asked: started,
         since: std::time::Instant::now(),
     }
-||||||| merged common ancestors
-    crate::framelog::add(crate::framelog::T::RemapWaitUs, asked.elapsed().as_micros() as u64);
-    Remapping(held, asked)
-=======
-    crate::framelog::add(crate::framelog::T::RemapWaitUs, started.elapsed().as_micros() as u64);
-    Remapping {
-        _held: held,
-        since: std::time::Instant::now(),
-    }
->>>>>>> vibr/main
 }
 
 /// What a read of title memory in place holds ([`title_memory_reading`]).
@@ -3811,7 +3557,6 @@ pub fn title_memory_reading(at: usize, len: usize) -> Reading {
 }
 
 /// [`title_memory_reading`] if it can be had at once: `None` while the
-<<<<<<< HEAD
 /// runtime changes a mapping of those bytes (or waits to), for a caller
 /// that has another way to read and would rather not wait.
 pub fn title_memory_reading_now(at: usize, len: usize) -> Option<Reading> {
@@ -3871,25 +3616,6 @@ pub fn title_memory_unmapping(at: usize, len: usize) {
         g.clean.remove(block);
         PUBLISHED.clear(block);
         PROTECTED.clear(block);
-||||||| merged common ancestors
-/// runtime changes a mapping (or waits to), for a caller that has another
-/// way to read and would rather not wait.
-pub fn title_memory_reading_now() -> Option<Reading> {
-    match MAPPING.try_read() {
-        Ok(guard) => Some(Reading(guard)),
-        Err(std::sync::TryLockError::Poisoned(e)) => Some(Reading(e.into_inner())),
-        Err(std::sync::TryLockError::WouldBlock) => None,
-=======
-/// runtime changes a mapping of those bytes (or waits to), for a caller
-/// that has another way to read and would rather not wait.
-pub fn title_memory_reading_now(at: usize, len: usize) -> Option<Reading> {
-    if !by_range() {
-        return match MAPPING.try_read() {
-            Ok(guard) => Some(Reading(Held::All(guard))),
-            Err(std::sync::TryLockError::Poisoned(e)) => Some(Reading(Held::All(e.into_inner()))),
-            Err(std::sync::TryLockError::WouldBlock) => None,
-        };
->>>>>>> vibr/main
     }
     let end = at.saturating_add(len);
     let mut s = spans();
@@ -3965,13 +3691,9 @@ fn title_memory_changed(at: usize, len: usize) -> std::sync::RwLockWriteGuard<'s
     // And nothing stays in place over it.
     crate::inplace::title_memory_freeing(at, len);
     let mut g = guards();
-<<<<<<< HEAD
     g.holes.clear();
-||||||| merged common ancestors
-=======
     // A mapping commits what was a placeholder: the runs over it are asked again.
     g.uncommitted.forget(at, at.saturating_add(len));
->>>>>>> vibr/main
     let range = at / BLOCK..at.saturating_add(len).div_ceil(BLOCK);
     let absent: Vec<usize> = g.absent.range(range.clone()).collect();
     for block in absent {
@@ -4093,7 +3815,6 @@ pub(crate) fn install() {
             };
         }
         let at = r.ExceptionInformation[1];
-<<<<<<< HEAD
         let block = at / BLOCK;
         if ours.is_none()
             && PROTECTED.any(block, block + 1)
@@ -4144,30 +3865,6 @@ pub(crate) fn install() {
             Some(exit) => fail(exit),
             None if came_back(at, true) => EXCEPTION_CONTINUE_EXECUTION,
             None => EXCEPTION_CONTINUE_SEARCH,
-||||||| merged common ancestors
-        // Held across both checks: another thread may have opened the block
-        // since this one faulted, and a copy may have guarded it again since
-        // (then it is ours again, not read-only for some other reason).
-        let mut g = guards();
-        if open(&mut g, at, at + 1) {
-            #[cfg(feature = "diagnostics")]
-            crate::copystat::add(crate::copystat::C::GuardFaults, 1);
-            crate::framelog::add(crate::framelog::T::GuardFaults, 1);
-            return EXCEPTION_CONTINUE_EXECUTION;
-        }
-        if writable(at) {
-            EXCEPTION_CONTINUE_EXECUTION
-        } else {
-            EXCEPTION_CONTINUE_SEARCH
-=======
-        // Held across both checks: another thread may have opened the block
-        // since this one faulted, and a copy may have guarded it again since
-        // (then it is ours again, not read-only for some other reason).
-        if handle_write_fault(at) {
-            EXCEPTION_CONTINUE_EXECUTION
-        } else {
-            EXCEPTION_CONTINUE_SEARCH
->>>>>>> vibr/main
         }
     }
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -4255,26 +3952,11 @@ mod tests {
     };
     const MEM_WRITE_WATCH: u32 = 0x20_0000;
 
-<<<<<<< HEAD
     /// Guard/VEH tests mutate process-wide `VirtualProtect` and global
     /// `GUARDS`/`VIEWS`; serialize them so `cargo test --workspace` stays
     /// deterministic when tests run in parallel.
     static GUARD_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-||||||| merged common ancestors
-    #[test]
-    fn clean_runs_match_per_block_tracking() {
-        let mut runs = CleanBlocks(BTreeMap::new());
-        let mut blocks = BTreeSet::new();
-        let check = |runs: &CleanBlocks, blocks: &BTreeSet<usize>| {
-            for from in 0..36 {
-                for to in from..36 {
-                    let actual: Vec<_> = runs.uncovered(from, to).into_iter().flat_map(|(a, b)| a..b).collect();
-                    let expected: Vec<_> = (from..to).filter(|block| !blocks.contains(block)).collect();
-                    assert_eq!(actual, expected, "{from}..{to}");
-                }
-            }
-        };
-=======
+
     #[test]
     fn uncommitted_runs_are_kept_until_their_memory_is_remapped() {
         // SAFETY: a fresh reservation of four blocks, released at the end.
@@ -4294,20 +3976,6 @@ mod tests {
         unsafe { VirtualFree(base as *mut _, 0, MEM_RELEASE) };
     }
 
-    #[test]
-    fn clean_runs_match_per_block_tracking() {
-        let mut runs = CleanBlocks(BTreeMap::new());
-        let mut blocks = BTreeSet::new();
-        let check = |runs: &CleanBlocks, blocks: &BTreeSet<usize>| {
-            for from in 0..36 {
-                for to in from..36 {
-                    let actual: Vec<_> = runs.uncovered(from, to).into_iter().flat_map(|(a, b)| a..b).collect();
-                    let expected: Vec<_> = (from..to).filter(|block| !blocks.contains(block)).collect();
-                    assert_eq!(actual, expected, "{from}..{to}");
-                }
-            }
-        };
->>>>>>> vibr/main
 
     pub(super) fn lock_guards() -> std::sync::MutexGuard<'static, ()> {
         GUARD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
@@ -4389,49 +4057,18 @@ mod tests {
         let p = fresh_watched(4 * PAGE);
         assert_ne!(p, 0);
         let (start, end) = (p, p + 4 * PAGE);
-<<<<<<< HEAD
         // The journal may hold pages of another test's memory that was here.
         let (none, before) = writes(start, end, false).expect("watched");
         assert!(before.iter().all(|&(_, w)| w < none), "{before:?}");
-||||||| merged common ancestors
-        let (_, before) = writes(start, end, false).expect("watched");
-        assert!(before.is_empty());
-=======
-        // The journal is the process's and keeps pages after they are freed:
-        // memory other tests had at these addresses may be in it, older than
-        // this asking.
-        let (then, _) = writes(start, end, false).expect("watched");
->>>>>>> vibr/main
         // SAFETY: committed pages of ours.
         unsafe { ((p + PAGE + 8) as *mut u8).write(1) };
-<<<<<<< HEAD
         let (now, after) = writes(start, end, false).expect("watched");
         let new = |w: Vec<(usize, u64)>| w.into_iter().filter(|w| w.1 > none).collect::<Vec<_>>();
         assert_eq!(new(after), [(p / PAGE + 1, now)]);
-||||||| merged common ancestors
-        let (now, after) = writes(start, end, false).expect("watched");
-        assert_eq!(after, [(p / PAGE + 1, now)]);
-=======
-        let (_, after) = writes(start, end, false).expect("watched");
-        let written = |pages: &[(usize, u64)]| pages.iter().find(|&&(page, _)| page == p / PAGE + 1).map(|&(_, w)| w);
-        // Asked by this test, or by another test's submission whose asking
-        // ahead took this range in: either way after `then`.
-        let now = written(&after).expect("the written page is reported");
-        assert!(now > then);
-        assert!(after.iter().all(|&(page, w)| page == p / PAGE + 1 || w <= then), "{after:?}");
->>>>>>> vibr/main
         // Another asker after the kernel's bit was cleared still sees it.
         let (later, again) = writes(p + PAGE, p + 2 * PAGE, false).expect("watched");
-<<<<<<< HEAD
         assert!(later > now);
         assert_eq!(new(again), [(p / PAGE + 1, now)]);
-||||||| merged common ancestors
-        assert!(later > now);
-        assert_eq!(again, [(p / PAGE + 1, now)]);
-=======
-        assert!(later >= now);
-        assert_eq!(again, [(p / PAGE + 1, now)]);
->>>>>>> vibr/main
         let mut plain = vec![0u8; PAGE];
         assert!(
             writes(
@@ -5969,14 +5606,8 @@ mod range_tests {
 
 #[cfg(test)]
 mod mapping_tests {
-<<<<<<< HEAD
     use super::tests::lock_guards;
     use super::{PAGE, by_range, title_memory_reading, title_memory_remapping};
-||||||| merged common ancestors
-    use super::{title_memory_reading, title_memory_remapping};
-=======
-    use super::{PAGE, by_range, title_memory_reading, title_memory_remapping};
->>>>>>> vibr/main
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
@@ -6028,7 +5659,6 @@ mod mapping_tests {
         reader.join().unwrap();
         assert!(read.load(Ordering::SeqCst));
     }
-<<<<<<< HEAD
 
     /// Reads and changes whose bytes do not meet do not wait for each other,
     /// and a change waiting for a read keeps new reads of its bytes out (but
@@ -6626,54 +6256,4 @@ mod many_askers_tests {
         assert!(!BITS.all(300, 700) && BITS.all(300, 511) && BITS.all(512, 700));
         assert!(!BITS.all(1 << 40, (1 << 40) + 1), "outside the address space");
     }
-||||||| merged common ancestors
-=======
-
-    /// Reads and changes whose bytes do not meet do not wait for each other,
-    /// and a change waiting for a read keeps new reads of its bytes out (but
-    /// not of others).
-    #[test]
-    fn reads_and_remappings_of_other_bytes_go_on() {
-        if !by_range() {
-            return; // VICTORY_MAPPING_RANGES=0: one lock over all of it
-        }
-        let at = HERE + 16 * PAGE;
-        let reading = title_memory_reading(at, PAGE);
-        // Another page changes while the read is under way, and another
-        // read goes on while that change is.
-        let (done, finished) = mpsc::channel();
-        std::thread::spawn(move || {
-            let changing = title_memory_remapping(at + PAGE, PAGE);
-            let (read, was_read) = mpsc::channel();
-            std::thread::spawn(move || {
-                let _reading = title_memory_reading(at + 2 * PAGE, PAGE);
-                read.send(()).unwrap();
-            });
-            let other = was_read.recv_timeout(Duration::from_secs(10)).is_ok();
-            drop(changing);
-            done.send(other).unwrap();
-        });
-        assert_eq!(finished.recv_timeout(Duration::from_secs(10)), Ok(true), "kept apart though their bytes do not meet");
-        // A change of the read's page waits, and keeps a new read of its
-        // bytes out meanwhile; a read elsewhere is not kept out.
-        let changed = Arc::new(AtomicBool::new(false));
-        let change = {
-            let changed = changed.clone();
-            std::thread::spawn(move || {
-                let _changing = title_memory_remapping(at, PAGE);
-                changed.store(true, Ordering::SeqCst);
-            })
-        };
-        while !super::spans().changes.iter().any(|c| c.1 == at) {
-            std::thread::yield_now();
-        }
-        assert!(super::title_memory_reading_now(at + 8, 8).is_none(), "a read began over a change that waits");
-        assert!(super::title_memory_reading_now(at + 3 * PAGE, 8).is_some());
-        std::thread::sleep(Duration::from_millis(50));
-        assert!(!changed.load(Ordering::SeqCst), "the mapping changed under a read in place");
-        drop(reading);
-        change.join().unwrap();
-        assert!(changed.load(Ordering::SeqCst));
-    }
->>>>>>> vibr/main
 }
