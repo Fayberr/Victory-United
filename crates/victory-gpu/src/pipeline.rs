@@ -70,13 +70,7 @@ pub(crate) struct Shader {
     /// ([`Shader::walks`]).
     #[cfg(windows)]
     walks: OnceLock<bool>,
-<<<<<<< HEAD
     /// Whether it is the program [`crate::ambient`] follows.
-    #[cfg(windows)]
-    pub(crate) resolves_light: bool,
-||||||| 085ee7c4
-=======
-    /// Its result gets the depth-shaded ambient light fallback ([`crate::ambient`]).
     #[cfg(windows)]
     pub(crate) resolves_light: bool,
     /// Its last reflection output can be bounded by the ambient light.
@@ -85,7 +79,6 @@ pub(crate) struct Shader {
     /// Its output can provide the sky dome for ambient lighting.
     #[cfg(windows)]
     pub(crate) draws_sky: bool,
->>>>>>> vitoriabr/main
 }
 
 impl std::fmt::Debug for Shader {
@@ -130,39 +123,7 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
         .or_insert_with(|| {
             KEPT[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             KEPT[1].fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
-<<<<<<< HEAD
             Arc::new(Shader::new(stage, bytes, full))
-||||||| 085ee7c4
-            Arc::new(Shader {
-                stage,
-                hash: full.to_hex()[..16].to_owned(),
-                container: bytes.to_vec(),
-                #[cfg(windows)]
-                translated: OnceLock::new(),
-                #[cfg(windows)]
-                walks: OnceLock::new(),
-            })
-=======
-            Arc::new(Shader {
-                stage,
-                hash: full.to_hex()[..16].to_owned(),
-                container: bytes.to_vec(),
-                #[cfg(windows)]
-                translated: OnceLock::new(),
-                #[cfg(windows)]
-                walks: OnceLock::new(),
-                #[cfg(windows)]
-                resolves_light: bytes
-                    .windows(crate::ambient::PROGRAM.len())
-                    .any(|w| w == crate::ambient::PROGRAM),
-                #[cfg(windows)]
-                ends_reflections: bytes
-                    .windows(crate::ambient::REFLECTED.len())
-                    .any(|w| w == crate::ambient::REFLECTED),
-                #[cfg(windows)]
-                draws_sky: bytes.windows(crate::ambient::SKY.len()).any(|w| w == crate::ambient::SKY),
-            })
->>>>>>> vitoriabr/main
         })
         .clone()
 }
@@ -181,6 +142,12 @@ impl Shader {
             walks: OnceLock::new(),
             #[cfg(windows)]
             resolves_light: bytes.windows(crate::ambient::PROGRAM.len()).any(|w| w == crate::ambient::PROGRAM),
+            #[cfg(windows)]
+            ends_reflections: bytes
+                .windows(crate::ambient::REFLECTED.len())
+                .any(|w| w == crate::ambient::REFLECTED),
+            #[cfg(windows)]
+            draws_sky: bytes.windows(crate::ambient::SKY.len()).any(|w| w == crate::ambient::SKY),
         }
     }
 }
@@ -189,18 +156,12 @@ impl Shader {
 #[cfg(windows)]
 pub(crate) struct Translated {
     pub(crate) host: victory_shader::emit::HostShader,
-<<<<<<< HEAD
     /// A compute program's threads in a group.
     pub(crate) threads: Option<[u32; 3]>,
-||||||| 085ee7c4
-=======
-    pub(crate) compute_threads: Option<[u32; 3]>,
->>>>>>> vitoriabr/main
     pub(crate) used: Vec<victory_shader::UsedResource>,
     /// Whether the shader's code can store to buffer memory ([`stores`]);
     /// true when its code is not known.
     pub(crate) stores: bool,
-<<<<<<< HEAD
     /// Whether the code can write anything through unordered access:
     /// [`stores`], or an image store or atomic (a texture shaders write).
     /// True when its code is not known. What `VICTORY_BARRIER_MERGE` asks
@@ -211,14 +172,11 @@ pub(crate) struct Translated {
     /// Whether it stores through a view it picks from the heap by an index,
     /// once asked (`crate::picked`).
     pub(crate) picks: std::sync::atomic::AtomicU8,
-||||||| 085ee7c4
-=======
     /// Per [`Translated::used`] entry: a store or atomic names that buffer
     /// descriptor. Empty when the code is not known.
     pub(crate) used_written: Vec<bool>,
     /// A buffer store whose descriptor could not be matched to `used`.
     pub(crate) write_unknown: bool,
->>>>>>> vitoriabr/main
 }
 
 #[cfg(windows)]
@@ -290,23 +248,26 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
     };
     let host = crate::shader_cache::host_shader(container)?;
     let stores = programs.is_empty() || programs.iter().any(stores);
-<<<<<<< HEAD
     let writes = stores || programs.iter().any(image_stores);
     let threads = programs.iter().find_map(|p| match &p.io {
         victory_shader::native::StageIo::Cs(cs) if cs.threads.iter().all(|&n| n > 0) => Some(cs.threads),
         _ => None,
     });
     let stores_by_address = programs.is_empty() || programs.iter().any(stores_by_address);
-    let used = programs
-        .into_iter()
-        .find(|p| {
-            matches!(
-                p.stage,
-                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-            )
-        })
-        .map(|p| p.used)
-        .unwrap_or_default();
+    let chosen = programs.iter().find(|p| {
+        matches!(
+            p.stage,
+            HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
+        )
+    });
+    let used = chosen.map(|p| p.used.clone()).unwrap_or_default();
+    let (used_written, mut write_unknown) = chosen
+        .map(|p| written_used(p, &used))
+        .unwrap_or((Vec::new(), !programs.is_empty()));
+    if programs.len() > 1 {
+        // Another stage's table store could name the same descriptor.
+        write_unknown = true;
+    }
     Ok(Translated {
         host,
         threads,
@@ -315,6 +276,8 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         writes,
         stores_by_address,
         picks: Default::default(),
+        used_written,
+        write_unknown,
     })
 }
 
@@ -330,48 +293,6 @@ fn image_stores(program: &victory_shader::NativeProgram) -> bool {
         matches!(i.encoding, Encoding::Mimg)
             && i.name().is_none_or(|n| n.contains("store") || n.contains("atomic"))
     })
-||||||| 085ee7c4
-    let used = programs
-        .into_iter()
-        .find(|p| {
-            matches!(
-                p.stage,
-                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-            )
-        })
-        .map(|p| p.used)
-        .unwrap_or_default();
-    Ok(Translated { host, used, stores })
-=======
-    let compute_threads = programs.iter().find_map(|p| match &p.io {
-        victory_shader::native::StageIo::Cs(cs) if cs.threads.iter().all(|&n| n > 0) => {
-            Some(cs.threads)
-        }
-        _ => None,
-    });
-    let chosen = programs.iter().find(|p| {
-        matches!(
-            p.stage,
-            HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-        )
-    });
-    let used = chosen.map(|p| p.used.to_vec()).unwrap_or_default();
-    let (used_written, mut write_unknown) = chosen
-        .map(|p| written_used(p, &used))
-        .unwrap_or((Vec::new(), !programs.is_empty()));
-    if programs.len() > 1 {
-        // Another stage's table store could name the same descriptor.
-        write_unknown = true;
-    }
-    Ok(Translated {
-        host,
-        compute_threads,
-        used,
-        stores,
-        used_written,
-        write_unknown,
-    })
->>>>>>> vitoriabr/main
 }
 
 /// The compute pipelines of the console's ray-tracing structure builder
@@ -747,57 +668,6 @@ pub(crate) fn builder_runs() -> bool {
         }
         return true;
     }
-<<<<<<< HEAD
-||||||| 085ee7c4
-    let missing = b.pipelines.iter().filter(|p| !make::now(p)).count();
-    if missing > 0 {
-        b.off = true;
-        tracing::warn!(
-            missing,
-            of = b.pipelines.len(),
-            "the ray-tracing structure builder stays off: not all of its programs have a host pipeline, and its stages run all or none"
-        );
-        return false;
-    }
-    tracing::info!(
-        pipelines = b.pipelines.len(),
-        "the ray-tracing structure builder runs: all of its programs have host pipelines"
-    );
-    b.whole = true;
-    true
-=======
-    let missing_pipelines: Vec<Arc<make::Pending>> = b
-        .pipelines
-        .iter()
-        .filter(|p| !make::now(p))
-        .cloned()
-        .collect();
-    let missing = missing_pipelines.len();
-    if missing > 0 {
-        b.off = true;
-        for p in &missing_pipelines {
-            if let Some(shader) = p.shaders.first() {
-                tracing::warn!(
-                    hash = %shader.hash,
-                    stage = %shader.stage,
-                    "the ray-tracing structure builder is missing this program's host pipeline"
-                );
-            }
-        }
-        tracing::warn!(
-            missing,
-            of = b.pipelines.len(),
-            "the ray-tracing structure builder stays off: not all of its programs have a host pipeline, and its stages run all or none"
-        );
-        return false;
-    }
-    tracing::info!(
-        pipelines = b.pipelines.len(),
-        "the ray-tracing structure builder runs: all of its programs have host pipelines"
-    );
-    b.whole = true;
-    true
->>>>>>> vitoriabr/main
 }
 
 /// Whether a console program can store to buffer memory: it has a buffer,
@@ -829,7 +699,6 @@ fn stores(program: &victory_shader::NativeProgram) -> bool {
     })
 }
 
-<<<<<<< HEAD
 /// Whether a console program can store to memory through raw addresses
 /// (`crate::memory`): a flat or global store or atomic, a call or jump to
 /// code not seen here, or code that does not decode. The programs that only
@@ -849,8 +718,6 @@ fn stores_by_address(program: &victory_shader::NativeProgram) -> bool {
     })
 }
 
-||||||| 085ee7c4
-=======
 /// Which [`Translated::used`] buffer descriptors a store or atomic names.
 /// The descriptor is the instruction's `rsrc`/SMEM base SGPR; a store whose
 /// descriptor is computed in VGPRs, or names a descriptor outside `used`,
@@ -879,7 +746,7 @@ fn written_used(
         let fields = inst.fields(program.wave64);
         let descriptor = match &fields {
             Fields::Buffer { rsrc, .. } => Some(rsrc),
-            Fields::Smem { base, .. } => Some(base),
+            Fields::Smem { base, .. } => base.as_ref(),
             _ => None,
         };
         let Some(Operand::Scalar { code, .. }) = descriptor else {
@@ -902,7 +769,6 @@ fn written_used(
     (written, unknown)
 }
 
->>>>>>> vitoriabr/main
 #[repr(C)]
 struct Pipeline {
     object: Object,
