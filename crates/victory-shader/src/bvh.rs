@@ -198,21 +198,11 @@ pub fn boxes(children: &[u32; 4], boxes: &[[f32; 6]; 4], ray: &Ray, sort: bool) 
         }
         let enter = near[0].max(near[1]).max(near[2]);
         let leave = far[0].min(far[1]).min(far[2]);
-<<<<<<< HEAD
-        // A child that is not there is a miss, whatever bytes its box
-        // holds; a box whose minimum x is NaN is switched off.
-        let there = children[n] != NONE && !b[0].is_nan();
-        if there && leave >= enter.max(0.0) && enter < ray.extent {
-||||||| a26859fc
-        // A box whose minimum x is NaN is switched off.
-        if !b[0].is_nan() && leave >= enter.max(0.0) && enter < ray.extent {
-=======
         // A box whose minimum x is NaN is switched off. A child that is not
         // there may have inverted infinite bounds, which every ray enters at
         // minus infinity: it would be first of the sorted children and end
         // the walk before them (DexNom/VIctory bc3cd4b0).
         if children[n] != NONE && !b[0].is_nan() && leave >= enter.max(0.0) && enter < ray.extent {
->>>>>>> avatar/main
             ids[n] = children[n];
             distances[n] = enter;
         }

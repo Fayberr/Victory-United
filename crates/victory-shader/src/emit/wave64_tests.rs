@@ -806,7 +806,6 @@ fn scc_of_a_mask_operation_joined_with_a_scalar_test_needs_the_skip_wave_wide() 
     }
     eprintln!("ran on the hardware device: the inner test's SCC for every lane once some lane is inside");
 }
-<<<<<<< HEAD
 
 /// One console wave of 64 threads, thread t holding t + 1. A branch on s0 (the wave's) picks
 /// `WaveActiveMax` (s0 not 0) or `WaveActiveMin`, and the two reductions share their end:
@@ -1707,8 +1706,6 @@ fn a_branch_that_writes_lds_two_different_values_keeps_64_lanes() {
     // a second value after the read: what the flag ends up holding depends on what was read
     assert_eq!(flag_wave(&flag_program(Some(2))), Some(64));
 }
-||||||| a26859fc
-=======
 
 /// A dispatch counted in threads: of the last group only the lanes below the
 /// count store (after DexNom/VIctory bc3cd4b0).
@@ -1749,4 +1746,3 @@ fn the_lanes_past_a_count_of_threads_do_not_run() {
         }
     }
 }
->>>>>>> avatar/main

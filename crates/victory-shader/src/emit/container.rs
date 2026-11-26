@@ -175,17 +175,11 @@ pub(crate) fn signature(elements: &[SigElement], input: bool) -> Vec<u8> {
     // Validator 1.6 writes one name per element in element order, repeats
     // included, except that system values share theirs (it keys names by
     // the semantic's string, which is one static string per system value);
-<<<<<<< HEAD
     // the rows sorted by register (unallocated last), then by name offset:
     // of two elements packed into one register, the one first in element
     // order comes first whatever its columns (a sort by column made the
     // validator refuse 72 of the title's vertex, mesh and pixel programs:
     // "does not match expected for module").
-||||||| a26859fc
-    // the rows sorted by register (unallocated last).
-=======
-    // the rows sorted by register (unallocated last), then name offset.
->>>>>>> avatar/main
     let mut offsets: Vec<u32> = Vec::new();
     let mut next = 8 + 32 * elements.len() as u32;
     let mut names = Vec::new();
