@@ -492,8 +492,19 @@ struct SlotUse {
     unmapped: bool,
     at: (u64, u64),
 }
+
+/// Placed textures reached only through bindless slots are uploaded when a
+/// slot first reaches them, and then looked at again (their memory hashed)
+/// at most this often, in frames, ...
+///
+/// shortcut: a texture the title rewrites in place without writing a slot
+/// shows its new contents up to this many frames late through bindless
+/// access (tables still upload what their draws read). Hashing all of them
+/// at each submission cost seconds per frame while the world streams in.
+const RECHECK_FRAMES: u64 = 15;
 /// ... and at most this many of them per frame.
 const RECHECKS: u32 = 32;
+
 /// Bumped when views go stale (a resource was released): their views'
 /// generations are checked, all at once, at the next submission.
 static VIEWED: AtomicU64 = AtomicU64::new(0);
@@ -1768,7 +1779,7 @@ pub(crate) struct Recheck {
 
 /// Frames after a whole upload of a texture picked by index at which its
 /// memory is looked at again, each counted from the look before.
-const RECHECK_FRAMES: [u64; 5] = [4, 12, 40, 120, 400];
+const RECHECK_WAITS: [u64; 5] = [4, 12, 40, 120, 400];
 
 thread_local! {
     /// This thread is inside [`HostHeap::publish`].
@@ -1866,11 +1877,11 @@ impl TextureQueue {
     }
 
     /// Slot `index` was uploaded whole in `frame` from memory `at`, whose
-    /// fingerprint is `print`: looked at again ([`RECHECK_FRAMES`]), unless
+    /// fingerprint is `print`: looked at again ([`RECHECK_WAITS`]), unless
     /// it was written again meanwhile and waits in the queue.
     fn recheck(&mut self, index: u32, frame: u64, at: (u64, u64), print: u64) {
         if !self.slots.contains_key(&index) {
-            let due = frame + RECHECK_FRAMES[0];
+            let due = frame + RECHECK_WAITS[0];
             self.rechecks.insert(index, Recheck { due, at, print, looks: 0, uploaded: frame });
         }
     }
@@ -1901,7 +1912,7 @@ impl TextureQueue {
             self.changed(index, frame, frame);
             return;
         }
-        match RECHECK_FRAMES.get(usize::from(seen.looks) + 1) {
+        match RECHECK_WAITS.get(usize::from(seen.looks) + 1) {
             Some(wait) => {
                 let next = Recheck { due: frame + wait, looks: seen.looks + 1, ..*seen };
                 self.rechecks.insert(index, next);
@@ -6713,26 +6724,6 @@ fn uav_element_size(desc: &D3D12_UNORDERED_ACCESS_VIEW_DESC) -> Option<u64> {
     } else {
         crate::resource::element(desc.Format.0 as u32).map(|(bytes, _)| bytes)
     }
-}
-
-/// Element byte stride of `view` for the runtime stride table (`0` for
-/// non-buffer views or descriptors without a known element size).
-fn view_stride(view: &View) -> u32 {
-    let bytes = match view {
-        View::Shader(_, Some(desc)) => element_size(&srv_desc(desc)),
-        View::Placed(false, resource, desc) if resource[0] == 1 => desc[..10]
-            .try_into()
-            .ok()
-            .map_or(0, |w: &[u32; 10]| element_size(&srv_desc(w))),
-        View::Unordered(_, _, Some(desc)) => uav_element_size(&uav_desc(desc)).unwrap_or(0),
-        View::Placed(true, resource, desc) if resource[0] == 1 => desc[..10]
-            .try_into()
-            .ok()
-            .and_then(|w: &[u32; 10]| uav_element_size(&uav_desc(w)))
-            .unwrap_or(0),
-        _ => 0,
-    };
-    u32::try_from(bytes).unwrap_or(0)
 }
 
 /// The elements of the title's buffer view `view` (0 for other views).
