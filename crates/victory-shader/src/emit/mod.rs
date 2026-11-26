@@ -948,7 +948,8 @@ fn emit_forms(
     emit_program(c, native, &p, &st, &io, &res)
 }
 
-/// [`emit_forms`], the name the wave64 retries and their tests call it by.
+/// [`emit_forms`], the name the wave64 retries' tests call it by.
+#[cfg(test)]
 fn emit_sized(
     c: &Container,
     native: &NativeProgram,
