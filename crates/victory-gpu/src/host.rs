@@ -8730,7 +8730,6 @@ impl Host {
                 #[cfg(feature = "diagnostics")]
                 text.push_str(&crate::book::at_loss(va));
             }
-            }
             // The plain output: the extended one (with marker texts) came
             // back without stopped lists on this host.
             if dred_faults() {
