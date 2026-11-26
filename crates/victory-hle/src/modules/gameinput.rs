@@ -358,14 +358,10 @@ pub struct Hub {
     /// Apart from the state: XInput can be slow, and the title reads
     /// readings every frame.
     source: Mutex<Box<dyn Source>>,
-<<<<<<< HEAD
     /// Mouse motion and wheel steps, added by the host's raw input thread.
     counts: Arc<Counts>,
-||||||| a26859fc
-=======
     /// The title sees one pad ([`one_pad`]).
     one_pad: bool,
->>>>>>> avatar/main
     state: Mutex<State>,
     /// A device callback returned.
     returned: Condvar,
@@ -389,18 +385,13 @@ fn now() -> u64 {
 }
 
 impl Hub {
-<<<<<<< HEAD
     fn new(
         source: Box<dyn Source>,
         counts: Arc<Counts>,
         settings: super::controls::Settings,
+        one_pad: bool,
     ) -> &'static Hub {
         cursor::ENABLED.store(settings.enabled && settings.capture, Ordering::Relaxed);
-||||||| a26859fc
-    fn new(source: Box<dyn Source>) -> &'static Hub {
-=======
-    fn new(source: Box<dyn Source>, one_pad: bool) -> &'static Hub {
->>>>>>> avatar/main
         let hub = Box::into_raw(Box::new(Hub {
             object: Object {
                 vtable: &INPUT,
@@ -408,12 +399,8 @@ impl Hub {
             },
             devices: std::array::from_fn(Device::new),
             source: Mutex::new(source),
-<<<<<<< HEAD
             counts,
-||||||| a26859fc
-=======
             one_pad,
->>>>>>> avatar/main
             state: Mutex::new(State {
                 slots: Default::default(),
                 callbacks: Vec::new(),
@@ -437,20 +424,12 @@ impl Hub {
     }
 
     /// A hub over the host's input, polled from now on.
-<<<<<<< HEAD
     fn start(
         source: Box<dyn Source>,
         counts: Arc<Counts>,
         settings: super::controls::Settings,
     ) -> &'static Hub {
-        let hub = Hub::new(source, counts, settings);
-||||||| a26859fc
-    fn start(source: Box<dyn Source>) -> &'static Hub {
-        let hub = Hub::new(source);
-=======
-    fn start(source: Box<dyn Source>) -> &'static Hub {
-        let hub = Hub::new(source, one_pad());
->>>>>>> avatar/main
+        let hub = Hub::new(source, counts, settings, one_pad());
         hub.poll();
         std::thread::spawn(move || {
             loop {
@@ -474,7 +453,8 @@ impl Hub {
         };
         let events = {
             let mut state = self.state();
-            let events = state.poll(&self.devices, pads, keys, &buttons, &self.counts);
+            let events =
+                state.poll(&self.devices, self.one_pad, pads, keys, &buttons, &self.counts);
             if let Some(c) = &mut state.controls
                 && std::mem::take(&mut c.release_cursor)
             {
@@ -482,12 +462,6 @@ impl Hub {
             }
             events
         };
-<<<<<<< HEAD
-||||||| a26859fc
-        let events = self.state().poll(&self.devices, pads, keys);
-=======
-        let events = self.state().poll(&self.devices, self.one_pad, pads, keys);
->>>>>>> avatar/main
         self.deliver(events);
     }
 
@@ -538,7 +512,22 @@ impl State {
     ) -> Vec<Event> {
         let now = now();
         let mut events = std::mem::take(&mut self.pending);
-<<<<<<< HEAD
+        // The title sees one pad ([`one_pad`]): every host pad folds into
+        // the stand-in slot and no other pad device exists. The keyboard and
+        // mouse go in through the controls, or through the stand-in pad.
+        let pads = if one_pad {
+            let base = pads.into_iter().flatten().reduce(merged);
+            let mut one: [Option<PadState>; PADS] = [None; PADS];
+            one[FALLBACK] = match (base, self.controls.is_none()) {
+                (Some(pad), true) => Some(merged(pad, fallback(&keys))),
+                (Some(pad), false) => Some(pad),
+                (None, true) => Some(fallback(&keys)),
+                (None, false) => None,
+            };
+            one
+        } else {
+            pads
+        };
         // Scripted input (auto input, press file, fast boot) is a third
         // source beside the host pads and the keyboard and mouse: it never
         // goes through the key layout and never replaces another source.
@@ -553,21 +542,6 @@ impl State {
                 .collect();
             c.feed(&held, counts);
             c.set_script(script_pad.unwrap_or_default());
-||||||| a26859fc
-        let any_pad = pads.iter().any(Option::is_some);
-        for (slot, pad) in pads.into_iter().enumerate() {
-            self.update(devices, slot, pad.map(Value::Pad), now, &mut events);
-=======
-        if one_pad {
-            let pad = pads.into_iter().flatten().fold(fallback(&keys), merged);
-            self.update(devices, FALLBACK, Some(Value::Pad(pad)), now, &mut events);
-            self.update(devices, KEYBOARD, Some(Value::Keys(keys)), now, &mut events);
-            return events;
-        }
-        let any_pad = pads.iter().any(Option::is_some);
-        for (slot, pad) in pads.into_iter().enumerate() {
-            self.update(devices, slot, pad.map(Value::Pad), now, &mut events);
->>>>>>> avatar/main
         }
         self.script = script_pad;
         self.host_pads = pads;
@@ -2168,37 +2142,27 @@ mod tests {
 
     /// A hub with the old stand-in pad (`[controls] enabled = false`).
     fn fake() -> (&'static Hub, Arc<Mutex<FakeHost>>) {
-<<<<<<< HEAD
-        fake_with(super::super::controls::Settings {
-            enabled: false,
-            ..Default::default()
-        })
+        fake_with(
+            super::super::controls::Settings {
+                enabled: false,
+                ..Default::default()
+            },
+            false,
+        )
     }
 
     /// A hub with keyboard and mouse controls (the defaults).
     fn fake_kbm() -> (&'static Hub, Arc<Mutex<FakeHost>>) {
-        fake_with(Default::default())
+        fake_with(Default::default(), false)
     }
 
     fn fake_with(
         settings: super::super::controls::Settings,
+        one_pad: bool,
     ) -> (&'static Hub, Arc<Mutex<FakeHost>>) {
-||||||| a26859fc
-=======
-        fake_with(false)
-    }
-
-    fn fake_with(one_pad: bool) -> (&'static Hub, Arc<Mutex<FakeHost>>) {
->>>>>>> avatar/main
         let host = Arc::new(Mutex::new(FakeHost::default()));
-<<<<<<< HEAD
         let counts = Arc::new(Counts::default());
-        let hub = Hub::new(Box::new(Fake(Arc::clone(&host))), counts, settings);
-||||||| a26859fc
-        let hub = Hub::new(Box::new(Fake(Arc::clone(&host))));
-=======
-        let hub = Hub::new(Box::new(Fake(Arc::clone(&host))), one_pad);
->>>>>>> avatar/main
+        let hub = Hub::new(Box::new(Fake(Arc::clone(&host))), counts, settings, one_pad);
         hub.poll();
         (hub, host)
     }
@@ -2419,7 +2383,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn keyboard_and_mouse_drive_the_stand_in_pad_without_a_host_pad() {
         let (hub, host) = fake_kbm();
         {
@@ -2490,10 +2453,14 @@ mod tests {
     }
 
     #[test]
-||||||| a26859fc
-=======
     fn a_host_pad_feeds_the_one_pad_which_never_goes() {
-        let (hub, host) = fake_with(true);
+        let (hub, host) = fake_with(
+            super::super::controls::Settings {
+                enabled: false,
+                ..Default::default()
+            },
+            true,
+        );
         let log = Log::default();
         register(hub, GAMEPAD_KIND, 2, &log);
         assert_eq!(*log.lock().unwrap(), [(FALLBACK, STATUS_CONNECTED, 0)]);
@@ -2523,7 +2490,6 @@ mod tests {
     }
 
     #[test]
->>>>>>> avatar/main
     fn async_enumeration_waits_for_the_poll_and_unregistering_stops_callbacks() {
         let (hub, host) = fake();
         let log = Log::default();
