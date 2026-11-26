@@ -325,6 +325,7 @@ fn screen_budget() -> Duration {
 fn screens_first() -> bool {
     !screen_budget().is_zero()
 }
+
 /// Pipelines queued and not made yet.
 static WAITING: AtomicU64 = AtomicU64::new(0);
 

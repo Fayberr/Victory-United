@@ -1390,6 +1390,7 @@ pub fn save_pipeline_cache() {
 /// [`save_pipeline_cache`], then the library opened again from the saved
 /// file, which lets go of every pipeline stored into it (the pre-build's).
 /// No pipeline may be made meanwhile.
+#[cfg(windows)]
 pub fn save_and_reopen_pipeline_cache() {
     library::save_and_reopen();
 }
