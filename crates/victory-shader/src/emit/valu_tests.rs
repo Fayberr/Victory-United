@@ -2058,7 +2058,6 @@ fn rdna_forms_give_what_the_spelled_out_ones_give() {
         }
     }
 }
-<<<<<<< HEAD
 
 /// MUBUF `op vdata, vaddr, s[srsrc:srsrc+3], 0 idxen`.
 const fn mubuf_idxen(op: u8, vdata: u8, vaddr: u8, srsrc: u8) -> [u32; 2] {
@@ -2130,6 +2129,7 @@ fn build_table_typed_cs(body: &[u32], used: Vec<UsedResource>) -> HostShader {
         root_srvs: lowered.root_srvs,
         root_uavs: lowered.root_uavs,
         root_indexed_views: res.root_indexed_views,
+        half_views: lowered.half_views,
     };
     if let Ok(mut v) = validator::Validator::load(validator::Validator::default_path().as_deref()) {
         let mut copy = shader.dxil.clone();
@@ -2505,8 +2505,6 @@ fn v_fmac_f32_takes_the_accumulator_modifiers() {
         });
     }
 }
-||||||| 0a4356653
-=======
 
 /// A program that moves a typed buffer's 16-bit channels
 /// (`buffer_load_format_d16_xyzw` from the table's first view,
@@ -2992,4 +2990,3 @@ fn a_format_load_read_as_halves_loads_the_integer() {
     }
     assert!(ran > 0, "no SM 6.6 device available");
 }
->>>>>>> nvidia/main
