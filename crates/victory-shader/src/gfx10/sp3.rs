@@ -136,7 +136,12 @@ fn operands(inst: &Instruction, name: &str, fields: &Fields) -> String {
             soffset,
             cache,
         } => {
-<<<<<<< HEAD
+            let data = match (name, data) {
+                ("s_atc_probe" | "s_atc_probe_buffer", Some(Operand::Literal(imm))) => {
+                    Some(atc_immediate(*imm))
+                }
+                _ => data.map(|d| d.to_string()),
+            };
             let off = match (soffset, offset) {
                 (Operand::Scalar { code: NULL, .. }, 0) => soffset.to_string(),
                 (Operand::Scalar { code: NULL, .. }, _) => {
@@ -146,47 +151,21 @@ fn operands(inst: &Instruction, name: &str, fields: &Fields) -> String {
                 _ => format!("{soffset} offset:0x{:06x}", offset & 0x1F_FFFF),
             };
             out = match (data, base) {
+                // The data is a counter or the wave ID; these have no address.
+                (Some(data), _)
+                    if matches!(
+                        name,
+                        "s_memtime" | "s_memrealtime" | "s_get_waveid_in_workgroup"
+                    ) =>
+                {
+                    data
+                }
                 (Some(data), Some(base)) => format!("{data}, {base}, {off}"),
                 (Some(data), None) if name.starts_with("s_scratch_") => format!("{data}, {off}"),
-                (Some(data), None) => data.to_string(),
+                (Some(data), None) => data,
                 (None, Some(base)) => format!("{base}, {off}"),
                 (None, None) => String::new(),
             };
-||||||| a26859fc
-            if let Some(data) = data {
-                let off = match (soffset, offset) {
-                    (Operand::Scalar { code: NULL, .. }, 0) => soffset.to_string(),
-                    (Operand::Scalar { code: NULL, .. }, _) => {
-                        format!("0x{:06x}", offset & 0x1F_FFFF)
-                    }
-                    (_, 0) => soffset.to_string(),
-                    _ => format!("{soffset} offset:0x{:06x}", offset & 0x1F_FFFF),
-                };
-                out = format!("{data}, {base}, {off}");
-            }
-=======
-            if let Some(data) = data {
-                let data = match (name, data) {
-                    ("s_atc_probe" | "s_atc_probe_buffer", Operand::Literal(imm)) => {
-                        atc_immediate(*imm)
-                    }
-                    _ => data.to_string(),
-                };
-                let off = match (soffset, offset) {
-                    (Operand::Scalar { code: NULL, .. }, 0) => soffset.to_string(),
-                    (Operand::Scalar { code: NULL, .. }, _) => {
-                        format!("0x{:06x}", offset & 0x1F_FFFF)
-                    }
-                    (_, 0) => soffset.to_string(),
-                    _ => format!("{soffset} offset:0x{:06x}", offset & 0x1F_FFFF),
-                };
-                out = match name {
-                    // The data is a counter or the wave ID; these have no address.
-                    "s_memtime" | "s_memrealtime" | "s_get_waveid_in_workgroup" => data.to_string(),
-                    _ => format!("{data}, {base}, {off}"),
-                };
-            }
->>>>>>> avatar/main
             flags(&mut out, cache, false);
         }
         Fields::Valu(v) => out = valu(name, v, inst.encoding),

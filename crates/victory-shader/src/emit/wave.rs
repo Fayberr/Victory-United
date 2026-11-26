@@ -306,15 +306,8 @@ pub(crate) fn sections(p: &Program, block: usize) -> HashMap<usize, Section> {
         let Some(end) = end else {
             break;
         };
-<<<<<<< HEAD
         let exec_start = (inst.write(Reg::S(EXEC)), inst.write(Reg::S(EXEC + 1)));
-        let shapes = simulate(&insts[i + 1..end], wave, (saved, saved_hi), exec_start);
-        out.insert(i, Section { end, shapes });
-||||||| a26859fc
-        let shapes = simulate(&insts[i + 1..end], wave, saved);
-        out.insert(i, Section { end, shapes });
-=======
-        let (vec, uni) = simulate(&insts[i + 1..end], wave, saved);
+        let (vec, uni) = simulate(&insts[i + 1..end], wave, (saved, saved_hi), exec_start);
         let mut reads = HashMap::new();
         for later in insts[end + 1..].iter().filter(|i| i.name() == "v_readlane_b32") {
             if let Fields::Valu(v) = &later.fields
@@ -333,7 +326,6 @@ pub(crate) fn sections(p: &Program, block: usize) -> HashMap<usize, Section> {
         }
         let shapes = shapes(vec, uni, wave);
         out.insert(i, Section { end, shapes, reads });
->>>>>>> avatar/main
         i = end + 1;
     }
     out
@@ -411,16 +403,6 @@ fn combine(op: Op, a: Sym, b: Sym) -> Sym {
     }
 }
 
-<<<<<<< HEAD
-fn simulate(
-    insts: &[Inst],
-    wave: u32,
-    saved: (Value, Option<Value>),
-    exec_start: (Option<Value>, Option<Value>),
-) -> HashMap<Value, Shape> {
-||||||| a26859fc
-fn simulate(insts: &[Inst], wave: u32, saved: Value) -> HashMap<Value, Shape> {
-=======
 /// The lane a `v_readlane_b32` names.
 fn lane_number(op: &Operand) -> Option<u32> {
     match *op {
@@ -433,8 +415,12 @@ fn lane_number(op: &Operand) -> Option<u32> {
 /// The lanes' values of the VGPRs the section writes, and its scalars.
 type Left = (HashMap<Value, Vec<Sym>>, HashMap<Value, Sym>);
 
-fn simulate(insts: &[Inst], wave: u32, saved: Value) -> Left {
->>>>>>> avatar/main
+fn simulate(
+    insts: &[Inst],
+    wave: u32,
+    saved: (Value, Option<Value>),
+    exec_start: (Option<Value>, Option<Value>),
+) -> Left {
     let all = if wave == 64 {
         u64::MAX
     } else {
