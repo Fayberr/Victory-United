@@ -2316,7 +2316,18 @@ impl HostHeap {
             }]
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             static ONCE: std::sync::Once = std::sync::Once::new();
-            ONCE.call_once(|| tracing::warn!(n, "no free dynamic descriptor slots: a table is not made"));
+            ONCE.call_once(|| {
+                let mut run = 0;
+                let mut largest_free = 0;
+                for &occupied in taken.iter() {
+                    run = if occupied { 0 } else { run + 1 };
+                    largest_free = largest_free.max(run);
+                }
+                tracing::warn!(n, largest_free,
+                    free = self.free.load(std::sync::atomic::Ordering::Relaxed),
+                    capacity = self.dynamic,
+                    "no free dynamic descriptor slots: a table is not made");
+            });
             #[cfg(feature = "diagnostics")]
             {
                 use crate::copystat::{C, add};
@@ -2347,6 +2358,11 @@ impl HostHeap {
     /// to it, never to a heap made later at the same address.
     pub(crate) fn id(&self) -> u64 {
         self.id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn dynamic_capacity(&self) -> u32 {
+        self.dynamic
     }
 
     /// The GPU address of the table of element strides by title slot (view
