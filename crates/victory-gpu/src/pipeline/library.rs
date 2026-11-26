@@ -492,31 +492,6 @@ fn open(device: &ID3D12Device1, blob: Blob) -> Option<Library> {
     // The rejected bytes are let go (a mapped file is unmapped) before the
     // empty library is made: nothing reads them any more.
     drop(blob);
-<<<<<<< HEAD
-||||||| 085ee7c4c
-    // And the file is kept under another name, not written over by this
-    // run's first save: a refusal may be this device's alone (run 263:
-    // RenderDoc's device refused the card's library, an empty one was
-    // saved over 366 MB of built pipelines, and the next run drew black
-    // until they were built again).
-    if rejected && let Some(dir) = DIR.get() {
-        if let Err(e) = std::fs::rename(dir.join(LIBRARY_FILE), dir.join(REJECTED_FILE)) {
-            tracing::warn!(error = %e, "the rejected host pipeline library could not be kept under its other name");
-        }
-    }
-=======
-    // And the file is kept under another name, not written over by this
-    // run's first save: a refusal may be this device's alone (run 263:
-    // RenderDoc's device refused the card's library, an empty one was
-    // saved over 366 MB of built pipelines, and the next run drew black
-    // until they were built again).
-    if rejected
-        && let Some(dir) = DIR.get()
-        && let Err(e) = std::fs::rename(dir.join(LIBRARY_FILE), dir.join(REJECTED_FILE))
-    {
-        tracing::warn!(error = %e, "the rejected host pipeline library could not be kept under its other name");
-    }
->>>>>>> origin/exp/vitoriabr-head
     let library = make(&[]).ok()?;
     Some(Library {
         library,
