@@ -76,6 +76,7 @@ fn load(dir: &Path, s: &Stage) -> Result<HostShader> {
         // What the runtime resolves when it binds a draw: no part of the
         // root signature or of the pipeline state.
         root_indexed_views: Vec::new(),
+        half_views: Vec::new(),
     })
 }
 

@@ -145,12 +145,29 @@ const FATAL: [i32; 6] = [
     EXCEPTION_BREAKPOINT,
 ];
 
+/// The status flags `cmp a, b` leaves (CF, PF, AF, ZF, SF, OF) as `EFLAGS` bits.
+pub(crate) fn cmp_flags(a: u64, b: u64) -> u32 {
+    let r = a.wrapping_sub(b);
+    u32::from(a < b)
+        | u32::from((r as u8).count_ones().is_multiple_of(2)) << 2
+        | (((a ^ b ^ r) >> 4) as u32 & 1) << 4
+        | u32::from(r == 0) << 6
+        | ((r >> 63) as u32) << 7
+        | ((((a ^ b) & (a ^ r)) >> 63) as u32) << 11
+}
+pub(crate) const CMP_FLAGS: u32 = 0x8d5;
+
 unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
     // An instruction of the console's CPU this one lacks (`console_ops`):
     // emulated, the title goes on.
     // SAFETY: the system passes valid exception pointers.
     if unsafe { (*(*info).ExceptionRecord).ExceptionCode } == EXCEPTION_ILLEGAL_INSTRUCTION {
         // SAFETY: the faulting thread's context, for the exception being dispatched.
+        let r = unsafe { crate::console_insn::emulate(&mut *(*info).ContextRecord) };
+        if r != 0 {
+            return r;
+        }
+        // SAFETY: as above.
         let r = unsafe { crate::console_ops::emulate(&mut *(*info).ContextRecord) };
         if r != 0 {
             return r;

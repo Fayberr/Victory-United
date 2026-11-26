@@ -2468,6 +2468,7 @@ fn ps_sample_coverage_input_reads_coverage_mask() {
         root_srvs: Vec::new(),
         root_uavs: Vec::new(),
         root_indexed_views: Vec::new(),
+        half_views: Vec::new(),
     };
 
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
@@ -2725,6 +2726,7 @@ fn wave_prefix_f32_uses_signed_flag_and_validates() {
         root_srvs: l.root_srvs,
         root_uavs: l.root_uavs,
         root_indexed_views: Vec::new(),
+        half_views: Vec::new(),
     };
     #[cfg(windows)]
     {

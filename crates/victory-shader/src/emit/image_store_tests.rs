@@ -167,6 +167,7 @@ fn lower(native: &NativeProgram) -> Result<HostShader, ShaderError> {
         root_srvs: lowered.root_srvs,
         root_uavs: lowered.root_uavs,
         root_indexed_views: res.root_indexed_views.clone(),
+        half_views: Vec::new(),
     })
 }
 
