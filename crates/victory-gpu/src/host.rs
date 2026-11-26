@@ -738,9 +738,9 @@ fn reaper_on() -> bool {
     static MODE: OnceLock<u8> = OnceLock::new();
     let mode = *MODE.get_or_init(|| {
         let asked = match std::env::var("VICTORY_REAPER").as_deref() {
-            Ok("1") => 1,
+            Ok("0") => 0,
             Ok("alt") => 2,
-            _ => 0,
+            _ => 1,
         };
         if asked == 0 || std::thread::Builder::new().name("victory-reaper".into()).spawn(reaper).is_err() {
             return 0;
@@ -2094,6 +2094,36 @@ struct Gather {
     budget: Option<ID3D12Resource>,
     /// Scratch buffers of earlier recordings, kept for the next sets.
     spare: Vec<ID3D12Resource>,
+    /// The passes recorded in the list for records taken after it stopped gathering for its prelude
+    /// (`crate::indirect::gather_segments`).
+    segments: Segments,
+}
+
+/// A list's segments' passes (`crate::indirect::gather_segments`).
+#[derive(Default)]
+struct Segments {
+    /// The list's buffer of slots, `SEGMENT_PASSES` passes of `SEGMENT_PASS` records of `GATHER_STRIDE` bytes: made at
+    /// the first pass and kept across recordings.
+    buffer: Option<ID3D12Resource>,
+    /// Whether a pass of this recording used the buffer: it is in `INDIRECT_ARGUMENT` from the first pass to the
+    /// list's end, else common.
+    used: bool,
+    /// The passes recorded in this recording.
+    passes: u32,
+    /// The passes of the segment open now that take records: none once something that may write arguments ends it.
+    open: Vec<SegmentPass>,
+}
+
+/// A pass of the open segment: its argument buffer (a host copy, its number), kind and stride, its number in the
+/// recording, the records it has, and its table (upload memory of the list: the count, then the records' offsets).
+struct SegmentPass {
+    src: ID3D12Resource,
+    src_id: u64,
+    kind: u32,
+    stride: u32,
+    pass: u32,
+    records: u32,
+    table: usize,
 }
 
 /// The most argument buffers a list gathers from.
@@ -2962,6 +2992,9 @@ struct CardWork {
     fetch: Prelude,
     root: ID3D12RootSignature,
     pso: ID3D12PipelineState,
+    /// With `VICTORY_CARD_HASH_WIDE=alt` ([`card_hash_wide_now`]): the compare of [`CARD_COMPARE_WIDE`], `pso`
+    /// being [`CARD_COMPARE`]'s. Both shaders declare the same root signature.
+    pso_wide: Option<ID3D12PipelineState>,
     /// One dword per piece compared, odd where the piece differs: PC
     /// memory, mapped (buffer, mapping, bytes).
     differs: (ID3D12Resource, usize, u64),
@@ -3040,64 +3073,24 @@ ByteAddressBuffer now : register(t0);
 // last sent up (or hashed whole, the first time).
 RWByteAddressBuffer hashes : register(u0);
 RWByteAddressBuffer differs : register(u1);
-groupshared uint4 parts[64];
 [RootSignature(RS)]
 [numthreads(64, 1, 1)]
-void main(uint3 id : SV_GroupID, uint thread : SV_GroupIndex) {
+void main(uint3 id : SV_DispatchThreadID) {
+    if (id.x >= pieces) return;
     uint piece = first + id.x;
     uint lo = piece * 65536u;
     lo = lo > skew ? lo - skew : 0u;
     uint hi = min((piece + 1u) * 65536u - skew, size);
     lo = lo & ~15u;
     hi = (hi + 15u) & ~15u;
-    uint4 h = uint4(0x9E3779B9u, 0x85EBCA6Bu, 0xC2B2AE35u, 0x27D4EB2Fu) + thread;
-    uint at = lo + thread * 16u;
-    // Eight loads at once: one after the other, each waits for memory.
+    uint4 h = uint4(0x9E3779B9u, 0x85EBCA6Bu, 0xC2B2AE35u, 0x27D4EB2Fu);
     [loop]
-    for (; at + 7168u < hi; at += 8192u) {
-        uint4 v0 = now.Load4(at + 0u);
-        uint4 v1 = now.Load4(at + 1024u);
-        uint4 v2 = now.Load4(at + 2048u);
-        uint4 v3 = now.Load4(at + 3072u);
-        uint4 v4 = now.Load4(at + 4096u);
-        uint4 v5 = now.Load4(at + 5120u);
-        uint4 v6 = now.Load4(at + 6144u);
-        uint4 v7 = now.Load4(at + 7168u);
-        h = (h ^ v0) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
-        h = h.yzwx ^ (h >> 15);
-        h = (h ^ v1) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
-        h = h.yzwx ^ (h >> 15);
-        h = (h ^ v2) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
-        h = h.yzwx ^ (h >> 15);
-        h = (h ^ v3) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
-        h = h.yzwx ^ (h >> 15);
-        h = (h ^ v4) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
-        h = h.yzwx ^ (h >> 15);
-        h = (h ^ v5) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
-        h = h.yzwx ^ (h >> 15);
-        h = (h ^ v6) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
-        h = h.yzwx ^ (h >> 15);
-        h = (h ^ v7) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
-        h = h.yzwx ^ (h >> 15);
-    }
-    [loop]
-    for (; at < hi; at += 1024u) {
+    for (uint at = lo; at < hi; at += 16u) {
         h = (h ^ now.Load4(at)) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
         h = h.yzwx ^ (h >> 15);
     }
-    parts[thread] = h;
-    GroupMemoryBarrierWithGroupSync();
-    if (thread != 0u) return;
-    h = parts[0];
-    [loop]
-    for (uint i = 1u; i < 64u; ++i) {
-        h = (h ^ parts[i]) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
-        h = h.yzwx ^ (h >> 15);
-    }
     if (compare != 0u) {
-        // The flag, and above it 31 bits of the hash (`torn`).
-        uint folded = h.x ^ (h.y * 3u) ^ (h.z * 5u) ^ (h.w * 7u);
-        differs.Store(out_at + id.x * 4u, (folded << 1u) | (any(h != hashes.Load4(piece * 16u)) ? 1u : 0u));
+        differs.Store(out_at + id.x * 4u, ((h.x ^ (h.y * 3u) ^ (h.z * 5u) ^ (h.w * 7u)) << 1u) | (any(h != hashes.Load4(piece * 16u)) ? 1u : 0u));
         // With the copy-back on its own thread: the next compare of the
         // piece finds what is written from here on.
         if (compare == 2u) hashes.Store4(piece * 16u, h);
@@ -3173,7 +3166,7 @@ void main(uint3 group : SV_GroupID, uint t : SV_GroupIndex) {
         all = all.yzwx ^ (all >> 15);
     }
     if (compare != 0u) {
-        differs.Store(out_at + i * 4u, any(all != hashes.Load4(piece * 16u)) ? 1u : 0u);
+        differs.Store(out_at + i * 4u, ((all.x ^ (all.y * 3u) ^ (all.z * 5u) ^ (all.w * 7u)) << 1u) | (any(all != hashes.Load4(piece * 16u)) ? 1u : 0u));
         if (compare == 2u) hashes.Store4(piece * 16u, all);
     } else {
         hashes.Store4(piece * 16u, all);
@@ -3184,8 +3177,65 @@ void main(uint3 group : SV_GroupID, uint t : SV_GroupIndex) {
 /// Whether [`CARD_COMPARE_WIDE`] is the compare (`VICTORY_CARD_HASH_WIDE`;
 /// on unless `0`). Chosen once: stored and compared hashes must agree.
 pub(crate) fn card_hash_wide() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("VICTORY_CARD_HASH_WIDE").is_none_or(|v| v != "0"))
+    card_hash_mode() == 1
+}
+
+/// `VICTORY_CARD_HASH_WIDE`: 0 a thread a piece, 1 a group a piece, 2 in turn (`alt`, [`card_hash_wide_now`]).
+fn card_hash_mode() -> u8 {
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        let mode = match std::env::var("VICTORY_CARD_HASH_WIDE").as_deref() {
+            Ok("1") => 1,
+            Ok("alt") => 2,
+            _ => 0,
+        };
+        if mode == 1 {
+            tracing::info!("the card's hashes of copies' pieces are made by a group of 64 threads a piece (VICTORY_CARD_HASH_WIDE=1)");
+        }
+        mode
+    })
+}
+
+/// Whether the card's hashes of a submission's pieces are made with [`CARD_COMPARE_WIDE`]: with
+/// `VICTORY_CARD_HASH_WIDE=1` always; with `alt` twenty seconds with, twenty without, in turn, each change said in the
+/// log, so that one run measures the card and the submitting thread in both at equal draws (run 332 compared two
+/// launches: card -8 to -24 ms, submit thread +12 to +20, inside the ±10 ms two launches differ by).
+///
+/// Read once per submission (`Host::card_before`): its pass after ranges were sent up and its compare use the same
+/// form. Why mixing the two forms across submissions is exact: a piece whose hash was stored in one form and is
+/// compared in the other is flagged as differing (two different 128-bit functions of the same bytes agree by chance
+/// about one time in 2^128, the odds a changed piece already has of a same hash in either form). A flagged piece is
+/// fetched and merged, and the merge stores into title memory only the bytes where the card's side differs from the
+/// CPU's (`Shadow::card_merge_relay`): a piece nothing changed stores nothing. So a change of phase costs one fetch of
+/// each piece compared next (two compares in a row without a store, `compare` 1, fetch it again until the next send
+/// stores its hash), never a byte. Each form has its own rare pattern of changes it cannot see, as with `=1`.
+fn card_hash_wide_now() -> bool {
+    match card_hash_mode() {
+        0 => false,
+        1 => true,
+        _ => {
+            static EPOCH: OnceLock<std::time::Instant> = OnceLock::new();
+            let on = (EPOCH.get_or_init(std::time::Instant::now).elapsed().as_secs() / 20) % 2 == 1;
+            static LAST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+            if LAST.swap(u8::from(on), Ordering::Relaxed) != u8::from(on) {
+                tracing::info!(
+                    "the card's hashes of copies' pieces from now (VICTORY_CARD_HASH_WIDE=alt): {}",
+                    if on { "ON, a group of 64 threads a piece" } else { "off, a thread a piece" }
+                );
+            }
+            on
+        }
+    }
+}
+
+impl CardWork {
+    /// The compare's pipeline for a submission ([`card_hash_wide_now`]) and whether it is the wide form.
+    fn compare_for(&self, wide_now: bool) -> (&ID3D12PipelineState, bool) {
+        match (&self.pso_wide, wide_now) {
+            (Some(wide), true) => (wide, true),
+            _ => (&self.pso, card_hash_wide()),
+        }
+    }
 }
 
 /// The compare's source for this process ([`card_hash_wide`]).
@@ -3194,8 +3244,9 @@ pub(crate) fn card_compare_source() -> &'static str {
 }
 
 /// The groups a compare pass over `pieces` pieces is dispatched with.
-pub(crate) fn card_compare_groups(pieces: u32) -> u32 {
-    if card_hash_wide() { pieces } else { pieces.div_ceil(64) }
+/// (For the form `wide` of the submission, [`CardWork::compare_for`].)
+fn card_compare_groups_as(wide: bool, pieces: u32) -> u32 {
+    if wide { pieces } else { pieces.div_ceil(64) }
 }
 
 /// Whether the pieces a flight's compare flags come down to the PC inside
@@ -3205,7 +3256,7 @@ pub(crate) fn card_compare_groups(pieces: u32) -> u32 {
 /// # Safety
 /// The list is open with the compare's root signature, pipeline and buffers
 /// set, and the pieces lie in the buffer.
-unsafe fn card_pass(list: &ID3D12GraphicsCommandList, span: &crate::shadow::CardSpan, size: u32, at: u32, mode: u32) {
+unsafe fn card_pass(wide: bool, list: &ID3D12GraphicsCommandList, span: &crate::shadow::CardSpan, size: u32, at: u32, mode: u32) {
     const MOST: u32 = D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION;
     let mut done = 0;
     while done < span.pieces {
@@ -3214,7 +3265,7 @@ unsafe fn card_pass(list: &ID3D12GraphicsCommandList, span: &crate::shadow::Card
         // SAFETY: the caller's.
         unsafe {
             list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
-            list.Dispatch(n, 1, 1);
+            list.Dispatch(card_compare_groups_as(wide, n), 1, 1);
         }
         done += n;
     }
@@ -4418,6 +4469,9 @@ fn stale_under_flights(runs: &[&HostList]) -> Vec<(std::sync::Arc<crate::shadow:
         if settle_room() {
             runs_left = (runs_left * 8).min(1 << 16);
         }
+        if let Some(wider) = merge_runs_alt() {
+            runs_left = wider;
+        }
         spans.retain(|(shadow, from, to)| shadow.merge_under_writes(*from, *to - *from, &mut runs_left));
         return spans;
     }
@@ -4504,6 +4558,35 @@ fn split<T>(lists: Vec<T>, order: Vec<usize>, cut: usize) -> Result<[Run<T>; 2],
     let [a, b] = halves;
     let [x, y] = orders;
     Ok([(a, x), (b, y)])
+}
+
+/// The cap of changed runs the merge under flights' writes takes before it settles the flights, in the phases with
+/// `VICTORY_MERGE_RUNS_ALT=N` (unset: none, the cap as set): twenty seconds N (1 to 65,536), twenty seconds the cap
+/// of `VICTORY_MERGE_RUNS` (x8 with [`settle_room`]), in turn, each change said in the log.
+///
+/// Why: run 345 (warm cache, the owner's flag set, which has `VICTORY_SETTLE_ROOM=1` and no `VICTORY_MERGE_RUNS`: a
+/// cap of 4,096) settled 1.4 times a frame for "title memory changed under shader writes", 84.8 ms a frame of the
+/// submitting thread waiting for the card, and every give-up of the merge in its lines was "for more changed runs
+/// than VICTORY_MERGE_RUNS leaves" (5 to 10 a window; 2,000 to 2,500 changed runs a frame are merged). Both ways are
+/// exact: the merge puts the title's changed bytes in beside the flights' writes, a run a copy on the card; the settle
+/// waits for the flights and lands them first. The price of the wider cap is those copies' card time, in the same
+/// phases (the card meter's "send-and-hash lists").
+fn merge_runs_alt() -> Option<usize> {
+    static WIDER: OnceLock<Option<usize>> = OnceLock::new();
+    let wider = (*WIDER.get_or_init(|| {
+        std::env::var("VICTORY_MERGE_RUNS_ALT").ok().and_then(|v| v.trim().parse::<usize>().ok()).map(|n| n.clamp(1, 1 << 16))
+    }))?;
+    static EPOCH: OnceLock<std::time::Instant> = OnceLock::new();
+    let on = (EPOCH.get_or_init(std::time::Instant::now).elapsed().as_secs() / 20) % 2 == 1;
+    static LAST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+    if LAST.swap(u8::from(on), Ordering::Relaxed) != u8::from(on) {
+        tracing::info!(
+            "the merge under flights' writes takes {} changed runs a submission before it settles them, from now (VICTORY_MERGE_RUNS_ALT): {}",
+            if on { wider.to_string() } else { "the cap as set".to_string() },
+            if on { "ON" } else { "off" }
+        );
+    }
+    on.then_some(wider)
 }
 
 /// Whether the list that brings copies in the card's memory up to date
@@ -5871,18 +5954,68 @@ impl Host {
             })?;
             #[cfg(feature = "diagnostics")]
             name(&pso, || crate::replay::play::COMPARE.into());
+            // With `alt`: the wide form's pipeline beside it (`pso` is then the thread-a-piece form, as
+            // `card_compare_source` gives it without `=1`). None if it does not build: every submission keeps `pso`.
+            let pso_wide = (card_hash_mode() == 2).then(|| self.make_card_compare_wide(&root)).flatten();
             Ok(CardWork {
                 sync: vec![list()?],
                 check: vec![list()?],
                 fetch: list()?,
                 root,
                 pso,
+                pso_wide,
                 differs: (differs, data as usize, RESULTS),
                 fetched: None,
                 taken: 0,
                 out: 0,
                 merge: if crate::shadow::merge_on_card_wanted() { self.make_card_merge() } else { None },
             })
+        }
+    }
+
+    /// [`CARD_COMPARE_WIDE`]'s pipeline with the compare's root signature `root` (the two shaders declare the same
+    /// one), for `VICTORY_CARD_HASH_WIDE=alt`; `None`, said in the log, if it cannot be made.
+    fn make_card_compare_wide(&self, root: &ID3D12RootSignature) -> Option<ID3D12PipelineState> {
+        use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
+        use windows::Win32::Graphics::Direct3D::ID3DBlob;
+        let made = (|| -> windows::core::Result<ID3D12PipelineState> {
+            let mut code: Option<ID3DBlob> = None;
+            // SAFETY: the source and names live through the call; the out pointer is ours.
+            unsafe {
+                D3DCompile(
+                    CARD_COMPARE_WIDE.as_ptr().cast(),
+                    CARD_COMPARE_WIDE.len(),
+                    windows::core::s!("card compare wide"),
+                    None,
+                    None,
+                    windows::core::s!("main"),
+                    windows::core::s!("cs_5_1"),
+                    0,
+                    0,
+                    &mut code,
+                    None,
+                )?;
+            }
+            let code = code.ok_or_else(windows::core::Error::empty)?;
+            // SAFETY: the blob's own bytes; a root signature the shader declares as well.
+            unsafe {
+                let bytes = std::slice::from_raw_parts(code.GetBufferPointer().cast::<u8>(), code.GetBufferSize());
+                self.device.CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
+                    pRootSignature: std::mem::transmute_copy(root),
+                    CS: D3D12_SHADER_BYTECODE {
+                        pShaderBytecode: bytes.as_ptr().cast(),
+                        BytecodeLength: bytes.len(),
+                    },
+                    ..Default::default()
+                })
+            }
+        })();
+        match made {
+            Ok(pso) => Some(pso),
+            Err(e) => {
+                tracing::warn!(error = %e, "VICTORY_CARD_HASH_WIDE=alt: the wide compare could not be made; a thread a piece throughout");
+                None
+            }
         }
     }
 
@@ -6077,6 +6210,12 @@ impl Host {
             }
             mask = buffer.map(|(buffer, _)| buffer);
         }
+        // The hash form of this submission's passes, one for all of them (`card_hash_wide_now`).
+        let wide_now = card_hash_wide_now();
+        let (compare_pso, wide) = {
+            let (pso, wide) = work.compare_for(wide_now);
+            (pso.clone(), wide)
+        };
         // A copy whose shader writes are declared for the first time gets
         // its bytes from before, whole.
         let mut whole: Vec<Arc<crate::shadow::Shadow>> = Vec::new();
@@ -6264,7 +6403,7 @@ impl Host {
                         CARD_PASSES[0].fetch_add(runs.len() as u64, Ordering::Relaxed);
                         CARD_PASSES[1].fetch_add(runs.iter().map(|r| u64::from(r.pieces)).sum::<u64>(), Ordering::Relaxed);
                         for run in runs {
-                            card_pass(list, &run, size as u32, 0, 0);
+                            card_pass(wide, list, &run, size as u32, 0, 0);
                         }
                     }
                     list.Close()?;
@@ -6362,7 +6501,7 @@ impl Host {
                         },
                     }]);
                     list.SetComputeRootSignature(&work.root);
-                    list.SetPipelineState(&work.pso);
+                    list.SetPipelineState(&compare_pso);
                     list.SetComputeRootUnorderedAccessView(3, work.differs.0.GetGPUVirtualAddress());
                     for r in plan.ranges.iter().filter(|r| r.compared) {
                         let (Some((_, Some(before), _)), size) = (r.shadow.card_sides(), r.shadow.card_hash_size()) else {
@@ -6372,7 +6511,7 @@ impl Host {
                         list.SetComputeRootUnorderedAccessView(2, before.GetGPUVirtualAddress());
                         // (What is only looked at keeps its hashes: what
                         // changed there is the next declared range's to land.)
-                        card_pass(list, &r.span, size as u32, r.at, if flown && !r.picked { 2 } else { 1 });
+                        card_pass(wide, list, &r.span, size as u32, r.at, if flown && !r.picked { 2 } else { 1 });
                         CARD_PASSES[2].fetch_add(1, Ordering::Relaxed);
                     }
                     list.Close()?;
@@ -8427,6 +8566,15 @@ impl HostList {
         }
         self.batches_common();
         self.card_budget_out();
+        {
+            let mut gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
+            gather.segments.open.clear();
+            if gather.segments.used && let Some(buffer) = &gather.segments.buffer {
+                // SAFETY: an open list and a live scratch buffer.
+                unsafe { self.list.ResourceBarrier(&[transition(buffer,
+                    D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COMMON)]) };
+            }
+        }
         self.take_coming();
         #[cfg(feature = "diagnostics")]
         if let Some((heap, back)) = self.stamps() {
@@ -8487,9 +8635,12 @@ impl HostList {
         self.indirects.lock().unwrap_or_else(|e| e.into_inner()).clear();
         {
             let mut gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
-            let Gather { closed, written, sets, spare, .. } = &mut *gather;
+            let Gather { closed, written, sets, spare, segments, .. } = &mut *gather;
             *closed = false;
             written.clear();
+            segments.used = false;
+            segments.passes = 0;
+            segments.open.clear();
             for set in sets.drain(..) {
                 if spare.len() < GATHER_SETS {
                     spare.push(set.into_scratch());
@@ -8915,7 +9066,15 @@ impl HostList {
     /// From here on the list gathers no records (`crate::indirect::gather`):
     /// what is about to be recorded may write arguments.
     pub(crate) fn gather_close(&self) {
-        self.gather.lock().unwrap_or_else(|e| e.into_inner()).closed = true;
+        let mut gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
+        gather.closed = true;
+        gather.segments.open.clear();
+    }
+
+    /// What is about to be recorded may write arguments: the segment open now ends
+    /// (`crate::indirect::gather_segments`), whatever the prelude's gathering does.
+    pub(crate) fn segments_end(&self) {
+        self.gather.lock().unwrap_or_else(|e| e.into_inner()).segments.open.clear();
     }
 
     /// Shaders of the list were declared to write the host copy numbered
@@ -8924,22 +9083,32 @@ impl HostList {
     /// gathered from here on. (Without the switch nothing is noted: the
     /// list stops gathering whole, as before.)
     pub(crate) fn gather_wrote(&self, copy: u64) {
+        let mut gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
+        // Shaders about to write: the open segment ends (`crate::indirect::gather_segments`).
+        gather.segments.open.clear();
         if crate::indirect::gather_by_copy_kept() {
-            self.gather.lock().unwrap_or_else(|e| e.into_inner()).written.insert(copy);
+            gather.written.insert(copy);
         }
     }
 
     /// A slot for the record at `offset` of the host copy `src` in the
     /// scratch buffer the list's prelude fills (`crate::indirect::gather`,
     /// which checked the record): the buffer and the slot's place in it.
-    pub(crate) fn gather_slot(&self, src: &ID3D12Resource, src_id: u64, offset: u32, (kind, stride): (u32, u32)) -> Option<(ID3D12Resource, u64)> {
+    ///
+    /// Once the list stopped gathering (whole, or for this copy): with `crate::indirect::gather_segments`, a slot of a
+    /// pass of the open segment ([`HostList::segment_slot`]; the third value: a pass was recorded for it).
+    pub(crate) fn gather_slot(&self, src: &ID3D12Resource, src_id: u64, offset: u32, (kind, stride): (u32, u32)) -> Option<(ID3D12Resource, u64, bool)> {
         let none = |why: usize| {
             crate::indirect::GATHER_NONE[why].fetch_add(1, Ordering::Relaxed);
             None
         };
         let mut gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
         if gather.closed || gather.written.contains(&src_id) {
-            return none(1);
+            drop(gather);
+            if !crate::indirect::gather_segments() {
+                return none(1);
+            }
+            return self.segment_slot(src, src_id, offset, (kind, stride));
         }
         let found = gather
             .sets
@@ -8987,7 +9156,87 @@ impl HostList {
         let Some(slot) = set.slot(offset) else {
             return none(3);
         };
-        Some((set.scratch.clone(), u64::from(slot) * u64::from(stride)))
+        Some((set.scratch.clone(), u64::from(slot) * u64::from(stride), false))
+    }
+
+    /// [`HostList::gather_slot`] once the list stopped gathering for its prelude (`crate::indirect::gather_segments`):
+    /// a slot of a pass of the segment open now, or of a pass recorded here for it. None: clamped alone, as before.
+    fn segment_slot(&self, src: &ID3D12Resource, src_id: u64, offset: u32, (kind, stride): (u32, u32)) -> Option<(ID3D12Resource, u64, bool)> {
+        use crate::indirect::{GATHER_STRIDE, SEGMENT_PASS, SEGMENT_PASSES, SEGMENT_STATS};
+        let fell_back = || {
+            SEGMENT_STATS[2].fetch_add(1, Ordering::Relaxed);
+            crate::indirect::GATHER_NONE[1].fetch_add(1, Ordering::Relaxed);
+            None
+        };
+        let pass_bytes = u64::from(SEGMENT_PASS) * u64::from(GATHER_STRIDE);
+        let take = |pass: &mut SegmentPass, buffer: &ID3D12Resource| {
+            let i = pass.records;
+            pass.records += 1;
+            // SAFETY: the table holds a count and `SEGMENT_PASS` offsets, in the list's upload memory alive until its
+            // reset; the card reads it only when the list runs. The count is written last.
+            unsafe {
+                let table = pass.table as *mut u32;
+                table.add(1 + i as usize).write_volatile(offset);
+                table.write_volatile(pass.records);
+            }
+            SEGMENT_STATS[0].fetch_add(1, Ordering::Relaxed);
+            (buffer.clone(), u64::from(pass.pass) * pass_bytes + u64::from(i) * u64::from(stride))
+        };
+        {
+            let mut gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
+            let Segments { buffer, open, .. } = &mut gather.segments;
+            if let Some(buffer) = buffer.as_ref()
+                && let Some(pass) = open
+                    .iter_mut()
+                    .find(|p| p.src_id == src_id && p.kind == kind && p.stride == stride && p.src.as_raw() == src.as_raw() && p.records < SEGMENT_PASS)
+            {
+                let (buffer, at) = take(pass, buffer);
+                return Some((buffer, at, false));
+            }
+        }
+        // A pass for the record, here: the list's budget first (it may record the budget's zeroing).
+        let Some(budget) = self.budget() else {
+            return fell_back();
+        };
+        let Some(table) = self.scratch(4 + u64::from(SEGMENT_PASS) * 4) else {
+            return fell_back();
+        };
+        let mut gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
+        let segments = &mut gather.segments;
+        if segments.passes >= SEGMENT_PASSES {
+            return fell_back();
+        }
+        if segments.buffer.is_none() {
+            let Some(made) = host().and_then(|h| h.uav_buffer(u64::from(SEGMENT_PASSES) * pass_bytes)) else {
+                return fell_back();
+            };
+            name(&made, || "indirect arguments, gathered in segments".to_owned());
+            segments.buffer = Some(made);
+        }
+        let Some(buffer) = segments.buffer.clone() else {
+            return fell_back();
+        };
+        // SAFETY: the list's own upload memory: the count starts at none.
+        unsafe { (table.1 as *mut u32).write_volatile(0) };
+        let before = if segments.used { D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT } else { D3D12_RESOURCE_STATE_COMMON };
+        let pass = segments.passes;
+        if !crate::indirect::record_segment(&self.list, (&buffer, before), u64::from(pass) * pass_bytes, budget, src, table.0, (kind, stride)) {
+            return fell_back();
+        }
+        segments.used = true;
+        segments.passes += 1;
+        segments.open.push(SegmentPass { src: src.clone(), src_id, kind, stride, pass, records: 0, table: table.1 as usize });
+        let passes = SEGMENT_STATS[1].fetch_add(1, Ordering::Relaxed) + 1;
+        if passes.is_power_of_two() {
+            tracing::info!(
+                "segments so far (VICTORY_GATHER_SEGMENTS): {passes} passes took {} records (records per pass is what it saves), {} found no room and were clamped alone",
+                SEGMENT_STATS[0].load(Ordering::Relaxed) + 1,
+                SEGMENT_STATS[2].load(Ordering::Relaxed)
+            );
+        }
+        let last = segments.open.len() - 1;
+        let (buffer, at) = take(&mut segments.open[last], &buffer);
+        Some((buffer, at, true))
     }
 
     /// Notes what the command about to be recorded does, as a marker
@@ -9728,6 +9977,10 @@ impl HostList {
                         batch.title_written(TitleWrite::Deferred);
                         // (It may write anywhere, a heap's records too.)
                         crate::port_journal::prep_wrote();
+                    } else if !batch.due_textures.is_empty() {
+                        // Host callbacks can use a refresh result, including the
+                        // mip mask that maps a reserved texture for this upload.
+                        batch.check_textures();
                     }
                     let _step = crate::timeline::span("a step of ours");
                     work();
@@ -12244,11 +12497,11 @@ impl Meter {
                 }
                 {
                     let mode = crate::watch::page_writes();
-                    let [writes, bytes, guarded, plain] = [0, 1, 2, 3].map(|i| crate::watch::WRITTEN[i].load(Ordering::Relaxed));
+                    let [writes, bytes, guarded, plain, told] = [0, 1, 2, 3, 4].map(|i| crate::watch::WRITTEN[i].load(Ordering::Relaxed));
                     let [kept, dropped, slots, uploaded] =
                         [0, 1, 2, 3].map(|i| crate::descriptor::host::PAGE_WRITES[i].load(Ordering::Relaxed));
                     tracing::info!(
-                        "writes behind the guards, since the start: {writes} DirectStorage writes into physical pages at addresses the                      title had mapped ({} MB); {guarded} guarded 64 KiB blocks of host copies lay under them ({}); {plain} reads to                      plain addresses finished ({}); {kept} ranges under texture views kept for the texture pass ({dropped} dropped);                      {slots} slots of placed textures held their bytes, {uploaded} of them uploaded before the write ({})                      (VICTORY_PAGE_WRITES: unset or guards opens the guarded blocks, 0 counts only, 1, slots, all)",
+                        "writes behind the guards, since the start: {writes} DirectStorage writes into physical pages at addresses the                      title had mapped ({} MB); {guarded} guarded 64 KiB blocks of host copies lay under them ({}); {plain} reads to                      plain addresses finished ({}; {told} passed to the texture pass); {kept} ranges under texture views kept for the texture pass ({dropped} dropped);                      {slots} slots of placed textures held their bytes, {uploaded} of them uploaded before the write ({})                      (VICTORY_PAGE_WRITES: unset opens guards and rechecks slots after all reads, guards opens the guarded blocks, 0 counts only, 1, slots, all)",
                         bytes >> 20,
                         if mode & 1 != 0 { "opened, taken again" } else { "left as they were" },
                         if mode & 4 != 0 { "told as well" } else { "counted only" },

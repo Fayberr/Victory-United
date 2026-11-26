@@ -142,9 +142,8 @@ fn build() -> [u8; 32] {
             }
             bytes.push(0);
         }
-        // The list affects output only with the explicit global opt-in.
-        if std::env::var_os("VICTORY_WAVE_WIDE").is_some_and(|v| v == "1")
-            && let Some(list) = std::env::var_os("VICTORY_WAVE_WIDE_ONLY").filter(|v| !v.is_empty())
+        // A hash list can opt individual shaders in without a global switch.
+        if let Some(list) = std::env::var_os("VICTORY_WAVE_WIDE_ONLY").filter(|v| !v.is_empty())
         {
             bytes.extend_from_slice(b"VICTORY_WAVE_WIDE_ONLY=");
             bytes.extend_from_slice(list.as_encoded_bytes());
@@ -173,6 +172,21 @@ pub(crate) fn translation() -> [u8; 32] {
     build()
 }
 
+fn translate_listed(c: &[u8]) -> Result<HostShader, String> {
+    static LIST: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let list = LIST.get_or_init(|| {
+        std::env::var("VICTORY_WAVE_WIDE_ONLY")
+            .unwrap_or_default()
+            .split(',')
+            .map(|h| h.trim().to_lowercase())
+            .filter(|h| !h.is_empty() && h != "none")
+            .collect()
+    });
+    let hash = blake3::hash(c).to_hex();
+    let wide = list.iter().any(|h| hash.starts_with(h.as_str()));
+    victory_shader::emit::with_wave_wide(wide, || victory_shader::emit::translate(c)).map_err(|e| e.to_string())
+}
+
 /// Puts the translation of `container` into the cache before any title asks
 /// for it (`victory shaders`): whether it was there already, or why it does
 /// not translate. The host is opened first, as a run does: what the card
@@ -180,7 +194,7 @@ pub(crate) fn translation() -> [u8; 32] {
 pub fn precompile(container: &[u8]) -> Result<bool, String> {
     let _ = crate::host::host();
     let misses = MISSES.load(Ordering::Relaxed);
-    let translate = |c: &[u8]| victory_shader::emit::translate(c).map_err(|e| e.to_string());
+    let translate = translate_listed;
     match CACHE.get() {
         Some(cache) => cached(cache, &build(), container, translate, true)?,
         None => translate(container)?,
@@ -192,7 +206,7 @@ pub fn precompile(container: &[u8]) -> Result<bool, String> {
 /// The translation of a console shader container, from the cache when
 /// there is one.
 pub(crate) fn host_shader(container: &[u8]) -> Result<HostShader, String> {
-    let translate = |c: &[u8]| victory_shader::emit::translate(c).map_err(|e| e.to_string());
+    let translate = translate_listed;
     let shader = match CACHE.get() {
         Some(cache) => cached(cache, &build(), container, translate, refresh_in_runs()),
         None => translate(container),

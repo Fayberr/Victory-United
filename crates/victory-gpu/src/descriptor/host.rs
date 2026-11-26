@@ -17,6 +17,10 @@ use crate::host::host;
 /// Distinguishes host heaps even when a title heap address is reused.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Each host heap's identity, handed out in order: a range of dynamic slots
+/// is given back to the heap that took it, and a heap made later at the same
+/// address is not that heap ([`HostHeap::release`]).
+
 /// A set of a heap's slots, a bit for each: no lock (a pass that went through
 /// a set of 70,000 under its lock kept everyone who writes slots waiting for
 /// 5 ms of a frame, timeline thin-6).
@@ -255,6 +259,8 @@ pub(crate) struct HostHeap {
     /// another's view made stale stays, which says only "may"): a write of
     /// any other view needs nothing of `placed` ([`spans_quick`]).
     spanned: Slots,
+    /// Identity of the heap that owns dynamic allocations.
+    id: u64,
 }
 
 /// Whether a slot's write of no placed texture view leaves `placed` alone
@@ -2337,6 +2343,12 @@ impl HostHeap {
     /// when the host caps its size.
     pub(crate) fn count(&self) -> u32 {
         self.count
+    }
+
+    /// This heap's identity ([`NEXT_ID`]): dynamic slots are given back only
+    /// to it, never to a heap made later at the same address.
+    pub(crate) fn id(&self) -> u64 {
+        self.id
     }
 
     /// The GPU address of the table of element strides by title slot (view
@@ -6551,6 +6563,39 @@ fn null_view(at: D3D12_CPU_DESCRIPTOR_HANDLE) {
 mod tests {
     use super::*;
 
+    /// A range of dynamic slots is given back only to the heap that took it:
+    /// the title can release a heap while a list still holds slots of it,
+    /// and a later heap can be made at the same address before that list is
+    /// reset.
+    #[cfg(windows)]
+    #[test]
+    fn dynamic_slots_are_given_back_only_to_the_heap_that_took_them() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Some(a) = HostHeap::new(false, 4) else {
+            return; // no host GPU
+        };
+        let Some(b) = HostHeap::new(false, 4) else {
+            return;
+        };
+        assert_ne!(a.id(), b.id());
+        let first = a.dynamic(2).expect("two dynamic slots");
+        let free = a.free.load(Relaxed);
+        a.release(b.id(), first, 2);
+        assert_eq!(
+            a.free.load(Relaxed),
+            free,
+            "another heap's identity gave the range back"
+        );
+        a.release(a.id(), first, 2);
+        assert_eq!(
+            a.free.load(Relaxed),
+            free + 2,
+            "their own heap did not get the range back"
+        );
+    }
+
+    /// A constant view is made in 256-byte steps and at most 64 KiB, the
+    /// most the host takes (a larger size removes the device on NVIDIA).
     #[test]
     fn dynamic_slots_are_given_back_only_to_the_heap_that_took_them() {
         let Some(old) = HostHeap::new(false, 4) else { return };
