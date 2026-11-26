@@ -146,13 +146,7 @@ extern "system" fn adapter_description(_: This, out: *mut AdapterDescription) ->
         return E_INVALIDARG;
     }
     let mut name = [0; 128];
-<<<<<<< HEAD
     for (slot, unit) in name.iter_mut().zip("VItoriaBr console GPU".encode_utf16()) {
-||||||| a66ac212
-    for (slot, unit) in name.iter_mut().zip("VIctory console GPU".encode_utf16()) {
-=======
-    for (slot, unit) in name.iter_mut().zip("KLBF Lab console GPU".encode_utf16()) {
->>>>>>> klbf/beta-2
         *slot = unit;
     }
     // shortcut: memory sizes are the title's split (GPU-optimal, standard),
