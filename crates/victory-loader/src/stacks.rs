@@ -131,22 +131,12 @@ pub(crate) fn frames_of(thread: HANDLE) -> (Vec<u64>, (i32, i32, usize)) {
         priority: 0,
         base_priority: 0,
     };
-<<<<<<< HEAD
     // Suspended first: a running thread may exit and free its TEB between
     // the query and the read below.
     // SAFETY: a thread of this process that is not this one.
     if unsafe { SuspendThread(thread) } == u32::MAX {
         return (frames, (0, 0, 0));
     }
-||||||| merged common ancestors
-    // Suspended first: a running thread may exit and free its TEB between
-    // the query and the read below.
-    // SAFETY: a thread of this process that is not this one.
-    if unsafe { SuspendThread(thread) } == u32::MAX {
-        return (frames, (0, 0));
-    }
-=======
->>>>>>> vibr/main
     // SAFETY: writes `info`, whose layout and size are the system's.
     let status = unsafe {
         NtQueryInformationThread(
@@ -158,31 +148,20 @@ pub(crate) fn frames_of(thread: HANDLE) -> (Vec<u64>, (i32, i32, usize)) {
         )
     };
     if status != 0 || info.teb.is_null() {
-<<<<<<< HEAD
         // SAFETY: suspended above.
         unsafe { ResumeThread(thread) };
         return (frames, (0, 0, 0));
-||||||| merged common ancestors
-        // SAFETY: suspended above.
-        unsafe { ResumeThread(thread) };
-        return (frames, (0, 0));
-=======
-        return (frames, (0, 0));
->>>>>>> vibr/main
     }
-    // SAFETY: the TEB of a live thread of this process: its NT_TIB holds
-    // the stack base at +8 and the stack limit at +0x10.
+    // SAFETY: the TEB of a suspended thread of this process: its NT_TIB
+    // holds the stack base at +8 and the stack limit at +0x10.
     let (high, low) = unsafe { (info.teb.add(1).read(), info.teb.add(2).read()) };
     // SAFETY: zeroed is a valid CONTEXT.
     let mut context = Aligned(unsafe { std::mem::zeroed() });
     context.0.ContextFlags = CONTEXT_FULL_AMD64;
-    // SAFETY: suspends, reads and resumes a thread that is not this one;
-    // nothing between suspend and resume allocates or takes a lock the
-    // thread could hold besides the unwinder's own.
+    // SAFETY: reads and resumes the thread suspended above; nothing until
+    // the resume allocates or takes a lock the thread could hold besides
+    // the unwinder's own.
     unsafe {
-        if SuspendThread(thread) == u32::MAX {
-            return (frames, (info.priority, info.base_priority));
-        }
         if GetThreadContext(thread, &mut context.0) != 0 {
             unwind_into(context.0, low, high, &mut frames);
         }
