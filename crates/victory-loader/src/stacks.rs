@@ -94,7 +94,6 @@ pub(crate) fn other_threads() -> Vec<u32> {
     }
     // SAFETY: we opened it.
     unsafe { CloseHandle(snapshot) };
-<<<<<<< HEAD
     ids
 }
 
@@ -103,12 +102,7 @@ pub(crate) fn other_threads() -> Vec<u32> {
 /// beforehand (it may hold the heap lock).
 pub fn dump_stacks() {
     let ids = other_threads();
-    eprintln!("VIctory: stacks of {} threads", ids.len());
-||||||| a66ac212
-    eprintln!("VIctory: stacks of {} threads", ids.len());
-=======
-    eprintln!("KLBF Lab: stacks of {} threads", ids.len());
->>>>>>> klbf/beta-2
+    eprintln!("VItoriaBr: stacks of {} threads", ids.len());
     for id in ids {
         // SAFETY: opens a thread of our own process.
         let thread = unsafe {
