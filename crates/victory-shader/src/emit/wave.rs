@@ -22,15 +22,10 @@ use crate::ir::{EXEC, Inst, Program, Reg, Value};
 pub(crate) enum Op {
     AddU,
     AddF,
-<<<<<<< HEAD
     /// A sum of 16-bit floats in the low halves (`v_add_f16`), each addition rounded to 16
     /// bits: not associative, so only the balanced tree over the lanes in their order is
     /// followed (see [`buddies`]), which is how the compiler sums a wave.
     AddH,
-||||||| merged common ancestors
-=======
-    AddF16,
->>>>>>> belobug/main
     MinU,
     MaxU,
     MinI,
@@ -45,25 +40,11 @@ pub(crate) enum Op {
 impl Op {
     fn of(name: &str) -> Option<Op> {
         Some(match name {
-<<<<<<< HEAD
             // the low dword of a 64-bit sum (`v_add_co_ci_u32` carries into
             // the high one) is the 32-bit sum of the low dwords
-            "v_add_nc_u32" | "v_add_co_u32" => Op::AddU,
-||||||| merged common ancestors
-            "v_add_nc_u32" => Op::AddU,
-=======
-            "v_add_nc_u32" => Op::AddU,
-            // shortcut: 64-bit sums as two dwords: the low ones are taken not
-            // to pass 32 bits (they are counts).
-            "v_add_co_u32" | "v_add_co_ci_u32" => Op::AddU,
->>>>>>> belobug/main
+            "v_add_nc_u32" | "v_add_co_u32" | "v_add_co_ci_u32" => Op::AddU,
             "v_add_f32" => Op::AddF,
-<<<<<<< HEAD
             "v_add_f16" => Op::AddH,
-||||||| merged common ancestors
-=======
-            "v_add_f16" => Op::AddF16,
->>>>>>> belobug/main
             "v_min_u32" => Op::MinU,
             "v_max_u32" => Op::MaxU,
             "v_min_i32" => Op::MinI,
@@ -97,7 +78,6 @@ impl Op {
         match self {
             Op::AddU | Op::AddH | Op::Or | Op::Xor | Op::MaxU => k == 0,
             Op::AddF => k == 0 || k == 0x8000_0000,
-            Op::AddF16 => k == 0 || k == 0x8000,
             Op::MinU | Op::And => k == u32::MAX,
             Op::MinI => k == 0x7FFF_FFFF,
             Op::MaxI => k == 0x8000_0000,
@@ -108,7 +88,6 @@ impl Op {
 
     /// Counting a lane twice changes the result.
     fn counts(self) -> bool {
-<<<<<<< HEAD
         matches!(self, Op::AddU | Op::AddF | Op::AddH | Op::Xor)
     }
 }
@@ -129,11 +108,6 @@ fn buddies(a: u64, b: u64) -> bool {
     match (run(a), run(b)) {
         (Some(x), Some(y)) => x.min(y) % (2 * n) == 0 && x.abs_diff(y) == n,
         _ => false,
-||||||| merged common ancestors
-        matches!(self, Op::AddU | Op::AddF | Op::Xor)
-=======
-        matches!(self, Op::AddU | Op::AddF | Op::AddF16 | Op::Xor)
->>>>>>> belobug/main
     }
 }
 
@@ -154,7 +128,6 @@ pub(crate) enum Sym {
         ident: u32,
         lanes: u64,
     },
-<<<<<<< HEAD
     /// The low (`high` clear) or high dword of the 64-bit float sum (`v_add_f64`) over
     /// `lanes` of `mask ? (lo, hi) : 0.0`, the double whose dwords are `lo` and `hi`.
     Half64 {
@@ -267,17 +240,6 @@ fn add64(a: Pair, b: Pair) -> Option<Pair> {
         }),
         _ => None,
     }
-||||||| merged common ancestors
-=======
-    /// 64-bit float sum over `lanes` of `mask ? (lo, hi) : 0.0`.
-    RedF64 {
-        lo: Value,
-        hi: Value,
-        mask: Value,
-        lanes: u64,
-        is_hi: bool,
-    },
->>>>>>> belobug/main
 }
 
 /// What a value a section leaves holds in every lane.
@@ -308,13 +270,10 @@ pub(crate) enum Shape {
 pub(crate) struct Section {
     pub end: usize,
     pub shapes: HashMap<Value, Shape>,
-<<<<<<< HEAD
     /// What a `v_readlane_b32` of one lane takes, later in the block, from a
     /// VGPR the section leaves (by the scalar it writes): the last lanes of
     /// a reduction hold it before the first do.
     pub reads: HashMap<Value, Shape>,
-||||||| merged common ancestors
-=======
     /// What each lane holds of vector values.
     lanes: HashMap<Value, Vec<Sym>>,
 }
@@ -334,17 +293,16 @@ impl Section {
                 ident,
                 lanes,
             } if lanes == all => Some(Shape::Active(op, src, mask, ident)),
-            Sym::RedF64 {
+            Sym::Half64 {
+                high,
                 lo,
                 hi,
                 mask,
                 lanes,
-                is_hi,
-            } if lanes == all => Some(Shape::ActiveF64(lo, hi, mask, is_hi)),
+            } if lanes == all => Some(Shape::Sum64 { high, lo, hi, mask }),
             _ => None,
         }
     }
->>>>>>> belobug/main
 }
 
 /// Every whole-wave section of `block`, by start index.
@@ -385,44 +343,34 @@ pub(crate) fn sections(p: &Program, block: usize) -> HashMap<usize, Section> {
             i += 1;
             continue;
         };
-<<<<<<< HEAD
-        let end = (i + 1..insts.len()).find(|&j| {
-            insts[j].write(Reg::S(EXEC)).is_some()
-                && insts[j].read(Reg::S(code)) == Some(saved)
-                && (!p.wave64
-                    || (insts[j].write(Reg::S(EXEC + 1)).is_some()
-                        && insts[j].read(Reg::S(code + 1)) == saved_hi))
-        });
-||||||| merged common ancestors
-        let end = (i + 1..insts.len()).find(|&j| {
-            insts[j].write(Reg::S(EXEC)).is_some()
-                && insts[j].read(Reg::S(saved_code(inst))) == Some(saved)
-        });
-=======
         // The saved mask may come back from another register: copied through
         // `s_mov_b32` (such as wave32 VGPR-lane spills lowered in `ir::build`)
         // or forwarded from a reload (`crate::sgpr_spill`).
         let mut aliases = vec![saved];
+        let mut aliases_hi: Vec<Value> = saved_hi.into_iter().collect();
         let mut end = None;
         for (j, inst) in insts.iter().enumerate().skip(i + 1) {
+            let back = |list: &[Value]| inst.reads.iter().any(|r| list.contains(&r.1));
             if inst.write(Reg::S(EXEC)).is_some()
-                && inst.reads.iter().any(|r| aliases.contains(&r.1))
+                && back(&aliases)
+                && (!p.wave64
+                    || (inst.write(Reg::S(EXEC + 1)).is_some() && back(&aliases_hi)))
             {
                 end = Some(j);
                 break;
             }
             if matches!(inst.name(), "s_mov_b32" | "s_mov_b64")
-                && inst.reads.iter().any(|r| aliases.contains(&r.1))
-                && let Some(&(_, w)) = inst.writes.first()
+                && (back(&aliases) || back(&aliases_hi))
+                && inst.write(Reg::S(EXEC)).is_none()
             {
-                aliases.push(w);
+                for &(_, w) in &inst.writes {
+                    aliases.push(w);
+                }
             }
         }
->>>>>>> belobug/main
         let Some(end) = end else {
             break;
         };
-<<<<<<< HEAD
         let exec_start = (inst.write(Reg::S(EXEC)), inst.write(Reg::S(EXEC + 1)));
         let (vec, uni) = simulate(&insts[i + 1..end], wave, (saved, saved_hi), exec_start);
         let mut reads = HashMap::new();
@@ -443,13 +391,6 @@ pub(crate) fn sections(p: &Program, block: usize) -> HashMap<usize, Section> {
         }
         let shapes = shapes(vec, uni, wave);
         out.insert(i, Section { end, shapes, reads });
-||||||| merged common ancestors
-        let shapes = simulate(&insts[i + 1..end], wave, saved);
-        out.insert(i, Section { end, shapes });
-=======
-        let (shapes, lanes) = simulate(&insts[i + 1..end], wave, saved);
-        out.insert(i, Section { end, shapes, lanes });
->>>>>>> belobug/main
         i = end + 1;
     }
     out
@@ -551,7 +492,6 @@ fn combine(op: Op, a: Sym, b: Sym) -> Sym {
     }
 }
 
-<<<<<<< HEAD
 /// The lane a `v_readlane_b32` names.
 fn lane_number(op: &Operand) -> Option<u32> {
     match *op {
@@ -570,13 +510,6 @@ fn simulate(
     saved: (Value, Option<Value>),
     exec_start: (Option<Value>, Option<Value>),
 ) -> Left {
-||||||| merged common ancestors
-fn simulate(insts: &[Inst], wave: u32, saved: Value) -> HashMap<Value, Shape> {
-=======
-type Found = (HashMap<Value, Shape>, HashMap<Value, Vec<Sym>>);
-
-fn simulate(insts: &[Inst], wave: u32, saved: Value) -> Found {
->>>>>>> belobug/main
     let all = if wave == 64 {
         u64::MAX
     } else {
@@ -613,13 +546,7 @@ fn simulate(insts: &[Inst], wave: u32, saved: Value) -> Found {
                 .then(|| constant(inst))
                 .flatten();
             let Some(k) = lo else {
-<<<<<<< HEAD
                 return (vec, uni);
-||||||| merged common ancestors
-                return shapes(vec, uni, wave);
-=======
-                return (shapes(vec.clone(), uni, wave), vec);
->>>>>>> belobug/main
             };
             exec = (if name == "s_mov_b64" {
                 k
@@ -640,13 +567,7 @@ fn simulate(insts: &[Inst], wave: u32, saved: Value) -> Found {
                 .then(|| constant(inst))
                 .flatten()
             else {
-<<<<<<< HEAD
                 return (vec, uni);
-||||||| merged common ancestors
-                return shapes(vec, uni, wave);
-=======
-                return (shapes(vec.clone(), uni, wave), vec);
->>>>>>> belobug/main
             };
             exec = ((exec & 0xFFFF_FFFF) | ((k & 0xFFFF_FFFF) << 32)) & all;
             if let Some(w) = inst.write(Reg::S(EXEC + 1)) {
@@ -654,34 +575,22 @@ fn simulate(insts: &[Inst], wave: u32, saved: Value) -> Found {
             }
             continue;
         }
-<<<<<<< HEAD
         if let Fields::Sop { dst, src, .. } = &inst.fields {
             let is_wave_and = if wave == 64 {
                 name == "s_and_b64"
             } else {
                 name.starts_with("s_and_b")
             };
-            if is_wave_and
-                && src.iter().any(|o| {
-                    matches!(*o, Operand::Scalar { code, .. }
-                        if read_mask(inst, code).is_some_and(|pair| masked.contains(&pair)))
-                })
+            // A mask ANDed with the saved one, or a copy of such a mask.
+            let reads_masked = |o: &Operand| {
+                matches!(*o, Operand::Scalar { code, .. }
+                    if read_mask(inst, code).is_some_and(|pair| masked.contains(&pair)))
+            };
+            if (is_wave_and && src.iter().any(reads_masked)
+                || name.starts_with("s_mov_b") && src.first().is_some_and(reads_masked))
                 && let Some(Operand::Scalar { code: dc, .. }) = *dst
                 && dc != NULL
                 && let Some(lo) = inst.write(Reg::S(dc))
-||||||| merged common ancestors
-        if let Fields::Sop { src, .. } = &inst.fields {
-            if name.starts_with("s_and_b")
-                && src.iter().any(|o| matches!(*o, Operand::Scalar { code, .. } if inst.read(Reg::S(code)).is_some_and(|v| masked.contains(&v))))
-                && let Some(&(_, w)) = inst.writes.iter().find(|w| matches!(w.0, Reg::S(_)))
-=======
-        if let Fields::Sop { dst, src, .. } = &inst.fields {
-            let reads_masked = |o: &Operand| matches!(*o, Operand::Scalar { code, .. } if inst.read(Reg::S(code)).is_some_and(|v| masked.contains(&v)));
-            // A mask ANDed with the saved one, or a copy of such a mask.
-            if (name.starts_with("s_and_b") && src.iter().any(reads_masked)
-                || name.starts_with("s_mov_b") && src.first().is_some_and(reads_masked))
-                && let Some(&(_, w)) = inst.writes.iter().find(|w| matches!(w.0, Reg::S(_)))
->>>>>>> belobug/main
             {
                 let hi = if wave == 64 {
                     inst.write(Reg::S(dc + 1))
@@ -772,7 +681,6 @@ fn simulate(insts: &[Inst], wave: u32, saved: Value) -> Found {
             }
         };
         let modifiers = v.abs != 0 || v.neg != 0 || v.clamp || v.omod != 0 || v.sdwa.is_some();
-<<<<<<< HEAD
         if name == "v_add_f64" {
             // Each lane adds its two pairs of dwords; a sum the simulation does not follow
             // leaves both dwords unknown.
@@ -817,49 +725,22 @@ fn simulate(insts: &[Inst], wave: u32, saved: Value) -> Found {
             }
             continue;
         }
-        if name == "v_readlane_b32" {
-            let (Some(Operand::Scalar { code, .. }), Some(src), Some(lane)) =
-                (v.dst, v.src.first(), v.src.get(1))
-            else {
-||||||| merged common ancestors
-        if name == "v_readlane_b32" {
-            let (Some(Operand::Scalar { code, .. }), Some(src), Some(lane)) =
-                (v.dst, v.src.first(), v.src.get(1))
-            else {
-=======
-        // The lane `v_readlane_b32` reads or `v_writelane_b32` writes: the
-        // low bits of a constant or of a uniform the simulation knows.
-        let lane_sel = |k: usize| match v.src.get(k).map(|o| scalar_sym(inst, o, &uni)) {
-            Some(Sym::K(l)) => Some(l & (wave - 1)),
-            _ => None,
-        };
         if matches!(name, "v_readlane_b32" | "v_readfirstlane_b32") {
             let (Some(Operand::Scalar { code, .. }), Some(src)) = (v.dst, v.src.first()) else {
->>>>>>> belobug/main
                 continue;
             };
-<<<<<<< HEAD
-            let l = lane_number(lane);
-||||||| merged common ancestors
-            let l = match *lane {
-                Operand::Const(c) => crate::resource::inline(c),
-                Operand::Literal(x) => Some(x),
-                _ => None,
-            };
-=======
             let l = if name == "v_readlane_b32" {
-                lane_sel(1)
+                v.src.get(1).and_then(lane_number)
             } else {
                 // The first lane EXEC holds.
                 (exec != 0).then(|| exec.trailing_zeros())
             };
->>>>>>> belobug/main
             let x = lanes(src, &vec, &uni);
             if let Some(w) = inst.write(Reg::S(code)) {
                 // One lane's own value is no other lane's.
-                let s = match l.map(|l| x[l as usize]) {
+                let s = match l.and_then(|l| x.get(l as usize)) {
                     Some(Sym::Own(_)) | None => Sym::Unknown,
-                    Some(s) => s,
+                    Some(&s) => s,
                 };
                 uni.insert(w, s);
             }
@@ -882,67 +763,19 @@ fn simulate(insts: &[Inst], wave: u32, saved: Value) -> Found {
             &vec,
             &uni,
         );
-        if name == "v_add_f64" && !modifiers && v.dpp.is_none() {
-            let pair_lanes = |k: usize| -> Option<(Vec<Sym>, Vec<Sym>)> {
-                match *v.src.get(k)? {
-                    Operand::Vector { reg, .. } => Some((
-                        lanes(&Operand::Vector { reg, dwords: 1 }, &vec, &uni),
-                        lanes(&Operand::Vector { reg: reg + 1, dwords: 1 }, &vec, &uni),
-                    )),
-                    Operand::Scalar { code, .. } if code != NULL => Some((
-                        lanes(&Operand::Scalar { code, dwords: 1 }, &vec, &uni),
-                        lanes(&Operand::Scalar { code: code + 1, dwords: 1 }, &vec, &uni),
-                    )),
-                    _ => None,
-                }
-            };
-            let unpack = |lo: Sym, hi: Sym| -> Option<(Value, Value, Value, u64)> {
-                match (lo, hi) {
-                    (
-                        Sym::Red { op: None, src: s_lo, mask: m_lo, ident: 0, lanes: l_lo },
-                        Sym::Red { op: None, src: s_hi, mask: m_hi, ident, lanes: l_hi },
-                    ) if m_lo == m_hi && l_lo == l_hi && (ident == 0 || ident == 0x8000_0000) => {
-                        Some((s_lo, s_hi, m_lo, l_lo))
-                    }
-                    (
-                        Sym::RedF64 { lo: s_lo, hi: s_hi, mask: m_lo, lanes: l_lo, is_hi: false },
-                        Sym::RedF64 { lo: s_lo2, hi: s_hi2, mask: m_hi, lanes: l_hi, is_hi: true },
-                    ) if (s_lo, s_hi, m_lo, l_lo) == (s_lo2, s_hi2, m_hi, l_hi) => {
-                        Some((s_lo, s_hi, m_lo, l_lo))
-                    }
-                    _ => None,
-                }
-            };
-            let (mut res_lo, mut res_hi) = (vec![Sym::Unknown; wave as usize], vec![Sym::Unknown; wave as usize]);
-            if let (Some((a_lo, a_hi)), Some((b_lo, b_hi))) = (pair_lanes(0), pair_lanes(1)) {
-                for l in 0..wave as usize {
-                    if let (Some(a), Some(b)) = (unpack(a_lo[l], a_hi[l]), unpack(b_lo[l], b_hi[l]))
-                        && (a.0, a.1, a.2) == (b.0, b.1, b.2)
-                        && a.3 & b.3 == 0
-                    {
-                        let lanes = a.3 | b.3;
-                        res_lo[l] = Sym::RedF64 { lo: a.0, hi: a.1, mask: a.2, lanes, is_hi: false };
-                        res_hi[l] = Sym::RedF64 { lo: a.0, hi: a.1, mask: a.2, lanes, is_hi: true };
-                    }
-                }
-            }
-            let old_hi = lanes(&Operand::Vector { reg: dreg + 1, dwords: 1 }, &vec, &uni);
-            let m_lo = (0..wave as usize).map(|l| if exec >> l & 1 != 0 { res_lo[l] } else { old[l] }).collect();
-            let m_hi = (0..wave as usize).map(|l| if exec >> l & 1 != 0 { res_hi[l] } else { old_hi[l] }).collect();
-            vec.insert(dst, m_lo);
-            if let Some(dst_hi) = inst.write(Reg::V(dreg + 1)) {
-                vec.insert(dst_hi, m_hi);
-            }
-            continue;
-        }
         if name == "v_writelane_b32" {
             // The lane given takes the scalar whatever EXEC holds; the others
-            // keep their value.
+            // keep their value. The lane is the low bits of a constant or of a
+            // uniform the simulation knows.
             let x = v
                 .src
                 .first()
                 .map_or(Sym::Unknown, |o| scalar_sym(inst, o, &uni));
-            let merged = match lane_sel(1) {
+            let lane = match v.src.get(1).map(|o| scalar_sym(inst, o, &uni)) {
+                Some(Sym::K(l)) => Some(l & (wave - 1)),
+                _ => None,
+            };
+            let merged = match lane {
                 Some(l) => {
                     let mut m = old;
                     m[l as usize] = x;
@@ -1101,13 +934,7 @@ fn simulate(insts: &[Inst], wave: u32, saved: Value) -> Found {
             .collect();
         vec.insert(dst, merged);
     }
-<<<<<<< HEAD
     (vec, uni)
-||||||| merged common ancestors
-    shapes(vec, uni, wave)
-=======
-    (shapes(vec.clone(), uni, wave), vec)
->>>>>>> belobug/main
 }
 
 fn constant(inst: &Inst) -> Option<u64> {
@@ -1163,41 +990,6 @@ fn shapes(
 ) -> HashMap<Value, Shape> {
     let all = u64::MAX >> (64 - wave);
     let mut out = HashMap::new();
-<<<<<<< HEAD
-||||||| merged common ancestors
-    let single = |s: Sym| match s {
-        Sym::K(k) => Some(Shape::K(k)),
-        Sym::Own(x) | Sym::Uni(x) => Some(Shape::Value(x)),
-        Sym::Red {
-            op: Some(op),
-            src,
-            mask,
-            ident,
-            lanes,
-        } if lanes == all => Some(Shape::Active(op, src, mask, ident)),
-        _ => None,
-    };
-=======
-    let single = |s: Sym| match s {
-        Sym::K(k) => Some(Shape::K(k)),
-        Sym::Own(x) | Sym::Uni(x) => Some(Shape::Value(x)),
-        Sym::Red {
-            op: Some(op),
-            src,
-            mask,
-            ident,
-            lanes,
-        } if lanes == all => Some(Shape::Active(op, src, mask, ident)),
-        Sym::RedF64 {
-            lo,
-            hi,
-            mask,
-            lanes,
-            is_hi,
-        } if lanes == all => Some(Shape::ActiveF64(lo, hi, mask, is_hi)),
-        _ => None,
-    };
->>>>>>> belobug/main
     for (v, s) in uni {
         if let Some(sh) = single(s, wave) {
             out.insert(v, sh);
@@ -1239,7 +1031,6 @@ fn per_lane(lanes: &[Sym], all: u64) -> Option<Shape> {
                 ident,
                 lanes,
             } if lanes == all => Some(Shape::Active(op, src, mask, ident)),
-<<<<<<< HEAD
             Sym::Half64 {
                 high,
                 lo,
@@ -1247,16 +1038,6 @@ fn per_lane(lanes: &[Sym], all: u64) -> Option<Shape> {
                 mask,
                 lanes,
             } if lanes == all => Some(Shape::Sum64 { high, lo, hi, mask }),
-||||||| merged common ancestors
-=======
-            Sym::RedF64 {
-                lo,
-                hi,
-                mask,
-                lanes,
-                is_hi,
-            } if lanes == all => Some(Shape::ActiveF64(lo, hi, mask, is_hi)),
->>>>>>> belobug/main
             _ => None,
         };
     }
@@ -1438,7 +1219,6 @@ mod tests {
             Some(Shape::Active(Op::AddU, x, m, 0))
         );
     }
-<<<<<<< HEAD
 
     #[test]
     fn constant_decodes_width_and_inline_kinds() {
@@ -1843,8 +1623,6 @@ mod tests {
         let p = build(&half_restore, true);
         assert!(sections(&p, 0).is_empty());
     }
-||||||| merged common ancestors
-=======
 
     /// Assembled with llvm-mc (gfx1030, wave32): a sum over all 32 lanes as
     /// the console expands it, a DPP reduction of each row of 16, then each
@@ -1888,11 +1666,6 @@ mod tests {
             found[&0].shapes.get(&total),
             Some(&Shape::Active(Op::AddU, x, saved, 0))
         );
-    }
-
-    fn build(words: &[u32], wave64: bool) -> Program {
-        let code: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
-        crate::ir::build(&code, wave64, 8).unwrap()
     }
 
     #[test]
@@ -2047,5 +1820,4 @@ mod tests {
         assert_eq!(shapes.get(&insts[1].write(Reg::V(1)).unwrap()), None);
         assert_eq!(shapes.get(&insts[2].write(Reg::S(1)).unwrap()), None);
     }
->>>>>>> belobug/main
 }
