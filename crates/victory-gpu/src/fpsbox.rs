@@ -257,7 +257,6 @@ pub(crate) fn draw(
     let Some(bytes) = pixel_bytes(format).filter(|_| tenths != u32::MAX) else {
         return;
     };
-<<<<<<< HEAD
     static GPU: OnceLock<String> = OnceLock::new();
     let lines = match mode {
         Mode::Off => return,
@@ -286,35 +285,6 @@ pub(crate) fn draw(
         if w == 0 || h == 0 {
             return;
         }
-||||||| merged common ancestors
-    // About a fortieth of the frame's height a glyph: 6 dots a pixel at
-    // 2160 lines, 3 at 1080.
-    let scale = (height / 360).clamp(2, 12);
-    let mut made = MADE.lock().unwrap_or_else(|e| e.into_inner());
-    let made = made.get_or_insert_with(HashMap::new);
-    if made.len() > 2048 {
-        // (Every text is a buffer of a few hundred KiB; a rate that wanders
-        // over thousands of values is not expected.)
-        made.clear();
-    }
-    let key = (tenths, format.0, scale);
-    if !made.contains_key(&key) {
-        let (w, h, lit) = bitmap(&text(tenths), scale);
-=======
-    // About a fortieth of the frame's height a glyph: 6 dots a pixel at
-    // 2160 lines, 3 at 1080.
-    let scale = (height / 360).clamp(2, 12);
-    let mut made = MADE.lock().unwrap_or_else(|e| e.into_inner());
-    let made = made.get_or_insert_with(HashMap::new);
-    if made.len() > 2048 {
-        // (Every text is a buffer of a few hundred KiB; a rate that wanders
-        // over thousands of values is not expected.)
-        made.clear();
-    }
-    let key = (tenths, format.0, scale);
-    if let std::collections::hash_map::Entry::Vacant(e) = made.entry(key) {
-        let (w, h, lit) = bitmap(&text(tenths), scale);
->>>>>>> vibr/main
         let pitch = (w as usize * bytes).next_multiple_of(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT as usize);
         let Some((buffer, data)) = host.shared_buffer((pitch * h as usize) as u64) else {
             return;
@@ -327,7 +297,6 @@ pub(crate) fn draw(
                 pixel(format, lit[y * w as usize + x], &mut out[at..at + bytes]);
             }
         }
-<<<<<<< HEAD
         let next = (cache.slot + 1) % RING;
         if let Some(old) = cache.ring[next].take() {
             crate::host::retire(old.buffer);
@@ -342,11 +311,6 @@ pub(crate) fn draw(
         cache.last_text = joined;
         cache.last_fmt = format.0;
         cache.last_scale = scale;
-||||||| merged common ancestors
-        made.insert(key, Made { buffer, width: w, height: h, pitch: pitch as u32 });
-=======
-        e.insert(Made { buffer, width: w, height: h, pitch: pitch as u32 });
->>>>>>> vibr/main
     }
     let Some(m) = cache.ring[cache.slot].as_ref() else {
         return;
