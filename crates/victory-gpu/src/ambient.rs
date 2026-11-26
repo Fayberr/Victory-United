@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 //! A stand-in for the indirect light the title traces rays for.
 //!
 //! With the ray-tracing structure builder off (`crate::pipeline::builder_runs`)
@@ -24,6 +23,17 @@
 //! mean of the last seconds, so that turning into a dark corner is not black
 //! at once). No occlusion but the creases'.
 //!
+//! (Neptune) Belobug's fork as it stands at 4f62c2a5 (VIctory-Belobug-AMD,
+//! GPL-3.0-or-later, kept here from klbf-lab) adds two things this estimate
+//! does not have. The reflections, which without rays are the sky's,
+//! unoccluded, wherever a surface is glossy (indoors a wooden floor, a
+//! counter and glass tops wore a white glaze five to ten times brighter than
+//! anything in the room), are held to a part of the light around
+//! (`VICTORY_AMBIENT_REFLECT`, [`hold`]). And the light can follow the sky's
+//! own mean instead of one constant for all hours (`VICTORY_AMBIENT_SKY`,
+//! [`follow`]), set by eye from a file in the running game
+//! (`VICTORY_AMBIENT_FILE`, [`live_level`]).
+//!
 //! `VICTORY_AMBIENT`:
 //! - unset or `0`/`off`: the title's own output.
 //! - a number: that share of the estimate (1: all of it).
@@ -36,11 +46,14 @@
 //! bounds what the air scatters by a multiple of the light around.
 
 use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::AtomicU32;
 
 use windows::Win32::Graphics::Direct3D12::*;
+use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::core::s;
 
 use crate::host::{HostList, host};
+use crate::object::This;
 
 /// Programs of the title the stand-in follows.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -116,11 +129,22 @@ fn air() -> f32 {
     })
 }
 
-/// Strength and radius of the creases' shade.
-fn shade() -> [f32; 2] {
-    static SET: OnceLock<[f32; 2]> = OnceLock::new();
+/// How much less of the light reaches creases and corners, worked out from
+/// the depth image alone: strength (0 for none), the radius looked at in
+/// metres, the near plane's distance, and the tangent of half the vertical
+/// field of view (the last two are guesses the picture is not sensitive
+/// to). `VICTORY_AMBIENT_SHADE=s,r,n,t` sets them; the file's values after
+/// its first four replace them.
+/// shortcut: stands in for the occlusion the title's traced probes carry.
+static SHADE: Mutex<Option<[f32; 4]>> = Mutex::new(None);
+
+fn shade() -> [f32; 4] {
+    if let Some(live) = *SHADE.lock().unwrap_or_else(|e| e.into_inner()) {
+        return live;
+    }
+    static SET: OnceLock<[f32; 4]> = OnceLock::new();
     *SET.get_or_init(|| {
-        let mut shade = [1.0, 0.6];
+        let mut shade = [1.0, 0.6, 0.1, 0.45];
         let set = std::env::var("VICTORY_AMBIENT_SHADE").unwrap_or_default();
         for (to, v) in shade.iter_mut().zip(set.split(',')) {
             if let Ok(v) = v.trim().parse() {
@@ -454,8 +478,8 @@ pub(crate) fn after(list: &HostList, role: Role, views: &Views) -> bool {
     }
     list.keep(&pass.cells);
     list.keep(&pass.points);
-    let [strength, radius] = shade();
-    let floats = [level, constant, strength, radius, 0.1, 0.45];
+    let [strength, radius, near, tan_y] = shade();
+    let floats = [level, constant, strength, radius, near, tan_y];
     let mut words = [0u32; 12];
     for (to, v) in words.iter_mut().zip(floats) {
         *to = v.to_bits();
@@ -501,82 +525,12 @@ pub(crate) fn after(list: &HostList, role: Role, views: &Views) -> bool {
     true
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn settings() {
-        assert_eq!(parse(""), Set::Off);
-        assert_eq!(parse("off"), Set::Off);
-        assert_eq!(parse("0"), Set::Off);
-        assert_eq!(parse("0.8"), Set::Estimate(0.8));
-        assert_eq!(parse("constant:0.3"), Set::Constant(0.3));
-        assert_eq!(parse("constant:nan"), Set::Off);
-    }
-
-    #[test]
-    fn roles_by_name() {
-        assert_eq!(role(b"..CS_ScreenProbes_TemporalResolve_a911b49c_Wrapped.."), Some(Role::Resolve));
-        assert_eq!(role(b"..CS_CacheScreenSpaceRadiance_eed2fc35.."), Some(Role::Radiance));
-        assert_eq!(role(b"CS_AccumulateLocalLightInscatteringVolume_7e2f5eef"), Some(Role::Air));
-        assert_eq!(role(b"CS_TemporalResolve"), None);
-    }
-
-    /// The passes compile with the system's compiler and the host takes them.
-    #[test]
-    fn the_passes_build() {
-        let Some(host) = host() else {
-            return;
-        };
-        make(&host.device, |bytes| host.uav_buffer(bytes)).expect("the passes");
-    }
-}
-||||||| a66ac212
-=======
-//! A least amount of indirect light.
-//!
-//! (Neptune) Belobug's pass as it stands in Belobug/VIctory-Belobug-AMD at 4f62c2a5
-//! (GPL-3.0-or-later): the light follows the sky the title draws, and reflections are held
-//! to the light around. The hooks in `draw.rs`, `pipeline.rs` and `host.rs` are his too.
-//!
-//! The title's indirect diffuse light comes from probes it fills
-//! by tracing rays, which do not run here yet: its program that resolves
-//! them (`CS_ScreenProbes_TemporalResolve_*`) leaves next to nothing, and
-//! whatever the sun does not reach directly is black. Right after that
-//! program, its output is replaced by a constant (it used to be a floor
-//! under what the program wrote, but that is garbage: see the shader). The
-//! constant is the same everywhere: the light in these images does not go with the title's exposure
-//! (well-lit surfaces hold about the same in a shot at -5.5 EV and in one at
-//! -9.75). The title's own lighting then applies it with the surfaces'
-//! colors. Raised, not added: the result is the next frame's history.
-//!
-//! `VICTORY_AMBIENT=<level>` sets it (0.6 by default, 0 for none); `off`
-//! keeps the title's own output.
-//! shortcut: the same light everywhere, from everywhere; gone once rays run.
-
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU32, Ordering};
-use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
-use windows::Win32::Graphics::Direct3D::ID3DBlob;
-use windows::Win32::Graphics::Direct3D12::*;
-use windows::Win32::Graphics::Dxgi::Common::*;
-use windows::core::s;
-
-use crate::host::{HostList, host};
-use crate::object::This;
-
-/// The programs it follows, by the start of their name.
-pub(crate) const PROGRAM: &[u8] = b"CS_ScreenProbes_TemporalResolve";
-/// Where they write the indirect diffuse light (R9G9B9E5 as 32-bit
-/// integers): root parameter and place in its table.
-pub(crate) const LIGHT: (u8, u32) = (1, 176);
-
 /// 0.6 looked balanced in run a2. `VICTORY_AMBIENT=off` leaves what the
 /// title's resolve wrote; 0 is no indirect diffuse light at all.
 const DEFAULT: f32 = 0.6;
 
-/// The floor; `None` if off.
+/// The floor; `None` if off. The reflection hold and the constant path
+/// ([`raise`]) read the light's level from here, as beloooo's fork does.
 pub(crate) fn level() -> Option<f32> {
     static LEVEL: OnceLock<f32> = OnceLock::new();
     let level = *LEVEL.get_or_init(|| {
@@ -590,9 +544,8 @@ pub(crate) fn level() -> Option<f32> {
 }
 
 /// The light's colour: warm white, or what `VICTORY_AMBIENT_TINT=r,g,b`
-/// gives. With `VICTORY_AMBIENT_FILE=<file>` (diagnostics builds) the file's
-/// `level r g b` is read again twice a second, to tune both by eye in a
-/// running game.
+/// gives. With `VICTORY_AMBIENT_FILE=<file>` the file's `level r g b` is
+/// read again twice a second, to tune both by eye in a running game.
 fn tint() -> [f32; 3] {
     let live = LIVE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, tint)) = *live {
@@ -613,7 +566,7 @@ fn tint() -> [f32; 3] {
 }
 
 /// The level and colour last read from `VICTORY_AMBIENT_FILE`, if any.
-static LIVE: std::sync::Mutex<Option<(f32, [f32; 3])>> = std::sync::Mutex::new(None);
+static LIVE: Mutex<Option<(f32, [f32; 3])>> = Mutex::new(None);
 
 /// The program that writes the title's reflections for the last time in a
 /// frame, by the start of its name, and where it writes them (R9G9B9E5 as
@@ -624,7 +577,7 @@ static LIVE: std::sync::Mutex<Option<(f32, [f32; 3])>> = std::sync::Mutex::new(N
 /// surface is glossy: indoors a wooden floor, a counter and glass tops wore
 /// a white glaze five to ten times brighter than anything in the room (run
 /// ciel1, 2026-11-25; it did not move with the ambient level). They are held
-/// to a part of the light around ([`keep`]).
+/// to a part of the light around ([`hold`]).
 pub(crate) const REFLECTED: &[u8] = b"CS_UpdateHistory";
 pub(crate) const REFLECTIONS: (u8, u32) = (1, 40);
 
@@ -632,13 +585,13 @@ pub(crate) const REFLECTIONS: (u8, u32) = (1, 40);
 /// `VICTORY_AMBIENT_REFLECT=<part>` (0.5 by default; 0 leaves the title's
 /// reflections alone); a ninth number in the file sets it in a running game.
 /// shortcut: stands in for what the title's traced reflections would see.
-static KEEP: std::sync::Mutex<Option<f32>> = std::sync::Mutex::new(None);
+static KEEP: Mutex<Option<f32>> = Mutex::new(None);
 
 /// The least a reflection holds, as a part of the light around: a tenth
 /// number in the file (0, the default, leaves dark reflections dark).
 /// shortcut: without rays, what should mirror the sky (still water) sees
 /// nothing and is black; this gives it a part of the ambient light instead.
-static LEAST: std::sync::Mutex<f32> = std::sync::Mutex::new(0.0);
+static LEAST: Mutex<f32> = Mutex::new(0.0);
 
 fn keep() -> f32 {
     if let Some(live) = *KEEP.lock().unwrap_or_else(|e| e.into_inner()) {
@@ -665,8 +618,7 @@ pub(crate) const SKY: &[u8] = b"ps_sky_paraboloid_reflection";
 /// (128x128, R16G16B16A16_FLOAT) and another image of the sky (R11G11B10).
 /// Following whichever was recorded last made the light jump between the
 /// two, three times apart, from frame to frame (run don1, 2026-11-25).
-static SKY_IMAGE: std::sync::Mutex<Option<std::sync::Arc<crate::resource::HostTexture>>> =
-    std::sync::Mutex::new(None);
+static SKY_IMAGE: Mutex<Option<std::sync::Arc<crate::resource::HostTexture>>> = Mutex::new(None);
 
 pub(crate) fn sky_drawn(image: usize) {
     let Some(copy) = crate::resource::host_copy(image as This) else { return };
@@ -691,7 +643,7 @@ pub(crate) fn sky_drawn(image: usize) {
 /// numbers, or six or seven with the shading's, does so in a running game.
 /// shortcut: the sky's mean stands in for the light the title's traced
 /// probes would gather; indoors it is the sky's too.
-static FOLLOW: std::sync::Mutex<Option<Option<[f32; 3]>>> = std::sync::Mutex::new(None);
+static FOLLOW: Mutex<Option<Option<[f32; 3]>>> = Mutex::new(None);
 
 /// Gain, least level and power: the level is `gain * mean^power + least`.
 /// The power is under one because the title's exposure follows the light:
@@ -716,36 +668,6 @@ fn follow() -> Option<[f32; 3]> {
             }
         }
         Some(follow)
-    })
-}
-
-/// Where the resolve reads the scene's depth (reversed, D32 with stencil):
-/// root parameter and place in its table.
-pub(crate) const DEPTH: (u8, u32) = (0, 464);
-
-/// How much less of the light reaches creases and corners, worked out from
-/// the depth image alone: strength (0 for none), the radius looked at in
-/// metres, the near plane's distance, and the tangent of half the vertical
-/// field of view (the last two are guesses the picture is not sensitive
-/// to). `VICTORY_AMBIENT_SHADE=s,r,n,t` sets them; the file's values after
-/// its first four replace them.
-/// shortcut: stands in for the occlusion the title's traced probes carry.
-static SHADE: std::sync::Mutex<Option<[f32; 4]>> = std::sync::Mutex::new(None);
-
-fn shade() -> [f32; 4] {
-    if let Some(live) = *SHADE.lock().unwrap_or_else(|e| e.into_inner()) {
-        return live;
-    }
-    static SET: OnceLock<[f32; 4]> = OnceLock::new();
-    *SET.get_or_init(|| {
-        let mut shade = [1.0, 0.6, 0.1, 0.45];
-        let set = std::env::var("VICTORY_AMBIENT_SHADE").unwrap_or_default();
-        for (to, v) in shade.iter_mut().zip(set.split(',')) {
-            if let Ok(v) = v.trim().parse() {
-                *to = v;
-            }
-        }
-        shade
     })
 }
 
@@ -813,7 +735,11 @@ fn live_level() -> Option<f32> {
     LIVE.lock().unwrap_or_else(|e| e.into_inner()).map(|(level, _)| level)
 }
 
-const SOURCE: &str = r#"
+/// The pass that puts the light there whole: the constant (or the sky's
+/// mean) shaded in creases from the depth, and the reflections held to a
+/// part of it. Its own shader, heap and pipeline, apart from the estimate's
+/// above; `held` above zero picks the reflections.
+const FLOOR_SOURCE: &str = r#"
 #define RS "RootConstants(num32BitConstants=13, b0), DescriptorTable(UAV(u0), SRV(t0), SRV(t1))"
 cbuffer Floor : register(b0) {
     float level; float3 tint;
@@ -918,7 +844,7 @@ void main(uint3 at : SV_DispatchThreadID) {
 /// Views, used in turn: more than the passes of every list in flight.
 const SLOTS: u32 = 1024;
 
-struct Pass {
+struct Floor {
     root: ID3D12RootSignature,
     pso: ID3D12PipelineState,
     views: ID3D12DescriptorHeap,
@@ -926,41 +852,12 @@ struct Pass {
     next: AtomicU32,
 }
 // SAFETY: D3D12 objects are free-threaded.
-unsafe impl Send for Pass {}
+unsafe impl Send for Floor {}
 // SAFETY: as above.
-unsafe impl Sync for Pass {}
+unsafe impl Sync for Floor {}
 
-fn make(device: &ID3D12Device) -> windows::core::Result<Pass> {
-    let mut code: Option<ID3DBlob> = None;
-    let mut errors: Option<ID3DBlob> = None;
-    // SAFETY: the source and names live through the call; out pointers ours.
-    let compiled = unsafe {
-        D3DCompile(
-            SOURCE.as_ptr().cast(),
-            SOURCE.len(),
-            s!("ambient"),
-            None,
-            None,
-            s!("main"),
-            s!("cs_5_1"),
-            0,
-            0,
-            &mut code,
-            Some(&mut errors),
-        )
-    };
-    let text = |b: &ID3DBlob| {
-        // SAFETY: the blob's own bytes.
-        unsafe { std::slice::from_raw_parts(b.GetBufferPointer().cast::<u8>(), b.GetBufferSize()) }
-            .to_vec()
-    };
-    if let Err(e) = compiled {
-        if let Some(errors) = errors {
-            tracing::warn!("ambient light: {}", String::from_utf8_lossy(&text(&errors)));
-        }
-        return Err(e);
-    }
-    let code = text(&code.ok_or_else(windows::core::Error::empty)?);
+fn make_floor(device: &ID3D12Device) -> windows::core::Result<Floor> {
+    let code = crate::host::compile(FLOOR_SOURCE, s!("main"), s!("cs_5_1"))?;
     // SAFETY: the root signature is inside the shader; plain creations.
     unsafe {
         let root: ID3D12RootSignature = device.CreateRootSignature(0, &code)?;
@@ -979,7 +876,7 @@ fn make(device: &ID3D12Device) -> windows::core::Result<Pass> {
             Flags: D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
             NodeMask: 0,
         })?;
-        Ok(Pass {
+        Ok(Floor {
             root,
             pso,
             views,
@@ -987,15 +884,6 @@ fn make(device: &ID3D12Device) -> windows::core::Result<Pass> {
             next: AtomicU32::new(0),
         })
     }
-}
-
-fn uav_barrier(list: &ID3D12GraphicsCommandList) {
-    let barrier = D3D12_RESOURCE_BARRIER {
-        Type: D3D12_RESOURCE_BARRIER_TYPE_UAV,
-        ..Default::default()
-    };
-    // SAFETY: an open list; the barrier names no resource.
-    unsafe { list.ResourceBarrier(&[barrier]) };
 }
 
 /// Raises what `light` holds to the floor, in `list`, after the program that
@@ -1025,10 +913,10 @@ fn record(list: &HostList, light: This, depth: Option<This>, held: f32) -> bool 
     let Some(light) = crate::resource::host_resource(light) else {
         return false;
     };
-    static PASS: OnceLock<Option<Pass>> = OnceLock::new();
-    let Some(pass) = PASS
+    static FLOOR: OnceLock<Option<Floor>> = OnceLock::new();
+    let Some(pass) = FLOOR
         .get_or_init(|| {
-            make(&host.device)
+            make_floor(&host.device)
                 .inspect_err(|e| tracing::warn!(error = %e, "no ambient light"))
                 .ok()
         })
@@ -1046,7 +934,7 @@ fn record(list: &HostList, light: This, depth: Option<This>, held: f32) -> bool 
     ONCE.call_once(|| {
         tracing::info!(level, width = d.Width, height = d.Height, "ambient light");
     });
-    let slot = pass.next.fetch_add(1, Ordering::Relaxed) % SLOTS * 3;
+    let slot = pass.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % SLOTS * 3;
     // The sky image, if the light follows it and the title has drawn it.
     let sky_image = SKY_IMAGE.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let sky = follow().and_then(|f| {
@@ -1156,13 +1044,41 @@ fn record(list: &HostList, light: This, depth: Option<This>, held: f32) -> bool 
 
 #[cfg(test)]
 mod tests {
-    /// The pass compiles with the system's compiler and the host takes it.
+    use super::*;
+
     #[test]
-    fn ambient_pass_builds() {
+    fn settings() {
+        assert_eq!(parse(""), Set::Off);
+        assert_eq!(parse("off"), Set::Off);
+        assert_eq!(parse("0"), Set::Off);
+        assert_eq!(parse("0.8"), Set::Estimate(0.8));
+        assert_eq!(parse("constant:0.3"), Set::Constant(0.3));
+        assert_eq!(parse("constant:nan"), Set::Off);
+    }
+
+    #[test]
+    fn roles_by_name() {
+        assert_eq!(role(b"..CS_ScreenProbes_TemporalResolve_a911b49c_Wrapped.."), Some(Role::Resolve));
+        assert_eq!(role(b"..CS_CacheScreenSpaceRadiance_eed2fc35.."), Some(Role::Radiance));
+        assert_eq!(role(b"CS_AccumulateLocalLightInscatteringVolume_7e2f5eef"), Some(Role::Air));
+        assert_eq!(role(b"CS_TemporalResolve"), None);
+    }
+
+    /// The passes compile with the system's compiler and the host takes them.
+    #[test]
+    fn the_passes_build() {
+        let Some(host) = host() else {
+            return;
+        };
+        make(&host.device, |bytes| host.uav_buffer(bytes)).expect("the passes");
+    }
+
+    /// The floor's pass (the constant and the reflections) too.
+    #[test]
+    fn the_floor_pass_builds() {
         let Some(host) = crate::host::host() else {
             return;
         };
-        super::make(&host.device).expect("the ambient pass");
+        make_floor(&host.device).expect("the floor pass");
     }
 }
->>>>>>> klbf/beta-2
