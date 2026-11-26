@@ -4029,578 +4029,6 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod barycentric_tests {
-    use super::container::SigElement;
-    use super::*;
-    use crate::native::{PsInput, StageIo, Usage};
-
-    /// `SPI_PS_INPUT_ADDR` bits: PERSP_CENTER, LINEAR_CENTER.
-    const PERSP_CENTER: u32 = 1 << 1;
-    const LINEAR_CENTER: u32 = 1 << 5;
-
-    /// `exp mrt0, v<r>, v<r>, v<r>, v<r> done vm`.
-    fn exp_mrt0(r: u32) -> [u32; 2] {
-        [0xF800_180F, r * 0x0101_0101]
-    }
-
-    /// VOP2 `v_add_f32 v<dst>, v<a>, v<b>`.
-    fn v_add_f32(dst: u32, a: u32, b: u32) -> u32 {
-        3 << 25 | dst << 17 | b << 9 | (256 + a)
-    }
-
-    fn element(name: &str, kind: u8, row: u32) -> SigElement {
-        SigElement {
-            name: name.into(),
-            index: 0,
-            kind,
-            comp: 9,
-            interp: 0,
-            row: Some(row),
-            col: 0,
-            cols: 4,
-            usage: 0,
-            half: false,
-        }
-    }
-
-    /// Translates a pixel program with the input VGPRs `input_addr`
-    /// enables and one float4 TEXCOORD0 attribute (attr 0, row 0).
-    fn pixel(words: &[u32], input_addr: u32) -> Result<HostShader, ShaderError> {
-        let mut target = element("SV_Target", 16, 0);
-        target.usage = 15;
-        pixel_sig(words, input_addr, &[element("TEXCOORD", 0, 0)], &[target])
-    }
-
-    /// The same with the console signatures `inputs` and `outputs`.
-    fn pixel_sig(
-        words: &[u32],
-        input_addr: u32,
-        inputs: &[SigElement],
-        outputs: &[SigElement],
-    ) -> Result<HostShader, ShaderError> {
-        let native = NativeProgram {
-            stage: HwStage::Ps,
-            wave64: false,
-            vgprs: 8,
-            layout: vec![],
-            used: vec![],
-            io: StageIo::Ps {
-                inputs: vec![PsInput {
-                    usage: Usage::Generic,
-                    row: 0,
-                    mask: 0b1111,
-                    attr: 0,
-                    flat: false,
-                    fp16: false,
-                    pack2: false,
-                    row2: 0,
-                }],
-                input_addr,
-                db_shader_control: 0,
-                patches: vec![],
-            },
-            code: words.iter().flat_map(|w| w.to_le_bytes()).collect(),
-        };
-        let isg1 = container::signature(inputs, true);
-        let osg1 = container::signature(outputs, false);
-        let bytes = crate::dxbc::build(&[(FourCC::ISG1, &isg1), (FourCC::OSG1, &osg1)]);
-        let c = Container::parse(&bytes).unwrap();
-        let p = ir::build(&native.patched_code(), native.wave64, native.vgprs)?;
-        let res = resource::track(&p, &native.layout, native.stage)?;
-        let io = io::raise(&p, &native)?;
-        let st = structure::structure(&p)?;
-        emit(&c, &native, &p, &st, &io, &res, crate::emit::Target::ANY)
-    }
-
-    /// The translation's `SFI0` features and `ISG1` rows.
-    fn parts(shader: &HostShader) -> (u64, Vec<SigElement>) {
-        let c = Container::parse(&shader.dxil).unwrap();
-        let sfi0 = c.part(FourCC::SFI0).unwrap().data.try_into().unwrap();
-        (
-            u64::from_le_bytes(sfi0),
-            signature(c.part(FourCC::ISG1).unwrap().data).unwrap(),
-        )
-    }
-
-    fn validate(shader: &HostShader) {
-        #[cfg(windows)]
-        if let Ok(mut v) =
-            validator::Validator::load(validator::Validator::default_path().as_deref())
-        {
-            v.validate(&mut shader.dxil.clone()).unwrap();
-        }
-        let _ = shader;
-    }
-
-    /// Custom interpolation reads I and J (v0, v1 with PERSP_CENTER) as
-    /// plain floats: they are channels y and z of `SV_Barycentrics`, the
-    /// weights of vertices 1 and 2.
-    #[test]
-    fn barycentrics_read_as_values_are_sv_barycentrics() {
-        let [e0, e1] = exp_mrt0(2);
-        let words = [v_add_f32(2, 0, 1), e0, e1, 0xBF81_0000];
-        let shader = pixel(&words, PERSP_CENTER).unwrap();
-        let (features, inputs) = parts(&shader);
-        assert_ne!(features & 0x2_0000, 0, "no Barycentrics feature");
-        let bary: Vec<_> = inputs.iter().filter(|e| e.kind == 28).collect();
-        assert_eq!(bary.len(), 1, "{inputs:?}");
-        assert_eq!((bary[0].index, bary[0].col, bary[0].cols), (0, 0, 3));
-        // Not packed: the validator wants packing location -1.
-        assert_eq!(bary[0].row, None);
-        // Only y and z (I and J) are read.
-        let isg1 = Container::parse(&shader.dxil).unwrap();
-        let isg1 = isg1.part(FourCC::ISG1).unwrap().data;
-        let rw: Vec<u8> = (0..2).map(|k| isg1[8 + 32 * k + 25]).collect();
-        assert!(rw.contains(&0b110), "{rw:?}");
-        validate(&shader);
-    }
-
-    /// Two kinds of barycentrics read directly: one element per mode.
-    #[test]
-    fn two_barycentric_modes_get_two_elements() {
-        // v0-v1 perspective i, j; v2-v3 linear i, j.
-        let [e0, e1] = exp_mrt0(4);
-        let words = [v_add_f32(4, 0, 3), e0, e1, 0xBF81_0000];
-        let shader = pixel(&words, PERSP_CENTER | LINEAR_CENTER).unwrap();
-        let (_, inputs) = parts(&shader);
-        let mut indices: Vec<u32> = inputs
-            .iter()
-            .filter(|e| e.kind == 28)
-            .map(|e| e.index)
-            .collect();
-        indices.sort();
-        assert_eq!(indices, [0, 1], "{inputs:?}");
-        validate(&shader);
-    }
-
-    /// I and J only fed to `v_interp_*` stay host interpolation: no
-    /// barycentrics are declared.
-    #[test]
-    fn interpolation_alone_declares_no_barycentrics() {
-        let [e0, e1] = exp_mrt0(2);
-        let words = [
-            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
-            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
-            e0,
-            e1,
-            0xBF81_0000,
-        ];
-        let shader = pixel(&words, PERSP_CENTER).unwrap();
-        let (features, inputs) = parts(&shader);
-        assert_eq!(features & 0x2_0000, 0);
-        assert!(inputs.iter().all(|e| e.kind != 28), "{inputs:?}");
-        validate(&shader);
-    }
-
-    /// Both: the attribute is interpolated and J is used as a value.
-    #[test]
-    fn interpolation_and_a_barycentric_value_together() {
-        let [e0, e1] = exp_mrt0(3);
-        let words = [
-            0xC808_0000,        // v_interp_p1_f32 v2, v0, attr0.x
-            0xC809_0001,        // v_interp_p2_f32 v2, v1, attr0.x
-            v_add_f32(3, 2, 1), // v3 = attribute + j
-            e0,
-            e1,
-            0xBF81_0000,
-        ];
-        let shader = pixel(&words, PERSP_CENTER).unwrap();
-        let (features, inputs) = parts(&shader);
-        assert_ne!(features & 0x2_0000, 0);
-        assert_eq!(inputs.iter().filter(|e| e.kind == 28).count(), 1);
-        validate(&shader);
-    }
-    /// The `PSV0` interpolation mode of TEXCOORD0 (row 0, x-w, float).
-    fn texcoord_mode(shader: &HostShader) -> u8 {
-        let c = Container::parse(&shader.dxil).unwrap();
-        let psv = c.part(FourCC::PSV0).unwrap().data;
-        let row = [1, 0, 0x44, 0, 3];
-        let at = psv.windows(5).position(|w| w == row).unwrap();
-        psv[at + 5]
-    }
-
-    const S_ENDPGM: u32 = 0xBF81_0000;
-
-    /// The `PSV0` input elements: (kind, start row if allocated, mode).
-    fn psv_inputs(shader: &HostShader) -> Vec<(u8, Option<u8>, u8)> {
-        let c = Container::parse(&shader.dxil).unwrap();
-        let psv = c.part(FourCC::PSV0).unwrap().data;
-        let u = |at: usize| u32::from_le_bytes(psv[at..at + 4].try_into().unwrap()) as usize;
-        let info = u(0);
-        let n_in = psv[4 + 28] as usize;
-        let mut at = 4 + info;
-        let n_bind = u(at);
-        at += 4;
-        if n_bind > 0 {
-            at += 4 + n_bind * u(at);
-        }
-        at += 4 + u(at);
-        at += 4 + 4 * u(at);
-        let size = u(at);
-        at += 4;
-        (0..n_in)
-            .map(|k| {
-                let e = &psv[at + k * size..];
-                let row = (e[10] & 0x40 != 0).then_some(e[9]);
-                (e[11], row, e[13])
-            })
-            .collect()
-    }
-
-    /// A conservative depth output makes the position centroid, which the
-    /// validator wants (14 programs were rejected with the center mode).
-    #[test]
-    fn conservative_depth_declares_a_centroid_position() {
-        let [e0, e1] = exp_mrt0(2);
-        let words = [
-            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
-            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
-            e0,
-            e1,
-            S_ENDPGM,
-        ];
-        let mut position = element("SV_Position", 3, 1);
-        position.usage = 0;
-        let inputs = [element("TEXCOORD", 0, 0), position];
-        let mut target = element("SV_Target", 16, 0);
-        target.usage = 15;
-        for (kind, name) in [(18, "SV_DepthLessEqual"), (19, "SV_DepthGreaterEqual")] {
-            let mut depth = element(name, kind, 0);
-            (depth.row, depth.cols) = (None, 1);
-            let shader =
-                pixel_sig(&words, PERSP_CENTER, &inputs, &[target.clone(), depth]).unwrap();
-            let pos: Vec<_> = psv_inputs(&shader)
-                .into_iter()
-                .filter(|e| e.0 == 3)
-                .collect();
-            assert_eq!(pos, [(3, Some(1), 5)], "{name}");
-        }
-        // Plain depth or none: noperspective center, as DXC declares it.
-        let shader = pixel_sig(&words, PERSP_CENTER, &inputs, &[target]).unwrap();
-        assert!(psv_inputs(&shader).contains(&(3, Some(1), 4)));
-    }
-
-    /// Every packed row of a pixel shader's inputs has one mode.
-    fn assert_one_mode_per_row(shader: &HostShader) {
-        let els = psv_inputs(shader);
-        for &(kind, row, mode) in &els {
-            let Some(row) = row else { continue };
-            for &(k, r, m) in &els {
-                assert!(
-                    r != Some(row) || m == mode,
-                    "row {row}: {kind}/{mode} vs {k}/{m}"
-                );
-            }
-        }
-    }
-
-    fn texcoord(index: u32, col: u8, cols: u8, comp: u8) -> SigElement {
-        SigElement {
-            index,
-            col,
-            cols,
-            comp,
-            ..element("TEXCOORD", 0, 0)
-        }
-    }
-
-    /// An attribute read with centroid barycentrics shares its row with
-    /// one nobody reads: the unread one takes the centroid mode.
-    #[test]
-    fn an_unread_element_takes_its_rows_mode() {
-        const PERSP_CENTROID: u32 = 1 << 2;
-        let [e0, e1] = exp_mrt0(2);
-        let words = [
-            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
-            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
-            e0,
-            e1,
-            S_ENDPGM,
-        ];
-        let mut target = element("SV_Target", 16, 0);
-        target.usage = 15;
-        let inputs = [texcoord(0, 0, 2, 9), texcoord(1, 2, 2, 9)];
-        let shader = pixel_sig(&words, PERSP_CENTROID, &inputs, &[target]).unwrap();
-        assert_one_mode_per_row(&shader);
-        let modes: Vec<u8> = psv_inputs(&shader).iter().map(|e| e.2).collect();
-        assert_eq!(modes, [3, 3]);
-        validate(&shader);
-    }
-
-    /// An interpolated float packed with an integer (constant) element: the
-    /// row stays where it is and becomes constant, the float weighed from
-    /// its vertices with `SV_Barycentrics`.
-    #[test]
-    fn an_integer_in_the_row_makes_it_constant() {
-        let [e0, e1] = exp_mrt0(2);
-        let words = [
-            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
-            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
-            e0,
-            e1,
-            S_ENDPGM,
-        ];
-        let mut target = element("SV_Target", 16, 0);
-        target.usage = 15;
-        let mut face = element("SV_IsFrontFace", 13, 0);
-        (face.col, face.cols, face.comp) = (3, 1, 5);
-        for other in [texcoord(1, 2, 1, 5), face] {
-            let inputs = [texcoord(0, 0, 2, 9), other];
-            let shader = pixel_sig(&words, PERSP_CENTER, &inputs, &[target.clone()]).unwrap();
-            assert_one_mode_per_row(&shader);
-            let els = psv_inputs(&shader);
-            assert!(els.iter().any(|e| e.0 == 28), "{els:?}");
-            assert!(
-                els.iter().filter(|e| e.1 == Some(0)).all(|e| e.2 == 1),
-                "{els:?}"
-            );
-            validate(&shader);
-        }
-    }
-
-    /// A row read both flat (P0) and interpolated becomes constant.
-    #[test]
-    fn a_flat_and_an_interpolated_read_make_the_row_constant() {
-        let [e0, e1] = exp_mrt0(2);
-        let words = [
-            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
-            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
-            0xC816_0202, // v_interp_mov_f32 v5, p0, attr0.z
-            v_add_f32(2, 2, 5),
-            e0,
-            e1,
-            S_ENDPGM,
-        ];
-        let mut target = element("SV_Target", 16, 0);
-        target.usage = 15;
-        let inputs = [texcoord(0, 0, 2, 9), texcoord(1, 2, 2, 9)];
-        let shader = pixel_sig(&words, PERSP_CENTER, &inputs, &[target]).unwrap();
-        assert_one_mode_per_row(&shader);
-        assert!(
-            psv_inputs(&shader)
-                .iter()
-                .filter(|e| e.0 == 0)
-                .all(|e| e.2 == 1)
-        );
-        validate(&shader);
-    }
-
-    /// The settling rules on their own: unread floats follow the fixed
-    /// element; two fixed modes in a pixel row are an error; vertex outputs
-    /// packing an integer make their floats constant.
-    #[test]
-    fn row_modes_settle() {
-        use super::lower::settle_row_modes;
-        let mut read = texcoord(0, 0, 2, 9);
-        (read.interp, read.usage) = (6, 1);
-        let mut unread = texcoord(1, 2, 2, 9);
-        unread.interp = 2;
-        let mut els = vec![read.clone(), unread.clone()];
-        settle_row_modes(&mut els, true).unwrap();
-        assert_eq!((els[0].interp, els[1].interp), (6, 6));
-        let mut int = texcoord(1, 2, 1, 5);
-        int.interp = 1;
-        assert!(settle_row_modes(&mut [read, int.clone()], true).is_err());
-        let mut els = vec![unread, int];
-        settle_row_modes(&mut els, false).unwrap();
-        assert_eq!((els[0].interp, els[1].interp), (1, 1));
-    }
-
-    /// Per sample, the conservative-depth position is per sample too.
-    #[test]
-    fn conservative_depth_per_sample_declares_a_sample_position() {
-        let mut position = element("SV_Position", 3, 0);
-        position.interp = 5;
-        let mut sample = element("SV_SampleIndex", 12, 0);
-        (sample.comp, sample.row, sample.cols) = (5, None, 1);
-        let mut inputs = vec![position.clone(), sample];
-        super::lower::settle_position_mode(&mut inputs);
-        assert_eq!(inputs[0].interp, 7);
-        // A per-sample interpolation alone does the same.
-        let mut texcoord = element("TEXCOORD", 0, 1);
-        texcoord.interp = 6;
-        let mut inputs = vec![position.clone(), texcoord];
-        super::lower::settle_position_mode(&mut inputs);
-        assert_eq!(inputs[0].interp, 7);
-        // Without either, centroid stays.
-        let mut alone = vec![position];
-        super::lower::settle_position_mode(&mut alone);
-        assert_eq!(alone[0].interp, 5);
-    }
-
-    /// An interpolation whose i is computed (`v_mul_f32 v3, 0.5, v0`) reads
-    /// the attribute's vertices: TEXCOORD0 becomes constant, read with
-    /// `attributeAtVertex`; i and j are `SV_Barycentrics` values.
-    #[test]
-    fn computed_barycentrics_read_the_vertices() {
-        let [e0, e1] = exp_mrt0(2);
-        let words = [
-            0x1006_00F0, // v_mul_f32 v3, 0.5, v0
-            0xC808_0003, // v_interp_p1_f32 v2, v3, attr0.x
-            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
-            e0,
-            e1,
-            S_ENDPGM,
-        ];
-        let shader = pixel(&words, PERSP_CENTER).unwrap();
-        let (features, inputs) = parts(&shader);
-        assert_ne!(features & 0x2_0000, 0, "no Barycentrics feature");
-        assert_eq!(inputs.iter().filter(|e| e.kind == 28).count(), 1);
-        assert_eq!(texcoord_mode(&shader), 1);
-        validate(&shader);
-    }
-
-    /// Weights from constants alone: the vertices, no `SV_Barycentrics`.
-    #[test]
-    fn constant_weights_need_no_barycentrics() {
-        let [e0, e1] = exp_mrt0(2);
-        let words = [
-            0x7E06_02F0, // v_mov_b32 v3, 0.5
-            0xC808_0003, // v_interp_p1_f32 v2, v3, attr0.x
-            0xC809_0003, // v_interp_p2_f32 v2, v3, attr0.x
-            e0,
-            e1,
-            S_ENDPGM,
-        ];
-        let shader = pixel(&words, PERSP_CENTER).unwrap();
-        let (features, inputs) = parts(&shader);
-        assert_ne!(features & 0x2_0000, 0, "no Barycentrics feature");
-        assert!(inputs.iter().all(|e| e.kind != 28), "{inputs:?}");
-        assert_eq!(texcoord_mode(&shader), 1);
-        validate(&shader);
-    }
-
-    /// The same attribute interpolated with the loaded i and j and with a
-    /// computed j: both from its vertices, the first weighed with
-    /// `SV_Barycentrics`.
-    #[test]
-    fn computed_and_loaded_barycentrics_on_one_attribute() {
-        let [e0, e1] = exp_mrt0(2);
-        let words = [
-            0xC810_0100, // v_interp_p1_f32 v4, v0, attr0.y
-            0xC811_0101, // v_interp_p2_f32 v4, v1, attr0.y
-            0x1006_02F0, // v_mul_f32 v3, 0.5, v1
-            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
-            0xC809_0003, // v_interp_p2_f32 v2, v3, attr0.x
-            v_add_f32(2, 2, 4),
-            e0,
-            e1,
-            S_ENDPGM,
-        ];
-        let shader = pixel(&words, PERSP_CENTER).unwrap();
-        let (_, inputs) = parts(&shader);
-        assert_eq!(inputs.iter().filter(|e| e.kind == 28).count(), 1);
-        assert_eq!(texcoord_mode(&shader), 1);
-        validate(&shader);
-    }
-
-    /// P10 of an attribute the program interpolates is P1 - P0.
-    #[test]
-    fn p10_of_an_interpolated_attribute() {
-        let [e0, e1] = exp_mrt0(2);
-        let words = [
-            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
-            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
-            0xC812_0000, // v_interp_mov_f32 v4, p10, attr0.x
-            v_add_f32(2, 2, 4),
-            e0,
-            e1,
-            S_ENDPGM,
-        ];
-        let shader = pixel(&words, PERSP_CENTER).unwrap();
-        assert_eq!(texcoord_mode(&shader), 1);
-        validate(&shader);
-        // Alone, what the hardware holds is not known.
-        let [e0, e1] = exp_mrt0(4);
-        let words = [0xC812_0000, e0, e1, S_ENDPGM];
-        assert!(pixel(&words, PERSP_CENTER).is_err());
-    }
-}
-
-#[cfg(test)]
-mod atomic_tests {
-    use super::*;
-    use crate::native::{ComputeIo, RootParam, StageIo};
-
-    #[test]
-    fn heap_texture_atomic_widths() {
-        // A synthetic compute shader loads a 2D UAV from a root table,
-        // compares or adds at (0, 0), then uses the returned register(s).
-        for (opcode, mask, wide) in [
-            (16u32, 3, false),
-            (16, 15, true),
-            (17, 1, false),
-            (17, 3, true),
-        ] {
-            let words = [
-                0xBE81_0380, // s_mov_b32 s1, 0 (table address high)
-                0xF40C_0200,
-                0xFA00_0000, // s_load_dwordx8 s[8:15], s[0:1], 0
-                0x7E00_0280,
-                0x7E02_0280, // v0, v1 = coordinates
-                0x7E04_0281,
-                0x7E06_0282,
-                0x7E08_0283,
-                0x7E0A_0284, // v2..v5 = 1..4
-                0xF000_2008 | opcode << 18 | mask << 8,
-                0x0002_0200,
-                // Use the old value in a second atomic at the same location.
-                0xF044_0008 | (if wide { 3 } else { 1 }) << 8,
-                0x0002_0200,
-                0xBF81_0000,
-            ];
-            let native = NativeProgram {
-                stage: HwStage::Cs,
-                wave64: false,
-                vgprs: 6,
-                layout: vec![RootParam {
-                    root: RootType::Table,
-                    table_offset_dwords: 0,
-                    sgprs: 1,
-                    base_register: 0,
-                    user_data: 0,
-                    slot: 0,
-                }],
-                used: vec![],
-                io: StageIo::Cs(ComputeIo {
-                    rsrc2: 2,
-                    threads: [32, 1, 1],
-                }),
-                code: words.iter().flat_map(|w| w.to_le_bytes()).collect(),
-            };
-            let p = ir::build(&native.code, false, native.vgprs).unwrap();
-            let bytes = crate::dxbc::build(&[]);
-            let shader = emit(
-                &Container::parse(&bytes).unwrap(),
-                &native,
-                &p,
-                &structure::structure(&p).unwrap(),
-                &io::raise(&p, &native).unwrap(),
-                &resource::track(&p, &native.layout, native.stage).unwrap(),
-                Target::ANY,
-            )
-            .unwrap();
-            let container = Container::parse(&shader.dxil).unwrap();
-            let features = u64::from_le_bytes(
-                container
-                    .part(FourCC::SFI0)
-                    .unwrap()
-                    .data
-                    .try_into()
-                    .unwrap(),
-            );
-            let required = 0x1040_8000; // heap atomics, typed atomics, Int64Ops
-            assert_eq!(features & required, if wide { required } else { 0 });
-            #[cfg(windows)]
-            if let Ok(mut v) =
-                validator::Validator::load(validator::Validator::default_path().as_deref())
-            {
-                v.validate(&mut shader.dxil.clone()).unwrap();
-            }
-        }
-    }
-}
 
 #[cfg(test)]
 mod packed_half_tests {
@@ -5186,180 +4614,6 @@ mod pr306_tests {
             }
             eprintln!("offsets {s0} and {s1}, four dwords a call: {wide}: {:x?}", &out[0][..28]);
             assert_eq!(out[0][..28], want[..], "offsets {s0} and {s1}, four dwords a call: {wide}");
-        }
-    }
-
-    #[test]
-    fn valu_div_f32_sequence_executes_on_gpu() {
-        let words: &[u32] = &[
-            0xBE85_0380, // s_mov_b32 s5, 0
-            0xF408_0202,
-            0xFA00_0000, // s_load_dwordx4 s[8:11], s[4:5], 0x0
-            0xF408_0302,
-            0xFA00_0020, // s_load_dwordx4 s[12:15], s[4:5], 0x20
-            0x340E_0083, // v_lshlrev_b32 v7, 3, v0
-            0xE034_1000,
-            0x8002_0107, // buffer_load_dwordx2 v[1:2], v7, s[8:11], 0 offen
-            0xD56D_6A03,
-            0x0406_0502, // v_div_scale_f32 v3, vcc_lo, v2, v2, v1
-            0xD56D_1008,
-            0x0406_0501, // v_div_scale_f32 v8, s16, v1, v2, v1
-            0x7E08_5503, // v_rcp_f32 v4, v3
-            0xD54B_0005,
-            0x23CA_0903, // v_fma_f32 v5, -v3, v4, 1.0
-            0xD54B_0004,
-            0x0412_0905, // v_fma_f32 v4, v5, v4, v4
-            0x100A_0908, // v_mul_f32 v5, v8, v4
-            0xD54B_0006,
-            0x2422_0B03, // v_fma_f32 v6, -v3, v5, v8
-            0xD56F_0004,
-            0x0416_0906, // v_div_fmas_f32 v4, v6, v4, v5
-            0xD55F_0001,
-            0x0406_0504, // v_div_fixup_f32 v1, v4, v2, v1
-            0x340E_0082, // v_lshlrev_b32 v7, 2, v0
-            0xE070_1000,
-            0x8003_0107, // buffer_store_dword v1, v7, s[12:15], 0 offen
-            0xBF81_0000, // s_endpgm
-        ];
-        let native = super::NativeProgram {
-            stage: super::HwStage::Cs,
-            wave64: false,
-            vgprs: 9,
-            layout: vec![
-                crate::RootParam {
-                    root: crate::RootType::Constants,
-                    table_offset_dwords: 0,
-                    sgprs: 4,
-                    base_register: 0,
-                    user_data: 0,
-                    slot: 0,
-                },
-                crate::RootParam {
-                    root: crate::RootType::Table,
-                    table_offset_dwords: 0,
-                    sgprs: 1,
-                    base_register: 0,
-                    user_data: 4,
-                    slot: 1,
-                },
-            ],
-            used: vec![
-                crate::UsedResource {
-                    kind: crate::ResourceType::Srv,
-                    root: crate::RootType::Table,
-                    table_offset_dwords: 0,
-                    lower_bound: 0,
-                    stride: 4,
-                    dwords: 4,
-                    user_data: 4,
-                    slot: 1,
-                },
-                crate::UsedResource {
-                    kind: crate::ResourceType::Uav,
-                    root: crate::RootType::Table,
-                    table_offset_dwords: 8,
-                    lower_bound: 0,
-                    stride: 4,
-                    dwords: 4,
-                    user_data: 4,
-                    slot: 1,
-                },
-            ],
-            io: crate::native::StageIo::Cs(crate::native::ComputeIo {
-                rsrc2: 5 << 1,
-                threads: [7, 1, 1],
-            }),
-            code: words.iter().flat_map(|w| w.to_le_bytes()).collect(),
-        };
-        let p = crate::ir::build(&native.code, native.wave64, native.vgprs).unwrap();
-        let res = crate::resource::track(&p, &native.layout, native.stage, None).unwrap();
-        let io = crate::io::raise(&p, &native).unwrap();
-        let st = crate::structure::structure(&p).unwrap();
-        let l = super::lower::lower(&super::lower::Parts {
-            native: &native,
-            p: &p,
-            st: &st,
-            io: &io,
-            res: &res,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            prims: Vec::new(),
-            mesh_stride: 0,
-        })
-        .unwrap();
-        // Validated and run only on Windows (dxil.dll and the host GPU).
-        #[cfg_attr(not(windows), allow(unused_mut, unused_variables))]
-        let mut dxil = l.dxil;
-        #[cfg(windows)]
-        if let Ok(mut v) = super::validator::Validator::load(
-            super::validator::Validator::default_path().as_deref(),
-        ) {
-            v.validate(&mut dxil).unwrap();
-        }
-        #[cfg(windows)]
-        if let Ok(host) = super::host::Host::new(false) {
-            let cs = super::HostShader {
-                stage: super::HwStage::Cs,
-                dxil,
-                user_data: l.user_data,
-                samplers: Vec::new(),
-                static_samplers: Vec::new(),
-                root_cbvs: l.root_cbvs,
-                root_srvs: l.root_srvs,
-                root_uavs: l.root_uavs,
-                written_root_uavs: l.written_root_uavs,
-                writes_guest_memory: l.writes_guest_memory,
-                root_indexed_views: Vec::new(),
-                half_views: l.half_views,
-            };
-            let (root, pso) = host.compute_pipeline(&cs).unwrap();
-            let inputs: Vec<u32> = [
-                7.0f32, 3.0, -1.0, 1e-40, 1.0, 1e35, 1e-35, 1e-36, 0.0, 0.0, -1.0, 0.0, -1e35, 1e35,
-            ]
-            .into_iter()
-            .map(f32::to_bits)
-            .collect();
-            let out = host
-                .dispatch(
-                    &root,
-                    &pso,
-                    &super::host::Dispatch {
-                        roots: vec![(0, super::host::Root::Constants(vec![0, 0, 0, 0, 0]))],
-                        views: &[
-                            super::host::View::Buffer {
-                                data: &inputs,
-                                stride: super::host::Stride::Raw,
-                            },
-                            super::host::View::RawUav(64),
-                        ],
-                        samplers: &[],
-                        groups: [1, 1, 1],
-                    },
-                )
-                .unwrap();
-            let got: Vec<f32> = out[0][..7].iter().copied().map(f32::from_bits).collect();
-            assert!((got[0] - (7.0f32 / 3.0)).abs() < 1e-6, "got {:?}", got);
-            assert_eq!(out[0][1], (-1.0f32 / 1e-40).to_bits());
-            assert!(
-                (got[2] - 1e-35).abs() <= 1e-40,
-                "lane 2 got {:?} ({:#x})",
-                got[2],
-                out[0][2]
-            );
-            assert!(
-                (got[3] - 10.0).abs() < 1e-5,
-                "lane 3 got {:?} ({:#x})",
-                got[3],
-                out[0][3]
-            );
-            assert_eq!(out[0][4], 0xFFC0_0000);
-            assert_eq!(out[0][5], (-1.0f32 / 0.0).to_bits());
-            assert!(
-                (got[6] - (-1.0)).abs() < 1e-6,
-                "lane 6 got {:?} ({:#x})",
-                got[6],
-                out[0][6]
-            );
         }
     }
 }
@@ -6381,6 +5635,255 @@ mod barycentric_tests {
         assert_eq!(rows, [("SV_Position", 0, Some(0)), ("TEXCOORD", 1, Some(2))]);
         validate(&shader);
     }
+
+    /// The same with the console signatures `inputs` and `outputs`.
+    fn pixel_sig(
+        words: &[u32],
+        input_addr: u32,
+        inputs: &[SigElement],
+        outputs: &[SigElement],
+    ) -> Result<HostShader, ShaderError> {
+        let native = NativeProgram {
+            stage: HwStage::Ps,
+            wave64: false,
+            vgprs: 8,
+            layout: vec![],
+            used: vec![],
+            io: StageIo::Ps {
+                inputs: vec![PsInput {
+                    usage: Usage::Generic,
+                    row: 0,
+                    mask: 0b1111,
+                    attr: 0,
+                    flat: false,
+                    fp16: false,
+                    pack2: false,
+                    row2: 0,
+                }],
+                input_addr,
+                db_shader_control: 0,
+                patches: vec![],
+            },
+            code: words.iter().flat_map(|w| w.to_le_bytes()).collect(),
+        };
+        let isg1 = container::signature(inputs, true);
+        let osg1 = container::signature(outputs, false);
+        let bytes = crate::dxbc::build(&[(FourCC::ISG1, &isg1), (FourCC::OSG1, &osg1)]);
+        let c = Container::parse(&bytes).unwrap();
+        let p = ir::build(&native.patched_code(), native.wave64, native.vgprs)?;
+        let res = resource::track(&p, &native.layout, native.stage, None)?;
+        let io = io::raise(&p, &native)?;
+        let st = structure::structure(&p)?;
+        emit(&c, &native, &p, &st, &io, &res)
+    }
+
+    /// The `PSV0` input elements: (kind, start row if allocated, mode).
+    fn psv_inputs(shader: &HostShader) -> Vec<(u8, Option<u8>, u8)> {
+        let c = Container::parse(&shader.dxil).unwrap();
+        let psv = c.part(FourCC::PSV0).unwrap().data;
+        let u = |at: usize| u32::from_le_bytes(psv[at..at + 4].try_into().unwrap()) as usize;
+        let info = u(0);
+        let n_in = psv[4 + 28] as usize;
+        let mut at = 4 + info;
+        let n_bind = u(at);
+        at += 4;
+        if n_bind > 0 {
+            at += 4 + n_bind * u(at);
+        }
+        at += 4 + u(at);
+        at += 4 + 4 * u(at);
+        let size = u(at);
+        at += 4;
+        (0..n_in)
+            .map(|k| {
+                let e = &psv[at + k * size..];
+                let row = (e[10] & 0x40 != 0).then_some(e[9]);
+                (e[11], row, e[13])
+            })
+            .collect()
+    }
+
+    /// Every packed row of a pixel shader's inputs has one mode.
+    fn assert_one_mode_per_row(shader: &HostShader) {
+        let els = psv_inputs(shader);
+        for &(kind, row, mode) in &els {
+            let Some(row) = row else { continue };
+            for &(k, r, m) in &els {
+                assert!(
+                    r != Some(row) || m == mode,
+                    "row {row}: {kind}/{mode} vs {k}/{m}"
+                );
+            }
+        }
+    }
+
+    fn texcoord(index: u32, col: u8, cols: u8, comp: u8) -> SigElement {
+        SigElement {
+            index,
+            col,
+            cols,
+            comp,
+            ..element("TEXCOORD", 0, 0)
+        }
+    }
+
+    /// A conservative depth output makes the position centroid, which the
+    /// validator wants (14 programs were rejected with the center mode).
+    #[test]
+    fn conservative_depth_declares_a_centroid_position() {
+        let [e0, e1] = exp_mrt0(2);
+        let words = [
+            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
+            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
+            e0,
+            e1,
+            S_ENDPGM,
+        ];
+        let mut position = element("SV_Position", 3, 1);
+        position.usage = 0;
+        let inputs = [element("TEXCOORD", 0, 0), position];
+        let mut target = element("SV_Target", 16, 0);
+        target.usage = 15;
+        for (kind, name) in [(18, "SV_DepthLessEqual"), (19, "SV_DepthGreaterEqual")] {
+            let mut depth = element(name, kind, 0);
+            (depth.row, depth.cols) = (None, 1);
+            let shader =
+                pixel_sig(&words, PERSP_CENTER, &inputs, &[target.clone(), depth]).unwrap();
+            let pos: Vec<_> = psv_inputs(&shader)
+                .into_iter()
+                .filter(|e| e.0 == 3)
+                .collect();
+            assert_eq!(pos, [(3, Some(1), 5)], "{name}");
+        }
+        // Plain depth or none: noperspective center, as DXC declares it.
+        let shader = pixel_sig(&words, PERSP_CENTER, &inputs, &[target]).unwrap();
+        assert!(psv_inputs(&shader).contains(&(3, Some(1), 4)));
+    }
+
+    /// Per sample, the conservative-depth position is per sample too.
+    #[test]
+    fn conservative_depth_per_sample_declares_a_sample_position() {
+        let mut position = element("SV_Position", 3, 0);
+        position.interp = 5;
+        let mut sample = element("SV_SampleIndex", 12, 0);
+        (sample.comp, sample.row, sample.cols) = (5, None, 1);
+        let mut inputs = vec![position.clone(), sample];
+        super::lower::settle_position_mode(&mut inputs);
+        assert_eq!(inputs[0].interp, 7);
+        // A per-sample interpolation alone does the same.
+        let mut texcoord = element("TEXCOORD", 0, 1);
+        texcoord.interp = 6;
+        let mut inputs = vec![position.clone(), texcoord];
+        super::lower::settle_position_mode(&mut inputs);
+        assert_eq!(inputs[0].interp, 7);
+        // Without either, centroid stays.
+        let mut alone = vec![position];
+        super::lower::settle_position_mode(&mut alone);
+        assert_eq!(alone[0].interp, 5);
+    }
+
+    /// An attribute read with centroid barycentrics shares its row with
+    /// one nobody reads: the unread one takes the centroid mode.
+    #[test]
+    fn an_unread_element_takes_its_rows_mode() {
+        const PERSP_CENTROID: u32 = 1 << 2;
+        let [e0, e1] = exp_mrt0(2);
+        let words = [
+            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
+            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
+            e0,
+            e1,
+            S_ENDPGM,
+        ];
+        let mut target = element("SV_Target", 16, 0);
+        target.usage = 15;
+        let inputs = [texcoord(0, 0, 2, 9), texcoord(1, 2, 2, 9)];
+        let shader = pixel_sig(&words, PERSP_CENTROID, &inputs, &[target]).unwrap();
+        assert_one_mode_per_row(&shader);
+        let modes: Vec<u8> = psv_inputs(&shader).iter().map(|e| e.2).collect();
+        assert_eq!(modes, [3, 3]);
+        validate(&shader);
+    }
+
+    /// An interpolated float packed with an integer (constant) element: the
+    /// row stays where it is and becomes constant, the float weighed from
+    /// its vertices with `SV_Barycentrics`.
+    #[test]
+    fn an_integer_in_the_row_makes_it_constant() {
+        let [e0, e1] = exp_mrt0(2);
+        let words = [
+            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
+            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
+            e0,
+            e1,
+            S_ENDPGM,
+        ];
+        let mut target = element("SV_Target", 16, 0);
+        target.usage = 15;
+        let mut face = element("SV_IsFrontFace", 13, 0);
+        (face.col, face.cols, face.comp) = (3, 1, 5);
+        for other in [texcoord(1, 2, 1, 5), face] {
+            let inputs = [texcoord(0, 0, 2, 9), other];
+            let shader = pixel_sig(&words, PERSP_CENTER, &inputs, &[target.clone()]).unwrap();
+            assert_one_mode_per_row(&shader);
+            let els = psv_inputs(&shader);
+            assert!(els.iter().any(|e| e.0 == 28), "{els:?}");
+            assert!(
+                els.iter().filter(|e| e.1 == Some(0)).all(|e| e.2 == 1),
+                "{els:?}"
+            );
+            validate(&shader);
+        }
+    }
+
+    /// A row read both flat (P0) and interpolated becomes constant.
+    #[test]
+    fn a_flat_and_an_interpolated_read_make_the_row_constant() {
+        let [e0, e1] = exp_mrt0(2);
+        let words = [
+            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
+            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
+            0xC816_0202, // v_interp_mov_f32 v5, p0, attr0.z
+            v_add_f32(2, 2, 5),
+            e0,
+            e1,
+            S_ENDPGM,
+        ];
+        let mut target = element("SV_Target", 16, 0);
+        target.usage = 15;
+        let inputs = [texcoord(0, 0, 2, 9), texcoord(1, 2, 2, 9)];
+        let shader = pixel_sig(&words, PERSP_CENTER, &inputs, &[target]).unwrap();
+        assert_one_mode_per_row(&shader);
+        assert!(
+            psv_inputs(&shader)
+                .iter()
+                .filter(|e| e.0 == 0)
+                .all(|e| e.2 == 1)
+        );
+        validate(&shader);
+    }
+
+    /// The settling rules on their own: unread floats follow the fixed
+    /// element; two fixed modes in a pixel row are an error; vertex outputs
+    /// packing an integer make their floats constant.
+    #[test]
+    fn row_modes_settle() {
+        use super::lower::settle_row_modes;
+        let mut read = texcoord(0, 0, 2, 9);
+        (read.interp, read.usage) = (6, 1);
+        let mut unread = texcoord(1, 2, 2, 9);
+        unread.interp = 2;
+        let mut els = vec![read.clone(), unread.clone()];
+        settle_row_modes(&mut els, true).unwrap();
+        assert_eq!((els[0].interp, els[1].interp), (6, 6));
+        let mut int = texcoord(1, 2, 1, 5);
+        int.interp = 1;
+        assert!(settle_row_modes(&mut [read, int.clone()], true).is_err());
+        let mut els = vec![unread, int];
+        settle_row_modes(&mut els, false).unwrap();
+        assert_eq!((els[0].interp, els[1].interp), (1, 1));
+    }
+
 }
 
 #[cfg(test)]
