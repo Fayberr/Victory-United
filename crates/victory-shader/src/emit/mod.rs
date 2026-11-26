@@ -134,28 +134,14 @@ use crate::{ShaderError, io, ir, resource, structure};
 pub use bitcode::census;
 pub use link::{link_mesh, mesh_fits};
 pub use sampler::StaticSampler;
-<<<<<<< HEAD
-pub use lower::{host_max_wave, host_settings, set_host_max_wave, set_host_rdna};
-||||||| 85d564167
-pub use lower::{host_settings, set_host_max_wave, set_host_rdna};
-=======
-pub use lower::{host_settings, set_host_max_wave, set_host_rdna, set_thread_max_wave};
->>>>>>> avatar/main
+pub use lower::{host_max_wave, host_settings, set_host_max_wave, set_host_rdna, set_thread_max_wave};
 pub use rect::rect_list_gs;
 pub use shader::{
     MEMORY_FAULTS, MEMORY_PAGES, MEMORY_READ_ONLY, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-<<<<<<< HEAD
-    SLOT_STRIDES_COUNT, SLOT_VIEW_BYTES, SLOT_VIEWS, SLOT_VIEWS_COUNT, SLOT_VIEWS_RECORD_BYTES, USER_DATA_SPACE,
-    VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS, USER_DISPATCH_THREADS_X, USER_GROUP_BASE,
-    USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
-    raw_views, set_raw_views, set_view_heap_limit, view_heap_limit,
-||||||| 85d564167
-    SLOT_STRIDES_COUNT, USER_DATA_SPACE, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS_X, USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
-    raw_views, set_raw_views, set_view_heap_limit, view_heap_limit,
-=======
-    SLOT_STRIDES_BYTES, SLOT_STRIDES_COUNT, VIEW_ADDRESSES, USER_DATA_SPACE, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS_X, USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
+    SLOT_STRIDES_BYTES, SLOT_STRIDES_COUNT, SLOT_VIEW_BYTES, SLOT_VIEWS, SLOT_VIEWS_COUNT, SLOT_VIEWS_RECORD_BYTES,
+    VIEW_ADDRESSES, USER_DATA_SPACE, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS,
+    USER_DISPATCH_THREADS_X, USER_GROUP_BASE, USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
     constants_raw, raw_views, set_raw_views, set_view_heap_limit, view_heap_limit,
->>>>>>> avatar/main
 };
 
 /// The loop limit without an override: 4096.
