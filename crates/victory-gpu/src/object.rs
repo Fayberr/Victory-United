@@ -71,6 +71,18 @@ pub(crate) extern "system" fn add_ref(this: This) -> u32 {
     unsafe { &*this }.refs.fetch_add(1, Ordering::Relaxed) + 1
 }
 
+/// Acquires a reference only if the object's last release has yet to start.
+///
+/// The caller must keep the allocation alive across this call.
+#[cfg(windows)]
+pub(crate) unsafe fn add_ref_alive(this: This) -> bool {
+    // SAFETY: the caller keeps the header allocated.
+    let refs = &unsafe { &*this }.refs;
+    refs.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+        if n == 0 { None } else { n.checked_add(1) }
+    }).is_ok()
+}
+
 pub(crate) extern "system" fn release(this: This) -> u32 {
     // SAFETY: `this` is one of our objects.
     let refs = &unsafe { &*this }.refs;
