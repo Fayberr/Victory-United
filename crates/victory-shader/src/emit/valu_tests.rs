@@ -2255,7 +2255,6 @@ fn whole_wave_f64_sum_and_cvt_f32_f64() {
         }
     }
 }
-<<<<<<< HEAD
 
 #[test]
 fn ps_sample_coverage_input_reads_coverage_mask() {
@@ -2697,8 +2696,6 @@ fn v_mul_legacy_f32_treats_denormals_as_zero() {
         );
     });
 }
-||||||| 465b94f5
-=======
 
 /// A program that moves a typed buffer's 16-bit channels
 /// (`buffer_load_format_d16_xyzw` from the table's first view,
@@ -3184,4 +3181,3 @@ fn a_format_load_read_as_halves_loads_the_integer() {
     }
     assert!(ran > 0, "no SM 6.6 device available");
 }
->>>>>>> vertex/main
