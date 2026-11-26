@@ -213,7 +213,7 @@ fn virtual_alloc(
         );
     }
     // Committed: what the GPU side found uncommitted there is no longer so
-    // (it looks again only now and then otherwise).
+    // (it looks again only now and then otherwise; `VICTORY_ABSENT_ONCE`).
     if !at.is_null() && kind & MEM_COMMIT != 0 {
         // Windows rounds a fixed commit's address down to a page. The
         // caller's last byte can be in the next 64 KiB watch block.

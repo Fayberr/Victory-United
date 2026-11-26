@@ -11,15 +11,19 @@
 //!   the resource: `descriptor::forget`), which leaves the record as it was;
 //! - its record in title memory is not the one seen at the last look (a
 //!   record copied by the title itself, past the API); a compare of 12
-//!   bytes per slot, no lock and no lookup;
+//!   bytes per slot in slot order, no lock and no lookup;
 //! - it found no host copy at its last look: every 16 passes, as before;
 //! - every [`FULL_EVERY`] passes, all of them, as a safety net.
 //!
 //! The span of a copy is worked out again only when one of its slots went.
 //! `VICTORY_HEAP_PASS_FULL=1` brings back the old pass (all slots every 16
 //! passes, all spans every pass) to compare.
+//!
+//! From fork pull request #523, as darkworldhm's snapshot carries it: the
+//! pass is taken with `VICTORY_HEAP_PASS_MARKED` too ([`marked`]); unset,
+//! `draw::State::heap_buffers` runs as it always did.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Passes between two looks at every slot, besides those marked.
 pub(crate) const FULL_EVERY: u64 = 256;
@@ -31,6 +35,70 @@ pub(crate) const ORPHANS_EVERY: u64 = 16;
 pub(crate) fn full_pass() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_HEAP_PASS_FULL").is_some_and(|v| v == "1"))
+}
+
+/// What `VICTORY_HEAP_PASS_MARKED` says: 0 unset (off), 1 on, 2 in turn.
+fn mode() -> u8 {
+    static MODE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| match std::env::var("VICTORY_HEAP_PASS_MARKED").as_deref() {
+        Ok("1") => 1,
+        Ok("alt") => 2,
+        _ => 0,
+    })
+}
+
+/// Whether the switch is set at all (`1` or `alt`): the table entries freed
+/// are then noted for the pass (`descriptor::forget`), in both phases of
+/// `alt`.
+pub(crate) fn marked_set() -> bool {
+    mode() != 0
+}
+
+/// Set when `alt` turns the marked pass on again: what it kept is from
+/// before the other pass's turn, and the other pass took the heap's changes
+/// meanwhile. The marked pass then starts anew (every slot), and has the
+/// other pass start anew at its next turn.
+pub(crate) static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Set when `alt` turns the marked pass off: see [`marked_paused`].
+static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// With `alt` only: whether the marked pass's turn has just ended (true
+/// once for each end), so that what it kept can be let go for the other
+/// pass's turn. False, with nothing but the switch read, when the switch
+/// is unset or `1`.
+pub(crate) fn marked_paused() -> bool {
+    mode() == 2 && PAUSED.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether the pass over the heap's buffer views looks only at marked
+/// slots now (`VICTORY_HEAP_PASS_MARKED=1`; off by default: every slot
+/// every 16 passes, as before). `alt`: twenty seconds with, twenty without,
+/// in turn, each change said in the log; the first pass of each turn looks
+/// at every slot.
+pub(crate) fn marked() -> bool {
+    match mode() {
+        0 => false,
+        1 => true,
+        _ => {
+            use std::sync::atomic::Ordering::Relaxed;
+            static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+            let on = (EPOCH.get_or_init(std::time::Instant::now).elapsed().as_secs() / 20) % 2 == 1;
+            static LAST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+            if LAST.swap(u8::from(on), Relaxed) != u8::from(on) {
+                if on {
+                    RESUMED.store(true, Relaxed);
+                } else {
+                    PAUSED.store(true, Relaxed);
+                }
+                tracing::info!(
+                    "the pass over the heap's buffer views looks only at marked slots from now (VICTORY_HEAP_PASS_MARKED=alt): {}",
+                    if on { "ON" } else { "off, every slot every 16 passes as usual" }
+                );
+            }
+            on
+        }
+    }
 }
 
 /// A slot's record in title memory: the tag and two words
@@ -72,10 +140,16 @@ fn scan_every() -> u64 {
 /// What a pass looks at (see the module).
 pub(crate) struct Picked<C> {
     passes: u64,
-    slots: HashMap<u32, Slot>,
+    /// In slot order: every pass reads the record of each of them from
+    /// title memory ([`Picked::plan`]), and in the order of a hash table
+    /// those reads fall all over the heap. With 163,000 views kept the
+    /// plan took 1,195 ms of the 10 s profiled that way (run st-x-play,
+    /// 9 ms a frame) and 262 ms in slot order (run st-y-play, 2 ms).
+    slots: BTreeMap<u32, Slot>,
     copies: HashMap<usize, Copy<C>>,
-    /// Slots that found no host copy, with the record seen.
-    orphans: HashMap<u32, Record>,
+    /// Slots that found no host copy, with the record seen. In slot order
+    /// as `slots` is.
+    orphans: BTreeMap<u32, Record>,
     /// View table entry -> slots whose record named it at their last look
     /// (some may name another by now: checked when used).
     by_entry: HashMap<u32, Vec<u32>>,
@@ -91,9 +165,9 @@ impl<C: Clone> Picked<C> {
     pub(crate) fn new(full: bool) -> Self {
         Picked {
             passes: 0,
-            slots: HashMap::new(),
+            slots: BTreeMap::new(),
             copies: HashMap::new(),
-            orphans: HashMap::new(),
+            orphans: BTreeMap::new(),
             by_entry: HashMap::new(),
             forgotten: None,
             full,
@@ -174,7 +248,8 @@ impl<C: Clone> Picked<C> {
         due
     }
 
-    fn record_of(&self, slot: u32) -> Option<Record> {
+    /// The record seen at slot `slot`'s last look, if it is kept.
+    pub(crate) fn record_of(&self, slot: u32) -> Option<Record> {
         self.slots
             .get(&slot)
             .map(|s| s.record)
