@@ -65,26 +65,15 @@ pub fn run(
     let original = std::fs::read(exe).with_context(|| format!("reading {}", exe.display()))?;
     let mut prepared = victory_loader::prepare(&original)?;
     let hash = prepared.original_hash.to_hex();
-<<<<<<< HEAD
     let build = victory_game::identify(&hash);
-    match build {
-        Some(build) => println!("build          {} ({hash})", build.label),
-        None => println!("build          unknown ({hash})"),
-    }
-    apply_title_patches(&mut prepared, build)?;
-||||||| a66ac212
-    match victory_game::identify(&hash) {
-        Some(build) => println!("build          {} ({hash})", build.label),
-        None => println!("build          unknown ({hash})"),
-    }
-=======
-    let label = match victory_game::identify(&hash) {
+    let label = match build {
         Some(build) => format!("{} ({hash})", build.label),
         None => format!("unknown ({hash})"),
     };
     println!("build          {label}");
+    // (klbf) The frame-time dump header names the build.
     victory_gpu::frametime::use_build_label(label);
->>>>>>> klbf/beta-2
+    apply_title_patches(&mut prepared, build)?;
 
     let images = cfg.cache_subdir("images")?;
     victory_hle::modules::d3d12x::use_shader_cache(cfg.cache_subdir("shaders")?);
@@ -195,7 +184,6 @@ pub fn run(
         show(name, dll.bind_imports(&with_dlls, policy)?);
     }
     let exe_name = exe.file_name().unwrap_or_default().to_string_lossy();
-<<<<<<< HEAD
     // The upscale dispatch is ours (`victory_hle::modules::ffx`); the rest of
     // that DLL is the title's own.
     struct TakeDispatch<'a>(&'a dyn victory_loader::ImportResolver);
@@ -222,12 +210,8 @@ pub fn run(
         // SAFETY: the image stays mapped, and nothing of it has run yet.
         unsafe { victory_loader::write_sites::apply_asked(&image_name, image.base(), size) };
     }
-||||||| a66ac212
-    show(&exe_name, image.bind_imports(&with_dlls, policy)?);
-=======
-    show(&exe_name, image.bind_imports(&with_dlls, policy)?);
-    // Renderer port #2 (VICTORY_PORT_DESCRIPTORS=1): the title's stores of
-    // descriptor records tell the layer their slots.
+    // (klbf) Renderer port #2 (VICTORY_PORT_DESCRIPTORS=1): the title's stores
+    // of descriptor records tell the layer their slots.
     #[cfg(windows)]
     if execute && victory_hle::port_descriptors::on() {
         use victory_loader::descriptor_sites::{Hooked, SITES, apply};
@@ -239,7 +223,6 @@ pub fn run(
         println!("renderer port 2: {patched} of {} descriptor record stores of the title patched", SITES.len());
         victory_hle::port_descriptors::hooked(image.base(), size, patched);
     }
->>>>>>> klbf/beta-2
     if !execute {
         println!("not executing (pass --execute to start the title)");
         return Ok(0);
@@ -316,13 +299,7 @@ fn watch(base: usize, size: usize) {
                 // SAFETY: four bytes inside the mapped image, checked above.
                 let value = unsafe { ((base + rva) as *const u32).read_volatile() };
                 if *seen != Some(value) {
-<<<<<<< HEAD
                     eprintln!("VItoriaBr: title+{rva:#x} = {value:#x}");
-||||||| a66ac212
-                    eprintln!("VIctory: title+{rva:#x} = {value:#x}");
-=======
-                    eprintln!("KLBF Lab: title+{rva:#x} = {value:#x}");
->>>>>>> klbf/beta-2
                     *seen = Some(value);
                 }
             }
