@@ -1006,12 +1006,7 @@ fn lds_meetings(p: &crate::ir::Program, st: &Structured, all: &[bool]) -> Option
             }
         }
     }
-<<<<<<< HEAD
     if (0..n).any(|r| reads[r] && writes[r]) && !super::loose_lds::on() {
-||||||| 9c184b35b
-    if (0..n).any(|r| reads[r] && writes[r]) {
-=======
-    if (0..n).any(|r| reads[r] && writes[r]) {
         if std::env::var_os("VICTORY_WAVE_WHY").is_some() {
             for r in (0..n).filter(|&r| reads[r] && writes[r]) {
                 let mut list = Vec::new();
@@ -1044,7 +1039,6 @@ fn lds_meetings(p: &crate::ir::Program, st: &Structured, all: &[bool]) -> Option
                 eprintln!("WAVE64-LDS region with reads and writes: {}", list.join("; "));
             }
         }
->>>>>>> origin/exp/fork-head
         return None;
     }
     let mut meet = vec![(false, false); n];
@@ -2405,7 +2399,7 @@ impl<'a> Lower<'a> {
 
     fn run(mut self, counted: bool) -> Result<Lowered, Stop> {
         let p = self.x.p;
-<<<<<<< HEAD
+        self.halves_only = self.places_read_as_halves();
         if counted {
             // Before anything else, so that wave counts, reads of the first
             // lane and stores know only the lanes that run.
@@ -2431,10 +2425,6 @@ impl<'a> Lower<'a> {
             self.s.entry = body;
         }
         self.find_coherent();
-||||||| 9c184b35b
-=======
-        self.halves_only = self.places_read_as_halves();
->>>>>>> origin/exp/fork-head
         let order = crate::ir::reverse_postorder(&p.blocks);
         for (n, &b) in order.iter().enumerate() {
             self.rpo[b] = n;
@@ -6819,19 +6809,6 @@ impl<'a> Lower<'a> {
                 let props = if un.starts_with("buffer_load_format")
                     || un.starts_with("buffer_store_format")
                 {
-<<<<<<< HEAD
-                    (10 | u, 0x409)
-                } else if !counted
-                    && *idxen
-                    && format.is_none()
-                    && stride >= 4
-                    && stride.is_multiple_of(4)
-                {
-                    // Nothing reads the count: the query is cleaned up.
-||||||| 9c184b35b
-                    (10 | u, 0x409)
-                } else if *idxen && format.is_none() && stride >= 4 && stride.is_multiple_of(4) {
-=======
                     // (Unsigned integers where the access moves halves.)
                     let halves = self
                         .table_place(&Source::Loaded { load: site, first })
@@ -6841,8 +6818,13 @@ impl<'a> Lower<'a> {
                                     || self.format_load_read_as_halves(ui))
                         });
                     (10 | u, if halves { 0x405 } else { 0x409 })
-                } else if *idxen && format.is_none() && stride >= 4 && stride.is_multiple_of(4) {
->>>>>>> origin/exp/fork-head
+                } else if !counted
+                    && *idxen
+                    && format.is_none()
+                    && stride >= 4
+                    && stride.is_multiple_of(4)
+                {
+                    // Nothing reads the count: the query is cleaned up.
                     (12 | u, stride)
                 } else {
                     // Structured ones too: the host's views of them are raw
@@ -8701,22 +8683,11 @@ impl<'a> Lower<'a> {
                         let m = self.s.m.bin(c, Bin::Mul, a, bb);
                         self.s.m.bin(c, Bin::Add, m, acc)
                     }
-<<<<<<< HEAD
-                    _ => self.legacy_fmad(a, bb, acc),
-||||||| 9c184b35b
-                    _ => {
-                        let m = self.legacy_mul(a, bb);
-                        self.s.m.bin(c, Bin::Add, m, acc)
-                    }
-=======
                     // On RDNA 2 the legacy encoding decodes as fused
                     // (`v_fma_legacy_f32`) and flushes its sources; the
-                    // zero-factor rule of the legacy multiply comes with it.
-                    _ => {
-                        let (a, bb, acc) = (self.ftz(a), self.ftz(bb), self.ftz(acc));
-                        self.legacy_fmad(a, bb, acc)
-                    }
->>>>>>> origin/exp/fork-head
+                    // zero-factor rule of the legacy multiply comes with it
+                    // (`legacy_fmad` flushes them itself).
+                    _ => self.legacy_fmad(a, bb, acc),
                 };
                 float(self, r)
             }
@@ -8726,21 +8697,12 @@ impl<'a> Lower<'a> {
                 let r = self.s.m.bin(c, Bin::Add, m, cc);
                 float(self, r)
             }
-<<<<<<< HEAD
-            "v_mad_legacy_f32" => {
-                let (a, bb, cc) = (f(self, 0)?, f(self, 1)?, f(self, 2)?);
-                let r = self.legacy_fmad(a, bb, cc);
-                float(self, r)
-            }
-||||||| 9c184b35b
-=======
             "v_mad_legacy_f32" => {
                 let (a, bb, cc) = (f(self, 0)?, f(self, 1)?, f(self, 2)?);
                 let (a, bb, cc) = (self.ftz(a), self.ftz(bb), self.ftz(cc));
                 let r = self.legacy_fmad(a, bb, cc);
                 float(self, r)
             }
->>>>>>> origin/exp/fork-head
             "v_max3_f32" | "v_min3_f32" | "v_med3_f32" => {
                 let (a, bb, cc) = (f(self, 0)?, f(self, 1)?, f(self, 2)?);
                 let r = match name {
@@ -12302,26 +12264,18 @@ impl<'a> Lower<'a> {
             let mut vals =
                 self.vgprs(inst, data.as_ref().ok_or("buffer store data")?, regs as u8)?;
             if d16 {
-<<<<<<< HEAD
-                // d16 data is taken as f16, widened for the 32-bit float
-                // store; through a view of an integer format it is a 16-bit
-                // integer, zero- or sign-extended (VIctory 4243a96a: the face
-                // network keeps its halves in UINT views; its output was
-                // noise). Both `ResourceHeap` (`SLOT_STRIDES`) and `Table`
+                // Through a view of a table each half is stored as it is
+                // (`halves`). Reached another way: d16 data is taken as f16,
+                // widened for the 32-bit float store; through a view of an
+                // integer format it is a 16-bit integer, zero- or
+                // sign-extended (VIctory 4243a96a: the face network keeps
+                // its halves in UINT views; its output was noise). Both
+                // `ResourceHeap` (`SLOT_STRIDES`) and `Table`
                 // (`SLOT_TABLE_STRIDES`, dynamic table snapshots included)
                 // populate the view-kind bits, while the handle stays a float
                 // one (`0x409`), whose raw bits RTX and WARP pass bit-exact
                 // without extra CFG blocks or touching non-d16 shaders.
                 let integer = if typed { self.integer_view(src)? } else { None };
-||||||| 9c184b35b
-                // shortcut: d16 data is taken as f16 (integer formats would
-                // keep 16 bits), widened for the 32-bit float store.
-=======
-                // Through a view of a table each half is stored as it is
-                // (`halves`). Reached another way:
-                // shortcut: d16 data is taken as f16 (integer formats would
-                // keep 16 bits), widened for the 32-bit float store.
->>>>>>> origin/exp/fork-head
                 let mut wide = Vec::new();
                 for k in 0..count {
                     let mut x = vals[(k / 2) as usize];
@@ -12363,14 +12317,12 @@ impl<'a> Lower<'a> {
                 args.push(self.handle(site, src, false, (10 | u, component))?);
                 args.extend([index.unwrap_or(self.s.m.i32(0)), iu]);
                 for x in vals {
-<<<<<<< HEAD
-                    let f = self.as_float(x);
-                    args.push(self.nan_guard(f, false));
-||||||| 9c184b35b
-                    args.push(self.as_float(x));
-=======
-                    args.push(if halves { x } else { self.as_float(x) });
->>>>>>> origin/exp/fork-head
+                    if halves {
+                        args.push(x);
+                    } else {
+                        let f = self.as_float(x);
+                        args.push(self.nan_guard(f, false));
+                    }
                 }
                 (
                     69,
@@ -12512,45 +12464,32 @@ impl<'a> Lower<'a> {
             return Err("a buffer result");
         };
         if d16 {
-<<<<<<< HEAD
             // Two f16 channels per VGPR (an odd last high half 0); the low
-            // 16 bits of an integer view's (see the stores above).
-            let integer = if typed { self.integer_view(src)? } else { None };
-||||||| 9c184b35b
-            // Two f16 channels per VGPR (an odd last high half 0).
-=======
-            // Two f16 channels per VGPR (an odd last high half 0); through
+            // 16 bits of an integer view's (see the stores above); through
             // a view of a table, the 16 bits of each as they are.
->>>>>>> origin/exp/fork-head
+            let integer = if typed { self.integer_view(src)? } else { None };
             let k16 = self.s.m.i32(16);
             let i32t = self.s.t.i32;
             for k in 0..count.div_ceil(2) {
                 let mut x = None;
                 for ch in (2 * k..(2 * k + 2).min(count)).rev() {
                     let f = self.s.m.extract(c, r, ch);
-<<<<<<< HEAD
-                    let mut h = self
-                        .s
-                        .op(c, "legacyF32ToF16", Attr::ReadNone, i32t, 130, &[f]);
-                    if let Some((int, _)) = integer {
-                        let bits = self.as_int(f);
-                        let low = self.s.m.i32(0xFFFF);
-                        let low = self.s.m.bin(c, Bin::And, bits, low);
-                        h = self.s.m.select(c, int, low, h);
-                    }
-||||||| 9c184b35b
-                    let h = self
-                        .s
-                        .op(c, "legacyF32ToF16", Attr::ReadNone, i32t, 130, &[f]);
-=======
                     let h = if halves {
                         let low = self.s.m.i32(0xffff);
                         self.s.m.bin(c, Bin::And, f, low)
                     } else {
-                        self.s
-                            .op(c, "legacyF32ToF16", Attr::ReadNone, i32t, 130, &[f])
+                        let h = self
+                            .s
+                            .op(c, "legacyF32ToF16", Attr::ReadNone, i32t, 130, &[f]);
+                        if let Some((int, _)) = integer {
+                            let bits = self.as_int(f);
+                            let low = self.s.m.i32(0xFFFF);
+                            let low = self.s.m.bin(c, Bin::And, bits, low);
+                            self.s.m.select(c, int, low, h)
+                        } else {
+                            h
+                        }
                     };
->>>>>>> origin/exp/fork-head
                     x = Some(match x {
                         Some(hi) => {
                             let hi = self.s.m.bin(c, Bin::Shl, hi, k16);

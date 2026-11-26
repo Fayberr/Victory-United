@@ -122,19 +122,10 @@ pub use sampler::StaticSampler;
 pub use lower::{host_settings, set_host_max_wave, set_host_rdna};
 pub use rect::rect_list_gs;
 pub use shader::{
-<<<<<<< HEAD
     MEMORY_FAULTS, MEMORY_PAGES, MEMORY_READ_ONLY, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-    SLOT_STRIDES_COUNT, SLOT_TABLE_STRIDES, USER_DATA_SPACE, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS_X, USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
+    SLOT_STRIDES_COUNT, SLOT_TABLE_STRIDES, USER_DATA_SPACE, USER_DISPATCH_SPREAD, USER_DISPATCH_THREADS_X, USER_MEMORY_BASE,
+    USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS,
     raw_views, set_raw_views, set_view_heap_limit, view_heap_limit,
-||||||| 9c184b35b
-    MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-    SLOT_STRIDES_COUNT, USER_DATA_SPACE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
-    set_view_heap_limit, view_heap_limit,
-=======
-    MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-    SLOT_STRIDES_COUNT, USER_DATA_SPACE, USER_DISPATCH_SPREAD, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
-    set_view_heap_limit, view_heap_limit,
->>>>>>> origin/exp/fork-head
 };
 
 /// The loop limit without an override: 2^20.
@@ -526,7 +517,6 @@ pub fn emit(
         };
         // The program in two other forms: without its early-outs, and
         // without any branch that only skips code no lane is left for.
-<<<<<<< HEAD
         let form = |label: &str, p: Option<ir::Program>| {
             let Some(p) = p else {
                 if why {
@@ -562,51 +552,6 @@ pub fn emit(
                 }
             };
             Some((p, st, io, res))
-||||||| 9c184b35b
-        let form = |p: Option<ir::Program>| {
-            p.and_then(|p| {
-                let st = structure::structure(&p).ok()?;
-                let io = io::raise(&p, native).ok()?;
-                let res = resource::track(&p, &native.layout, native.stage, Some(&st)).ok()?;
-                Some((p, st, io, res))
-            })
-=======
-        // `VICTORY_WAVE_WHY`: why a form is missing (no such branch, or the
-        // stage that refused the changed program, with its reason).
-        let form_why = std::env::var_os("VICTORY_WAVE_WHY").is_some();
-        let form = |label: &str, p: Option<ir::Program>| {
-            let say = |what: &dyn std::fmt::Display| {
-                if form_why {
-                    eprintln!("WAVE64-FORM {label}: {what}");
-                }
-            };
-            let Some(p) = p else {
-                say(&"not made (no such branch in the program, or its blocks could not be made reducible)");
-                return None;
-            };
-            let st = match structure::structure(&p) {
-                Ok(st) => st,
-                Err(e) => {
-                    say(&format_args!("structure: {e}"));
-                    return None;
-                }
-            };
-            let io = match io::raise(&p, native) {
-                Ok(io) => io,
-                Err(e) => {
-                    say(&format_args!("io: {e}"));
-                    return None;
-                }
-            };
-            let res = match resource::track(&p, &native.layout, native.stage, Some(&st)) {
-                Ok(res) => res,
-                Err(e) => {
-                    say(&format_args!("resources: {e}"));
-                    return None;
-                }
-            };
-            Some((p, st, io, res))
->>>>>>> origin/exp/fork-head
         };
         let forms = [
             ("without early-outs", form("without early-outs", ir::without_early_outs(p))),
@@ -626,7 +571,6 @@ pub fn emit(
         // lost the card in a submission of two programs that had just moved to it
         // (`ptfx_CS_lightAtlas_Sprite` and `_Trail`). The 32-lane programs' form below, which
         // has no barrier, stays on.
-<<<<<<< HEAD
         let wide_option = std::env::var_os("VICTORY_WAVE_WIDE");
         // Both archived kernels use one logical wave per group and have
         // validated wave32 PSOs on RTX. Explicit policy wins.
@@ -645,15 +589,7 @@ pub fn emit(
             && c.part(FourCC::ACCC).is_some()
             && matches!(&original, Err(ShaderError::Unsupported { what, .. })
                 if *what == lower::DIVERGENT_MASK_EXCHANGE);
-||||||| 9c184b35b
-        let wide_on = std::env::var_os("VICTORY_WAVE_WIDE").is_some_and(|v| v == "1");
-=======
-        let wide_on = std::env::var_os("VICTORY_WAVE_WIDE").is_some_and(|v| v == "1");
-        // `VICTORY_WAVE_WIDE=last`: the same form, but only for programs that every other
-        // form below leaves at 64 lanes (on a 32-lane host those are refused outright), so
-        // the programs the approximate forms already take keep their barrier-free form.
         let wide_last = std::env::var_os("VICTORY_WAVE_WIDE").is_some_and(|v| v == "last");
->>>>>>> origin/exp/fork-head
         // exact first: each host wave on its own where that is exact (the idiom, every
         // form; no barriers), then the other exact forms; then approximate
         for exact in [true, false] {
@@ -735,7 +671,6 @@ pub fn emit(
                 }
             }
         }
-<<<<<<< HEAD
         // Last of all (`VICTORY_WAVE_LDS_LOOSE=0` turns it off): LDS read and written inside
         // one lane-branch region, ordered between the two host waves only where the region
         // is entered and left (`loose_lds::with`, approximate). A 32-lane host refuses
@@ -765,8 +700,6 @@ pub fn emit(
                 }
             }
         }
-||||||| 9c184b35b
-=======
         if wide_last {
             let deep_on = std::env::var_os("VICTORY_WAVE_DEEP_SKIPS").is_none_or(|v| v != "0");
             let deep = if deep_on { form("without skips, scalars followed", ir::without_skips(p, true)) } else { None };
@@ -777,14 +710,13 @@ pub fn emit(
                 Some(p),
             ];
             if let Some(base) = bases.into_iter().flatten().next() {
-                let again = widen(c, native, base, why);
+                let again = widen(c, native, base, why, false);
                 report("wave-wide branches (last)", &again);
                 if done(&again) {
                     return again.map(|(shader, _)| shader);
                 }
             }
         }
->>>>>>> origin/exp/fork-head
     }
     // SCC of a mask operation joined with a scalar test behind a per-lane skip (the 32-lane
     // trace programs): right once the wave takes that skip together ([`widen`]; the

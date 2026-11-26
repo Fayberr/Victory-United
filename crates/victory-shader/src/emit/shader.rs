@@ -85,7 +85,6 @@ pub const USER_VIEW_ADDRESS: u32 = 0x101;
 /// 4 and c). The shader adds the dword to every byte offset through that
 /// view. Asked for every root UAV.
 pub const USER_VIEW_BIAS: u32 = 0x103;
-<<<<<<< HEAD
 /// `RootType::Other` code of a user-data dword the host computes: the low
 /// 32 bits of the title address in the root view of root parameter `slot`;
 /// [`USER_ROOT_ADDRESS`] + 1: its bits from 32 up. Programs with a spilled
@@ -100,8 +99,6 @@ pub const USER_ROOT_ADDRESS: u32 = 0x104;
 /// the group's width. Asked for by the structure builder's programs
 /// ([`crate::spill::is_spilled`]).
 pub const USER_DISPATCH_THREADS_X: u32 = 0x106;
-||||||| 9c184b35b
-=======
 /// `RootType::Other` code of a user-data dword the host computes, for a
 /// compute program that reads its group id x: dword 0 the groups per row of
 /// a dispatch spread across z (0: not spread), dword 1 the x group count
@@ -109,9 +106,9 @@ pub const USER_DISPATCH_THREADS_X: u32 = 0x106;
 /// most Direct3D 12 runs) runs as `(row, y, rows)`; the program takes group
 /// `(x + z * row, y, 0)` and leaves at once past the asked count. (After
 /// upstream VIctory pull request #2312, Xvania7; run 319 measured indirect
-/// compute records asking 115,200 groups, clamped to 65,535 before.)
-pub const USER_DISPATCH_SPREAD: u32 = 0x104;
->>>>>>> origin/exp/fork-head
+/// compute records asking 115,200 groups, clamped to 65,535 before.) 0x104
+/// is [`USER_ROOT_ADDRESS`] here and 0x105 its high half.
+pub const USER_DISPATCH_SPREAD: u32 = 0x108;
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {
