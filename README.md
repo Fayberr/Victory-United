@@ -24,7 +24,7 @@ cabelo e luz bem melhores. Por cima dela vieram os ajustes para NVIDIA de 8 GB.
 | Imagem, perfil Series X | rostos e pele com textura, luz coerente nas cutscenes |
 | fps, perfil Series X, release | ~5,6 (a placa sozinha leva ~105 ms por quadro) |
 | Memória da placa, Series X | no limite; na prisão passa do orçamento e a textura borra |
-| Perfil Series S, release, cutscene de abertura | imagem certa, placa em 5,3 de 6,9 GB, ~10–11 fps (10% piores: ~9) |
+| Perfil Series S, release, cutscene de abertura | imagem certa, placa em 5,3 de 6,9 GB, ~16 fps com `CARD_STEPS=2` (vídeo de abertura: 30 fps) |
 | Perfil Series S, release, prisão (jogável, ~430 s depois do início) | ~12 fps, paredes e pele suaves sem `VICTORY_AMBIENT` |
 
 **Ainda não está jogável.** O alvo é ter 15 fps ou mais, com imagem nítida, nas cutscenes e na prisão. Use o perfil Series S.
@@ -69,7 +69,7 @@ target\release\victory.exe shaders <os arquivos de shaders do jogo>
 target\release\victory.exe run <o executável do jogo> --console series-s --execute
 ```
 
-Configuração usada nas medições acima: `VICTORY_RT_MISS=1`, `VICTORY_RELAY=2`,
+Configuração usada nas medições acima: `VICTORY_RT_MISS=1`, `VICTORY_RELAY=2`, `VICTORY_CARD_STEPS=2`,
 `VICTORY_THIN=0`, `VICTORY_DISPLAY_MODE=1920x1080`, `VICTORY_PIPELINE_BOOK=1`,
 `VICTORY_MEMORY_CARD_MB=1024`, `VICTORY_UPSCALER=6` (Series S). Não ligue
 `VICTORY_THIN=1` numa NVIDIA (o fps cai a menos da metade). Não ligue
