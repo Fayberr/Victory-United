@@ -38,6 +38,7 @@ pub(crate) struct Pending {
     /// Taken by a worker from [`Queue::slow`].
     was_slow: AtomicBool,
     made: OnceLock<Option<HostPipeline>>,
+    began: OnceLock<Instant>,
     /// What identifies it across runs (shader containers and state), and
     /// whether a draw or dispatch has requested it yet.
     key: String,
@@ -160,6 +161,7 @@ impl Pending {
             queue_state: AtomicU8::new(NOT_QUEUED),
             was_slow: AtomicBool::new(false),
             made: OnceLock::new(),
+            began: OnceLock::new(),
             key: key.finalize().to_hex()[..32].to_owned(),
             used: AtomicBool::new(false),
             first_wait: AtomicU64::new(0),
@@ -172,6 +174,7 @@ impl Pending {
 
     fn make(&self) {
         self.make_with(|| {
+            let _ = self.began.set(Instant::now());
             let _building = crate::timeline::span("pipeline: build a host pipeline");
             let began = Instant::now();
             let made = HostPipeline::new(&self.shaders, self.graphics.as_deref());
@@ -449,6 +452,13 @@ fn shared_budget() -> bool {
 /// Waits for `p` while frame `frame` has budget left.
 fn wait(p: &Pending, frame: u64) {
     let screen = p.screen && screens_first();
+    static SKIP_LONG_WAIT: OnceLock<bool> = OnceLock::new();
+    if !screen
+        && *SKIP_LONG_WAIT.get_or_init(|| crate::switch::on("VICTORY_PIPELINE_SKIP_LONG_WAIT"))
+        && p.began.get().is_some_and(|t| t.elapsed() > Duration::from_secs(1))
+    {
+        return;
+    }
     let budget = if screen { screen_budget() } else { wait_budget() };
     if budget.is_zero() {
         return;
