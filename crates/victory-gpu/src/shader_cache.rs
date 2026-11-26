@@ -1,31 +1,14 @@
-<<<<<<< HEAD
-//! Translated shaders kept on disk (decision 0003): under the configured
-//! cache folder, keyed by the container's content and by the translator
-//! (the BLAKE3 of its sources) and its settings, so a changed translator
-//! never serves an old translation. Entries go through
-//! `victory-pipeline`'s content-addressed cache, which writes them
-//! atomically; an entry that does not read back is translated again. Runtime
-//! pipelines can use the translation even when the cache cannot store it.
-||||||| c7daeea5
-//! Translated shaders kept on disk (decision 0003): under the configured
-//! cache folder, keyed by the container's content and by the translator
-//! that translated it (its source fingerprint and settings, see `build`), so
-//! a changed translator never serves an old translation. Entries go through
-//! `victory-pipeline`'s content-addressed cache, which writes them
-//! atomically; an entry that does not read back is translated again. Runtime
-//! pipelines can use the translation even when the cache cannot store it.
-=======
 //! Translated shaders kept on disk (decision 0003): offline warm-up and title
 //! execution share the same shader cache, under the configured cache folder.
-//! A key includes the console container, translator sources and configuration
-//! (its source fingerprint and settings, see `build`), and the host wave width
-//! and descriptor-heap limit used by the emitter, so a changed translator or
-//! host never serves an old translation. Entries go through
-//! `victory-pipeline`'s content-addressed cache, which writes them atomically;
-//! an entry that does not read back is translated again. Translated DXIL and
-//! deterministic unsupported results are persisted. Runtime pipelines can use
-//! the translation even when the cache cannot store it.
->>>>>>> integ/vertex
+//! A key includes the console container, translator sources (the BLAKE3 of
+//! them) and configuration (its source fingerprint and settings, see `build`),
+//! and the host wave width and descriptor-heap limit used by the emitter, so a
+//! changed translator or host never serves an old translation. Entries go
+//! through `victory-pipeline`'s content-addressed cache, which writes them
+//! atomically; an entry that does not read back is translated again.
+//! Translated DXIL and deterministic unsupported results are persisted.
+//! Runtime pipelines can use the translation even when the cache cannot store
+//! it.
 //!
 //! The entry is our own encoding of [`HostShader`]: a field added to it
 //! must be added to `encode` and `decode` too (entries of older builds
