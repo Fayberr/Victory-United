@@ -42,30 +42,18 @@ pub(crate) struct Pending {
     shaders: Vec<Arc<Shader>>,
     pub(crate) graphics: Option<Box<GraphicsState>>,
     queue_state: AtomicU8,
-<<<<<<< HEAD
     /// Taken by a worker from [`Queue::slow`].
     was_slow: AtomicBool,
-||||||| c7daeea5
-=======
     /// Draws and dispatches that asked for it and found it not made: the
     /// workers make the most wanted one first.
     asked: AtomicU64,
->>>>>>> integ/vertex
     made: OnceLock<Option<HostPipeline>>,
     /// What identifies it across runs (shader containers and state), and
     /// whether a draw or dispatch has requested it yet.
     pub(super) key: String,
     used: AtomicBool,
-<<<<<<< HEAD
     /// A pass over the screen ([`GraphicsState::screen_pass`]).
     screen: bool,
-    /// Why it is not made, if it is not ([`left_out`]).
-    left_out: Option<&'static str>,
-||||||| c7daeea5
-    /// Why it is not made, if it is not ([`left_out`]).
-    left_out: Option<&'static str>,
-=======
->>>>>>> integ/vertex
     /// When a worker began it ([`slow`]).
     begun: OnceLock<Instant>,
     /// Why it is not made, if it is not ([`left_out`]).
@@ -135,12 +123,8 @@ impl Pending {
             graphics,
             left_out,
             queue_state: AtomicU8::new(NOT_QUEUED),
-<<<<<<< HEAD
             was_slow: AtomicBool::new(false),
-||||||| c7daeea5
-=======
             asked: AtomicU64::new(0),
->>>>>>> integ/vertex
             made: OnceLock::new(),
             key,
             used: AtomicBool::new(false),
@@ -165,17 +149,6 @@ impl Pending {
 
     fn make(&self) {
         let _ = self.begun.set(Instant::now());
-<<<<<<< HEAD
-        self.made.get_or_init(|| {
-            let began = Instant::now();
-            let made = HostPipeline::new(&self.shaders, self.graphics.as_deref());
-            super::library::note_time(&self.key, began.elapsed().as_millis() as u64);
-            made
-        });
-||||||| c7daeea5
-        self.made
-            .get_or_init(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
-=======
         self.make_with(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
     }
 
@@ -184,16 +157,18 @@ impl Pending {
     /// later frame waited for it (and, on a title's thread, end the run).
     fn make_with(&self, new: impl FnOnce() -> Option<HostPipeline>) {
         self.made.get_or_init(|| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(new)).unwrap_or_else(|_| {
+            let began = Instant::now();
+            let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(new)).unwrap_or_else(|_| {
                 tracing::error!(
                     key = %self.key,
                     shaders = ?self.shaders,
                     "making a host pipeline panicked; its draws are dropped"
                 );
                 None
-            })
+            });
+            super::library::note_time(&self.key, began.elapsed().as_millis() as u64);
+            made
         });
->>>>>>> integ/vertex
         let (lock, done) = &DONE;
         let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
         done.notify_all();
@@ -705,15 +680,29 @@ impl Queue {
         Some(prev == NOT_QUEUED)
     }
 
-<<<<<<< HEAD
+    /// The passes over the screen first, then the most asked for of the
+    /// requested ones (the first of equals), then the early ones in order,
+    /// then one long one if there is room for it. In the order of the first
+    /// request, one that thousands of draws a frame want waited behind
+    /// hundreds wanted once.
     fn pop(&mut self, screens_only: bool, slow_limit: usize) -> Option<Arc<Pending>> {
         // An early entry can have been promoted and claimed already.
         let unclaimed = |list: &mut VecDeque<Arc<Pending>>| {
             std::iter::from_fn(|| list.pop_front()).find(|p| p.queue_state.load(Ordering::Relaxed) == EARLY)
         };
+        let most_asked = |requested: &mut VecDeque<Arc<Pending>>| {
+            let mut most: Option<(usize, u64)> = None;
+            for (at, p) in requested.iter().enumerate() {
+                let asked = p.asked.load(Ordering::Relaxed);
+                if most.is_none_or(|(_, m)| asked > m) {
+                    most = Some((at, asked));
+                }
+            }
+            most.and_then(|(at, _)| requested.remove(at))
+        };
         let mut p = self.screen.pop_front();
         if p.is_none() && !screens_only {
-            p = self.requested.pop_front().or_else(|| unclaimed(&mut self.early));
+            p = most_asked(&mut self.requested).or_else(|| unclaimed(&mut self.early));
             if p.is_none() && self.slow_now < slow_limit {
                 p = unclaimed(&mut self.slow);
                 if let Some(p) = &p {
@@ -723,31 +712,6 @@ impl Queue {
             }
         }
         let p = p?;
-||||||| c7daeea5
-    fn pop(&mut self) -> Option<Arc<Pending>> {
-        let p = self.requested.pop_front().or_else(|| {
-            // An early entry can have been promoted and claimed already.
-            std::iter::from_fn(|| self.early.pop_front())
-                .find(|p| p.queue_state.load(Ordering::Relaxed) == EARLY)
-        })?;
-=======
-    /// The most asked for of the requested ones (the first of equals), then
-    /// the early ones in order. In the order of the first request, one that
-    /// thousands of draws a frame want waited behind hundreds wanted once.
-    fn pop(&mut self) -> Option<Arc<Pending>> {
-        let mut most: Option<(usize, u64)> = None;
-        for (at, p) in self.requested.iter().enumerate() {
-            let asked = p.asked.load(Ordering::Relaxed);
-            if most.is_none_or(|(_, m)| asked > m) {
-                most = Some((at, asked));
-            }
-        }
-        let p = most.and_then(|(at, _)| self.requested.remove(at)).or_else(|| {
-            // An early entry can have been promoted and claimed already.
-            std::iter::from_fn(|| self.early.pop_front())
-                .find(|p| p.queue_state.load(Ordering::Relaxed) == EARLY)
-        })?;
->>>>>>> integ/vertex
         p.queue_state.store(MAKING, Ordering::Relaxed);
         Some(p)
     }
