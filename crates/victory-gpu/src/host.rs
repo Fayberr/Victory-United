@@ -5273,7 +5273,6 @@ impl Host {
         // Behind what the title's queues were given before it.
         crate::queue::before_sync();
         let _ = self.submit(runs, &[], false);
-<<<<<<< HEAD
     }
 
     /// Runs a closed internal upload-only host list synchronously without
@@ -5282,10 +5281,6 @@ impl Host {
     /// GPU work and waits for the upload list's fence before returning.
     pub(crate) fn execute_sync_internal(&self, list: &HostList) {
         let _ = self.submit(&[list], &[], false);
-||||||| merged common ancestors
->>>>>>>>> Temporary merge branch 2
-=======
->>>>>>> origin/exp/vibr-head
     }
 
     /// A queue's submission with [`late`]: the host lists `lists`, taken
@@ -9431,7 +9426,6 @@ impl Host {
     /// shown; else, in diagnostics builds, whether the frame was black.
     #[allow(dead_code)]
     pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-<<<<<<< HEAD
         self.present_planes(texture, state, None, frame)
     }
 
@@ -9444,16 +9438,6 @@ impl Host {
         overlay: Option<(&ID3D12Resource, u32)>,
         frame: u64,
     ) -> Option<bool> {
-||||||| merged common ancestors
-        let showing = std::time::Instant::now();
-        let shown = self.present_now(texture, state, frame);
-        crate::framelog::add(crate::framelog::T::PresentShowUs, showing.elapsed().as_micros() as u64);
-        shown
-    }
-
-    fn present_now(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-=======
->>>>>>> origin/exp/vibr-head
         // SAFETY: a live resource.
         let desc = unsafe { texture.GetDesc() };
         let planes = overlay.and_then(|(over, over_state)| {
@@ -9477,7 +9461,6 @@ impl Host {
         };
         let (width, height) = (desc.Width as u32, desc.Height);
         let mut presenter = self.presenter.lock().unwrap_or_else(|e| e.into_inner());
-<<<<<<< HEAD
         if presenter.is_none() {
             *presenter = match self.presenter(width, height, format) {
                 Ok(p) => Some(p),
@@ -9540,50 +9523,6 @@ impl Host {
         }
         let state = D3D12_RESOURCE_STATES(state_u32 as i32);
         // SAFETY: our swap chain, list and live source texture(s).
-||||||| merged common ancestors
-        if presenter.is_none() {
-            *presenter = match self.presenter(width, height, format) {
-                Ok(p) => Some(p),
-                Err(e) => {
-                    tracing::warn!(error = %e, "no swap chain");
-                    return None;
-                }
-            };
-        }
-        let p = presenter.as_mut()?;
-        if (p.width, p.height, p.format) != (width, height, format) {
-            // Presents sent ahead hold back buffers until they have run.
-            settle_now(WHY_SYNC);
-            // SAFETY: no back buffer is held; every submission was waited for.
-            let resized = unsafe {
-                p.swap_chain
-                    .ResizeBuffers(BUFFERS, width, height, format, DXGI_SWAP_CHAIN_FLAG(0))
-            };
-            match resized {
-                Ok(()) => {
-                    (p.width, p.height, p.format) = (width, height, format);
-                    tracing::info!(
-                        width,
-                        height,
-                        format = format.0,
-                        frame,
-                        "the swap chain's buffers were made again for another size or format"
-                    );
-                    self.log_video_memory("right after the swap chain's buffers were made again");
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, width, height, "swap chain not resized");
-                    return None;
-                }
-            }
-        }
-        let state = D3D12_RESOURCE_STATES(state as i32);
-        // SAFETY: our swap chain, list and a live source texture.
-=======
-        let p = self.ready_presenter(&mut presenter, width, height, format, frame)?;
-        let state = D3D12_RESOURCE_STATES(state as i32);
-        // SAFETY: our swap chain, list and a live source texture.
->>>>>>> origin/exp/vibr-head
         unsafe {
             let index = p.swap_chain.GetCurrentBackBufferIndex();
             let Ok(back) = p.swap_chain.GetBuffer::<ID3D12Resource>(index) else {
@@ -9681,23 +9620,10 @@ impl Host {
                     &back,
                     D3D12_RESOURCE_STATE_PRESENT,
                     D3D12_RESOURCE_STATE_COPY_DEST,
-<<<<<<< HEAD
                 ));
                 list.ResourceBarrier(&pre);
                 list.CopyResource(&back, texture);
             }
-||||||| merged common ancestors
-                ),
-            ]);
-            list.CopyResource(&back, texture);
-            // The frame rate, into the corner of what is shown (not of the
-            // title's own frame, which the lines below read back).
-            crate::fpsbox::draw(self, list, &back, (width, height, format));
-=======
-                ),
-            ]);
-            list.CopyResource(&back, texture);
->>>>>>> origin/exp/vibr-head
             #[cfg(feature = "diagnostics")]
             let capture = crate::capture::wanted(frame)
                 .then(|| {
@@ -9851,7 +9777,7 @@ impl Host {
     ///
     /// shortcut: a composed frame is not sent ahead, is not read for the
     /// look at black frames, and has no panel drawn over it.
-    pub(crate) fn present_planes(&self, planes: &[Shown], frame: u64) -> Option<bool> {
+    pub(crate) fn present_composed(&self, planes: &[Shown], frame: u64) -> Option<bool> {
         let &(first, first_state, _) = planes.first()?;
         if planes.len() == 1 {
             return self.present(first, first_state, frame);
