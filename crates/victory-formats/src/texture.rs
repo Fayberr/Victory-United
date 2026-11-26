@@ -660,6 +660,7 @@ impl Layout {
             mips,
             pipes,
             pipe_bank_xor: if d.swizzle.xor() { pipe_bank_xor } else { 0 },
+            pattern,
             flips,
             xor,
         }
