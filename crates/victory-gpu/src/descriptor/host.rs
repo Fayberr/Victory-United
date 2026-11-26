@@ -2327,7 +2327,15 @@ impl HostHeap {
     /// whose pass runs first takes them (a title has one view heap).
     pub(crate) fn texture_slots_remapped(&self, frame: u64) -> usize {
         self.texture_slots_page_written(frame);
-        let mut ranges = std::mem::take(&mut *REMAPPED.lock().unwrap_or_else(|e| e.into_inner()));
+        self.slots_remapped_under(&take_texture_changes(&REMAPPED), frame)
+    }
+
+    /// The slots of placed textures that lie in `ranges` made due from the
+    /// next frame (as [`HostHeap::texture_slots_remapped`]); returns how
+    /// many.
+    fn slots_remapped_under(&self, ranges: &[(u64, u64)], frame: u64) -> usize {
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut ranges = ranges.to_vec();
         if ranges.is_empty() {
             return 0;
         }
