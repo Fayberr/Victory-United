@@ -633,7 +633,6 @@ fn heap_spread() -> bool {
 #[derive(Default)]
 struct HeapRanges<T>(Vec<Option<(T, u64, u64)>>);
 
-<<<<<<< HEAD
 /// Whether the heap buffer pass runs once a frame for each view heap a list
 /// binds, not once for all of them, and a list holds each heap's table of
 /// strides by its own key (`VICTORY_SWEEP_PER_HEAP=1`, from codec-d/cool_fox
@@ -659,23 +658,6 @@ impl Default for BufferSweep {
     }
 }
 
-||||||| 0a4356653
-=======
-/// Descriptor-derived references belong to the heap that produced them.
-pub(crate) struct BufferSweep {
-    passes: u64,
-    ranges: HeapRanges<std::sync::Arc<crate::shadow::Shadow>>,
-    // Last refresh frame and covered interval for throttled, unwatched copies.
-    unwatched: std::collections::HashMap<u64, (u64, u64, u64)>,
-}
-
-impl Default for BufferSweep {
-    fn default() -> Self {
-        Self { passes: 0, ranges: HeapRanges(Vec::new()), unwatched: Default::default() }
-    }
-}
-
->>>>>>> vicetay/main
 impl<T> HeapRanges<T> {
     fn set(&mut self, slot: u32, range: Option<(T, u64, u64)>) {
         let slot = slot as usize;
@@ -1597,7 +1579,6 @@ impl State {
             self.heaps[0] = heap;
         }
         // Heaps first: a root signature with directly indexed heaps must be
-<<<<<<< HEAD
         // set after them, with both a view heap and a sampler heap bound.
         // (`VICTORY_FALLBACK_HEAPS=1`, codec-d/cool_fox 641835a4: a host
         // heap of one slot for one the title did not set; else only those it
@@ -1638,57 +1619,6 @@ impl State {
                 // SAFETY: an open list and shader-visible heaps.
                 unsafe { l.SetDescriptorHeaps(&heaps) };
             }
-||||||| 0a4356653
-        // set after them.
-        if self.host_heaps != self.heaps {
-            let heaps: Vec<Option<ID3D12DescriptorHeap>> = self
-                .heaps
-                .iter()
-                .filter(|&&h| h != 0)
-                .filter_map(|&h| crate::descriptor::heap(h as This).host())
-                .map(|h| Some(h.heap.clone()))
-                .collect();
-            heaps.iter().flatten().for_each(|h| list.keep(h));
-            // SAFETY: an open list and shader-visible heaps.
-            unsafe { l.SetDescriptorHeaps(&heaps) };
-=======
-        // set after them, with both a view heap and a sampler heap bound.
-        if !self.host_heaps_set || self.host_heaps != self.heaps {
-            let mut view_heap: Option<ID3D12DescriptorHeap> = None;
-            let mut sampler_heap: Option<ID3D12DescriptorHeap> = None;
-            for &h in &self.heaps {
-                if h == 0 {
-                    continue;
-                }
-                let title_heap = crate::descriptor::heap(h as This);
-                if let Some(host_heap) = title_heap.host() {
-                    if title_heap.samplers() {
-                        sampler_heap = Some(host_heap.heap.clone());
-                    } else {
-                        view_heap = Some(host_heap.heap.clone());
-                    }
-                }
-            }
-            if view_heap.is_none() {
-                view_heap = crate::host::host().and_then(|h| h.fallback_view_heap().cloned());
-            }
-            if sampler_heap.is_none() {
-                sampler_heap = crate::host::host().and_then(|h| h.fallback_sampler_heap().cloned());
-            }
-            let mut heaps: Vec<Option<ID3D12DescriptorHeap>> = Vec::with_capacity(2);
-            if let Some(h) = view_heap {
-                list.keep(&h);
-                heaps.push(Some(h));
-            }
-            if let Some(h) = sampler_heap {
-                list.keep(&h);
-                heaps.push(Some(h));
-            }
-            if !heaps.is_empty() {
-                // SAFETY: an open list and shader-visible heaps.
-                unsafe { l.SetDescriptorHeaps(&heaps) };
-            }
->>>>>>> vicetay/main
             self.host_heaps = self.heaps;
             self.host_heaps_set = true;
             self.host_roots = [0; 2];
@@ -2156,7 +2086,6 @@ impl State {
             .find(|h| !h.samplers())?;
         let host = heap.host()?;
         let gpu = host.strides_gpu()?;
-<<<<<<< HEAD
         // One key per list, as textures have: no title resource is there.
         // (`VICTORY_SWEEP_PER_HEAP=1`, codec-d/cool_fox c64fc9b4: one per
         // heap's table of strides, whose GPU address is aligned; tagged so it
@@ -2164,15 +2093,6 @@ impl State {
         const ONCE: usize = usize::MAX - 0x5e;
         let per_heap = sweep_per_heap();
         if !list.first_use(if per_heap { gpu as usize | 1 } else { ONCE }) {
-||||||| 0a4356653
-        // One key per list, as textures have: no title resource is there.
-        const ONCE: usize = usize::MAX - 0x5e;
-        if !list.first_use(ONCE) {
-=======
-        // Stride buffers have aligned GPU addresses. Tag the list key so it
-        // is distinct from aligned guest resource pointers.
-        if !list.first_use(gpu as usize | 1) {
->>>>>>> vicetay/main
             return Some(gpu);
         }
         // The list may outlive the title's heap object, which owns the table.
@@ -2185,14 +2105,9 @@ impl State {
         // shortcut: what the title writes into such buffers between lists
         // of one frame is seen a frame late.
         let frame = crate::frame::current();
-<<<<<<< HEAD
+        static FRAME: AtomicU64 = AtomicU64::new(u64::MAX);
         let last = if per_heap { &host.buffer_frame } else { &FRAME };
         if last.swap(frame, Ordering::Relaxed) == frame {
-||||||| 0a4356653
-        if FRAME.swap(frame, Ordering::Relaxed) == frame {
-=======
-        if host.buffer_frame.swap(frame, Ordering::Relaxed) == frame {
->>>>>>> vicetay/main
             return Some(gpu);
         }
         let started = std::time::Instant::now();
@@ -2200,7 +2115,6 @@ impl State {
         if crate::host::aside::on() {
             let at = std::ptr::from_ref(heap) as usize;
             list.refreshes_coming(move || {
-<<<<<<< HEAD
                 crate::descriptor::with_heap(at, |heap| {
                     // The list retains the original stride buffer. A newly
                     // allocated heap at the same CPU address has another one.
@@ -2208,15 +2122,6 @@ impl State {
                         .filter(|h| !per_heap || h.strides_gpu() == Some(gpu))
                         .map(|h| heap_buffer_pass(heap, h, frame))
                 })
-||||||| 0a4356653
-                crate::descriptor::with_heap(at, |heap| heap.host().map(|host| heap_buffer_pass(heap, host, frame)))
-=======
-                crate::descriptor::with_heap(at, |heap| {
-                    // The list retains the original stride buffer. A newly
-                    // allocated heap at the same CPU address has another one.
-                    heap.host().filter(|h| h.strides_gpu() == Some(gpu)).map(|h| heap_buffer_pass(heap, h, frame))
-                })
->>>>>>> vicetay/main
                     .flatten()
                     .unwrap_or_default()
             });
@@ -2498,49 +2403,6 @@ impl State {
                 BAKED_MS.fetch_add(began.elapsed().as_millis() as u64, Ordering::Relaxed);
                 return;
             }
-<<<<<<< HEAD
-        }
-        let n = EARLY_TEXTURE_PASSES[usize::from(bake)].fetch_add(1, Ordering::Relaxed) + 1;
-        if bake && n.is_power_of_two() {
-            let [slots, due, ..] = HEAP_TEXTURES_QUEUE.each_ref().map(|c| c.load(Ordering::Relaxed));
-            tracing::info!(
-                frame,
-                bakes = n,
-                queued_at_the_last_pass = slots,
-                due_at_the_last_pass = due,
-                uploaded_so_far = HEAP_TEXTURES.load(Ordering::Relaxed),
-                "a draw of the title's decoration bake: textures picked by index are uploaded first (VICTORY_BAKE_TEXTURES_MS=0: not)"
-            );
-        }
-        let began = std::time::Instant::now();
-        PASS_BUDGET.set(Some((budget.0, budget.1, bake)));
-        crate::texture::BAKING.set(bake && bake_exact());
-        self.heap_textures(list, heap, host);
-        crate::texture::BAKING.set(false);
-        PASS_BUDGET.set(None);
-        if bake {
-||||||| 0a4356653
-        }
-        let n = EARLY_TEXTURE_PASSES[usize::from(bake)].fetch_add(1, Ordering::Relaxed) + 1;
-        if bake && n.is_power_of_two() {
-            let [slots, due, ..] = HEAP_TEXTURES_QUEUE.each_ref().map(|c| c.load(Ordering::Relaxed));
-            tracing::info!(
-                frame,
-                bakes = n,
-                queued_at_the_last_pass = slots,
-                due_at_the_last_pass = due,
-                uploaded_so_far = HEAP_TEXTURES.load(Ordering::Relaxed),
-                "a draw of the title's decoration bake: textures picked by index are uploaded first (VICTORY_BAKE_TEXTURES_MS=0: not)"
-            );
-        }
-        let began = std::time::Instant::now();
-        PASS_BUDGET.set(Some(budget));
-        crate::texture::BAKING.set(bake && bake_exact());
-        self.heap_textures(list, heap, host);
-        crate::texture::BAKING.set(false);
-        PASS_BUDGET.set(None);
-        if bake {
-=======
             // Fallback when no host GPU list can be created (e.g. headless tests).
             crate::texture::BAKING.set(exact);
             self.flush_for_bake(list, host, None);
@@ -2561,7 +2423,6 @@ impl State {
             let _ = self.heap_textures(list, heap, host, None);
             crate::texture::BAKING.set(false);
             PASS_BUDGET.set(None);
->>>>>>> vicetay/main
             BAKED_MS.fetch_add(began.elapsed().as_millis() as u64, Ordering::Relaxed);
             return;
         }
@@ -2685,24 +2546,11 @@ impl State {
         });
         let per_frame = match asked {
             Some(mb) => mb << 20,
-<<<<<<< HEAD
             None => {
                 let base = staging_budget_per_frame(memory.map(|[budget, ..]| budget));
                 // (`VICTORY_RESIDENCY=1` with 32 GiB of RAM or less: 128 MiB.)
                 if crate::residency::limited_host_ram() { base.min(128 << 20) } else { base }
             }
-||||||| 0a4356653
-            None => staging_budget_per_frame(memory.map(|[budget, ..]| budget)),
-=======
-            None => {
-                let base = staging_budget_per_frame(memory.map(|[budget, ..]| budget));
-                if crate::residency::limited_host_ram() {
-                    base.min(128 << 20)
-                } else {
-                    base
-                }
-            }
->>>>>>> vicetay/main
         };
         static FRAME: AtomicU64 = AtomicU64::new(u64::MAX);
         static SPENT: AtomicU64 = AtomicU64::new(0);
@@ -2821,11 +2669,9 @@ impl State {
             }
             None => (span, per_frame),
         };
-<<<<<<< HEAD
         // (`VICTORY_RESIDENCY=1`, codec-d/cool_fox: the frame's ceiling while
         // the system is short of memory, after the catch-up and early budgets;
         // not for a bake, which samples its textures at once.)
-        let required = PASS_BUDGET.get().is_some_and(|(_, _, bake)| bake);
         let bytes_at_most = if required || asked.is_some() {
             bytes_at_most
         } else {
@@ -2837,23 +2683,6 @@ impl State {
                 crate::texture::live_staging_bytes(),
             )
         };
-||||||| 0a4356653
-=======
-        // Apply the shared frame ceiling after early-pass and catch-up budgets.
-        // A bake samples its inputs immediately and cannot retry that draw.
-        let bytes_at_most = if required || asked.is_some() {
-            bytes_at_most
-        } else {
-            crate::residency::prefetch_limit(
-                bytes_at_most,
-                crate::residency::pressured(),
-                crate::residency::critical_commit(),
-                crate::residency::limited_host_ram(),
-                crate::texture::live_staging_bytes(),
-            )
-        };
-
->>>>>>> vicetay/main
         let began = std::time::Instant::now();
         if sync.is_none() {
             BAKE_SERVED.store(0, Ordering::Relaxed);
@@ -3004,23 +2833,12 @@ impl State {
                     );
                 }
             }
-<<<<<<< HEAD
             // (`VICTORY_RESIDENCY=1`: no new host texture or staging while
             // commit is short; after the unmapped slots above were let go.)
             if !crate::residency::admit_texture_pass(required) {
                 served = false;
                 break;
             }
-||||||| 0a4356653
-=======
-            // Gate new host texture creation / staging on commit reserve after
-            // `mapped == 0` reclamation (`texture_slot_gone`) has run, and
-            // before mirroring a slot to an unuploaded texture.
-            if !crate::residency::admit_texture_pass(required) {
-                served = false;
-                break;
-            }
->>>>>>> vicetay/main
             // A slot that shows the texture by an earlier view of it (one
             // from another level) goes on doing so until the upload of what
             // the new one shows has run.
@@ -3152,7 +2970,6 @@ impl State {
                 readable(list, sampled.kind, view);
                 crate::texture::PICKING.set(None);
             }
-<<<<<<< HEAD
             // A staging buffer refused or put off (`crate::residency`) leaves
             // the slot due: marking it served would lose its only retry.
             if ahead.is_none()
@@ -3165,22 +2982,6 @@ impl State {
                 use crate::texlate::{Kind, note};
                 note(if waited { Kind::Waited } else { Kind::Ready }, since);
                 note(Kind::Noticed, away);
-            }
-            if shows_other && let Some(handle) = heap.handle(index) {
-                host.texture_slot_flip(list, index, handle);
-||||||| 0a4356653
-            if shows_other && let Some(handle) = heap.handle(index) {
-                host.texture_slot_flip(list, index, handle);
-=======
-            // A failed or deferred staging allocation leaves this slot due.
-            // Publishing it or marking it served would lose the only retry for
-            // some materials.
-            if ahead.is_none()
-                && (crate::residency::take_staging_deferred() || crate::residency::upload_refused())
-            {
-                served = false;
-                break;
->>>>>>> vicetay/main
             }
             if let (Some(sync), Some(key), Some(handle)) = (sync.as_deref_mut(), upload_key, heap.handle(index)) {
                 if let Some(copy) = crate::resource::host_copy(resource) {
