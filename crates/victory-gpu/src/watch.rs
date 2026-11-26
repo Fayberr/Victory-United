@@ -3105,6 +3105,8 @@ fn protect_here(g: &Guards, from: usize, to: usize) {
             continue;
         }
         PROTECTED.clear(block);
+        #[cfg(feature = "diagnostics")]
+        let error = std::io::Error::last_os_error();
         if block >= uncommitted_until {
             uncommitted_until = uncommitted_end(block);
             #[cfg(feature = "diagnostics")]
@@ -3114,6 +3116,16 @@ fn protect_here(g: &Guards, from: usize, to: usize) {
             g.absent.insert(block);
             if known_holes() && placeholder(block) {
                 g.held.insert(block);
+            }
+        }
+        // Diagnostics: a committed block that will not be made read-only is
+        // reported written at every asking and never known to the guards
+        // (one in 1,024 said).
+        #[cfg(feature = "diagnostics")]
+        if block >= uncommitted_until {
+            static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed).is_multiple_of(1024) {
+                tracing::info!("a block of title memory could not be made read-only (one in 1024): {:#x}: {error}", block * BLOCK);
             }
         }
     }

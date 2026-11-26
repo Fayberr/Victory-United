@@ -83,6 +83,8 @@ fn build(words: &[u32], buffers: bool) -> HostShader {
         root_cbvs: lowered.root_cbvs,
         root_srvs: lowered.root_srvs,
         root_uavs: lowered.root_uavs,
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         root_indexed_views: Vec::new(),
         half_views: lowered.half_views,
     };
@@ -90,7 +92,7 @@ fn build(words: &[u32], buffers: bool) -> HostShader {
         v.validate(&mut shader.dxil.clone())
             .expect("DXIL validation failed");
     } else {
-        eprintln!("no dxil.dll; validation skipped");
+        crate::emit::test_skip::skip("no dxil.dll; validation skipped");
     }
     shader
 }
@@ -119,7 +121,7 @@ pub(super) fn run(shader: &HostShader, views: &[View]) -> Vec<(&'static str, Vec
         let host = match Host::new(warp) {
             Ok(host) => host,
             Err(e) => {
-                eprintln!("no SM 6.6 {label} device ({e}); skipped");
+                crate::emit::test_skip::skip(&format!("no SM 6.6 {label} device ({e}); skipped"));
                 continue;
             }
         };
@@ -386,6 +388,8 @@ fn immediate_sampler_chosen_by_control_flow() {
             root_cbvs: lowered.root_cbvs,
             root_srvs: lowered.root_srvs,
             root_uavs: lowered.root_uavs,
+            written_root_uavs: lowered.written_root_uavs,
+            writes_guest_memory: lowered.writes_guest_memory,
             root_indexed_views: Vec::new(),
             half_views: Vec::new(),
         };

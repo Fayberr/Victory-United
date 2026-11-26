@@ -40,6 +40,8 @@ pub mod device;
 mod draw;
 pub mod dxgi;
 pub mod fence;
+#[cfg(windows)]
+mod fpsbox;
 pub mod frame;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod book;
@@ -68,6 +70,8 @@ mod picked;
 mod pool;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod popwatch;
+#[cfg(windows)]
+mod ranges;
 #[cfg(windows)]
 mod primitive;
 pub mod query;

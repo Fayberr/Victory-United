@@ -105,6 +105,8 @@ fn lowered(native: &NativeProgram, host_wave: u32) -> Result<HostShader, ShaderE
         root_cbvs: result.root_cbvs,
         root_srvs: result.root_srvs,
         root_uavs: result.root_uavs,
+        written_root_uavs: result.written_root_uavs,
+        writes_guest_memory: result.writes_guest_memory,
         root_indexed_views: res.root_indexed_views,
         half_views: Vec::new(),
     };

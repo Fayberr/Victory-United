@@ -72,6 +72,15 @@ pub(crate) struct Shader {
     pub(crate) bakes: bool,
     #[cfg(windows)]
     translated: OnceLock<Option<Translated>>,
+    /// Its result gets the depth-shaded ambient light fallback ([`crate::ambient`]).
+    #[cfg(windows)]
+    pub(crate) resolves_light: bool,
+    /// Its last reflection output can be bounded by the ambient light.
+    #[cfg(windows)]
+    pub(crate) ends_reflections: bool,
+    /// Its output can provide the sky dome for ambient lighting.
+    #[cfg(windows)]
+    pub(crate) draws_sky: bool,
 }
 
 impl std::fmt::Debug for Shader {
@@ -128,6 +137,16 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
                 bakes: bakes(bytes),
                 #[cfg(windows)]
                 translated: OnceLock::new(),
+                #[cfg(windows)]
+                resolves_light: bytes
+                    .windows(crate::ambient::PROGRAM.len())
+                    .any(|w| w == crate::ambient::PROGRAM),
+                #[cfg(windows)]
+                ends_reflections: bytes
+                    .windows(crate::ambient::REFLECTED.len())
+                    .any(|w| w == crate::ambient::REFLECTED),
+                #[cfg(windows)]
+                draws_sky: bytes.windows(crate::ambient::SKY.len()).any(|w| w == crate::ambient::SKY),
             })
         })
         .clone()
@@ -138,7 +157,15 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
 pub(crate) struct Translated {
     pub(crate) host: victory_shader::emit::HostShader,
     /// A compute program's threads in a group.
+    // (The draw side's resolution of its dispatch hunk reads `threads` or
+    // `compute_threads`, whichever name it kept.)
+    #[allow(dead_code)]
     pub(crate) threads: Option<[u32; 3]>,
+    /// The same group size under the name the draw side reads it
+    /// (`Translated::compute_threads` in `draw.rs`); the draw side's own
+    /// resolution keeps one of the two names.
+    #[allow(dead_code)]
+    pub(crate) compute_threads: Option<[u32; 3]>,
     pub(crate) used: Vec<victory_shader::UsedResource>,
     pub(crate) tables: crate::draw::TablePlan,
     /// Whether the shader's code can store to buffer memory ([`stores`]);
@@ -149,6 +176,15 @@ pub(crate) struct Translated {
     /// Whether it stores through a view it picks from the heap by an index,
     /// once asked (`crate::picked`).
     pub(crate) picks: std::sync::atomic::AtomicU8,
+    /// Per [`Translated::used`] entry: a store or atomic names that buffer
+    /// descriptor. Empty when the code is not known.
+    // (`draw.rs` reads this when it keeps the per-descriptor write list; its
+    // other resolution reads [`Translated::tables`] instead.)
+    #[allow(dead_code)]
+    pub(crate) used_written: Vec<bool>,
+    /// A buffer store whose descriptor could not be matched to `used`.
+    #[allow(dead_code)]
+    pub(crate) write_unknown: bool,
 }
 
 #[cfg(windows)]
@@ -225,26 +261,35 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         victory_shader::native::StageIo::Cs(cs) if cs.threads.iter().all(|&n| n > 0) => Some(cs.threads),
         _ => None,
     });
+    // (`draw.rs` reads the group size under the other side's name.)
+    let compute_threads = threads;
     let stores_by_address = programs.is_empty() || programs.iter().any(stores_by_address);
-    let used = programs
-        .into_iter()
-        .find(|p| {
-            matches!(
-                p.stage,
-                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-            )
-        })
-        .map(|p| p.used)
-        .unwrap_or_default();
+    let chosen = programs.iter().find(|p| {
+        matches!(
+            p.stage,
+            HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
+        )
+    });
+    let used = chosen.map(|p| p.used.clone()).unwrap_or_default();
+    let (used_written, mut write_unknown) = chosen
+        .map(|p| written_used(p, &used))
+        .unwrap_or((Vec::new(), !programs.is_empty()));
+    if programs.len() > 1 {
+        // Another stage's table store could name the same descriptor.
+        write_unknown = true;
+    }
     let tables = crate::draw::TablePlan::new(&used, &host.root_indexed_views);
     Ok(Translated {
         host,
         threads,
+        compute_threads,
         used,
         tables,
         stores,
         stores_by_address,
         picks: Default::default(),
+        used_written,
+        write_unknown,
     })
 }
 
@@ -446,9 +491,24 @@ pub(crate) fn builder_runs() -> bool {
     if b.whole {
         return true;
     }
-    let missing: Vec<String> = b.pipelines.iter().filter(|p| !make::now(p)).map(|p| make::hashes(p)).collect();
-    if !missing.is_empty() {
+    let missing_pipelines: Vec<Arc<make::Pending>> = b
+        .pipelines
+        .iter()
+        .filter(|p| !make::now(p))
+        .cloned()
+        .collect();
+    if !missing_pipelines.is_empty() {
         b.off = b.pipelines.len();
+        for p in &missing_pipelines {
+            if let Some(shader) = p.shaders.first() {
+                tracing::warn!(
+                    hash = %shader.hash,
+                    stage = %shader.stage,
+                    "the ray-tracing structure builder is missing this program's host pipeline"
+                );
+            }
+        }
+        let missing: Vec<String> = missing_pipelines.iter().map(|p| make::hashes(p)).collect();
         tracing::warn!(
             missing = missing.len(),
             of = b.pipelines.len(),
@@ -510,6 +570,57 @@ fn stores_by_address(program: &victory_shader::NativeProgram) -> bool {
             && i.name()
                 .is_none_or(|n| (n.contains("store") || n.contains("atomic")) && !n.contains("scratch"))
     })
+}
+
+/// Which [`Translated::used`] buffer descriptors a store or atomic names.
+/// The descriptor is the instruction's `rsrc`/SMEM base SGPR; a store whose
+/// descriptor is computed in VGPRs, or names a descriptor outside `used`,
+/// leaves [`Translated::write_unknown`] set.
+#[cfg(windows)]
+fn written_used(
+    program: &victory_shader::NativeProgram,
+    used: &[victory_shader::UsedResource],
+) -> (Vec<bool>, bool) {
+    use victory_shader::gfx10::{Encoding, Fields, Operand, decode};
+    let Ok(code) = decode(&program.code) else {
+        return (vec![true; used.len()], true);
+    };
+    let mut written = vec![false; used.len()];
+    let mut unknown = false;
+    for inst in code.iter() {
+        let is_store = match inst.encoding {
+            Encoding::Mubuf | Encoding::Mtbuf | Encoding::Smem => {
+                inst.name().is_none_or(|n| n.contains("store") || n.contains("atomic"))
+            }
+            _ => false,
+        };
+        if !is_store {
+            continue;
+        }
+        let fields = inst.fields(program.wave64);
+        let descriptor = match &fields {
+            Fields::Buffer { rsrc, .. } => Some(rsrc),
+            Fields::Smem { base, .. } => Some(base),
+            _ => None,
+        };
+        let Some(Operand::Scalar { code, .. }) = descriptor else {
+            unknown = true;
+            continue;
+        };
+        let mut hit = false;
+        for (i, resource) in used.iter().enumerate() {
+            if resource.kind == victory_shader::ResourceType::Uav
+                && resource.lower_bound == u32::from(*code)
+            {
+                written[i] = true;
+                hit = true;
+            }
+        }
+        if !hit {
+            unknown = true;
+        }
+    }
+    (written, unknown)
 }
 
 #[repr(C)]
@@ -933,6 +1044,51 @@ mod tests {
 
     use super::*;
     use crate::object::{S_OK, slot};
+
+    #[cfg(windows)]
+    #[test]
+    fn a_store_marks_only_the_table_descriptor_it_names() {
+        let program = victory_shader::NativeProgram {
+            stage: victory_shader::HwStage::Cs,
+            wave64: false,
+            vgprs: 32,
+            layout: Vec::new(),
+            used: vec![victory_shader::UsedResource {
+                kind: victory_shader::ResourceType::Uav,
+                root: victory_shader::RootType::Table,
+                table_offset_dwords: 0,
+                lower_bound: 0,
+                stride: 1,
+                dwords: 4,
+                user_data: 0,
+                slot: 0,
+            }],
+            io: victory_shader::native::StageIo::Cs(victory_shader::native::ComputeIo {
+                rsrc2: 0,
+                threads: [64, 1, 1],
+            }),
+            code: [
+                0xE078_1000u32, // buffer_store_dwordx4 v[4:7], v1, s[0:3], 0 offen
+                0x8000_0401,
+                0xBF81_0000, // s_endpgm
+            ]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect(),
+        };
+        let (written, unknown) = super::written_used(&program, &program.used);
+        assert_eq!(written, [true]);
+        assert!(!unknown);
+
+        let mut load = program;
+        load.code = [0xBF81_0000u32] // s_endpgm
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        let (written, unknown) = super::written_used(&load, &load.used);
+        assert_eq!(written, [false]);
+        assert!(!unknown);
+    }
 
     fn shaders(p: This) -> Vec<(&'static str, Vec<u8>)> {
         pipeline(p)

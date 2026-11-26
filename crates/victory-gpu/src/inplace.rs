@@ -1420,9 +1420,12 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) fn warp() -> Option<ID3D12Device> {
+    pub(crate) fn warp() -> Option<(std::sync::MutexGuard<'static, ()>, ID3D12Device)> {
         use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_12_0;
         use windows::Win32::Graphics::Dxgi::*;
+        let serial = crate::host::WARP_SERIAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // SAFETY: plain DXGI queries and device creation on the software
         // adapter; a card is never opened.
         unsafe {
@@ -1434,7 +1437,7 @@ pub(crate) mod tests {
             }
             let mut device: Option<ID3D12Device> = None;
             D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device).ok()?;
-            device
+            Some((serial, device?))
         }
     }
 
@@ -1444,7 +1447,9 @@ pub(crate) mod tests {
     #[test]
     fn warp_probe_opens_title_like_memory_and_the_gpu_sees_its_bytes() {
         let _turn = crate::indirect::tests::warp_turn();
-        let Some(device) = warp() else { return };
+        let Some((_serial, device)) = warp() else {
+            return;
+        };
         if device.cast::<ID3D12Device13>().is_err() {
             eprintln!("no ID3D12Device13 here: parts of an allocation cannot be opened");
             return;
@@ -1468,7 +1473,9 @@ pub(crate) mod tests {
     #[test]
     fn warp_a_title_buffer_in_place_shows_its_bytes_at_its_offset() {
         let _turn = crate::indirect::tests::warp_turn();
-        let Some(device) = warp() else { return };
+        let Some((_serial, device)) = warp() else {
+            return;
+        };
         if device.cast::<ID3D12Device13>().is_err() {
             return;
         }
