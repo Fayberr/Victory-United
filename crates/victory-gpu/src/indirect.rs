@@ -3600,17 +3600,8 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
             // The first record is no draw (2^24 indices): it runs empty
             // and charges nothing.
             let words: [u32; 6] = [
-<<<<<<< HEAD
                 if i == 0 { 1 << 24 } else { 1 << 22 }, // IndexCount
                 if i == 0 { 1 } else { u32::MAX }, // InstanceCount -> clamps to 16 (cost = 1 << 26)
-||||||| a26859fc
-                u32::MAX,                    // IndexCount -> clamps to 1 << 24
-                u32::MAX,                    // InstanceCount -> clamps to 4 (cost = 1 << 26)
-=======
-                // The last is no draw: empty, and free.
-                if i + 1 < RECORDS as usize { 1 << 22 } else { 1 << 23 }, // IndexCount
-                u32::MAX,                    // InstanceCount -> clamps to 16 (cost = 1 << 26)
->>>>>>> avatar/main
                 1000 + i as u32,             // StartIndexLocation
                 (-200i32 + i as i32) as u32, // BaseVertexLocation
                 5000 + i as u32,             // StartInstanceLocation
@@ -3675,14 +3666,8 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         let mut zeroed = 0usize;
         for i in 0..RECORDS as usize {
             let rec = &out_words[i * 6..(i + 1) * 6];
-<<<<<<< HEAD
             if rec[0] == (1 << 22) && rec[1] == 16 {
                 assert!(i == 1 || i == 2, "the first two real draws fit the budget");
-||||||| a26859fc
-            if rec[0] == (1 << 24) && rec[1] == 4 {
-=======
-            if rec[0] == (1 << 22) && rec[1] == 16 {
->>>>>>> avatar/main
                 kept += 1;
             } else {
                 assert_eq!((rec[0], rec[1]), (0, 0), "excess draw must be zeroed");
@@ -3723,7 +3708,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
 
         let args = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
         // First two calls fit inside the initial 64 KiB scratch buffer and
-<<<<<<< HEAD
         // must reuse the exact same `ID3D12Resource`, which stays readable
         // as arguments between them.
         let b1 = bound(&list, (&src_buf, 0), Some((&count_buf, 0)), (0, 16, 64), true).unwrap();
@@ -3733,23 +3717,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
             "a clamp leaves the scratch readable as arguments"
         );
         let b2 = bound(&list, (&src_buf, 64), Some((&count_buf, 0)), (1, 20, 128), true).unwrap();
-||||||| a26859fc
-        // must reuse the exact same `ID3D12Resource`.
-        let b1 = bound(&list, (&src_buf, 0), Some((&count_buf, 0)), (0, 16, 64)).unwrap();
-        done(&list, &b1);
-        let b2 = bound(&list, (&src_buf, 64), Some((&count_buf, 0)), (1, 20, 128)).unwrap();
-        done(&list, &b2);
-=======
-        // must reuse the exact same `ID3D12Resource`, which stays readable
-        // as arguments between them.
-        let b1 = bound(&list, (&src_buf, 0), Some((&count_buf, 0)), (0, 16, 64)).unwrap();
-        assert_eq!(
-            list.indirect_state(&b1),
-            args,
-            "a clamp leaves the scratch readable as arguments"
-        );
-        let b2 = bound(&list, (&src_buf, 64), Some((&count_buf, 0)), (1, 20, 128)).unwrap();
->>>>>>> avatar/main
         assert_eq!(
             b1.as_raw(),
             b2.as_raw(),
@@ -3758,7 +3725,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         assert_eq!(list.indirect_state(&b2), args);
 
         // A call needing >64 KiB grows the scratch buffer mid-list while keeping
-<<<<<<< HEAD
         // `b1` alive until reset. The new buffer starts out common.
         let grown = list.indirect_scratch(5000 * 20).unwrap();
         assert_eq!(
@@ -3768,21 +3734,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         );
         let b3 = bound(&list, (&src_buf, 0), Some((&count_buf, 0)), (1, 20, 5000), true).unwrap();
         assert_eq!(b3.as_raw(), grown.as_raw());
-||||||| a26859fc
-        // `b1` alive until reset.
-        let b3 = bound(&list, (&src_buf, 0), Some((&count_buf, 0)), (1, 20, 5000)).unwrap();
-        done(&list, &b3);
-=======
-        // `b1` alive until reset. The new buffer starts out common.
-        let grown = list.indirect_scratch(5000 * 20).unwrap();
-        assert_eq!(
-            list.indirect_state(&grown),
-            D3D12_RESOURCE_STATE_COMMON,
-            "a new scratch buffer is common"
-        );
-        let b3 = bound(&list, (&src_buf, 0), Some((&count_buf, 0)), (1, 20, 5000)).unwrap();
-        assert_eq!(b3.as_raw(), grown.as_raw());
->>>>>>> avatar/main
         assert_ne!(
             b3.as_raw(),
             b1.as_raw(),
@@ -3804,7 +3755,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         list.reset();
 
         // After reset, requests up to the grown high-water mark reuse `b3` with
-<<<<<<< HEAD
         // zero new allocations; the buffer decayed to common when the
         // submission ran.
         assert_eq!(
@@ -3813,20 +3763,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
             "a reset list starts with a common scratch buffer"
         );
         let b4 = bound(&list, (&src_buf, 0), Some((&count_buf, 0)), (1, 20, 4096), true).unwrap();
-||||||| a26859fc
-        // zero new allocations.
-        let b4 = bound(&list, (&src_buf, 0), Some((&count_buf, 0)), (1, 20, 4096)).unwrap();
-        done(&list, &b4);
-=======
-        // zero new allocations; the buffer decayed to common when the
-        // submission ran.
-        assert_eq!(
-            list.indirect_state(&b3),
-            D3D12_RESOURCE_STATE_COMMON,
-            "a reset list starts with a common scratch buffer"
-        );
-        let b4 = bound(&list, (&src_buf, 0), Some((&count_buf, 0)), (1, 20, 4096)).unwrap();
->>>>>>> avatar/main
         assert_eq!(
             b4.as_raw(),
             b3.as_raw(),
@@ -3838,7 +3774,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         host.execute(&[&list]);
         list.reset();
     }
-<<<<<<< HEAD
 
     /// A group charges its records in lane order: with 300 left of the
     /// budget, the first draw (100) fits, the second (250) does not and
@@ -3846,9 +3781,35 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
     /// word record by record, which of them fitted was up to the GPU.)
     #[test]
     fn warp_a_group_charges_its_records_in_lane_order() {
-        let Some(mut warp) = WarpHarness::new() else {
+        let Some((left, out)) = four_records_of_a_group(true) else {
             return;
         };
+        assert_eq!(out[0..4], [100, 1, 7, 9], "the first record fits");
+        for i in 1..4 {
+            assert_eq!(out[i * 4..i * 4 + 4], [0, 0, 7, 9], "record {i} runs empty");
+        }
+        assert_eq!(left, 0, "the record that did not fit took the rest");
+    }
+
+    /// As above where a record that does not fit takes nothing
+    /// (`VICTORY_INDIRECT_REST=0`): those after it that fit run.
+    #[test]
+    fn warp_a_record_that_does_not_fit_may_take_nothing() {
+        let Some((left, out)) = four_records_of_a_group(false) else {
+            return;
+        };
+        for (i, count) in [100, 0, 50, 100].into_iter().enumerate() {
+            assert_eq!(out[i * 4..i * 4 + 4], [count, count.min(1), 7, 9], "record {i}");
+        }
+        assert_eq!(left, 50);
+    }
+
+    /// Draws of 100, 250, 50 and 100 with 300 left of the budget: what is
+    /// left then, and the records as clamped.
+    fn four_records_of_a_group(rest: bool) -> Option<(u32, Vec<u32>)> {
+        let mut warp = WarpHarness::new()?;
+        let source = if rest { SOURCE.to_owned() } else { SOURCE.replace("REST ?", "false ?") };
+        let clamp = make_from(&warp.device, &source).expect("the clamp must compile on WARP");
         const KIND_DRAW: u32 = 0;
         const STRIDE: u32 = 16;
         const BUDGET_CAP: u32 = 1 << 27;
@@ -3872,7 +3833,7 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
             (budget_ptr as *mut u32).write_volatile(BUDGET_CAP - 300);
         }
         assert!(record_clamp_as(
-            &warp.clamp,
+            &clamp,
             &warp.list,
             (&dst_buf, D3D12_RESOURCE_STATE_COMMON),
             budget_gpu,
@@ -3899,11 +3860,7 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
                     .to_vec(),
             )
         };
-        assert_eq!(out[0..4], [100, 1, 7, 9], "the first record fits");
-        for i in 1..counts.len() {
-            assert_eq!(out[i * 4..i * 4 + 4], [0, 0, 7, 9], "record {i} runs empty");
-        }
-        assert_eq!(spent, BUDGET_CAP, "the record that did not fit took the rest");
+        Some((BUDGET_CAP - spent, out))
     }
 
     /// The list's budget starts empty at each submission, wherever it
@@ -4242,374 +4199,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
             assert_eq!(hits, expected, "every record of both windows runs once");
         }
     }
-||||||| a26859fc
-=======
-
-    /// A group charges its records in lane order: with 300 left of the
-    /// budget, the first draw (100) fits, the second (250) does not and
-    /// takes the rest, and the ones after it run empty. (Racing for the
-    /// word record by record, which of them fitted was up to the GPU.)
-    #[test]
-    fn warp_a_group_charges_its_records_in_lane_order() {
-        let Some((left, out)) = four_records_of_a_group(true) else {
-            return;
-        };
-        assert_eq!(out[0..4], [100, 1, 7, 9], "the first record fits");
-        for i in 1..4 {
-            assert_eq!(out[i * 4..i * 4 + 4], [0, 0, 7, 9], "record {i} runs empty");
-        }
-        assert_eq!(left, 0, "the record that did not fit took the rest");
-    }
-
-    /// As above where a record that does not fit takes nothing
-    /// (`VICTORY_INDIRECT_REST=0`): those after it that fit run.
-    #[test]
-    fn warp_a_record_that_does_not_fit_may_take_nothing() {
-        let Some((left, out)) = four_records_of_a_group(false) else {
-            return;
-        };
-        for (i, count) in [100, 0, 50, 100].into_iter().enumerate() {
-            assert_eq!(out[i * 4..i * 4 + 4], [count, count.min(1), 7, 9], "record {i}");
-        }
-        assert_eq!(left, 50);
-    }
-
-    /// Draws of 100, 250, 50 and 100 with 300 left of the budget: what is
-    /// left then, and the records as clamped.
-    fn four_records_of_a_group(rest: bool) -> Option<(u32, Vec<u32>)> {
-        let mut warp = WarpHarness::new()?;
-        let source = if rest { SOURCE.to_owned() } else { SOURCE.replace("REST ?", "false ?") };
-        let clamp = make_from(&warp.device, &source).expect("the clamp must compile on WARP");
-        const KIND_DRAW: u32 = 0;
-        const STRIDE: u32 = 16;
-        const BUDGET_CAP: u32 = 1 << 27;
-        let counts = [100u32, 250, 50, 100];
-        let total = counts.len() * STRIDE as usize;
-        let (src_buf, src_ptr, _) = warp.shared_buffer(total as u64);
-        let (_budget_buf, budget_ptr, budget_gpu) = warp.shared_buffer(256);
-        let (readback_buf, readback_ptr, _) = warp.shared_buffer(total as u64);
-        let dst_buf = warp.default_uav(total as u64);
-        // SAFETY: mapped buffers of these sizes.
-        unsafe {
-            for (i, &count) in counts.iter().enumerate() {
-                let words = [count, 1, 7, 9];
-                std::ptr::copy_nonoverlapping(
-                    words.as_ptr().cast::<u8>(),
-                    src_ptr.add(i * STRIDE as usize),
-                    16,
-                );
-            }
-            std::ptr::write_bytes(budget_ptr, 0, 256);
-            (budget_ptr as *mut u32).write_volatile(BUDGET_CAP - 300);
-        }
-        assert!(record_clamp_as(
-            &clamp,
-            &warp.list,
-            (&dst_buf, D3D12_RESOURCE_STATE_COMMON),
-            budget_gpu,
-            (&src_buf, 0),
-            None,
-            (KIND_DRAW, STRIDE, counts.len() as u32),
-            false,
-        ));
-        // SAFETY: an open list; the clamped records are copied for the check.
-        unsafe {
-            warp.list.ResourceBarrier(&[transition(
-                &dst_buf,
-                D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
-                D3D12_RESOURCE_STATE_COPY_SOURCE,
-            )]);
-            warp.list.CopyBufferRegion(&readback_buf, 0, &dst_buf, 0, total as u64);
-        }
-        warp.submit_and_wait();
-        // SAFETY: the work is done; mapped buffers.
-        let (spent, out) = unsafe {
-            (
-                (budget_ptr as *const u32).read_volatile(),
-                std::slice::from_raw_parts(readback_ptr.cast::<u32>().cast_const(), total / 4)
-                    .to_vec(),
-            )
-        };
-        Some((BUDGET_CAP - spent, out))
-    }
-
-    /// The list's budget starts empty at each submission, wherever it
-    /// lives (the card's copy is zeroed in the list): a recording whose
-    /// clamps spend all of it is followed, after the reset, by one whose
-    /// small record still runs.
-    #[test]
-    fn host_list_budget_starts_empty_at_each_submission() {
-        let Some(host) = super::host() else {
-            return;
-        };
-        let Ok(list) = host.new_list() else {
-            return;
-        };
-        let _ = host.log_messages();
-        let worker = compile_cs(&host.device, WORKER_CS).expect("worker shader must compile");
-        const KIND_DISPATCH: u32 = 2;
-        const STRIDE: u32 = 12;
-        let signature = {
-            let arg = D3D12_INDIRECT_ARGUMENT_DESC {
-                Type: D3D12_INDIRECT_ARGUMENT_TYPE(KIND_DISPATCH as i32),
-                ..Default::default()
-            };
-            let desc = D3D12_COMMAND_SIGNATURE_DESC {
-                ByteStride: STRIDE,
-                NumArgumentDescs: 1,
-                pArgumentDescs: &arg,
-                NodeMask: 0,
-            };
-            let mut sig: Option<ID3D12CommandSignature> = None;
-            // SAFETY: a valid single-argument command signature description.
-            unsafe {
-                host.device
-                    .CreateCommandSignature(&desc, None::<&ID3D12RootSignature>, &mut sig)
-                    .unwrap();
-            }
-            sig.unwrap()
-        };
-        // Three records of 65,535 x 16 groups: about half the budget each.
-        let Some((big, big_ptr)) = host.shared_buffer(3 * u64::from(STRIDE)) else {
-            return;
-        };
-        let Some((small, small_ptr)) = host.shared_buffer(u64::from(STRIDE)) else {
-            return;
-        };
-        let Some((hits_buf, hits_ptr)) = host.shared_buffer(256) else {
-            return;
-        };
-        // SAFETY: mapped buffers of these sizes; nothing runs yet.
-        unsafe {
-            for i in 0..3 {
-                let words = [65535u32, 16, 1];
-                std::ptr::copy_nonoverlapping(
-                    words.as_ptr().cast::<u8>(),
-                    big_ptr.add(i * STRIDE as usize),
-                    12,
-                );
-            }
-            std::ptr::copy_nonoverlapping([1u32, 1, 1].as_ptr().cast::<u8>(), small_ptr, 12);
-            std::ptr::write_bytes(hits_ptr, 0, 256);
-        }
-        // SAFETY: a live buffer.
-        let hits_gpu = unsafe { hits_buf.GetGPUVirtualAddress() };
-        for round in 0..2 {
-            // Spends the budget (clamped, not executed), then one group.
-            bound(&list, (&big, 0), None, (KIND_DISPATCH, STRIDE, 3)).unwrap();
-            let scratch = bound(&list, (&small, 0), None, (KIND_DISPATCH, STRIDE, 1)).unwrap();
-            // SAFETY: an open list; the worker's root signature and
-            // pipeline; buffers the test holds until the list has run.
-            unsafe {
-                list.list.SetComputeRootSignature(&worker.root);
-                list.list.SetPipelineState(&worker.pso);
-                list.list.SetComputeRootUnorderedAccessView(0, hits_gpu);
-                list.list.ExecuteIndirect(&signature, 1, &scratch, 0, None, 0);
-            }
-            list.close();
-            assert_eq!(host.log_messages(), None, "the debug layer found an error");
-            host.execute(&[&list]);
-            list.reset();
-            // SAFETY: the list has run; a mapped buffer.
-            let hits = unsafe { (hits_ptr as *const u32).read_volatile() };
-            // The small record comes after the big ones spent the budget:
-            // it runs empty, in every round alike (none carries over).
-            assert_eq!(hits, 0, "round {round}: the spent budget empties the record after it");
-        }
-        // A recording with only the small record: the budget is empty
-        // again, so it runs.
-        let scratch = bound(&list, (&small, 0), None, (KIND_DISPATCH, STRIDE, 1)).unwrap();
-        // SAFETY: as above.
-        unsafe {
-            list.list.SetComputeRootSignature(&worker.root);
-            list.list.SetPipelineState(&worker.pso);
-            list.list.SetComputeRootUnorderedAccessView(0, hits_gpu);
-            list.list.ExecuteIndirect(&signature, 1, &scratch, 0, None, 0);
-        }
-        list.close();
-        assert_eq!(host.log_messages(), None, "the debug layer found an error");
-        host.execute(&[&list]);
-        list.reset();
-        // SAFETY: the list has run; a mapped buffer.
-        let hits = unsafe { (hits_ptr as *const u32).read_volatile() };
-        assert_eq!(hits, 1, "the budget starts empty at the next submission");
-    }
-
-    /// Records the dispatch records `groups` (three words each, `step`
-    /// bytes apart, the rest of each record ones) into a fresh mapped
-    /// buffer of `warp`'s device.
-    fn dispatch_records(warp: &WarpHarness, groups: &[u32], step: u32) -> ID3D12Resource {
-        let total = groups.len() * step as usize;
-        let (buffer, ptr, _) = warp.shared_buffer(total as u64);
-        let mut bytes = vec![0xffu8; total];
-        for (i, &g) in groups.iter().enumerate() {
-            for (w, word) in [g, 1, 1].into_iter().enumerate() {
-                let at = i * step as usize + w * 4;
-                bytes[at..at + 4].copy_from_slice(&word.to_le_bytes());
-            }
-        }
-        // SAFETY: the mapping holds `total` bytes.
-        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, total) };
-        buffer
-    }
-
-    /// Two windows in one list, as `crate::draw` records them: each clamps
-    /// its records ahead, then one execution per record reads the scratch
-    /// buffer with no barrier between them; the second clamp moves the
-    /// scratch buffer straight from arguments back to unordered access.
-    /// Every record runs once, with the group count it asked for.
-    #[test]
-    fn warp_window_executions_read_their_records_with_no_barrier_between() {
-        let Some(mut warp) = WarpHarness::new() else {
-            return;
-        };
-        const KIND_DISPATCH: u32 = 2;
-        // The title names 12 bytes and keeps its records 32 apart.
-        const STRIDE: u32 = 12;
-        const STEP: u32 = 32;
-        let windows: [&[u32]; 2] = [&[1, 2, 3, 4], &[10, 11, 12, 13]];
-        let sources: Vec<ID3D12Resource> =
-            windows.iter().map(|g| dispatch_records(&warp, g, STEP)).collect();
-        let (_budget_buf, budget_ptr, budget_gpu) = warp.shared_buffer(256);
-        let (_hits_buf, hits_ptr, hits_gpu) = warp.shared_buffer(256);
-        let dst_buf = warp.default_uav(u64::from(STEP) * 4);
-        let sig = warp.signature(KIND_DISPATCH, STRIDE);
-        // SAFETY: mapped buffers of these sizes.
-        unsafe {
-            std::ptr::write_bytes(budget_ptr, 0, 256);
-            std::ptr::write_bytes(hits_ptr, 0, 256);
-        }
-        let mut state = D3D12_RESOURCE_STATE_COMMON;
-        for (groups, src) in windows.iter().zip(&sources) {
-            assert!(record_clamp_as(
-                &warp.clamp,
-                &warp.list,
-                (&dst_buf, state),
-                budget_gpu,
-                (src, 0),
-                None,
-                (KIND_DISPATCH, STEP, groups.len() as u32),
-                true,
-            ));
-            state = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
-            // SAFETY: an open list; the worker's root signature and
-            // pipeline; the scratch buffer is readable as arguments.
-            unsafe {
-                warp.list.SetComputeRootSignature(&warp.worker.root);
-                warp.list.SetPipelineState(&warp.worker.pso);
-                warp.list.SetComputeRootUnorderedAccessView(0, hits_gpu);
-                for i in 0..groups.len() as u64 {
-                    warp.list.ExecuteIndirect(&sig, 1, &dst_buf, i * u64::from(STEP), None, 0);
-                }
-            }
-        }
-        warp.submit_and_wait();
-        // SAFETY: the work is done; mapped buffers.
-        let (hits, spent) = unsafe {
-            (
-                (hits_ptr as *const u32).read_volatile(),
-                (budget_ptr as *const u32).read_volatile(),
-            )
-        };
-        let expected: u32 = windows.iter().flat_map(|g| g.iter()).sum();
-        assert_eq!(hits, expected, "every record of both windows runs once");
-        assert_eq!(spent, expected * 64, "and is charged what it asked for");
-    }
-
-    /// The windows of `warp_window_executions_read_their_records_with_no_barrier_between`
-    /// through a host list (`bound_ahead`, the list's tracked scratch state,
-    /// `Host::execute`), twice: on the first recording the scratch buffer
-    /// starts common, on the second (after the reset) it starts common
-    /// again. With the debug layer on (`VICTORY_D3D12_DEBUG=1` in a
-    /// diagnostics build) no barrier names a state the buffer is not in.
-    #[test]
-    fn host_list_window_executions_need_no_barrier_of_their_own() {
-        let Some(host) = super::host() else {
-            return;
-        };
-        // What earlier tests left in the debug layer's queue, if it is on.
-        let _ = host.log_messages();
-        let Ok(list) = host.new_list() else {
-            return;
-        };
-        let worker = compile_cs(&host.device, WORKER_CS).expect("worker shader must compile");
-        const KIND_DISPATCH: u32 = 2;
-        const STRIDE: u32 = 12;
-        const STEP: u32 = 32;
-        let signature = {
-            let arg = D3D12_INDIRECT_ARGUMENT_DESC {
-                Type: D3D12_INDIRECT_ARGUMENT_TYPE(KIND_DISPATCH as i32),
-                ..Default::default()
-            };
-            let desc = D3D12_COMMAND_SIGNATURE_DESC {
-                ByteStride: STRIDE,
-                NumArgumentDescs: 1,
-                pArgumentDescs: &arg,
-                NodeMask: 0,
-            };
-            let mut sig: Option<ID3D12CommandSignature> = None;
-            // SAFETY: a valid single-argument command signature description.
-            unsafe {
-                host.device
-                    .CreateCommandSignature(&desc, None::<&ID3D12RootSignature>, &mut sig)
-                    .unwrap();
-            }
-            sig.unwrap()
-        };
-        let windows: [&[u32]; 2] = [&[1, 2, 3, 4], &[10, 11, 12, 13]];
-        let mut sources = Vec::new();
-        for groups in windows {
-            let total = groups.len() * STEP as usize;
-            let Some((buffer, ptr)) = host.shared_buffer(total as u64) else {
-                return;
-            };
-            let mut bytes = vec![0xffu8; total];
-            for (i, &g) in groups.iter().enumerate() {
-                for (w, word) in [g, 1, 1].into_iter().enumerate() {
-                    let at = i * STEP as usize + w * 4;
-                    bytes[at..at + 4].copy_from_slice(&word.to_le_bytes());
-                }
-            }
-            // SAFETY: the mapping holds `total` bytes.
-            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, total) };
-            sources.push(buffer);
-        }
-        let Some((hits_buf, hits_ptr)) = host.shared_buffer(256) else {
-            return;
-        };
-        let expected: u32 = windows.iter().flat_map(|g| g.iter()).sum();
-        // SAFETY: a live buffer.
-        let hits_gpu = unsafe { hits_buf.GetGPUVirtualAddress() };
-        for _ in 0..2 {
-            // SAFETY: the mapping holds 256 bytes; nothing runs.
-            unsafe { std::ptr::write_bytes(hits_ptr, 0, 256) };
-            for (groups, src) in windows.iter().zip(&sources) {
-                let spec = (KIND_DISPATCH, STEP, groups.len() as u32);
-                let scratch = bound_ahead(&list, (src, 0), spec).unwrap();
-                assert_eq!(list.indirect_state(&scratch), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-                // SAFETY: an open list; the worker's root signature and
-                // pipeline; buffers the test holds until the list has run.
-                unsafe {
-                    list.list.SetComputeRootSignature(&worker.root);
-                    list.list.SetPipelineState(&worker.pso);
-                    list.list.SetComputeRootUnorderedAccessView(0, hits_gpu);
-                    for i in 0..groups.len() as u64 {
-                        let at = i * u64::from(STEP);
-                        list.list.ExecuteIndirect(&signature, 1, &scratch, at, None, 0);
-                    }
-                }
-            }
-            list.close();
-            // With the debug layer on: nothing it objects to was recorded.
-            // Read before the submission, which moves the messages to the log.
-            assert_eq!(host.log_messages(), None, "the debug layer found an error");
-            host.execute(&[&list]);
-            list.reset();
-            // SAFETY: the list has run; a mapped buffer.
-            let hits = unsafe { (hits_ptr as *const u32).read_volatile() };
-            assert_eq!(hits, expected, "every record of both windows runs once");
-        }
-    }
 
     /// A command signature of one argument of `kind` on `device`.
     fn one_argument(device: &ID3D12Device, kind: u32, stride: u32) -> ID3D12CommandSignature {
@@ -4647,7 +4236,6 @@ void main(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID) {
     seen.InterlockedMax(4, group.x, was);
     seen.InterlockedMax(8, thread.x, was);
     seen.InterlockedAdd(16 + group.x * 4, 1, was);
->>>>>>> avatar/main
 }
 "#;
         let Some(mut gpu) = WarpHarness::on(false) else {
