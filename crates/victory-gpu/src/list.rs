@@ -130,18 +130,10 @@ struct List {
     /// at them before it runs `host`.
     #[cfg(windows)]
     gate: Vec<ValueWait>,
-<<<<<<< HEAD
-    /// With `VICTORY_THIN=1`, of a list the title has: what it wrote down
-    /// ([`thin`]; then there is no `host`).
-    #[cfg(windows)]
-    thin: thin::Front,
-||||||| a66ac212
-=======
     /// (Neptune, from avatarmanz/VIctory-7900XTX) With `VICTORY_THIN=1`, of a list the title
     /// has: what it wrote down ([`thin`]; then there is no `host`).
     #[cfg(windows)]
     thin: thin::Front,
->>>>>>> klbf/beta-2
 }
 
 /// One part of a title list cut at its waits: the waits the queue stands
@@ -180,7 +172,6 @@ fn with_state_how(
     f(list, &mut state);
     #[cfg(feature = "diagnostics")]
     crate::copystat::recorded(started);
-<<<<<<< HEAD
     #[cfg(feature = "diagnostics")]
     crate::profile::seen(crate::profile::Seen::Record);
 }
@@ -219,11 +210,6 @@ fn finish_list(this: This) {
 fn host_list_rec<'a>(this: This) -> Option<&'a crate::host::HostList> {
     flush_held(this);
     host_list(this)
-||||||| a66ac212
-=======
-    #[cfg(feature = "diagnostics")]
-    crate::profile::seen(crate::profile::Seen::Record);
->>>>>>> klbf/beta-2
 }
 
 /// The submission of `lists` has run: each gives its descriptor tables'
@@ -344,17 +330,12 @@ static IDLE: std::sync::Mutex<(Vec<Idle>, u64)> = std::sync::Mutex::new((Vec::ne
 /// between them (a list keeps scratch chunks over a reset only while lists
 /// do not share them, `VICTORY_SCRATCH_POOL=0`).
 #[cfg(windows)]
-<<<<<<< HEAD
 // (512 since run 221: with submissions prepared by a thread of ours the
 // title has its lists back at once and resets them while the flights of
 // the frame before are still in the air, so more than 128 are out at a
 // time: 80 host lists were made and as many thrown away every frame,
 // 8 ms to make and more to free, on the thread that submits.)
-const IDLE_MOST: (usize, u64) = (512, 256 << 20);
-||||||| a66ac212
-const IDLE_MOST: (usize, u64) = (128, 256 << 20);
-=======
-const IDLE_MOST_USUAL: (usize, u64) = (128, 256 << 20);
+const IDLE_MOST_USUAL: (usize, u64) = (512, 256 << 20);
 
 /// (Neptune) `VICTORY_LIST_POOL_MOST=<lists>` and `VICTORY_LIST_POOL_MB=<MiB>` raise the two
 /// limits: with a thousand lists in the air a frame's lists beyond the first 128 were
@@ -394,7 +375,6 @@ fn idle_trim() -> Option<u64> {
 fn stale(pushed_at: impl Iterator<Item = u64>, now: u64, max_age: u64) -> usize {
     pushed_at.take_while(|&t| now.saturating_sub(t) > max_age).count()
 }
->>>>>>> klbf/beta-2
 
 /// Whether host lists that have run are used again (on by default;
 /// `VICTORY_LIST_POOL=0`: each is made new and thrown away, as before).
@@ -1183,15 +1163,9 @@ extern "system" fn copy_buffer_region(
         && let Some(from) = buffer_range(src, src_offset, len)
         && !gpu_buffer_copy(list, to, from, len as usize)
     {
-<<<<<<< HEAD
-        buffer_copy(this, list, to, from, len as usize);
-||||||| a66ac212
-        list.defer_copy(to, from, len as usize);
-=======
         if !card_copy(list, to, from, len) {
-            list.defer_copy(to, from, len as usize);
+            buffer_copy(this, list, to, from, len as usize);
         }
->>>>>>> klbf/beta-2
     }
     #[cfg(not(windows))]
     let _ = (this, dst, dst_offset, src, src_offset, len);
@@ -1312,7 +1286,6 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
             if unlike(dst, src, true) {
                 return;
             }
-<<<<<<< HEAD
             // Two title textures over the same memory have one host
             // texture between them: the copy would be of that texture onto
             // itself, which the host does not allow, and it would change
@@ -1321,17 +1294,9 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
             // debug layer: "CopyResource with its destination in the
             // COPY_SOURCE state", 37 times, a 2560x1440 depth texture).
             // Only the two state changes and the copy are left out: what
-            // is noted of the textures stays as it was. After
-            // triippywhale 6e502b3b.
+            // is noted of the textures stays as it was. (Neptune)
+            // fxceless/victory-fork a253706, after triippywhale 6e502b3b.
             let same = windows::core::Interface::as_raw(to) == windows::core::Interface::as_raw(from);
-||||||| a66ac212
-=======
-            // (Neptune) Two title textures over the same memory have one host texture between
-            // them: the copy would be of that texture onto itself, which D3D12 forbids, and it
-            // changes nothing. Only the state changes and the copy are left out
-            // (fxceless/victory-fork a253706, after triippywhale 6e502b3b).
-            let same = windows::core::Interface::as_raw(to) == windows::core::Interface::as_raw(from);
->>>>>>> klbf/beta-2
             // A source the title fills itself is uploaded first (upstream
             // PR #671): a copy read whatever the host texture held.
             if crate::texture::title_written(from) {
@@ -1340,7 +1305,6 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
             // Depth textures shaders also write: what they wrote, first.
             list.twin_use(dst, false, true);
             list.twin_use(src, false, false);
-<<<<<<< HEAD
             // A destination made level by level gets its levels' memory
             // ahead of this list (`crate::tiles`).
             crate::texture::card_writes(list, dst, to, None);
@@ -1357,16 +1321,6 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
                 });
                 return;
             }
-||||||| a66ac212
-=======
-            crate::texture::host_written(dst);
-            if same {
-                return;
-            }
-            // A destination made level by level gets its levels' memory
-            // ahead of this list (`crate::tiles`).
-            crate::texture::card_writes(list, dst, to, None);
->>>>>>> klbf/beta-2
             ensure_state(list, dst, COPY_DEST);
             ensure_state(list, src, COPY_SOURCE);
             #[cfg(feature = "diagnostics")]
@@ -1613,7 +1567,6 @@ extern "system" fn copy_texture_region(
             let Some(texture) = crate::resource::host_resource(src.resource) else {
                 return;
             };
-<<<<<<< HEAD
             // From a host copy without its largest levels: the level it
             // has (the same size as the title's), or nothing.
             if crate::resource::dropped(src.resource) > 0 {
@@ -1623,22 +1576,13 @@ extern "system" fn copy_texture_region(
                 }
             }
             // The same subresource of one host texture on both sides (two
-            // title textures over one memory): not a copy the host allows.
-            // The states and the copy are left out below; the rest is
-            // noted as before.
+            // title textures over one memory): not a copy the host allows
+            // (fxceless/victory-fork a253706). The states and the copy are
+            // left out below; the rest is noted as before.
             same = texture.as_raw() == to.as_raw()
                 && src.kind != FOOTPRINT
                 && dst.kind != FOOTPRINT
                 && src.footprint.offset as u32 == dst.footprint.offset as u32;
-||||||| a66ac212
-=======
-            // The same subresource of one host texture on both sides: not a copy D3D12 allows
-            // (fxceless/victory-fork a253706). The states and the copy are left out.
-            same = texture.as_raw() == to.as_raw()
-                && src.kind != FOOTPRINT
-                && dst.kind != FOOTPRINT
-                && src.footprint.offset as u32 == dst.footprint.offset as u32;
->>>>>>> klbf/beta-2
             list.twin_use(src.resource, false, false);
             if crate::texture::title_written(texture) {
                 crate::texture::upload(list, src.resource, texture);
@@ -1651,7 +1595,6 @@ extern "system" fn copy_texture_region(
         // A depth texture shaders also write: what they wrote, first (the
         // source above too).
         list.twin_use(dst.resource, false, true);
-<<<<<<< HEAD
         // The first copy into a texture of the title's: what it does not
         // write is zeros, as in a texture that was an allocation of its own
         // (`VICTORY_COPY_OVER_TITLE=title`: what title memory holds, which
@@ -1690,31 +1633,12 @@ extern "system" fn copy_texture_region(
         // of its result into a block-compressed texture of that kind, and
         // a copy into a level without memory is dropped.
         crate::texture::card_writes(list, dst.resource, to, Some(dst.footprint.offset as u32));
-||||||| a66ac212
-        ensure_state(list, dst.resource, COPY_DEST);
-=======
-        // A destination made level by level gets the level's memory ahead
-        // of this list (`crate::tiles`): the title's bake copies each level
-        // of its result into a block-compressed texture of that kind, and
-        // a copy into a level without memory is dropped.
-        if !same {
-            crate::texture::card_writes(list, dst.resource, to, Some(dst.footprint.offset as u32));
-        }
->>>>>>> klbf/beta-2
         crate::texture::host_written(dst.resource);
-<<<<<<< HEAD
         if same {
             SELF_COPIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return;
         }
         ensure_state(list, dst.resource, COPY_DEST);
-||||||| a66ac212
-=======
-        if same {
-            return;
-        }
-        ensure_state(list, dst.resource, COPY_DEST);
->>>>>>> klbf/beta-2
         let mut to_location = dst;
         to_location.resource = to.as_raw().cast_const().cast();
         let host_box = (!source_box.is_null()).then(|| source_box.cast::<D3D12_BOX>());
@@ -2960,20 +2884,11 @@ const fn list_table(newer: bool) -> [*const (); 160] {
 /// titles add.
 static LIST_FUNCTIONS: Table<160> = Table(list_table(false));
 static NEWER_LIST_FUNCTIONS: Table<160> = Table(list_table(true));
-<<<<<<< HEAD
-/// Of lists whose calls are written down.
-#[cfg(windows)]
-static THIN_FUNCTIONS: Table<160> = Table(thin::table(false));
-#[cfg(windows)]
-static NEWER_THIN_FUNCTIONS: Table<160> = Table(thin::table(true));
-||||||| a66ac212
-=======
 /// (Neptune, from avatarmanz/VIctory-7900XTX) Of lists whose calls are written down.
 #[cfg(windows)]
 static THIN_FUNCTIONS: Table<160> = Table(thin::table(false));
 #[cfg(windows)]
 static NEWER_THIN_FUNCTIONS: Table<160> = Table(thin::table(true));
->>>>>>> klbf/beta-2
 
 #[cfg(test)]
 mod tests {
