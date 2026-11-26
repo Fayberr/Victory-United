@@ -987,7 +987,6 @@ fn done_on(list: &ID3D12GraphicsCommandList, scratch: &ID3D12Resource) {
     };
 }
 
-<<<<<<< HEAD
 /// The batched clamp's pipeline ([`batch`]).
 fn batch_clamp() -> Option<&'static Clamp> {
     static CLAMP: std::sync::OnceLock<Option<Clamp>> = std::sync::OnceLock::new();
@@ -1052,8 +1051,6 @@ pub(crate) fn batch_for(device: &ID3D12Device) -> windows::core::Result<(ID3D12R
     make_from(device, batch::SOURCE).map(|c| (c.root, c.pso))
 }
 
-||||||| c7daeea5
-=======
 /// The clamp pass's root constants and its source and count addresses, if
 /// the records can be clamped (4-byte aligned buffers and offsets).
 fn clamp_arguments(
@@ -1173,7 +1170,6 @@ fn clamp_wait_switch() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_CLAMP_WAITS").is_none_or(|v| v != "0"))
 }
 
->>>>>>> integ/vertex
 /// The most records of one argument buffer gathered for a list
 /// ([`gather`]): a multiple of the clamp's 64 threads a group, so that the
 /// threads past the last record read inside the table.
@@ -4409,7 +4405,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
             assert_eq!(hits, expected, "every record of both windows runs once (ring: {ring})");
         }
     }
-<<<<<<< HEAD
 
     /// A command signature of one argument of `kind` on `device`.
     fn one_argument(device: &ID3D12Device, kind: u32, stride: u32) -> ID3D12CommandSignature {
@@ -4791,8 +4786,6 @@ void main(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID) {
             println!("{EXECUTIONS} indirect dispatches, {what}: {best:.2} ms");
         }
     }
-||||||| c7daeea5
-=======
 
     /// Each clamp into the ring takes room of its own, the ring grows when
     /// full, a list's submission runs (the enhanced barrier included), and
@@ -4910,7 +4903,6 @@ void main(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID) {
         list.reset();
         assert_eq!(list.deferred_early(), 0, "a reset forgets them");
     }
->>>>>>> integ/vertex
 }
 
 /// The benchmark of the clamp and its barriers (ignored by default).
