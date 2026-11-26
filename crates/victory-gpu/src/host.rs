@@ -899,6 +899,9 @@ fn create() -> windows::core::Result<Host> {
             let adapter = warp_adapter()?;
             D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device)?;
             tracing::info!("host device on the software adapter (WARP)");
+        } else if let Some(adapter) = chosen_adapter() {
+            D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device)?;
+            crate::tdr::log();
         } else {
             D3D12CreateDevice(None, D3D_FEATURE_LEVEL_12_0, &mut device)?;
             // Whether a GPU hang ends the run or freezes the PC (#1054).
@@ -999,6 +1002,51 @@ impl Host {
 
 /// DXGI may return hardware for `EnumWarpAdapter` (notably under Proton).
 /// Reject it before creating a device in diagnostics' software-only mode.
+/// LOCAL: the card `VICTORY_ADAPTER` names, for a PC with more than one.
+/// The value is part of the card's name, any case (`5060`, `RTX 5070`), or
+/// its index in DXGI's order (`#1`). Unset: Windows' default card. A value
+/// that matches no hardware card is logged with the list and ignored.
+fn chosen_adapter() -> Option<IDXGIAdapter1> {
+    let want = std::env::var("VICTORY_ADAPTER").ok()?;
+    let want = want.trim();
+    if want.is_empty() {
+        return None;
+    }
+    // SAFETY: plain DXGI adapter queries.
+    unsafe {
+        let factory: IDXGIFactory4 = CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)).ok()?;
+        let index = want.strip_prefix('#').and_then(|n| n.parse::<u32>().ok());
+        let mut seen = Vec::new();
+        for i in 0.. {
+            let Ok(adapter) = factory.EnumAdapters1(i) else { break };
+            let Ok(desc) = adapter.GetDesc1() else { continue };
+            let len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
+            let name = String::from_utf16_lossy(&desc.Description[..len]);
+            let software = desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0;
+            let hit = match index {
+                Some(n) => n == i,
+                None => name.to_lowercase().contains(&want.to_lowercase()),
+            };
+            if hit && !software {
+                tracing::warn!(
+                    adapter = %name,
+                    index = i,
+                    memory_mb = desc.DedicatedVideoMemory / (1024 * 1024),
+                    "host device on the card VICTORY_ADAPTER names"
+                );
+                return Some(adapter);
+            }
+            seen.push(format!("#{i} {name}"));
+        }
+        tracing::warn!(
+            want,
+            cards = %seen.join(", "),
+            "VICTORY_ADAPTER names no hardware card; Windows' default card is used"
+        );
+        None
+    }
+}
+
 pub(crate) fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
     // SAFETY: plain DXGI adapter queries.
     unsafe {
@@ -5823,9 +5871,15 @@ impl Host {
         for (shadow, at, bytes) in batch.placed.drain(..) {
             shadow.placed_copy(at, &bytes);
         }
-        if let Some(check) = card.as_ref().and_then(|c| c.check.clone()) {
-            lists.push(Some(check));
-        }
+        // A title list can leave a buffer promoted to COPY_DEST. Buffers
+        // decay to COMMON between ExecuteCommandLists calls, so submit
+        // the compare separately before signalling this submission's fence.
+        // Keep it in the list array so the timing end markers follow it.
+        let compare_at = card.as_ref().and_then(|c| c.check.clone()).map(|list| {
+            let at = lists.len();
+            lists.push(Some(list));
+            at
+        });
         #[cfg(feature = "diagnostics")]
         split.part(4);
         stage.next("submit: waiting for the heaps' records");
@@ -5841,21 +5895,28 @@ impl Host {
         #[cfg(feature = "diagnostics")]
         let stamp = stamps::take();
         #[cfg(feature = "diagnostics")]
-        if let Some((ahead, behind)) = stamp.and_then(stamps::lists) {
+        let compare_at = if let Some((ahead, behind)) = stamp.and_then(stamps::lists) {
             lists.insert(0, Some(ahead));
             lists.push(Some(behind));
             firsts.iter_mut().for_each(|first| *first += 1);
-        }
+            compare_at.map(|at| at + 1)
+        } else {
+            compare_at
+        };
         #[cfg(feature = "diagnostics")]
         let sending = crate::timeline::ticks();
         if late {
             *submitted += 1;
             #[cfg(feature = "diagnostics")]
-            if let Some([front, behind]) = self.span_lists() {
+            let compare_at = if let Some([front, behind]) = self.span_lists() {
                 lists.insert(0, Some(front));
                 lists.push(Some(behind));
                 firsts.iter_mut().for_each(|first| *first += 1);
-            }
+                compare_at.map(|at| at + 1)
+            } else {
+                compare_at
+            };
+            let (lists, compare) = lists.split_at(compare_at.unwrap_or(lists.len()));
             let cuts: Vec<usize> = parts.iter().filter_map(|&n| firsts.get(n).copied()).collect();
             // SAFETY: closed lists; the fence is ours.
             let signalled = unsafe {
@@ -5863,6 +5924,9 @@ impl Host {
                 for to in cuts.into_iter().chain([lists.len()]) {
                     self.queue.ExecuteCommandLists(&lists[from..to]);
                     from = to;
+                }
+                if !compare.is_empty() {
+                    self.queue.ExecuteCommandLists(compare);
                 }
                 self.queue.Signal(&self.fence, *submitted)
             };
@@ -5897,19 +5961,22 @@ impl Host {
             working(was_working);
             return Some((submitted, sent));
         }
+        let (lists, compare) = lists.split_at(compare_at.unwrap_or(lists.len()));
         // Diagnostics: each list on its own, timed (`VICTORY_GPU_TIMING`).
         #[cfg(feature = "diagnostics")]
         let groups: Vec<&[Option<ID3D12CommandList>]> = if timing() {
             firsts
                 .iter()
+                .enumerate()
                 .zip(firsts.iter().skip(1).chain([&lists.len()]))
-                .map(|(&a, &b)| &lists[a..b])
+                // Include any leading timeline marker in the first timed group.
+                .map(|((i, &a), &b)| &lists[if i == 0 { 0 } else { a }..b])
                 .collect()
         } else {
-            vec![&lists[..]]
+            vec![lists]
         };
         #[cfg(not(feature = "diagnostics"))]
-        let groups = [&lists[..]];
+        let groups = [lists];
         submitting(2, runs.len());
         for (i, group) in groups.iter().enumerate() {
             *submitted += 1;
@@ -5917,6 +5984,9 @@ impl Host {
             // SAFETY: closed lists; the fence and event are ours.
             unsafe {
                 self.queue.ExecuteCommandLists(group);
+                if i + 1 == groups.len() && !compare.is_empty() {
+                    self.queue.ExecuteCommandLists(compare);
+                }
                 self.card_sent();
                 let waited = self
                     .queue
@@ -5936,8 +6006,7 @@ impl Host {
                     Err(e) => tracing::warn!(error = %e, "host submission not waited for"),
                 }
             }
-            // With timing on each group is one of `runs` (and the compare
-            // of copies in the card's memory, with the last): every
+            // With timing on each group is one of `runs`: every
             // command's time on the card goes to the sums by pipeline.
             #[cfg(feature = "diagnostics")]
             if timing() {
@@ -9126,6 +9195,7 @@ impl Host {
     /// shown; else, in diagnostics builds, whether the frame was black.
     #[allow(dead_code)]
     pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
+<<<<<<< HEAD
         self.present_planes(texture, state, None, frame)
     }
 
@@ -9138,6 +9208,22 @@ impl Host {
         overlay: Option<(&ID3D12Resource, u32)>,
         frame: u64,
     ) -> Option<bool> {
+||||||| 0a4356653
+=======
+        self.present_over(texture, state, None, frame)
+    }
+
+    /// LOCAL (port of fxceless #1189): [`Self::present`], with a second
+    /// plane laid over `texture` if there is one (`crate::compose`): its
+    /// texture and its state, which it is left in.
+    pub(crate) fn present_over(
+        &self,
+        texture: &ID3D12Resource,
+        state: u32,
+        over: Option<(&ID3D12Resource, u32)>,
+        frame: u64,
+    ) -> Option<bool> {
+>>>>>>> nvidia/main
         // SAFETY: a live resource.
         let desc = unsafe { texture.GetDesc() };
         let planes = overlay.and_then(|(over, over_state)| {
@@ -9320,10 +9406,26 @@ impl Host {
                     &back,
                     D3D12_RESOURCE_STATE_PRESENT,
                     D3D12_RESOURCE_STATE_COPY_DEST,
+<<<<<<< HEAD
                 ));
                 list.ResourceBarrier(&pre);
                 list.CopyResource(&back, texture);
             }
+||||||| 0a4356653
+                ),
+            ]);
+            list.CopyResource(&back, texture);
+=======
+                ),
+            ]);
+            // LOCAL (port of fxceless #1189): the second plane laid over the
+            // first, into a texture of ours shown instead (`crate::compose`).
+            let laid = over.and_then(|(ui, ui_state)| crate::compose::record(&self.device, list, texture, ui, ui_state));
+            if let Some(laid) = &laid {
+                copy.keep(laid);
+            }
+            list.CopyResource(&back, laid.as_ref().unwrap_or(texture));
+>>>>>>> nvidia/main
             #[cfg(feature = "diagnostics")]
             let capture = crate::capture::wanted(frame)
                 .then(|| {
