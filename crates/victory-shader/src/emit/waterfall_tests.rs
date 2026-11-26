@@ -95,19 +95,9 @@ fn build(words: &[u32], buffers: bool) -> HostShader {
 }
 
 /// Runs `shader` with `views` at heap indices 0.. (the UAV last) on the
-<<<<<<< HEAD
 /// hardware GPU and on WARP, returning the UAV's 32 dwords for each device
 /// that ran. At least one device must produce a readback.
-fn run(shader: &HostShader, views: &[View]) -> Vec<(&'static str, Vec<u32>)> {
-||||||| a26859fc
-/// hardware GPU and on WARP (each skipped without a device) and returns,
-/// per one that ran, the UAV's 32 dwords.
-fn run(shader: &HostShader, views: &[View]) -> Vec<(&'static str, Vec<u32>)> {
-=======
-/// hardware GPU and on WARP (each skipped without a device) and returns,
-/// per one that ran, the UAV's 32 dwords.
 pub(super) fn run(shader: &HostShader, views: &[View]) -> Vec<(&'static str, Vec<u32>)> {
->>>>>>> avatar/main
     let samplers = [D3D12_SAMPLER_DESC {
         Filter: D3D12_FILTER_MIN_MAG_MIP_POINT,
         AddressU: D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
