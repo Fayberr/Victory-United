@@ -15,8 +15,21 @@ endorsed by the game's developer or publisher, see [LEGAL.md](LEGAL.md).
 
 ## State
 
-Early. It boots and shows the menus, and the open world runs at a few frames per second, so it is
-not playable yet. Shadows are missing some light, because the game's ray tracing does not run yet.
+Early. It boots, plays the intro and the menus and reaches the first playable room. It is not
+playable yet. Shadows are missing some light, because the game's ray tracing does not run yet.
+
+Measured on one machine: Windows 11 Pro (build 26300), NVIDIA GeForce RTX 3080 Ti with 12 GB
+(driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `33f3c35`, Series S profile, default
+settings, no frame generation.
+
+- **Speed:** 4.9 to 5.2 frames per second in the first playable room, standing at the window.
+  Two runs of 6 minutes each (median of five-second intervals). The intro cutscenes ran at 3.2
+  to 4.1 frames per second.
+- **Stability:** the longest run without a crash was 8 minutes (a scripted run through the
+  intro). Turning on some experimental speed switches caused GPU hangs within the first few
+  minutes, so they are off by default.
+- **Picture:** the room is lit by daylight through the window, and the character and the window
+  glass are drawn. Some frames show bright blocks outside the window.
 
 ## Build
 
