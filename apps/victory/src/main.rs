@@ -9,6 +9,8 @@ mod inspect;
 mod replay;
 mod run;
 mod shader;
+#[cfg(windows)]
+mod title_patch;
 mod translate;
 #[cfg(windows)]
 mod warm;

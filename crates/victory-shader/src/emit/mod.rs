@@ -202,6 +202,25 @@ pub fn builder_bounds() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_BVH_BOUNDS").is_none_or(|v| v != "0"))
 }
 
+/// Whether the ray-tracing node test answers "nothing hit" for every node
+/// (`VICTORY_RT_MISS=1`; off by default): a box node's four children are
+/// none and a triangle node is a miss, so every traversal ends at its root.
+///
+/// For runs without the structure builder, or while its structures are
+/// wrong: the title's local-light shadow rays then hit nothing (lit, as
+/// with no occluder, in place of black or speckled faces), its reflection
+/// and probe rays reach the sky, and the trace programs cost next to
+/// nothing on the card. The sun's near shadows are the title's cascades
+/// and stay. shortcut: no lamp casts a shadow; drop it once the structures
+/// are right.
+///
+/// Part of the translation: the shader cache keys on it (`victory-gpu`'s
+/// does).
+pub fn rt_miss() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_RT_MISS").is_some_and(|v| v == "1"))
+}
+
 /// The clean-up passes that run over a translated program before it is
 /// written (`bitcode::opt`): a set of that module's pass bits. Every pass
 /// is exact, so the switch is for telling a translator fault from a
@@ -714,6 +733,24 @@ pub fn emit(
                 }
             }
         }
+        // Still last, for a program that would ask for 64-lane waves even so, which this host
+        // refuses outright: the wave-wide form after all (unless `VICTORY_WAVE_WIDE=0`). Every
+        // group barrier it adds now stands behind decisions the two host waves take as one
+        // ([`widen`]). Not before the forms above: the programs they take keep their
+        // translation.
+        let wide_last = !wide_on && wide_option.as_ref().is_none_or(|v| v != "0");
+        if wide_last && matches!(&original, Ok((_, Some(64)))) {
+            let deep_on = std::env::var_os("VICTORY_WAVE_DEEP_SKIPS").is_none_or(|v| v != "0");
+            let deep = if deep_on { form("without skips, scalars followed", ir::without_skips(p, true)) } else { None };
+            let bases = [deep.as_ref().map(|f| &f.0), forms[1].1.as_ref().map(|f| &f.0), forms[0].1.as_ref().map(|f| &f.0), Some(p)];
+            if let Some(base) = bases.into_iter().flatten().next() {
+                let again = widen(c, native, base, why, driver_loop);
+                report("wave-wide branches", &again);
+                if done(&again) {
+                    return again.map(|(shader, _)| shader);
+                }
+            }
+        }
     }
     // SCC of a mask operation joined with a scalar test behind a per-lane skip (the 32-lane
     // trace programs): right once the wave takes that skip together ([`widen`]; the
@@ -789,20 +826,55 @@ fn widen(
         }
         _ => return Err(NOT),
     }
+    // (two host waves for a console wave: see [`lower::with_loop_exits`])
+    if native.wave64 && lower::host_max_wave() == 32 {
+        return lower::with_loop_exits(|| widen_from(c, native, p, why, active_loop_only));
+    }
+    widen_from(c, native, p, why, active_loop_only)
+}
+
+fn widen_from(
+    c: &Container,
+    native: &NativeProgram,
+    p: &ir::Program,
+    why: bool,
+    active_loop_only: bool,
+) -> Result<(HostShader, Option<u32>), ShaderError> {
     let mut wide = std::collections::HashSet::new();
+    // The scalar branches the two host waves take as one ([`lower::with_agreed`]): every one
+    // around a place where the waves meet, so that no group barrier of the translation stands
+    // behind a decision the halves make each for themselves.
+    let mut agreed = std::collections::HashSet::new();
     loop {
         let st = structure::structure_wide(p, &wide)?;
         let io = io::raise(p, native)?;
         let res = resource::track(p, &native.layout, native.stage, Some(&st))?;
         lower::take_needs();
-        let r = emit_program(c, native, p, &st, &io, &res);
+        lower::take_meets();
+        let r = lower::with_agreed(&agreed, || emit_program(c, native, p, &st, &io, &res));
         let needs = lower::take_needs();
+        let meets = lower::take_meets();
         // (or translated for 64-lane waves still: shared memory read and written where not
         // every lane runs, whose blocks the lowering names too)
         let stuck = matches!(&r, Err(ShaderError::Unsupported { what, .. })
                 if lower::needs_every_lane(what) || *what == lower::LANE_MASK && !needs.is_empty())
             || matches!(&r, Ok((_, Some(64)))) && !needs.is_empty();
         if !stuck {
+            if r.is_ok() && !meets.is_empty() {
+                // (a meeting in a block that could not be named, or an indirect exit: not known)
+                let around = lower::scalar_branches_around(&st, &meets).filter(|_| !meets.contains(&usize::MAX));
+                let Some(around) = around else {
+                    return Err(ShaderError::Unsupported {
+                        offset: 0,
+                        what: "wave-wide branches whose meetings of host waves cannot be placed",
+                    });
+                };
+                let before = agreed.len();
+                agreed.extend(around);
+                if agreed.len() > before {
+                    continue;
+                }
+            }
             if why {
                 let order = ir::reverse_postorder(&p.blocks);
                 let mut rpo = vec![0usize; p.blocks.len()];
@@ -819,7 +891,7 @@ fn widen(
                         format!("B{b}({nm}{})", if back { ",BACK" } else { "" })
                     })
                     .collect();
-                eprintln!("WAVE64-WIDE {} branches taken wave-wide: [{}]", wide.len(), desc.join(", "));
+                eprintln!("WAVE64-WIDE {} branches taken wave-wide, {} scalar branches agreed on: [{}]", wide.len(), agreed.len(), desc.join(", "));
             }
             return r;
         }
