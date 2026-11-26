@@ -5698,8 +5698,12 @@ impl State {
             why("mesh draws are switched off (VICTORY_MESH_TEST=skip)");
             return false;
         }
-        // One record without a count: clamped in a batch (`batches`).
-        let batch = if batches() > 0 && max == 1 && count.is_none() {
+        // One record without a count: clamped in a batch (`batches`). Not a
+        // spread dispatch: the batch writes 12-byte records and the spread
+        // signature reads 20-byte ones, so the program got garbage group
+        // counts (black picture with `VICTORY_DISPATCH_SPREAD` on, measured
+        // by halving the fork's switches). It is clamped on its own below.
+        let batch = if batches() > 0 && max == 1 && count.is_none() && !is_spread {
             args.refresh(list, arguments, len);
             self.batched(list, &args, arguments, kind)
         } else {
