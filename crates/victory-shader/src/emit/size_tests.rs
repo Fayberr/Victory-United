@@ -64,6 +64,8 @@ fn build(words: &[u32], srv: (u8, u32)) -> Result<HostShader, ShaderError> {
         mesh_stride: 0,
     })?;
     let shader = HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: HwStage::Cs,
         dxil: lowered.dxil,
         user_data: lowered.user_data,

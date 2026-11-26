@@ -255,6 +255,8 @@ fn lower_words(words: Vec<u32>, threads: u32, lds_bytes: u32, rsrc2: u32) -> Hos
         root_cbvs: lowered.root_cbvs,
         root_srvs: lowered.root_srvs,
         root_uavs: lowered.root_uavs,
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         root_indexed_views: res.root_indexed_views,
         half_views: lowered.half_views,
     };
@@ -298,7 +300,7 @@ fn run_cases_on(
         let host = match Host::new(warp) {
             Ok(host) => host,
             Err(e) => {
-                eprintln!("no SM 6.6 {label} device ({e}); skipped");
+                crate::emit::test_skip::skip(&format!("no SM 6.6 {label} device ({e}); skipped"));
                 continue;
             }
         };
@@ -308,7 +310,9 @@ fn run_cases_on(
             // without 32-lane waves (#356: 16 at most): refused, as it should be; not run.
             Err(e) if !host.runs_waves_of(32) => {
                 let (min, max) = host.wave_lanes().unwrap_or_default();
-                eprintln!("{label}: waves of {min} to {max} lanes, not 32; skipped ({e})");
+                crate::emit::test_skip::skip(&format!(
+                    "{label}: waves of {min} to {max} lanes, not 32; skipped ({e})"
+                ));
                 no_32_lanes += 1;
                 continue;
             }
@@ -2287,6 +2291,8 @@ fn whole_wave_f64_sum_and_cvt_f32_f64() {
         root_cbvs: lowered.root_cbvs,
         root_srvs: lowered.root_srvs,
         root_uavs: lowered.root_uavs,
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         root_indexed_views: Vec::new(),
         half_views: lowered.half_views,
     };
@@ -2299,13 +2305,14 @@ fn whole_wave_f64_sum_and_cvt_f32_f64() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     for (label, warp) in [("hardware", false), ("warp", true)] {
         let Ok(host) = Host::new(warp) else {
+            crate::emit::test_skip::skip(&format!("no SM 6.6 {label} device"));
             continue;
         };
         let (root, pso) = match host.compute_pipeline(&shader) {
             Ok(p) => p,
             // WARP does not support fixed WaveSize(32) on SM 6.6.
             Err(e) if warp => {
-                eprintln!("{label}: compute_pipeline skipped ({e})");
+                crate::emit::test_skip::skip(&format!("{label}: compute_pipeline refused ({e})"));
                 continue;
             }
             Err(e) => panic!("{label}: compute_pipeline failed: {e}"),
@@ -2459,6 +2466,8 @@ fn ps_sample_coverage_input_reads_coverage_mask() {
     });
     s.m.terminate(b, Term::Ret);
     let vs = HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: HwStage::Vs,
         dxil: s.finish(),
         user_data: Vec::new(),
@@ -2567,6 +2576,21 @@ fn packed_dot_products_and_clamps_execute_cleanly() {
         &[[0x1111_1111u32, 0x2222_2222u32, 10u32, 0]],
         |backend, _i, _inp, got| {
             assert_eq!(got, 26, "{backend}: v_dot8_u32_u4 got {got}, want 26");
+        },
+    );
+
+    // Signed nibbles: -1 * 7 in every lane plus 100, and -8 * -8 in every lane.
+    let [d8i_w0, d8i_w1] = vop3p(0x018, 0, vgpr(1), vgpr(2), vgpr(3));
+    let dot8_i4_shader = build_valu_cs(&[d8i_w0, d8i_w1]);
+    run_cases(
+        &dot8_i4_shader,
+        &[
+            [0xFFFF_FFFFu32, 0x7777_7777u32, 100u32, 0],
+            [0x8888_8888u32, 0x8888_8888u32, 0u32, 0],
+        ],
+        |backend, i, _inp, got| {
+            let want = [44, 512][i];
+            assert_eq!(got, want, "{backend}: v_dot8_i32_i4 case {i} got {got}, want {want}");
         },
     );
 
@@ -2717,6 +2741,8 @@ fn wave_prefix_f32_uses_signed_flag_and_validates() {
         v.validate(&mut dxil).unwrap();
     }
     let shader = HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: HwStage::Cs,
         dxil,
         user_data: l.user_data,
@@ -2963,6 +2989,8 @@ fn halves_go_through_a_table_as_they_are_and_name_their_views() {
     .expect("lower");
     assert_eq!(lowered.half_views, [(1, 0), (1, 8)]);
     let shader = HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: HwStage::Cs,
         dxil: lowered.dxil,
         user_data: lowered.user_data,
@@ -3241,6 +3269,8 @@ fn a_format_load_read_as_halves_loads_the_integer() {
         })
         .expect("lower");
         HostShader {
+            written_root_uavs: Vec::new(),
+            writes_guest_memory: false,
             stage: HwStage::Cs,
             dxil: l.dxil,
             user_data: l.user_data,

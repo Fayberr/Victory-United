@@ -201,7 +201,8 @@ pub fn boxes(children: &[u32; 4], boxes: &[[f32; 6]; 4], ray: &Ray, sort: bool) 
         // A box whose minimum x is NaN is switched off. A child that is not
         // there may have inverted infinite bounds, which every ray enters at
         // minus infinity: it would be first of the sorted children and end
-        // the walk before them (DexNom/VIctory bc3cd4b0).
+        // the walk before them (DexNom/VIctory bc3cd4b0). Their pointers must
+        // also keep the miss distance when sorting real hits.
         if children[n] != NONE && !b[0].is_nan() && leave >= enter.max(0.0) && enter < ray.extent {
             ids[n] = children[n];
             distances[n] = enter;

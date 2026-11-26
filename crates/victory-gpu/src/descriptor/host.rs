@@ -116,6 +116,14 @@ impl Made {
     }
 }
 
+/// The bytes of a constant buffer view the host takes of `requested`: at
+/// most the 64 KiB a shader can index. The host removes the device for a
+/// larger view, and the title's heap holds such sizes in slots it does not
+/// use.
+pub(crate) fn constant_view_bytes(requested: u32) -> u32 {
+    requested.min(D3D12_REQ_CONSTANT_BUFFER_ELEMENT_COUNT * 16)
+}
+
 pub(crate) struct HostHeap {
     pub(crate) heap: ID3D12DescriptorHeap,
     cpu: usize,
@@ -1883,6 +1891,14 @@ fn find_dynamic_run(taken: &[bool], cursor: usize, n: usize) -> Option<usize> {
 
 /// Tables refused for want of free dynamic slots, since the start.
 pub(crate) static REFUSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn dynamic_slots_on(null: u32, asked: Option<u32>) -> u32 {
+    if null == 0 {
+        return DYNAMIC;
+    }
+    let most = (null / 2).max(DYNAMIC);
+    asked.unwrap_or(DYNAMIC).clamp(DYNAMIC, most)
+}
 
 impl HostHeap {
     pub(crate) fn new(sampler: bool, count: u32) -> Option<Self> {
@@ -5600,6 +5616,10 @@ fn make_twinned(
     let device = &host.device;
     match view {
         &View::Constant(address, size) => {
+            let size = constant_view_bytes(size).next_multiple_of(D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+            if size == 0 || address == 0 {
+                return None;
+            }
             let shadow = crate::shadow::find(address, u64::from(size))?;
             let gpu = shadow.gpu(address);
             if gpu % 256 != 0 {
@@ -6166,20 +6186,33 @@ fn same_placed_texture(a: &View, b: &View) -> bool {
     }
 }
 
-/// A shader view of a texture the title placed in memory itself, as a view
-/// of the resource made for that memory (on first use).
+/// A shader or unordered access view of a texture the title placed in
+/// memory itself, as a view of the resource made for that memory (on first
+/// use).
 pub(crate) fn placed_texture(view: &View) -> Option<View> {
     const BUFFER: u32 = 1;
-    let View::Placed(false, resource, desc) = view else {
+    const TARGET_DEPTH_UNORDERED: u32 = 0x7;
+    let &View::Placed(unordered, mut resource, ref desc) = view else {
         return None;
     };
     if resource[0] == BUFFER {
         return None;
     }
     let address = u64::from(desc[10]) | u64::from(desc[11]) << 32;
-    let texture = crate::resource::texture_at(address, resource)?;
-    crate::resource::want_level(texture, crate::resource::first_mip(desc));
-    Some(View::Shader(texture as usize, desc[..10].try_into().ok()))
+    let words = desc[..10].try_into().ok();
+    if unordered {
+        let texture = crate::resource::uav_texture_at(address, &resource, desc[0])?;
+        Some(View::Unordered(texture as usize, 0, words))
+    } else {
+        // Shader views placed in memory take their texels either from title
+        // memory or from `TARGETS_AT` (`resource::alias_of`): clear target
+        // flags the title left on the resource description so this view
+        // never replaces that target in `TARGETS_AT`.
+        resource[12] &= !TARGET_DEPTH_UNORDERED;
+        let texture = crate::resource::texture_at(address, &resource)?;
+        crate::resource::want_level(texture, crate::resource::first_mip(desc));
+        Some(View::Shader(texture as usize, words))
+    }
 }
 
 /// With `VICTORY_NULL_MAGENTA=1`, a 2D colour texture view that shows
@@ -7213,6 +7246,19 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         // SAFETY: a slot of our heap and a live texture.
         unsafe { host.device.CreateShaderResourceView(texture, None, heap.cpu(0)) };
         // SAFETY: a plain device query.
+        assert!(unsafe { host.device.GetDeviceRemovedReason() }.is_ok());
+    }
+
+    #[test]
+    fn constant_view_from_world_load_fits_the_device() {
+        assert_eq!(constant_view_bytes(1_087_744), 65_536);
+        assert_eq!(constant_view_bytes(u32::MAX), 65_536);
+        assert_eq!(constant_view_bytes(320), 320);
+        let Some(host) = host() else { return };
+        let heap = HostHeap::new(false, 4).unwrap();
+        let data = vec![0u8; 128 * 1024];
+        let address = (data.as_ptr() as u64).next_multiple_of(65_536);
+        assert!(make(&View::Constant(address, 1_087_744), heap.cpu(0)).is_some());
         assert!(unsafe { host.device.GetDeviceRemovedReason() }.is_ok());
     }
 
@@ -8256,6 +8302,41 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert_eq!(slots(frame + 3 + TABLED_FRAMES), [2]);
     }
 
+    /// Small heaps and a dynamic range ending at the cap must leave the
+    /// shader's clamp target out of both title and dynamic allocations.
+    #[test]
+    fn view_heaps_keep_the_clamp_slot_null() {
+        let Some(host) = host() else {
+            eprintln!("no host GPU; heap clamp test not run");
+            return;
+        };
+        probe_view_limit();
+        let null = victory_shader::emit::view_heap_limit();
+        assert!(null >= DYNAMIC);
+        for count in [4, null - DYNAMIC, null - DYNAMIC + 1, null + 1] {
+            let heap = HostHeap::new(false, count).expect("a view heap on the live device");
+            // SAFETY: a plain query of a live heap.
+            assert_eq!(unsafe { heap.heap.GetDesc().NumDescriptors }, null + 1);
+            assert_eq!(heap.dynamic, DYNAMIC);
+            assert!(heap.count + heap.dynamic <= null);
+            let first = heap.dynamic(DYNAMIC).expect("the whole dynamic range");
+            assert!(first + DYNAMIC - 1 < null);
+            assert_eq!(heap.dynamic(1), None);
+        }
+        // SAFETY: a plain query of the live device after the allocations.
+        assert!(unsafe { host.device.GetDeviceRemovedReason() }.is_ok());
+        eprintln!("heap clamp checked on hardware: {} slots, {DYNAMIC} dynamic slots; small, exact-fit and overflowing title heaps leave slot {null} null", null + 1);
+    }
+
+    #[test]
+    fn dynamic_slots_stay_within_half_a_capped_heap() {
+        assert_eq!(dynamic_slots_on(0, Some(524_288)), DYNAMIC);
+        assert_eq!(dynamic_slots_on(2_000_000, None), DYNAMIC);
+        assert_eq!(dynamic_slots_on(2_000_000, Some(524_288)), 524_288);
+        assert_eq!(dynamic_slots_on(800_000, Some(524_288)), 400_000);
+        assert_eq!(dynamic_slots_on(2_000_000, Some(1)), DYNAMIC);
+    }
+
     #[test]
     fn dynamic_slots_are_held_until_released() {
         let Some(heap) = HostHeap::new(false, 4) else {
@@ -8399,6 +8480,31 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         heap.release(first + 10, 4);
         assert_eq!(heap.dynamic(4), Some(first + 10));
         eprintln!("allocated the free run across the cursor");
+    }
+
+    /// Contiguous free dynamic slot ranges that cross the search cursor are found.
+    #[test]
+    fn dynamic_allocation_finds_contiguous_range_crossing_search_cursor() {
+        let Some(heap) = HostHeap::new(false, 4) else {
+            return; // no host GPU
+        };
+        // Fill the entire dynamic range, then position the search cursor at 12
+        // with all slots occupied so the only free run (10..14) actually
+        // crosses the cursor.
+        let a = heap.dynamic(8).unwrap();
+        let b = heap.dynamic(8).unwrap();
+        assert_eq!((a, b), (4, 12));
+        let rest = heap.dynamic - 16;
+        assert_eq!(heap.dynamic(rest), Some(20));
+        heap.release(4, 12);
+        assert_eq!(heap.dynamic(12), Some(4));
+
+        // Release dynamic slots 10..14 (heap slots 14..18, crossing cursor at 12).
+        // Before the fix, a request of 4 slots starting search at 12 scanned
+        // 12..end (2 free) then 0..12 (2 free), missing the contiguous run at 10..14.
+        heap.release(14, 4);
+        let c = heap.dynamic(4);
+        assert_eq!(c, Some(14));
     }
 }
 
@@ -8611,6 +8717,203 @@ mod own_copy_tests {
         let last = first + heap.dynamic - 1;
         heap.release(last, 1);
         assert_eq!(heap.dynamic(2), None);
+    }
+
+    /// Placed unordered texture views (2D and 3D) mirror onto host unordered
+    /// access textures when written into a shader-visible heap, reuse an
+    /// existing target at the same address, and feed shader views placed at
+    /// that address in another format through `texture::alias`.
+    #[test]
+    fn placed_unordered_texture_view_mirrors_and_aliases_to_shader_view() {
+        use super::*;
+
+        let Some(host) = host() else {
+            return; // no host GPU
+        };
+        let Some(heap) = HostHeap::new(false, 8) else {
+            return;
+        };
+
+        // 1. 3D volume UAV (4x4x4 R32_UINT, resource flags = 0) mirrored via
+        // `HostHeap::mirror(..., for_draw = false)` as a shader-visible heap
+        // copy does.
+        let vol_at = 0x7fed_1000_0000u64;
+        let vol_res = [4, 0, 0, 0, 4, 0, 4, 0x1_0004, 42, 1, 0, 0, 0, 0];
+        let mut vol_uav = [0u32; 16];
+        (vol_uav[0], vol_uav[1], vol_uav[4]) = (42, 8, 4);
+        (vol_uav[10], vol_uav[11]) = (vol_at as u32, (vol_at >> 32) as u32);
+        let slot_mem = [0u64; 4];
+        let slot_handle = slot_mem.as_ptr() as u64;
+        super::super::create_placed_uav(std::ptr::null(), &vol_res, &vol_uav, slot_handle);
+        assert!(heap.mirror(0, slot_handle, false).is_some());
+        {
+            let tex = heap.kept_in(0).expect("3D placed UAV must mirror immediately");
+            // SAFETY: live D3D12 resource.
+            let d = unsafe { tex.GetDesc() };
+            assert_eq!(d.Dimension, D3D12_RESOURCE_DIMENSION_TEXTURE3D);
+            assert_ne!(d.Flags.0 & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS.0, 0);
+        }
+        // SAFETY: plain device query.
+        assert!(unsafe { host.device.GetDeviceRemovedReason() }.is_ok());
+
+        // Another placed UAV at the same address with compatible format reuses
+        // the resource already recorded in `TARGETS_AT`.
+        let Some(View::Unordered(first_vol, _, _)) =
+            placed_texture(&View::Placed(true, vol_res, vol_uav))
+        else {
+            panic!("expected View::Unordered");
+        };
+        let mut explicit_flags = vol_res;
+        explicit_flags[12] = 0x4;
+        let Some(View::Unordered(second_vol, _, _)) =
+            placed_texture(&View::Placed(true, explicit_flags, vol_uav))
+        else {
+            panic!("expected View::Unordered");
+        };
+        assert_eq!(first_vol, second_vol, "must reuse existing UAV texture at address");
+
+        // 2. Cross-format aliasing: a 4x4 R9G9B9E5_SHAREDEXP (67) description
+        // written through an R32_UINT (42) placed UAV and then read through an
+        // R9G9B9E5_SHAREDEXP placed SRV (even if `ALLOW_UNORDERED_ACCESS` was
+        // left on the SRV's resource description) copies the GPU texels across.
+        let alias_at = 0x7fed_2000_0000u64;
+        let rgb9e5_res = [3, 0, 0, 0, 4, 0, 4, 0x1_0001, 67, 1, 0, 0, 0x4, 0];
+        let mut uav_desc = [0u32; 16];
+        (uav_desc[0], uav_desc[1]) = (42, 4);
+        (uav_desc[10], uav_desc[11]) = (alias_at as u32, (alias_at >> 32) as u32);
+        let uav_placed = View::Placed(true, rgb9e5_res, uav_desc);
+        let Some(View::Unordered(uav_obj, _, _)) = placed_texture(&uav_placed) else {
+            panic!("expected placed UAV texture");
+        };
+        assert!(make(&uav_placed, heap.cpu(1)).is_some());
+
+        let mut srv_words = [0u32; 16];
+        (srv_words[0], srv_words[1], srv_words[2], srv_words[5]) =
+            (67, 4, D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING, 1);
+        (srv_words[10], srv_words[11]) = (alias_at as u32, (alias_at >> 32) as u32);
+        let srv_placed = View::Placed(false, rgb9e5_res, srv_words);
+        let Some(View::Shader(srv_obj, _)) = placed_texture(&srv_placed) else {
+            panic!("expected placed SRV texture");
+        };
+        assert!(make(&srv_placed, heap.cpu(2)).is_some());
+        assert_eq!(
+            crate::resource::alias_of(srv_obj as crate::object::This),
+            Some(uav_obj as crate::object::This),
+            "placed SRV must find the placed UAV texture in TARGETS_AT"
+        );
+
+        // Upload a known R32_UINT pattern into `uav_obj` on the GPU, run
+        // `texture::alias` into `srv_obj`, and read `srv_obj` back.
+        let uav_tex = crate::resource::host_resource(uav_obj as crate::object::This).unwrap();
+        let srv_tex = crate::resource::host_resource(srv_obj as crate::object::This).unwrap();
+        let pattern = 0x7c40_8210u32;
+        let make_buf = |heap_type, state| {
+            let hp = D3D12_HEAP_PROPERTIES {
+                Type: heap_type,
+                ..Default::default()
+            };
+            let rd = D3D12_RESOURCE_DESC {
+                Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
+                Width: 1024,
+                Height: 1,
+                DepthOrArraySize: 1,
+                MipLevels: 1,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+                ..Default::default()
+            };
+            let mut out: Option<ID3D12Resource> = None;
+            // SAFETY: valid buffer description.
+            unsafe {
+                host.device
+                    .CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, state, None, &mut out)
+                    .unwrap();
+            }
+            out.unwrap()
+        };
+        let upload = make_buf(D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+        let readback = make_buf(D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+        // SAFETY: 1024-byte upload buffer mapped on CPU.
+        unsafe {
+            let mut ptr = std::ptr::null_mut();
+            upload.Map(0, None, Some(&mut ptr)).unwrap();
+            std::slice::from_raw_parts_mut(ptr.cast::<u32>(), 256).fill(pattern);
+            upload.Unmap(0, None);
+        }
+
+        let list = host.new_list().unwrap();
+        crate::list::ensure_state(&list, uav_obj as crate::object::This, 0x400); // COPY_DEST
+        let buf_loc = |buf: &ID3D12Resource, format| D3D12_TEXTURE_COPY_LOCATION {
+            // SAFETY: borrowed pointer not released by the copy location.
+            pResource: unsafe { std::mem::transmute_copy(buf) },
+            Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+            Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 {
+                PlacedFootprint: D3D12_PLACED_SUBRESOURCE_FOOTPRINT {
+                    Offset: 0,
+                    Footprint: D3D12_SUBRESOURCE_FOOTPRINT {
+                        Format: format,
+                        Width: 4,
+                        Height: 4,
+                        Depth: 1,
+                        RowPitch: 256,
+                    },
+                },
+            },
+        };
+        let tex_loc = |tex: &ID3D12Resource| D3D12_TEXTURE_COPY_LOCATION {
+            // SAFETY: borrowed pointer not released by the copy location.
+            pResource: unsafe { std::mem::transmute_copy(tex) },
+            Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+            Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 {
+                SubresourceIndex: 0,
+            },
+        };
+        // SAFETY: open list and live resources in matching copy states.
+        unsafe {
+            list.list.CopyTextureRegion(
+                &tex_loc(uav_tex),
+                0,
+                0,
+                0,
+                &buf_loc(&upload, DXGI_FORMAT_R32_UINT),
+                None,
+            );
+        }
+        crate::list::ensure_state(&list, uav_obj as crate::object::This, 0x8); // UNORDERED_ACCESS
+        assert!(crate::texture::alias(
+            &list,
+            srv_obj as crate::object::This,
+            uav_obj as crate::object::This
+        ));
+        crate::list::ensure_state(&list, srv_obj as crate::object::This, 0x800); // COPY_SOURCE
+        // SAFETY: open list and `srv_tex` transitioned to `COPY_SOURCE`.
+        unsafe {
+            list.list.CopyTextureRegion(
+                &buf_loc(&readback, DXGI_FORMAT_R9G9B9E5_SHAREDEXP),
+                0,
+                0,
+                0,
+                &tex_loc(srv_tex),
+                None,
+            );
+        }
+        list.close();
+        host.execute(&[&list]);
+
+        // SAFETY: GPU execution finished; readback holds 1024 bytes.
+        let got = unsafe {
+            let mut ptr = std::ptr::null_mut();
+            readback.Map(0, None, Some(&mut ptr)).unwrap();
+            let word = *ptr.cast::<u32>();
+            readback.Unmap(0, None);
+            word
+        };
+        assert_eq!(got, pattern);
+        // SAFETY: plain device query.
+        assert!(unsafe { host.device.GetDeviceRemovedReason() }.is_ok());
     }
 }
 

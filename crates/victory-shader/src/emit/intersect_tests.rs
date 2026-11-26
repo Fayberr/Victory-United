@@ -193,6 +193,8 @@ pub(super) fn build_compute_shader(
         root_cbvs: lowered.root_cbvs,
         root_srvs: lowered.root_srvs,
         root_uavs: lowered.root_uavs,
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         root_indexed_views: res.root_indexed_views.clone(),
         half_views: lowered.half_views,
     };
@@ -558,7 +560,7 @@ fn run(wide: bool, descriptor: Descriptor, pointers: u64, sort: bool) {
     let mut ran = 0;
     for (label, warp) in [("hardware", false), ("warp", true)] {
         let Ok(host) = Host::new(warp) else {
-            eprintln!("no SM 6.6 {label} device; skipped");
+            crate::emit::test_skip::skip(&format!("no SM 6.6 {label} device; skipped"));
             continue;
         };
         let (root, pso) = host

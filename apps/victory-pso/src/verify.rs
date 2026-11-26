@@ -65,6 +65,8 @@ fn load(dir: &Path, s: &Stage) -> Result<HostShader> {
         })
         .collect();
     Ok(HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage,
         dxil,
         user_data,
@@ -494,6 +496,7 @@ pub fn run(dir: &Path, want: Want, execute: bool) -> Result<()> {
 
     let host = Host {
         device: a.device.clone(),
+        adapter: format!("{} (vendor {:#06x})", a.name, a.vendor),
     };
     let stages: Vec<(&HostShader, D3D12_SHADER_VISIBILITY)> = shaders
         .iter()

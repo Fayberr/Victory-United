@@ -65,6 +65,10 @@ thread_local! {
     /// While a stage's tables are walked (`State::tables`): whether that
     /// stage's shader can store to buffers (`Translated::stores`).
     static STORES: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    /// While a table descriptor is bound: whether this binding may be
+    /// written. Derived from the store instruction's descriptor when known;
+    /// falls back to `STORES` (the whole stage).
+    static BINDING_WRITES: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     /// While `State::early_textures` runs the texture pass: the
     /// milliseconds and the bytes that run may take, in place of the
     /// pass's own per frame.
@@ -1786,7 +1790,7 @@ impl State {
             return 0;
         }
         if kind == USER_MEMORY_BASE {
-            return memory.map_or(0, |m| m.base);
+            return memory.map_or(0, |m| if dword == 0 { m.base } else { m.count });
         }
         // All of every group, unless the dispatch says otherwise.
         if kind == victory_shader::emit::USER_DISPATCH_THREADS_X {
@@ -2079,13 +2083,17 @@ impl State {
             if t.stores && crate::picked::on() && crate::picked::picks(&stage.shader, &t.picks) {
                 crate::picked::runs_in(list);
             }
+            BINDING_WRITES.set(t.stores);
             let made = self.tables(
                 list,
                 &t.used,
                 &stage.tables,
                 &t.host.half_views,
+                &t.used_written,
+                t.write_unknown,
                 compute,
             );
+            BINDING_WRITES.set(t.stores);
             STORES.set(true);
             if made.iter().any(|m| m.1 == u32::MAX) {
                 once!("a draw whose descriptor table found no free slots is dropped");
@@ -2101,13 +2109,16 @@ impl State {
                 && !crate::pipeline::builder_quarantined(self.pipeline as This);
             // Title memory by address: what the shader finds it by.
             let memory = if t.host.root_srvs.contains(&victory_shader::emit::SLOT_MEMORY) {
+                // The shader can read the scene through guest addresses and
+                // write its result to a texture or a separate root UAV.
+                let raw_writes = writes && (t.host.writes_guest_memory || !write_skip());
                 // The structure builder off: what its structures' walkers
                 // would read is not a structure (`memory::empty`).
                 let unbuilt = stage.shader.walks() && !crate::pipeline::builder_live() && !crate::memory::walks_unbuilt();
                 // Only through a store by address: what it stores through
                 // views is declared with them.
-                let use_ = if crate::pipeline::is_builder(self.pipeline as This) || writes && t.stores_by_address {
-                    crate::memory::Use::Builds { back: writes }
+                let use_ = if crate::pipeline::is_builder(self.pipeline as This) || raw_writes && t.stores_by_address {
+                    crate::memory::Use::Builds { back: raw_writes }
                 } else {
                     crate::memory::Use::Reads
                 };
@@ -2286,7 +2297,9 @@ impl State {
                         None
                     }
                 };
-                if !self.root_uav(list, address, param, compute, writes) {
+                let writes_slot =
+                    writes && (!write_skip() || t.host.written_root_uavs.contains(&slot));
+                if !self.root_uav(list, address, param, compute, writes_slot) {
                     return false;
                 }
             }
@@ -2609,6 +2622,8 @@ impl State {
             {
                 let last: Vec<String> = slots[n - 63..=n]
                     .iter()
+                    .rev()
+                    .take(64)
                     .filter_map(|&i| crate::descriptor::view(heap.handle(i)?).map(|v| format!("{i}: {v:?}")))
                     .map(|s| s.chars().take(200).collect())
                     .collect();
@@ -4133,8 +4148,19 @@ impl State {
         used: &[UsedResource],
         layouts: &[TableLayout],
         half: &[(u8, u32)],
+        written: &[bool],
+        unknown_write: bool,
         compute: bool,
     ) -> MadeTables {
+        let writes = |u: &UsedResource| -> bool {
+            if unknown_write {
+                return true;
+            }
+            used.iter()
+                .position(|x| std::ptr::eq(x, u))
+                .and_then(|i| written.get(i).copied())
+                .unwrap_or(true)
+        };
         let tables = |u: &&UsedResource| u.root == RootType::Table;
         let mut fresh = TableSlots::default();
         for u in used.iter().filter(tables).filter(|u| u.kind == ResourceType::Cbv) {
@@ -4191,6 +4217,7 @@ impl State {
         }
         for u in used.iter().filter(tables) {
             if !fresh.contains(u.slot) {
+                BINDING_WRITES.set(writes(u));
                 self.table_entry(list, u, compute);
             }
         }
@@ -4300,9 +4327,10 @@ impl State {
                 }
                 let depth_before = TESTED_DEPTH.get();
                 TESTED_DEPTH.set((depth_before.0, false));
-                for u in layout.entries.iter().filter(|u| u.kind != ResourceType::Cbv) {
+                for u in entries().filter(|u| u.kind != ResourceType::Cbv) {
                     let handle = table + u64::from(u.table_offset_dwords) * 4;
                     if let Some(view) = crate::descriptor::view(handle) {
+                        BINDING_WRITES.set(writes(u));
                         readable(list, u.kind, &view);
                     }
                 }
@@ -4314,6 +4342,7 @@ impl State {
                     if let Some(view) = crate::descriptor::view(handle)
                         && let Some(kind) = view_kind(&view)
                     {
+                        BINDING_WRITES.set(STORES.get());
                         readable(list, kind, &view);
                     }
                 }
@@ -4416,6 +4445,13 @@ impl State {
                 };
                 match crate::descriptor::view(table + u64::from(k) * 32) {
                     Some(View::Constant(address, size)) => {
+                        // The host takes at most 64 KiB for a constant buffer
+                        // view; a title view past that is bound at that size.
+                        let size = crate::descriptor::host::constant_view_bytes(size);
+                        if size == 0 || address == 0 {
+                            host.make_null(index);
+                            continue;
+                        }
                         // Mirror `root_view`: when the constant buffer lives in
                         // an existing shadow copy at a 256-byte-aligned host GPU
                         // address and fits within D3D12's 64 KiB CBV limit, bind
@@ -5146,7 +5182,9 @@ impl State {
                     // the record drawn before it.
                     if (6..=8).contains(&why_not) {
                         static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                        if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 256 == 0 {
+                        if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                            .is_multiple_of(256)
+                        {
                             let (last_copy, last_offset) = self.last_indirect;
                             tracing::info!(
                                 "a window miss (one in 256): cause {why_not}, kind {kind}, stride {stride}, buffer {} offset {offset:#x} ({} left); the command before it on the list: buffer {last_copy} offset \
@@ -5490,7 +5528,7 @@ fn readable(list: &HostList, kind: ResourceType, view: &View) {
         if kind == ResourceType::Uav {
             // A shader that cannot store to buffers leaves the range as
             // the title has it: nothing to find afterwards.
-            if STORES.get() || !write_skip() {
+            if (BINDING_WRITES.get() && STORES.get()) || !write_skip() {
                 #[cfg(feature = "diagnostics")]
                 crate::host::wide_write(address, len, 0);
                 shadow.gpu_writes(list, address, len);

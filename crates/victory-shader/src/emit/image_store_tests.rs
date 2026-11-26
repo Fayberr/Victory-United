@@ -158,6 +158,8 @@ fn lower(native: &NativeProgram) -> Result<HostShader, ShaderError> {
         mesh_stride: 0,
     })?;
     Ok(HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: HwStage::Cs,
         dxil: lowered.dxil,
         user_data: lowered.user_data,

@@ -166,6 +166,8 @@ fn build(words: &[u32], threads: u32, uav_image: bool) -> HostShader {
     })
     .expect("lower");
     let shader = HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: HwStage::Cs,
         dxil: lowered.dxil,
         user_data: lowered.user_data,

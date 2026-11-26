@@ -39,7 +39,7 @@ use super::host::{GraphicsState, HostPipeline};
 
 /// What a host pipeline is made from, and the host pipeline once made.
 pub(crate) struct Pending {
-    shaders: Vec<Arc<Shader>>,
+    pub(crate) shaders: Vec<Arc<Shader>>,
     pub(crate) graphics: Option<Box<GraphicsState>>,
     queue_state: AtomicU8,
     /// Taken by a worker from [`Queue::slow`].
@@ -642,7 +642,21 @@ struct Queue {
     /// being made ([`slow_limit`]).
     slow: VecDeque<Arc<Pending>>,
     slow_now: usize,
+    /// Depth-only / shadow-map prewarmed pipelines: rebuilt ahead of other
+    /// early pipelines while no draw is actively requesting one.
+    early_depth: VecDeque<Arc<Pending>>,
     requested: VecDeque<Arc<Pending>>,
+}
+
+/// Whether `p` is a traditional vertex graphics pipeline (as opposed to mesh
+/// or compute).
+fn is_vertex_graphics(p: &Pending) -> bool {
+    p.shaders.iter().any(|s| s.stage == "vertex")
+}
+
+/// Whether `p` is a compute pipeline.
+fn is_compute(p: &Pending) -> bool {
+    p.shaders.iter().any(|s| s.stage == "compute")
 }
 
 impl Queue {
@@ -652,6 +666,7 @@ impl Queue {
             early: VecDeque::new(),
             slow: VecDeque::new(),
             slow_now: 0,
+            early_depth: VecDeque::new(),
             requested: VecDeque::new(),
         }
     }
@@ -674,6 +689,8 @@ impl Queue {
             self.requested.push_back(p.clone());
         } else if slow {
             self.slow.push_back(p.clone());
+        } else if p.graphics.as_ref().is_some_and(|state| state.writes_depth_only()) {
+            self.early_depth.push_back(p.clone());
         } else {
             self.early.push_back(p.clone());
         }
@@ -702,7 +719,9 @@ impl Queue {
         };
         let mut p = self.screen.pop_front();
         if p.is_none() && !screens_only {
-            p = most_asked(&mut self.requested).or_else(|| unclaimed(&mut self.early));
+            p = most_asked(&mut self.requested)
+                .or_else(|| unclaimed(&mut self.early_depth))
+                .or_else(|| unclaimed(&mut self.early));
             if p.is_none() && self.slow_now < slow_limit {
                 p = unclaimed(&mut self.slow);
                 if let Some(p) = &p {

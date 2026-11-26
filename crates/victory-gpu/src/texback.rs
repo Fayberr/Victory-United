@@ -14,6 +14,14 @@
 //! the texels are tiled into the texture's title memory in the console's
 //! layout, as the console's GPU would have left them.
 //!
+//! Ported from myokex/victory-amd `1544bd5` (GPL-3.0-or-later).
+//! From Geckomacabre/vx-layer `eee5667d` as fxceless PR 999 has it (with the
+//! allocation tickets and the flights' ranges of its second commit). The
+//! height map is in a pipe and bank XOR swizzle mode, which the layouts
+//! address since PastiiJay's klbf-lab `ee7081b7` (from MiamiGame/XTP
+//! `00c60fb` and `188d895`, patterns generated out of Mesa's addrlib, MIT);
+//! without it no copy back could be tiled. GPL-3.0-or-later.
+//!
 //! shortcut: by kind, not by texture: textures of those kinds the title never
 //! reads are copied back too (about a megabyte per such list). The copy shows
 //! what the list's last write left; a title read in between sees the frame
@@ -234,7 +242,9 @@ pub(crate) fn land(back: &Back) {
         let linear = unsafe { std::slice::from_raw_parts(data.cast::<u8>().add(footprint.Offset as usize), len) };
         if let Err(e) = back.layout.tile(&mut tiled, mip, slice, linear, pitch, pitch * rows as usize) {
             static ONCE: std::sync::Once = std::sync::Once::new();
-            ONCE.call_once(|| tracing::warn!(?e, mip, slice, "a texture copied back could not be tiled"));
+            ONCE.call_once(|| {
+                tracing::warn!(?e, mip, slice, swizzle = back.layout.desc.swizzle.0, "a texture copied back could not be tiled")
+            });
             // SAFETY: mapped above.
             unsafe { back.buffer.Unmap(0, None) };
             return;
@@ -245,7 +255,15 @@ pub(crate) fn land(back: &Back) {
     crate::host::copy_mapped(at as *mut u8, tiled.as_ptr(), size, true);
     let copied = COPIED.fetch_add(1, Ordering::Relaxed) + 1;
     if copied == 1 || copied.is_multiple_of(128) {
-        tracing::info!(copied, bytes = size, "texture readback landed");
+        tracing::info!(
+            copied,
+            bytes = size,
+            swizzle = back.layout.desc.swizzle.0,
+            width = back.layout.desc.width,
+            height = back.layout.desc.height,
+            element = back.layout.desc.element_bytes,
+            "texture readback landed"
+        );
     }
 }
 

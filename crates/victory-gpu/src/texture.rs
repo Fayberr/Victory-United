@@ -289,8 +289,6 @@ fn cut_from_blocks(host: &crate::host::Host, total: u64) -> Option<(ID3D12Resour
 fn staging_buffer_alone(host: &crate::host::Host, total: u64) -> Option<(ID3D12Resource, *mut u8, u64, bool, Option<Piece>)> {
     let size = total.max(64 << 10).next_power_of_two();
     if size > SPARE_MOST.1 || !staging_pool() {
-        // (Counted as made: the frame log's "staging N made" is then the
-        // buffers of a run without the pool too.)
         SPARE_STATS[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         return host.upload_buffer(total).map(|(buffer, data)| (buffer, data, 0, false, None));
     }

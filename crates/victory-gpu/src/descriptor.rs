@@ -1134,12 +1134,16 @@ pub(crate) enum View {
 
 impl View {
     /// Whether the view reads buffer memory (constant buffers, buffer views
-    /// of resources or of memory) or memory the title placed a texture in:
-    /// such views get host slots only for draws.
+    /// of resources or of memory) or memory the title placed a texture in
+    /// to sample: such views get host slots only for draws. Placed
+    /// unordered texture views live on the host alone, as texture objects'
+    /// unordered views do, so shader-visible heap writes mirror them.
     #[cfg(windows)]
     fn is_buffer(&self) -> bool {
+        const BUFFER: u32 = 1;
         match self {
-            View::Constant(..) | View::Placed(..) => true,
+            View::Constant(..) | View::Placed(false, ..) => true,
+            View::Placed(true, resource, _) => resource[0] == BUFFER,
             View::Shader(r, _) | View::Unordered(r, _, _) => {
                 crate::resource::buffer_bytes(*r as This).is_some()
             }
@@ -2036,7 +2040,7 @@ mod tests {
             user_data: 4,
             slot: 1,
         };
-        let made = state.tables(&list, &[range], &[], &[(1, 8)], true);
+        let made = state.tables(&list, &[range], &[], &[(1, 8)], &[], false, true);
         let made: Vec<(u8, u32)> = made.iter().copied().collect();
         let [(1, offset)] = made[..] else {
             panic!("one fresh table for root parameter 1, not {made:?}");

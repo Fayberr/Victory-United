@@ -345,17 +345,28 @@ impl Lower<'_> {
             self.end_guarded(at, &[]);
             return Ok(());
         }
-        let has_cl = name.ends_with("_cl");
+        let has_cl = name.split('_').any(|t| t == "cl");
         let (op, sample) = match name {
-            "image_sample" | "image_sample_o" | "image_sample_cl" => (60, true),
-            "image_sample_lz" | "image_sample_l" | "image_sample_lz_o" => (62, true),
-            "image_sample_b" | "image_sample_b_cl" => (61, true),
-            "image_sample_c_lz" => (65, true),
-            "image_sample_d" | "image_sample_d_cl" => (63, true),
+            "image_sample" | "image_sample_o" | "image_sample_cl" | "image_sample_cl_o" => {
+                (60, true)
+            }
+            "image_sample_lz" | "image_sample_l" | "image_sample_lz_o" | "image_sample_l_o" => {
+                (62, true)
+            }
+            "image_sample_b" | "image_sample_b_cl" | "image_sample_b_o" | "image_sample_b_cl_o" => {
+                (61, true)
+            }
+            "image_sample_c_lz" | "image_sample_c_lz_o" => (65, true),
+            "image_sample_d" | "image_sample_d_cl" | "image_sample_d_o" | "image_sample_d_cl_o" => {
+                (63, true)
+            }
             "image_get_lod" if self.s.pixel => (81, true),
             // Implicit derivatives: pixel shaders only.
-            "image_sample_c" if self.s.pixel => (64, true),
-            "image_sample_c_cl" if self.s.pixel => (64, true),
+            "image_sample_c" | "image_sample_c_cl" | "image_sample_c_o" | "image_sample_c_cl_o"
+                if self.s.pixel =>
+            {
+                (64, true)
+            }
             "image_gather4" | "image_gather4_lz" | "image_gather4_lz_o" | "image_gather4_l" | "image_gather4_l_o" => (73, true),
             "image_load" | "image_load_mip" => (66, false),
             "image_get_resinfo" => (72, false),
@@ -532,13 +543,33 @@ impl Lower<'_> {
                 *o = zero;
             }
             if offset_word && offsets > 0 {
-                let w = addr_val(self, 0)?;
-                for (k, at) in [(0, 26), (1, 18)].into_iter().take(offsets.min(2)) {
-                    // Bits at..at+5 sign-extended: shift up, then down.
-                    let left = self.s.m.i32(at);
-                    let t = self.s.m.bin(c, Bin::Shl, w, left);
-                    let k26 = self.s.m.i32(26);
-                    os[k] = self.s.m.bin(c, Bin::AShr, t, k26);
+                // The offset word is always a full 32-bit VGPR (even with a16):
+                // signed 6-bit fields at bits 0..=5 (x), 8..=13 (y), 16..=21 (z).
+                // DXIL sampling ops require immediate offsets in -8..=7, while
+                // gathers also accept computed offsets.
+                let w = addr_u32(self, 0)?;
+                let imm = self.s.m.int_value(w).and_then(|w| {
+                    let w = w as u32;
+                    let field = |k: usize| {
+                        let x = (w >> (8 * k) & 0x3F) as i32;
+                        if x >= 32 { x - 64 } else { x }
+                    };
+                    let fields = [field(0), field(1), field(2)];
+                    (op == 73 || fields[..offsets].iter().all(|x| (-8..=7).contains(x)))
+                        .then_some(fields)
+                });
+                if let Some(fields) = imm {
+                    for (k, o) in os.iter_mut().enumerate().take(offsets) {
+                        *o = self.s.m.i32(fields[k] as u32);
+                    }
+                } else {
+                    for (k, at) in [(0, 26), (1, 18), (2, 10)].into_iter().take(offsets) {
+                        // Bits at..at+5 sign-extended: shift up, then down.
+                        let left = self.s.m.i32(at);
+                        let t = self.s.m.bin(c, Bin::Shl, w, left);
+                        let k26 = self.s.m.i32(26);
+                        os[k] = self.s.m.bin(c, Bin::AShr, t, k26);
+                    }
                 }
             }
             let mut args = vec![h, sh];
@@ -619,27 +650,6 @@ impl Lower<'_> {
                     call_sample(self, "sampleLevel.f32", 62, &args, &mut gathered)
                 }
                 60 => {
-                    if offset_word {
-                        // DXIL wants immediate offsets in -8..=7 here; the
-                        // console's are 6-bit and may be computed. A
-                        // constant word in range becomes immediates
-                        // (upstream PR #634); anything else keeps the
-                        // offsets computed above (upstream refuses those).
-                        let w = addr_val(self, 0)?;
-                        if let Some(w) = self.s.m.int_value(w) {
-                            let w = w as u32;
-                            let field = |k: usize| {
-                                let x = (w >> (8 * k) & 0x3F) as i32;
-                                if x >= 32 { x - 64 } else { x }
-                            };
-                            let n = offsets.min(2);
-                            if (0..n).all(|k| (-8..=7).contains(&field(k))) {
-                                for (k, o) in os.iter_mut().enumerate().take(n) {
-                                    *o = self.s.m.i32(field(k) as u32);
-                                }
-                            }
-                        }
-                    }
                     args.extend(&os);
                     args.push(clamp);
                     call_sample(self, "sample.f32", 60, &args, &mut gathered)
@@ -733,7 +743,7 @@ impl Lower<'_> {
                     call_sample(self, name, op, &args, &mut gathered)
                 }
                 62 => {
-                    let lod = if name == "image_sample_l" {
+                    let lod = if matches!(name, "image_sample_l" | "image_sample_l_o") {
                         let x = addr_packed(self, coord_base, coords)?;
                         to_float(self, x)
                     } else {
