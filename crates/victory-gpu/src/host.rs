@@ -10881,45 +10881,28 @@ impl HostList {
                 });
             }
         }
-        for list in runs {
-            for rb in &list.deferred().readbacks {
-                let written = if rb.dst_pitch == rb.row_bytes && rb.src_pitch == rb.row_bytes {
-                    let bytes = rb.row_bytes * rb.lines;
-                    crate::watch::writing(rb.dst, bytes);
-                    write_mapped(rb.dst as *mut u8, rb.src as *const u8, bytes);
-                    bytes
-                } else {
-                    let mut n = 0;
-                    for line in 0..rb.lines {
-                        let to = rb.dst + line * rb.dst_pitch;
-                        let from = rb.src + line * rb.src_pitch;
-                        crate::watch::writing(to, rb.row_bytes);
-                        write_mapped(to as *mut u8, from as *const u8, rb.row_bytes);
-                        n += rb.row_bytes;
-                    }
-                    n
-                };
-                COPY_BACK[1].fetch_add(written as u64, Ordering::Relaxed);
-            }
-        }
         COPY_BACK[0].fetch_add(copying.elapsed().as_micros() as u64, Ordering::Relaxed);
-        // Host timestamps the lists resolved, on the title's GPU clock.
+        // Host GPU timestamps the lists resolved, on the title's GPU clock,
+        // then the read-backs and the bottom-of-pipe writes that tell the
+        // title the GPU is done.
         let mut clock = None;
         for list in runs {
-            let mut deferred = list.deferred();
-            for &(at, what, bytes) in &deferred.writes[deferred.early..] {
+            read_backs(list);
+            let deferred = list.deferred();
+            for &(at, what, bytes) in &deferred.writes {
                 let what = match what {
-                    crate::queue::Written::HostTimestamp(raw) => match clock.get_or_insert_with(|| self.clock()) {
-                        // SAFETY: the list's mapped read-back memory, which
-                        // the submission that ran resolved into.
-                        Some(c) => crate::queue::Written::Value(c.convert(unsafe { (raw as *const u64).read_volatile() })),
-                        None => crate::queue::Written::GpuTimestamp,
-                    },
+                    crate::queue::Written::HostTimestamp(raw) => {
+                        match clock.get_or_insert_with(|| self.clock()) {
+                            // SAFETY: the list's mapped read-back memory,
+                            // which the submission that ran resolved into.
+                            Some(c) => crate::queue::Written::Value(c.convert(unsafe { (raw as *const u64).read_volatile() })),
+                            None => crate::queue::Written::GpuTimestamp,
+                        }
+                    }
                     what => what,
                 };
                 what.write(at as *mut u8, bytes);
             }
-            deferred.early = 0;
         }
     }
 
