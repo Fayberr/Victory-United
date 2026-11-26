@@ -1399,29 +1399,6 @@ extern "system" fn present(
     hr
 }
 
-/// The second plane's host copy, its GPU state, and the title resource, when
-/// the present carries one (`crate::compose`). The state is left in
-/// `COPY_SOURCE` for the compose pass; the caller restores it after showing.
-#[cfg(windows)]
-fn second_plane(
-    planes: u32,
-    plane_parameters: *const Plane,
-) -> Option<(This, std::sync::Arc<crate::resource::HostTexture>, u32)> {
-    if planes < 2 || plane_parameters.is_null() {
-        return None;
-    }
-    // SAFETY: the title passes `planes` plane descriptions.
-    let plane = unsafe { plane_parameters.add(1).as_ref() }?;
-    if plane.count == 0 || plane.resources.is_null() {
-        return None;
-    }
-    // SAFETY: the plane lists `count` resources.
-    let resource = unsafe { *plane.resources };
-    let copy = crate::resource::host_copy(resource)?;
-    let (_, before) = crate::resource::host_transition(resource, 0x800)?;
-    Some((resource, copy, before))
-}
-
 fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESULT {
     #[cfg(windows)]
     let presenting = std::time::Instant::now();
@@ -1560,7 +1537,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         const COPY_SOURCE: u32 = 0x800;
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
-<<<<<<< HEAD
         // A second plane (the title's interface over its game image, in
         // its Series S mode) is drawn over the first: `crate::over`. Each
         // plane's description is 0x48 bytes and starts as the first does.
@@ -1585,20 +1561,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         if let Some((r, _, was)) = over {
             crate::resource::host_transition(r, was);
         }
-||||||| 085ee7c4
-        let shown = host.present(texture, state, frame);
-        crate::resource::host_transition(resource, state);
-=======
-        let second = second_plane(planes, plane_parameters);
-        let over = second
-            .as_ref()
-            .map(|(_, copy, before)| (&copy.texture, *before));
-        let shown = host.present_over(texture, state, over, frame);
-        if let Some((resource, _, before)) = second {
-            crate::resource::host_transition(resource, before);
-        }
-        crate::resource::host_transition(resource, state);
->>>>>>> vitoriabr/main
         #[cfg(feature = "diagnostics")]
         blinks(frame, resource, state, shown);
         #[cfg(not(feature = "diagnostics"))]
