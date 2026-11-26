@@ -348,7 +348,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn signals_set_waiting_events() {
-        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0, WAIT_TIMEOUT};
+        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
         use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 
         let mut f = std::ptr::null();
@@ -373,20 +373,10 @@ mod tests {
         let at = slot::<extern "system" fn(This) -> u64>(f, 0x60)(f);
         // SAFETY: the fence's value.
         assert_eq!(unsafe { *(at as *const u64) }, 5);
-        // A new wait after a rewind uses the current fence value.
-        assert_eq!(signal(f, 2), S_OK);
-        assert_eq!(slot::<extern "system" fn(This) -> u64>(f, 0x40)(f), 2);
-        assert_eq!(wait(f, 4, event), S_OK);
-        // SAFETY: the event is still live.
-        assert_eq!(unsafe { WaitForSingleObject(event, 0) }, WAIT_TIMEOUT);
-        assert_eq!(signal(f, 4), S_OK);
-        // SAFETY: as above.
-        assert_eq!(unsafe { WaitForSingleObject(event, 0) }, WAIT_OBJECT_0);
         // SAFETY: ours.
         unsafe { CloseHandle(event) };
         assert_eq!(slot::<extern "system" fn(This) -> u32>(f, 0x10)(f), 0);
     }
-<<<<<<< HEAD
 
     #[test]
     fn fence1_interface_is_created_and_queried() {
@@ -420,8 +410,6 @@ mod tests {
         assert_eq!(slot::<Release>(queried, 0x10)(queried), 1);
         assert_eq!(slot::<Release>(f, 0x10)(f), 0);
     }
-||||||| merged common ancestors
-=======
 
     /// A fence's value only grows; a lower signal changes nothing.
     #[test]
@@ -565,5 +553,4 @@ mod tests {
         }
         assert_eq!(release(f), 0);
     }
->>>>>>> vibr/main
 }
