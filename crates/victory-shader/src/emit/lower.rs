@@ -1489,7 +1489,6 @@ thread_local! {
     pub(super) static TEST_HOST_WAVE: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
 }
 
-<<<<<<< HEAD
 /// The values that hold a lane mask on some path: the masks, and every join one of whose
 /// incoming values does (directly or through other joins). A register holding a mask on one
 /// path and a number on the other (#356: `s_mov_b32 s20, vcc_lo` on one side, `5` on the
@@ -1513,10 +1512,6 @@ pub(super) fn mask_values(p: &Program, st: &Structured) -> HashSet<Value> {
 
 /// Whether `i` reads a lane mask as a number; `masks` is [`mask_values`] of the program.
 pub(super) fn reads_mask_as_data(st: &Structured, masks: &HashSet<Value>, i: &Inst) -> bool {
-||||||| 0a4356653
-pub(super) fn reads_mask_as_data(st: &Structured, i: &Inst) -> bool {
-=======
-pub(super) fn reads_mask_as_data(st: &Structured, i: &Inst) -> bool {
     // A scalar select uses the condition of the whole guest wave, even
     // when the preceding mask operation has no scalar-dword consumers.
     if matches!(i.fields, Fields::Sop { .. } | Fields::Valu(_))
@@ -1524,7 +1519,6 @@ pub(super) fn reads_mask_as_data(st: &Structured, i: &Inst) -> bool {
     {
         return true;
     }
->>>>>>> vicetay/main
     let is_mask = |v: Value| st.masks.contains_key(&v) || st.highs.contains_key(&v);
     let holds_mask = |v: Value| masks.contains(&v);
     let ops: Vec<&Operand> = match &i.fields {
@@ -12122,35 +12116,12 @@ impl<'a> Lower<'a> {
             let mut vals =
                 self.vgprs(inst, data.as_ref().ok_or("buffer store data")?, regs as u8)?;
             if d16 {
-<<<<<<< HEAD
-                // Through a view of a table each half is stored as it is
-                // (`halves`). Otherwise d16 data is taken as f16, widened for
-                // the 32-bit float store; through a view of an integer format
-                // it is a 16-bit integer, zero- or sign-extended (VIctory
-                // 4243a96a: the face network keeps its halves in UINT views;
-                // its output was noise). shortcut: that is known of the views
-                // a program picks from the heap, not of those in its tables;
-                // and the handle stays a float one, whose bits the drivers
-                // pass.
-||||||| 0a4356653
-                // d16 data is taken as f16, widened for the 32-bit float
-                // store; through a view of an integer format it is a 16-bit
-                // integer, zero- or sign-extended (VIctory 4243a96a: the face
-                // network keeps its halves in UINT views; its output was
-                // noise). shortcut: that is known of the views a program
-                // picks from the heap, not of those in its tables; and the
-                // handle stays a float one, whose bits the drivers pass.
-=======
-                // d16 data is taken as f16, widened for the 32-bit float
-                // store; through a view of an integer format it is a 16-bit
-                // integer, zero- or sign-extended (VIctory 4243a96a: the face
-                // network keeps its halves in UINT views; its output was
-                // noise). Both `ResourceHeap` (`SLOT_STRIDES`) and `Table`
-                // (`SLOT_TABLE_STRIDES`, dynamic table snapshots included)
-                // populate the view-kind bits, while the handle stays a float
-                // one (`0x409`), whose raw bits RTX and WARP pass bit-exact
-                // without extra CFG blocks or touching non-d16 shaders.
->>>>>>> vicetay/main
+                // A half view carries each channel's bits unchanged.
+                // Otherwise widen the half to f32, or zero- or sign-extend it
+                // for an integer format. The heap stride table and the table
+                // stride buffer (including dynamic snapshots) supply the view
+                // kind. The latter path keeps the float handle (0x409), whose
+                // bits RTX and WARP pass through for integer views.
                 let integer = if typed { self.integer_view(src)? } else { None };
                 let mut wide = Vec::new();
                 for k in 0..count {
