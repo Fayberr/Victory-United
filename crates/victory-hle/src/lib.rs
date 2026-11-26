@@ -147,7 +147,6 @@ mod tests {
             Some(Provenance::Hle)
         );
     }
-<<<<<<< HEAD
 
     /// The title imports two BSTR helpers from `oleaut32.dll` by ordinal
     /// (4 is `SysAllocStringLen`, 6 `SysFreeString`), so the host's own
@@ -195,33 +194,4 @@ mod tests {
         // A call we do not implement is not passed to the host either.
         assert_eq!(r.classify("rpcrt4.dll", &name("RpcServerRegisterIf")), None);
     }
-||||||| a26859fc
-=======
-
-    // #510: the RPC runtime's GUID calls are ours, so the DLL itself stays
-    // outside the host policy (its own `ws2_32` imports would be a network
-    // path `modules::net` never sees).
-    #[test]
-    fn the_rpc_runtime_is_implemented_here() {
-        let r = HleResolver::new(HostPolicy::none());
-        for call in [
-            "UuidCreate",
-            "UuidCreateSequential",
-            "UuidFromStringA",
-            "UuidFromStringW",
-            "UuidToStringA",
-            "UuidToStringW",
-            "RpcStringFreeA",
-            "RpcStringFreeW",
-        ] {
-            assert_eq!(
-                r.classify("rpcrt4.dll", &name(call)),
-                Some(Provenance::Hle),
-                "{call}"
-            );
-        }
-        // A call we do not implement is not passed to the host either.
-        assert_eq!(r.classify("rpcrt4.dll", &name("RpcServerRegisterIf")), None);
-    }
->>>>>>> avatar/main
 }
