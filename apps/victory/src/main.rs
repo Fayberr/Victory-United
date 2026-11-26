@@ -6,13 +6,9 @@
 mod agility;
 mod census;
 mod inspect;
-<<<<<<< HEAD
 mod precompile;
-||||||| a26859fc
-=======
 #[cfg(all(windows, feature = "diagnostics"))]
 mod replay;
->>>>>>> avatar/main
 mod run;
 mod shader;
 mod translate;
@@ -102,7 +98,6 @@ enum Command {
         #[arg(long)]
         warm: Option<PathBuf>,
     },
-<<<<<<< HEAD
     /// Translate shaders into the runtime cache ahead of time (resumable).
     /// With --pipelines, also compile compute pipelines into the host
     /// pipeline library and GPU driver cache.
@@ -125,8 +120,6 @@ enum Command {
         #[arg(long)]
         pipeline_jobs: Option<usize>,
     },
-||||||| a26859fc
-=======
     /// Translate every shader found (as `translate` finds them) into the
     /// shader cache, so that no run has to: a few minutes, once per change
     /// of the translator.
@@ -158,7 +151,6 @@ enum Command {
         #[arg(long, hide = true)]
         these: Option<String>,
     },
->>>>>>> avatar/main
     /// Prepare, map and bind a title executable; with --execute, run it.
     Run {
         exe: PathBuf,
@@ -248,7 +240,6 @@ fn main() -> Result<()> {
             }
             translate::run(paths, validate, pipelines, list, jobs)
         }
-<<<<<<< HEAD
         Command::Precompile {
             paths,
             pipelines,
@@ -257,21 +248,18 @@ fn main() -> Result<()> {
             jobs,
             pipeline_jobs,
         } => precompile::run(paths, pipelines, only, limit, jobs, pipeline_jobs),
-||||||| a26859fc
-=======
         Command::Shaders { paths, jobs } => translate::precompile(paths, jobs),
         #[cfg(windows)]
         Command::Warm { jobs, limit, again, used, these } => warm::run(jobs, limit, again, used, these),
->>>>>>> avatar/main
         Command::Run {
             exe,
             unimplemented,
             strict,
             execute,
             console,
-<<<<<<< HEAD
-            title_args: _,
+            title_args,
         } => {
+            victory_hle::runtime::set_title_args(title_args);
             let code = run::run(&exe, unimplemented, strict, execute, console)?;
             if code != 0 {
                 // Preserve all 32 bits of the Windows process status.
@@ -279,18 +267,8 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-||||||| a26859fc
-            title_args: _,
-        } => run::run(&exe, unimplemented, strict, execute, console),
-=======
-            title_args,
-        } => {
-            victory_hle::runtime::set_title_args(title_args);
-            run::run(&exe, unimplemented, strict, execute, console)
-        }
         #[cfg(all(windows, feature = "diagnostics"))]
         Command::Replay(options) => replay::run(options),
->>>>>>> avatar/main
         Command::Config => show_config(),
     }
 }
