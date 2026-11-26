@@ -108,7 +108,6 @@ pub(crate) struct Shadow {
     /// Ranges shaders of a submission not yet copied back may be writing:
     /// title memory there is older than the copy.
     pending: Mutex<Vec<(usize, usize)>>,
-<<<<<<< HEAD
     /// With [`relay`]: how many submissions not yet copied back declared
     /// each range of `pending` ([`Flights`]). Locked inside `pending`'s
     /// lock.
@@ -165,6 +164,25 @@ pub(crate) struct Shadow {
     place: Option<(windows::Win32::Graphics::Direct3D12::ID3D12Heap, u64)>,
     /// Bytes reserved in `crate::rebar` (0 if not placed in GPU upload heap).
     rebar: u64,
+    /// The buffer is the title's memory itself ([`Direct`]): nothing is
+    /// copied either way.
+    direct: Option<Direct>,
+    /// Ranges that cannot be watched, with the frame they were copied in.
+    unwatched: Mutex<std::collections::HashMap<(usize, usize), u64>>,
+    /// Ranges already guarded and copied at `region_epoch(from, to)` (O(1) fast
+    /// path when no guard fault/remap/rewrite occurred in those 64 MiB regions).
+    clean_spans: Mutex<std::collections::HashMap<(usize, usize), u64>>,
+    /// The buffer has memory only where it was brought up to date.
+    sparse: Option<Sparse>,
+}
+
+struct Direct {
+    heap: windows::Win32::Graphics::Direct3D12::ID3D12Heap,
+    /// The same memory from other 64 KiB starts, for views whose elements
+    /// do not fall on multiples of their size from this one's.
+    aliases: Mutex<Vec<(u64, Arc<Shadow>)>>,
+    /// The title mapped other memory there since.
+    dead: std::sync::atomic::AtomicBool,
 }
 
 /// What a copy in the card's memory ([`cards`]) has beside the buffer
@@ -2010,80 +2028,6 @@ mod relay_tests {
         merge_piece(&fetched, &mut wrong_cpu, &mut wrong_title);
         assert_eq!(wrong_title[30], base[30]);
     }
-||||||| merged common ancestors
-    /// The copy's bytes before the submission ran, from an offset on,
-    /// covering the ranges its shaders write: what the GPU wrote differs.
-    before: Mutex<Option<(usize, Vec<u8>)>>,
-=======
-    /// The copy's bytes before the submission ran, from an offset on,
-    /// covering the ranges its shaders write: what the GPU wrote differs.
-    before: Mutex<Before>,
-    /// The buffer is the title's memory itself ([`direct`]): nothing is
-    /// copied either way.
-    direct: Option<Direct>,
-    /// Ranges that cannot be watched, with the frame they were copied in.
-    unwatched: Mutex<std::collections::HashMap<(usize, usize), u64>>,
-    /// Ranges already guarded and copied at `region_epoch(from, to)` (O(1) fast
-    /// path when no guard fault/remap/rewrite occurred in those 64 MiB regions).
-    clean_spans: Mutex<std::collections::HashMap<(usize, usize), u64>>,
-    /// The buffer has memory only where it was brought up to date.
-    sparse: Option<Sparse>,
-    /// Device-local VRAM mirror (`DEFAULT`) + Wave64 GPU hash state (`card.rs`).
-    card: Option<Arc<crate::card::CardState>>,
-}
-
-struct Direct {
-    heap: windows::Win32::Graphics::Direct3D12::ID3D12Heap,
-    /// The same memory from other 64 KiB starts, for views whose elements
-    /// do not fall on multiples of their size from this one's.
-    aliases: Mutex<Vec<(u64, Arc<Shadow>)>>,
-    /// The title mapped other memory there since.
-    dead: std::sync::atomic::AtomicBool,
-}
-
-#[derive(Default)]
-struct Before {
-    snapshot: Option<(usize, Vec<u8>)>,
-    unchanged: UnchangedPages,
-}
-
-/// Pages already compared in full against this submission's snapshot.
-#[derive(Default)]
-struct UnchangedPages {
-    start: usize,
-    end: usize,
-    pages: Vec<bool>,
-}
-
-impl UnchangedPages {
-    fn begin(&mut self, start: usize, end: usize) {
-        if self.pages.is_empty() {
-            self.start = start;
-            self.end = end;
-            self.pages.resize(end.div_ceil(PAGE) - start / PAGE, false);
-        }
-    }
-
-    fn differs(&mut self, address: usize, current: &[u8], before: &[u8]) -> bool {
-        let page = address / PAGE;
-        let unchanged = &mut self.pages[page - self.start / PAGE];
-        if *unchanged {
-            return false;
-        }
-        if current != before {
-            return true;
-        }
-        // A later range can touch bytes a partial comparison missed. At
-        // the edges, only bytes covered by the snapshot can be compared.
-        *unchanged = address == (page * PAGE).max(self.start)
-            && address + current.len() == ((page + 1) * PAGE).min(self.end);
-        false
-    }
-
-    fn clear(&mut self) {
-        self.pages.clear();
-    }
->>>>>>> belobug/main
 }
 
 /// Snapshot memory kept for reuse (already touched, so no page faults).
