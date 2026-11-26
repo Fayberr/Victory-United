@@ -284,18 +284,12 @@ static IDLE: std::sync::Mutex<(Vec<Idle>, u64)> = std::sync::Mutex::new((Vec::ne
 /// between them (a list keeps scratch chunks over a reset only while lists
 /// do not share them, `VICTORY_SCRATCH_POOL=0`).
 #[cfg(windows)]
-<<<<<<< HEAD
 // (512 since run 221: with submissions prepared by a thread of ours the
 // title has its lists back at once and resets them while the flights of
 // the frame before are still in the air, so more than 128 are out at a
 // time: 80 host lists were made and as many thrown away every frame,
 // 8 ms to make and more to free, on the thread that submits.)
 const IDLE_MOST: (usize, u64) = (512, 256 << 20);
-||||||| a26859fc
-const IDLE_MOST: (usize, u64) = (128, 256 << 20);
-=======
-const IDLE_MOST: (usize, u64) = (512, 256 << 20);
->>>>>>> avatar/main
 
 /// Whether host lists that have run are used again (on by default;
 /// `VICTORY_LIST_POOL=0`: each is made new and thrown away, as before).
@@ -1574,17 +1568,11 @@ extern "system" fn copy_memory(this: This, dst: u64, src: u64, len: u64, _flags:
         && src != 0
     {
         let len = len as usize;
-<<<<<<< HEAD
-        list.defer_known(dst as usize, src as usize, len, move || {
-||||||| a26859fc
-        list.defer(move || {
-=======
         if list.place_copy(dst as usize, src as usize, len) {
             with_state(this, |_, state| state.copied());
             return;
         }
-        list.defer(move || {
->>>>>>> avatar/main
+        list.defer_known(dst as usize, src as usize, len, move || {
             if crate::texture::committed(src as *const u8, len)
                 && crate::texture::committed(dst as *const u8, len)
             {
@@ -2287,7 +2275,6 @@ extern "system" fn barrier_groups(this: This, count: u32, _groups: *const u8) {
     {
         use std::sync::atomic::Ordering::Relaxed;
         use windows::Win32::Graphics::Direct3D12::D3D12_RESOURCE_BARRIER;
-<<<<<<< HEAD
         // Nothing written through unordered access since the list's last
         // such barrier: nothing to wait for (`VICTORY_BARRIER_MERGE`).
         if crate::host::barrier_merge() {
@@ -2298,10 +2285,7 @@ extern "system" fn barrier_groups(this: This, count: u32, _groups: *const u8) {
             list.set_uav_pending(false);
             crate::host::BARRIER_STATS[0].fetch_add(1, Relaxed);
         }
-||||||| a26859fc
-=======
         with_state(this, |_, state| state.synced());
->>>>>>> avatar/main
         // SAFETY: the same layout; no resource named.
         let barrier = unsafe { std::mem::transmute::<Barrier, D3D12_RESOURCE_BARRIER>(UAV_BARRIER) };
         // SAFETY: an open list.
@@ -2574,7 +2558,6 @@ mod tests {
         assert_eq!(release(list), 0);
         assert_eq!(release(allocator), 0);
     }
-<<<<<<< HEAD
 
     #[test]
     fn barrier_batches_split_before_duplicate_resource_transitions() {
@@ -2805,8 +2788,6 @@ mod tests {
         assert_eq!(release(list), 0);
         assert_eq!(release(allocator), 0);
     }
-||||||| a26859fc
-=======
 
     /// An offset near `u64::MAX` must not overflow and write outside the
     /// query destination buffer.
@@ -2831,5 +2812,4 @@ mod tests {
             assert_eq!(release(object), 0);
         }
     }
->>>>>>> avatar/main
 }
