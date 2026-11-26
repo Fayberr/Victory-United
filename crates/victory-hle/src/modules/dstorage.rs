@@ -1428,6 +1428,8 @@ fn execute(request: &Request) -> Result<(), HRESULT> {
         let mut packed = vec![0; request.intermediate_size as usize];
         let n = inflate(&source, &mut packed).map_err(|hr| fail(hr, "zlib"))?;
         packed.truncate(n);
+        // The compressed bytes aren't needed past here: not held while BCPack unpacks.
+        drop(source);
         Cow::Owned(packed)
     } else {
         source
