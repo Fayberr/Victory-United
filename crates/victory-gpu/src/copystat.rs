@@ -1242,6 +1242,7 @@ pub(crate) fn log(frames: f64) {
         c[C::GpuWritesLeftOut as usize],
         mb(c[C::GpuWritesLeftOutBytes as usize]),
     );
+    crate::draw::tables_line(frames);
     let [together, written, mapped] =
         [0, 1, 2].map(|n| crate::watch::ALIASES[n].load(std::sync::atomic::Ordering::Relaxed));
     let due = crate::watch::DUE.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / frames;
