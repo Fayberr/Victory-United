@@ -14193,6 +14193,7 @@ impl Host {
         frame: u64,
         token: Option<u64>,
     ) -> Option<bool> {
+        slow_frame(frame);
         // SAFETY: a live resource.
         let desc = unsafe { texture.GetDesc() };
         let planes = overlay.and_then(|(over, over_state)| {
@@ -16274,3 +16275,19 @@ mod masked_patch_compile_tests {
     }
 }
 
+/// A frame that took long, said in the log on its own (the frame line every few seconds only gives
+/// the mean, and a single hitch disappears in it): over 100 ms a warning, over 500 ms an error,
+/// with the time since the last present and the pipelines still being made (a first draw with a
+/// new pipeline is the usual cause of one). The 33 ms the title asks for (30 fps) is the goal.
+fn slow_frame(frame: u64) {
+    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    let now = std::time::Instant::now();
+    let before = LAST.lock().unwrap_or_else(|e| e.into_inner()).replace(now);
+    let Some(before) = before else { return };
+    let ms = now.duration_since(before).as_secs_f64() * 1e3;
+    if ms > 500.0 {
+        tracing::error!(frame, ms = format_args!("{ms:.0}"), "slow frame: {ms:.0} ms (30 fps is 33 ms)");
+    } else if ms > 100.0 {
+        tracing::warn!(frame, ms = format_args!("{ms:.0}"), "slow frame: {ms:.0} ms (30 fps is 33 ms)");
+    }
+}
