@@ -136,14 +136,10 @@ pub(crate) struct Shadow {
     /// Asks for the copy that gave no length (root views: they read from
     /// their address to the copy's end, whatever lies there).
     unsized_asks: AtomicU64,
-<<<<<<< HEAD
     /// Whether shaders were ever declared to write it.
     written: std::sync::atomic::AtomicBool,
-||||||| c7daeea5
-=======
     /// With `crate::stamp` on: the pages checked in this submission.
     stamp: crate::stamp::Stamp,
->>>>>>> integ/vertex
     /// A number no other copy has had. Its address is no name for a copy:
     /// one let go and another made may share it.
     id: u64,
@@ -186,25 +182,13 @@ struct Card {
     /// not gone to the card's side yet.
     dirty: Mutex<Vec<(usize, usize)>>,
     /// With [`relay`]: the offsets that went from `dirty` to the card's
-<<<<<<< HEAD
     /// side, each with the number of the send that took it
     /// ([`card_dirty`]), kept until a fetch sent after it has been merged.
-    /// Locked inside `dirty`'s lock.
+    /// Locked inside `dirty`'s lock. A send's ranges in order and apart
+    /// (one list of ranges with the send's number each was walked whole for
+    /// every piece merged: with the title's changed dwords sent each on its
+    /// own, that is up to 54,000 ranges a frame against 1,300 pieces).
     sent: Mutex<SentRuns>,
-||||||| c7daeea5
-    /// side, each with the number of the send that took it
-    /// ([`card_dirty`]), kept until a fetch sent after it has been merged.
-    /// Locked inside `dirty`'s lock.
-    sent: Mutex<Vec<(usize, usize, u64)>>,
-=======
-    /// side, by the number of the send that took them ([`card_dirty`]; a
-    /// send's ranges in order and apart), kept until a fetch sent after it
-    /// has been merged. Locked inside `dirty`'s lock. (One list of ranges
-    /// with the send's number each was walked whole for every piece merged:
-    /// with the title's changed dwords sent each on its own, that is up to
-    /// 54,000 ranges a frame against 1,300 pieces.)
-    sent: Mutex<Vec<(u64, Vec<(usize, usize)>)>>,
->>>>>>> integ/vertex
     /// Whether the copy is in [`CARD_QUEUE`]: set when `dirty` takes its
     /// first range, cleared when [`card_dirty`] takes them. Written under
     /// `dirty`'s lock.
@@ -293,27 +277,16 @@ fn resolve_card_limits(
 /// The smallest title buffer whose copy goes to the card's memory, and the
 /// most bytes of such copies (their "before" twins not counted: a copy
 /// shaders write takes its size twice), both in bytes:
-<<<<<<< HEAD
 /// `VICTORY_CARD_BUFFERS_MIN_MB` and `VICTORY_CARD_BUFFERS_MB`.
+/// `VICTORY_CARD_BUFFERS_MIN_KB` names the smallest in KiB instead, below
+/// 1 MiB too: run int-k-2's world has 3,604 title buffers under 1 MiB, 42 MB
+/// in all, that shaders read over the bus.
 /// Defaults scale with the adapter's local VRAM budget (16 MiB / 512 MiB on
 /// `<= 12 GiB` budgets, 4 MiB / 2048 MiB on 16 GB cards, 1 MiB / up to 8192 MiB
 /// on `>= 20 GiB` budgets), and explicit env vars always override.
-||||||| c7daeea5
-/// `VICTORY_CARD_BUFFERS_MIN_MB` (16) and `VICTORY_CARD_BUFFERS_MB` (512).
-/// Run 69's gameplay has ten title buffers of 16 MiB or more, 494 MB, and
-/// 1,650 MB of the card's budget free.
-=======
-/// `VICTORY_CARD_BUFFERS_MIN_MB` (16) and `VICTORY_CARD_BUFFERS_MB` (512).
-/// `VICTORY_CARD_BUFFERS_MIN_KB` names the smallest in KiB instead, below
-/// 1 MiB too (0: every title buffer): run int-k-2's world has 3,604 title
-/// buffers under 1 MiB, 42 MB in all, that shaders read over the bus.
-/// Run 69's gameplay has ten title buffers of 16 MiB or more, 494 MB, and
-/// 1,650 MB of the card's budget free.
->>>>>>> integ/vertex
 fn card_limits() -> (u64, u64) {
     static LIMITS: std::sync::OnceLock<(u64, u64)> = std::sync::OnceLock::new();
     *LIMITS.get_or_init(|| {
-<<<<<<< HEAD
         let env_mb = |name: &str| std::env::var(name).ok().and_then(|v| v.trim().parse::<u64>().ok());
         let vram_budget = crate::host::host().and_then(|h| h.video_memory()).map(|[budget, ..]| budget);
         let (mut min_bytes, max_bytes) = resolve_card_limits(
@@ -341,45 +314,6 @@ fn card_limits() -> (u64, u64) {
             "card buffer limits"
         );
         (min_bytes, max_bytes)
-||||||| c7daeea5
-        let mb = |name: &str, default: u64| {
-            std::env::var(name).ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(default) << 20
-        };
-        // From 1 MiB up and 1,024 MB in all by default (it was 16 and 512):
-        // the shader writes of the smaller buffers are then found by the
-        // card's hashes too, and with that the first room's walls were
-        // drawn in every run.
-        // `VICTORY_CARD_BUFFERS_MIN_KB` (not set by default) says the least
-        // size in KiB instead, so that it can go under 1 MiB: 64 is every
-        // title buffer (a copy's size is rounded up to 64 KiB). Why one
-        // would: the copies under 1 MiB are some 3,700 of 3,800 and 30 MB
-        // in all (run 274), they stay in the PC's memory, and every load,
-        // store and atomic a shader does on them crosses the bus. The
-        // title's passes that are slow by the thread read and write such
-        // buffers (one tile-reset pass: 737,000 one-dword requests on
-        // a 288-byte and a 900 KiB buffer in 1.4 to 2 ms). What it costs:
-        // 64 KiB of the card's memory a copy and as much again for one
-        // shaders write, and more copies for the passes before and after
-        // each submission to go through. Not tried in a game yet.
-        let least = match std::env::var("VICTORY_CARD_BUFFERS_MIN_KB").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
-            Some(kib) if kib > 0 => kib << 10,
-            _ => mb("VICTORY_CARD_BUFFERS_MIN_MB", 1).max(1 << 20),
-        };
-        (least, mb("VICTORY_CARD_BUFFERS_MB", 1024))
-=======
-        let mb = |name: &str, default: u64| {
-            std::env::var(name).ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(default) << 20
-        };
-        // From 1 MiB up and 1,024 MB in all by default (it was 16 and 512):
-        // the shader writes of the smaller buffers are then found by the
-        // card's hashes too, and with that the first room's walls were
-        // drawn in every run.
-        let least = match std::env::var("VICTORY_CARD_BUFFERS_MIN_KB").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
-            Some(kb) => kb << 10,
-            None => mb("VICTORY_CARD_BUFFERS_MIN_MB", 1).max(1 << 20),
-        };
-        (least, mb("VICTORY_CARD_BUFFERS_MB", 1024))
->>>>>>> integ/vertex
     })
 }
 
@@ -916,18 +850,8 @@ pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)
             let ranges = joined(std::mem::take(&mut *dirty));
             if relay() {
                 let mut sent = c.sent.lock().unwrap_or_else(|e| e.into_inner());
-<<<<<<< HEAD
                 sent.forget(fetched);
                 sent.note_joined(sent_as, ranges.clone());
-||||||| c7daeea5
-                sent.retain(|s| s.2 > fetched);
-                sent.extend(ranges.iter().map(|&(a, b)| (a, b, sent_as)));
-=======
-                sent.retain(|s| s.0 > fetched);
-                if !ranges.is_empty() {
-                    sent.push((sent_as, ranges.clone()));
-                }
->>>>>>> integ/vertex
             }
             ranges
         };
@@ -938,7 +862,6 @@ pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)
     out
 }
 
-<<<<<<< HEAD
 /// Diagnostics (`crate::host::upcheck`, nothing in the air): copies whose
 /// pages the write watch and the guards hold for unchanged since they were
 /// taken, compared with title memory, `most` bytes a call in turn. `say` gets
@@ -1036,8 +959,6 @@ pub(crate) fn carded_copies() -> Vec<Arc<Shadow>> {
     CARDED.lock().unwrap_or_else(|e| e.into_inner()).values().filter_map(std::sync::Weak::upgrade).collect()
 }
 
-||||||| c7daeea5
-=======
 /// Of a send's ranges (in order and apart) those that reach into
 /// `[from, to)`.
 fn sent_over(ranges: &[(usize, usize)], from: usize, to: usize) -> &[(usize, usize)] {
@@ -1046,7 +967,6 @@ fn sent_over(ranges: &[(usize, usize)], from: usize, to: usize) -> &[(usize, usi
     &ranges[first..last]
 }
 
->>>>>>> integ/vertex
 /// Ranges in order, those that overlap or touch as one.
 fn joined(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     // (The sort that finds what is in order already: they come as a few
@@ -1962,22 +1882,10 @@ fn workers() -> &'static Workers {
         there: std::sync::atomic::AtomicUsize::new(0),
     });
     STARTED.call_once(|| {
-<<<<<<< HEAD
         for i in 0..wide_threads() {
-||||||| c7daeea5
-        let n = std::thread::available_parallelism().map_or(4, |n| n.get() / 4).clamp(2, 6);
-        for i in 0..n {
-=======
-        let n = wide_threads();
-        for i in 0..n {
->>>>>>> integ/vertex
             let _ = std::thread::Builder::new().name(format!("victory-wide-{i}")).spawn(move || {
-<<<<<<< HEAD
                 crate::cores::keep_helper_on_fast_cores("victory-wide");
-||||||| c7daeea5
-=======
                 WIDE_WORKER.set(true);
->>>>>>> integ/vertex
                 let workers = WORKERS.get().expect("made above");
                 loop {
                     let job = {
@@ -2049,7 +1957,6 @@ pub(crate) fn wide_run(jobs: Vec<Box<dyn FnOnce() + Send>>) {
     wide(jobs);
 }
 
-<<<<<<< HEAD
 /// Calls `work` with every number under `n`, on the kept threads and on
 /// this one, the next number to whichever is free: for thousands of small
 /// pieces of work, where a job each ([`wide`]) is mostly the jobs' queue.
@@ -2074,8 +1981,6 @@ pub(crate) fn wide_each(n: usize, work: impl Fn(usize) + Send + Sync + 'static) 
     wide(jobs);
 }
 
-||||||| c7daeea5
-=======
 /// [`wide_apart`], for the host's own work by a caller that holds locks; on
 /// one of the threads themselves the jobs run one after the other.
 pub(crate) fn wide_run_apart(jobs: Vec<Box<dyn FnOnce() + Send>>) {
@@ -2124,7 +2029,6 @@ fn wide_apart(mut jobs: Vec<Job>) {
     }
 }
 
->>>>>>> integ/vertex
 /// About this many bytes to a piece of work for [`wide`].
 const WIDE_JOB: usize = 1 << 20;
 
@@ -2895,7 +2799,6 @@ fn changed_runs_wide(now: &[u8], was: &[u8]) -> Vec<(usize, usize)> {
     changed_runs_bytes(now, was)
 }
 
-<<<<<<< HEAD
 /// The kernel's page.
 const KERNEL_PAGE: usize = 4096;
 
@@ -2985,8 +2888,9 @@ pub(crate) static PUT: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 
 /// The dwords (of title memory from `at` on) where `merged` differs from
 /// `title`, as (offset, bytes) in order, joined where at most `gap` bytes
-/// lie between.
-fn dword_runs(at: usize, title: &[u8], merged: &[u8], gap: usize) -> Vec<(usize, usize)> {
+/// lie between. (Vertex brought a `dword_runs` too, which widens runs it is
+/// given: that one keeps the name.)
+fn changed_dword_runs(at: usize, title: &[u8], merged: &[u8], gap: usize) -> Vec<(usize, usize)> {
     let mut runs: Vec<(usize, usize)> = Vec::new();
     for (from, n) in changed_runs(merged, title) {
         // Shaders write dwords: the whole of each.
@@ -3000,7 +2904,7 @@ fn dword_runs(at: usize, title: &[u8], merged: &[u8], gap: usize) -> Vec<(usize,
     runs
 }
 
-/// [`dword_runs`] with no gap, the fast way where it can be: a frame compares
+/// [`changed_dword_runs`] with no gap, the fast way where it can be: a frame compares
 /// 12 MB this way and finds 80,000 runs.
 fn word_runs(at: usize, title: &[u8], held: &[u8]) -> Vec<(usize, usize)> {
     #[cfg(target_arch = "x86_64")]
@@ -3008,7 +2912,7 @@ fn word_runs(at: usize, title: &[u8], held: &[u8]) -> Vec<(usize, usize)> {
         // SAFETY: the processor has AVX2, and the lengths are the same.
         return unsafe { word_runs_avx2(title, held) };
     }
-    dword_runs(at, title, held, 0)
+    changed_dword_runs(at, title, held, 0)
 }
 
 /// # Safety
@@ -3104,9 +3008,9 @@ fn put_changed(at: usize, title: &[u8], merged: &[u8]) -> usize {
         }
         return merged.len();
     }
-    let mut runs = dword_runs(at, title, merged, 0);
+    let mut runs = changed_dword_runs(at, title, merged, 0);
     if runs.len() > 64 {
-        runs = dword_runs(at, title, merged, 32);
+        runs = changed_dword_runs(at, title, merged, 32);
         PUT[3].fetch_add(1, Ordering::Relaxed);
     }
     let mut written = 0;
@@ -3141,8 +3045,6 @@ pub(crate) fn land_as_before(start: usize, now: usize, held: usize, n: usize, ti
     }
 }
 
-||||||| c7daeea5
-=======
 /// The step a refresh that compares ([`refresh_compare`]) takes or leaves
 /// whole: the kernel's page, which is as fine as its write watch tells.
 const CHUNK: usize = 4 << 10;
@@ -3299,20 +3201,14 @@ unsafe fn take_changed(at: usize, to: usize, held: *mut u8, out: &mut Taken) {
     COMPARED_ROOM.set((title, steps));
 }
 
->>>>>>> integ/vertex
 #[cfg(test)]
 mod merge_tests {
-<<<<<<< HEAD
-    use super::{PIECE, back_piece, changed_chunks, changed_runs, changed_runs_bytes, changed_runs_wide, dword_runs, join_runs, put_changed, word_runs};
-||||||| c7daeea5
-    use super::{PIECE, back_piece, changed_chunks, changed_runs, changed_runs_bytes, changed_runs_wide, join_runs};
-=======
     use super::{
         CHUNK, PAGE, PIECE, SNAPS, Taken, WIDE_COMPARE_JOB, back_piece, changed_chunks,
-        changed_runs, changed_runs_bytes, changed_runs_wide, changed_stretches, compare_jobs,
-        dword_runs, give_back, join_runs, pooled, take_changed, take_snapshots,
+        changed_dword_runs, changed_runs, changed_runs_bytes, changed_runs_wide,
+        dword_runs, give_back, join_runs, pooled, put_changed, take_changed, take_snapshots,
+        word_runs,
     };
->>>>>>> integ/vertex
 
     /// Runs with fewer bytes between them than the gap become one, from the
     /// first's start to the last's end; the others stay as they are.
@@ -3587,17 +3483,17 @@ mod merge_tests {
                 for &c in &changes {
                     merged[c] ^= 0x55;
                 }
-                let runs = dword_runs(at, &title, &merged, 0);
+                let runs = changed_dword_runs(at, &title, &merged, 0);
                 let held: Vec<usize> = runs.iter().flat_map(|&(a, n)| a..a + n).collect();
                 let mut expect: Vec<usize> = (0..200).filter(|i| changes.iter().any(|c| (at + c) / 4 == (at + i) / 4)).collect();
                 expect.dedup();
                 assert_eq!(held, expect, "{at:#x} {changes:?}");
-                let joined = dword_runs(at, &title, &merged, 32);
+                let joined = changed_dword_runs(at, &title, &merged, 32);
                 assert!(joined.len() <= runs.len());
                 assert!(runs.iter().all(|r| joined.iter().any(|j| j.0 <= r.0 && r.0 + r.1 <= j.0 + j.1)));
             }
         }
-        assert!(dword_runs(0, &title, &title, 0).is_empty());
+        assert!(changed_dword_runs(0, &title, &title, 0).is_empty());
     }
 
     /// The runs hold exactly the bytes that differ: putting them into the
@@ -3651,7 +3547,7 @@ mod merge_tests {
                     *b = random() as u8;
                 }
             }
-            assert_eq!(word_runs(0x1000, &now, &was), dword_runs(0x1000, &now, &was, 0), "round {round}");
+            assert_eq!(word_runs(0x1000, &now, &was), changed_dword_runs(0x1000, &now, &was, 0), "round {round}");
         }
     }
 
