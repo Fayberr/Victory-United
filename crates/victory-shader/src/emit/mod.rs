@@ -2,18 +2,13 @@
 //! or mesh shader as a PC DXIL container (SM 6.6) that host D3D12 accepts.
 //! Compute shaders keep the console's thread-group size; one that depends
 //! on the lane layout (cross-lane operations) declares the console's wave
-<<<<<<< HEAD
-//! size (`WaveSize`), so the host device must support it. On a host of
-//! 32-lane waves, a wave64 program that no form in 32-lane waves gives as
-//! the console runs it takes the paired form instead (`paired`): a host
-//! wave for each console wave, two console lanes a thread, half the threads.
-||||||| merged common ancestors
-//! size (`WaveSize`), so the host device must support it.
-=======
 //! size (`WaveSize`), so the host device must support it: [`Target`] says
 //! which wave sizes the host runs, and a shader that needs another one does
 //! not translate for it (rather than being refused at pipeline creation).
->>>>>>> belobug/main
+//! On a host of 32-lane waves, a wave64 program that no form in 32-lane
+//! waves gives as the console runs it takes the paired form instead
+//! (`paired`): a host wave for each console wave, two console lanes a
+//! thread, half the threads.
 //!
 //! What the host binds for a translated shader ([`HostShader`]):
 //!
@@ -39,18 +34,10 @@
 //! * **Root CBVs and root SRVs** (raw buffers) as root descriptors
 //!   `b<i>` / `t<i>` in [`ROOT_CBV_SPACE`], `i` the title's root parameter
 //!   index ([`HostShader::root_cbvs`], [`HostShader::root_srvs`]); the
-<<<<<<< HEAD
-//!   address the title sets is the buffer's.
-//! * **Vertex fetch** (added 2026-11-23). The title's mesh and
-||||||| merged common ancestors
-//!   address the title sets is the buffer's.
-//! * **Vertex fetch** (added 2026-11-23). Grand Theft Auto VI's mesh and
-=======
 //!   address the title sets is the buffer's. An indexed access through a
 //!   descriptor the code builds around one reads at the index times the
 //!   stride the code puts in the descriptor.
 //! * **Vertex fetch** (added 2026-11-23). Grand Theft Auto VI's mesh and
->>>>>>> belobug/main
 //!   vertex programs fetch vertices themselves with typed-format loads
 //!   (`tbuffer_load_format_*`): the format (8_8_8_8 unorm, 16_16 snorm,
 //!   2_10_10_10 unorm, 8_8_8_8 and 16_16_16_16 uint...) is in the
@@ -109,60 +96,43 @@ mod cube_lod_tests;
 mod descriptor_tests;
 #[cfg(all(test, windows))]
 mod diff_tests;
-<<<<<<< HEAD
 #[cfg(all(test, windows))]
 mod image_dim_tests;
 #[cfg(all(test, windows))]
 mod image_store_tests;
 #[cfg(all(test, windows))]
+mod image_tests;
+#[cfg(all(test, windows))]
 mod intersect_tests;
-||||||| merged common ancestors
-=======
 #[cfg(test)]
 mod memory_tests;
-#[cfg(all(test, windows))]
-mod image_tests;
->>>>>>> belobug/main
 #[cfg(all(windows, any(test, feature = "host")))]
 pub mod host;
-<<<<<<< HEAD
 mod idiom;
-mod link;
-||||||| merged common ancestors
-=======
-#[cfg(all(test, windows))]
-mod lds_tests;
 #[cfg(all(test, windows))]
 mod lane_read_loop_tests;
->>>>>>> belobug/main
-mod lower;
-<<<<<<< HEAD
-mod own_bits;
 #[cfg(all(test, windows))]
-mod permlane_tests;
-mod rect;
-||||||| merged common ancestors
-=======
-mod rectangle;
+mod lds_tests;
+mod link;
+mod lower;
 #[cfg(test)]
 mod opcode_audit;
 #[cfg(all(test, windows))]
 mod opcode_tests;
->>>>>>> belobug/main
+mod own_bits;
+#[cfg(all(test, windows))]
+mod permlane_tests;
+mod rect;
+mod rectangle;
 mod sampler;
 #[cfg(all(test, windows))]
 mod scratch_tests;
 mod shader;
-<<<<<<< HEAD
+#[cfg(all(test, windows))]
+mod split_tests;
 pub mod stand_in;
 pub mod exposure;
 mod threading;
-||||||| merged common ancestors
-=======
-#[cfg(all(test, windows))]
-mod split_tests;
-mod threading;
->>>>>>> belobug/main
 #[cfg(windows)]
 pub mod validator;
 #[cfg(all(test, windows))]
@@ -183,29 +153,19 @@ use crate::dxbc::{Container, FourCC};
 use crate::native::{HwStage, NativeProgram, RootType};
 use crate::{ShaderError, io, ir, resource, structure};
 
-<<<<<<< HEAD
 pub use bitcode::census;
 pub use link::{link_mesh, mesh_fits};
-||||||| merged common ancestors
-=======
 pub use rectangle::rectangle_geometry;
->>>>>>> belobug/main
 pub use sampler::StaticSampler;
-<<<<<<< HEAD
 pub use lower::{host_max_wave, host_settings, set_host_max_wave, set_host_rdna};
 pub use rect::rect_list_gs;
 pub use shader::{
     MEMORY_FAULTS, MEMORY_PAGES, MEMORY_READ_ONLY, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-    SLOT_STRIDES_COUNT, SLOT_VIEW_BYTES, SLOT_VIEWS, SLOT_VIEWS_COUNT, SLOT_VIEWS_RECORD_BYTES, USER_DATA_SPACE,
-    VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS, USER_DISPATCH_THREADS_X, USER_GROUP_BASE,
-    USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
+    SLOT_STRIDES_COUNT, SLOT_VIEW_BYTES, SLOT_VIEWS, SLOT_VIEWS_COUNT, SLOT_VIEWS_RECORD_BYTES, STRIDE_SPACE,
+    USER_DATA_SPACE, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS, USER_DISPATCH_THREADS_X,
+    USER_GROUP_BASE, USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
     raw_views, set_raw_views, set_view_heap_limit, view_heap_limit,
 };
-||||||| merged common ancestors
-pub use shader::{ROOT_CBV_SPACE, SAMPLER_SPACE, USER_DATA_SPACE};
-=======
-pub use shader::{ROOT_CBV_SPACE, SAMPLER_SPACE, STRIDE_SPACE, USER_DATA_SPACE};
->>>>>>> belobug/main
 
 /// The loop limit without an override: 4096.
 pub const DEFAULT_LOOP_LIMIT: u32 = lower::LOOP_LIMIT;
@@ -224,7 +184,6 @@ pub fn loop_limit() -> u32 {
     })
 }
 
-<<<<<<< HEAD
 /// Whether a pixel shader's helper lane reads its own value where the console reads the first
 /// lane's (`lower.rs` `first_lane`); on unless `VICTORY_HELPER_OWN=0`. Part of the translation:
 /// the shader cache keys on it.
@@ -408,39 +367,6 @@ fn parse_shader_opt(value: Option<&str>) -> u32 {
     parsed.map_or(bitcode::opt::DEFAULT, |n| n & bitcode::opt::ALL)
 }
 
-||||||| merged common ancestors
-=======
-/// The clean-up passes that run over a translated program before it is
-/// written (`bitcode::opt`): a set of that module's pass bits. Every pass
-/// is exact, so the switch is for telling a translator fault from a
-/// clean-up fault, and for measuring what the clean-up is worth.
-/// `VICTORY_SHADER_OPT`:
-/// - unset: every pass.
-/// - `0`: none (the module as the lowering made it).
-/// - a number (decimal or `0x` hex): those passes; 1 dead code, 2 constants
-///   and identities, 4 one instruction for one value, 8 what a branch taken
-///   says about its condition, 16 one read for one place within a block.
-///
-/// Part of the translation: the shader cache keys on it (`victory-gpu`'s
-/// does).
-pub fn shader_opt() -> u32 {
-    static PASSES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-    *PASSES.get_or_init(|| parse_shader_opt(std::env::var("VICTORY_SHADER_OPT").ok().as_deref()))
-}
-
-/// `VICTORY_SHADER_OPT`'s value; every pass when it is unset or
-/// unreadable. Pure, for testing.
-fn parse_shader_opt(value: Option<&str>) -> u32 {
-    let parsed = value
-        .map(str::trim)
-        .and_then(|v| match v.strip_prefix("0x") {
-            Some(hex) => u32::from_str_radix(hex, 16).ok(),
-            None => v.parse().ok(),
-        });
-    parsed.map_or(bitcode::opt::ALL, |n| n & bitcode::opt::ALL)
-}
-
->>>>>>> belobug/main
 /// `VICTORY_SHADER_LOOP_LIMIT`'s value; the default when it is unset,
 /// unreadable or 0. Pure, for testing.
 fn parse_loop_limit(value: Option<&str>) -> u32 {
@@ -499,7 +425,6 @@ pub struct HostShader {
     /// Root SRVs (raw buffers) the shader reads: `t<index>` in
     /// [`ROOT_CBV_SPACE`].
     pub root_srvs: Vec<u8>,
-<<<<<<< HEAD
     /// Root UAVs (raw buffers) the shader reads or writes: `u<index>` in
     /// [`ROOT_CBV_SPACE`].
     pub root_uavs: Vec<u8>,
@@ -524,15 +449,9 @@ pub struct HostShader {
     /// descriptor picked at run time keeps the float path (its slot, and so
     /// its format, is known only then).
     pub half_views: Vec<(u8, u32)>,
-||||||| merged common ancestors
-=======
-    /// Root UAVs (raw buffers) the shader reads or writes: `u<index>` in
-    /// [`ROOT_CBV_SPACE`].
-    pub root_uavs: Vec<u8>,
     /// True when the shader reads the runtime stride table (`t0` in
     /// [`STRIDE_SPACE`]).
     pub stride_table: bool,
->>>>>>> belobug/main
 }
 
 impl HostShader {
@@ -602,8 +521,7 @@ impl Default for Target {
 }
 
 /// Translates the vertex, pixel, compute or mesh program of a console
-<<<<<<< HEAD
-/// shader container.
+/// shader container, for any host ([`Target::ANY`]).
 ///
 /// A program refused because the first half of an interpolation is read as
 /// data is translated once more with first halves evaluated as the pair
@@ -611,50 +529,44 @@ impl Default for Target {
 /// with that on for every program, 8,551 pixel programs of the title that
 /// already translated came out changed (an extra evaluation in each), for
 /// the sake of 9 that did not translate.
-||||||| merged common ancestors
-/// shader container.
-=======
-/// shader container, for any host ([`Target::ANY`]).
->>>>>>> belobug/main
 pub fn translate(container: &[u8]) -> Result<HostShader, ShaderError> {
-<<<<<<< HEAD
-    translate_code(container, None)
-}
-
-/// [`translate`] with `code` in place of the program's own when given.
-pub(crate) fn translate_code(container: &[u8], code: Option<Vec<u8>>) -> Result<HostShader, ShaderError> {
-    match translate_plain(container, code.as_deref()) {
-        Err(ShaderError::Unsupported { what, .. }) if what == lower::FIRST_HALF => {
-            lower::with_first_half_pairs(|| translate_plain(container, code.as_deref()))
-        }
-        other => other,
-    }
-}
-
-fn translate_plain(container: &[u8], code: Option<&[u8]>) -> Result<HostShader, ShaderError> {
-||||||| merged common ancestors
-=======
     translate_for(container, Target::ANY)
 }
 
 /// [`translate`] for a host that runs the wave sizes of `target`.
 pub fn translate_for(container: &[u8], target: Target) -> Result<HostShader, ShaderError> {
->>>>>>> belobug/main
+    translate_code_for(container, None, target)
+}
+
+/// [`translate`] with `code` in place of the program's own when given.
+pub(crate) fn translate_code(container: &[u8], code: Option<Vec<u8>>) -> Result<HostShader, ShaderError> {
+    translate_code_for(container, code, Target::ANY)
+}
+
+fn translate_code_for(
+    container: &[u8],
+    code: Option<Vec<u8>>,
+    target: Target,
+) -> Result<HostShader, ShaderError> {
+    match translate_plain(container, code.as_deref(), target) {
+        Err(ShaderError::Unsupported { what, .. }) if what == lower::FIRST_HALF => {
+            lower::with_first_half_pairs(|| translate_plain(container, code.as_deref(), target))
+        }
+        other => other,
+    }
+}
+
+fn translate_plain(
+    container: &[u8],
+    code: Option<&[u8]>,
+    target: Target,
+) -> Result<HostShader, ShaderError> {
     let c = Container::parse(container)?;
-<<<<<<< HEAD
     let dxil = c
         .part(FourCC::DXIL)
         .or(c.part(FourCC::ACCC))
         .ok_or(ShaderError::Malformed("no DXIL part"))?;
     let mut native = crate::native_programs(dxil.data)?
-||||||| merged common ancestors
-    let dxil = c
-        .part(FourCC::DXIL)
-        .ok_or(ShaderError::Malformed("no DXIL part"))?;
-    let native = crate::native_programs(dxil.data)?
-=======
-    let native = crate::container_programs(&c)?
->>>>>>> belobug/main
         .into_iter()
         .find(|p| {
             matches!(
@@ -666,20 +578,10 @@ pub fn translate_for(container: &[u8], target: Target) -> Result<HostShader, Sha
             offset: 0,
             what: "a container without a vertex, pixel, compute or mesh program",
         })?;
-<<<<<<< HEAD
     if let Some(code) = code {
         native.code = code.to_vec();
     }
-    let p = crate::spill::build(&native)?;
-    // Structurisation first: tracing per-lane descriptors needs it (its
-    // failure is reported after the earlier stages').
-    let st = structure::structure(&p);
-    let res = resource::track(&p, &native.layout, native.stage, st.as_ref().ok())?;
-||||||| merged common ancestors
-    let p = ir::build(&native.patched_code(), native.wave64, native.vgprs)?;
-    let res = resource::track(&p, &native.layout, native.stage)?;
-=======
-    let mut p = ir::build(&native.patched_code(), native.wave64, native.vgprs)?;
+    let mut p = crate::spill::build(&native)?;
     // Spilled user-data tables belong to the ray-tracing BVH builder
     // (`XboxBvhBuilder.dll`). Running only a subset of its stages while
     // `VICTORY_RAYS` is off lets later stages (e.g. `c42a31951201f9a0`) read
@@ -688,29 +590,13 @@ pub fn translate_for(container: &[u8], target: Target) -> Result<HostShader, Sha
         crate::unspill::unspill(&mut p, &native.layout, native.stage);
     }
     crate::sgpr_spill::forward(&mut p);
-    let traces = resource::traces_rays(&p);
->>>>>>> belobug/main
+    // Structurisation first: tracing per-lane descriptors needs it (its
+    // failure is reported after the earlier stages').
+    let st = structure::structure(&p);
+    let res = resource::track(&p, &native.layout, native.stage, st.as_ref().ok())?;
     let io = io::raise(&p, &native)?;
-<<<<<<< HEAD
     let st = st?;
-    emit(&c, &native, &p, &st, &io, &res)
-||||||| merged common ancestors
-    let st = structure::structure(&p)?;
-    emit(&c, &native, &p, &st, &io, &res)
-=======
-    let st = structure::structure(&p)?;
-    let with = |addresses: bool| {
-        let res = resource::track_with(&p, &native.layout, native.stage, addresses)?;
-        emit(&c, &native, &p, &st, &io, &res, target)
-    };
-    let compute = native.stage == HwStage::Cs && rays();
-    let plain = match with(traces && compute) {
-        Err(ShaderError::Unsupported { .. }) if compute && !traces => with(true),
-        Err(ShaderError::Unsupported { .. }) if compute => with(false),
-        done => return done,
-    };
-    plain
->>>>>>> belobug/main
+    emit(&c, &native, &p, &st, &io, &res, target)
 }
 
 /// Emits a program whose earlier stages already ran, for `target`.
@@ -723,7 +609,7 @@ pub fn emit(
     res: &resource::Resources,
     target: Target,
 ) -> Result<HostShader, ShaderError> {
-    let original = emit_program(c, native, p, st, io, res, target);
+    let original = emit_with_retries(c, native, p, st, io, res, target);
     // Retry unsupported programs only. Threading can separate an unknown
     // register value from its apparent use on a mutually exclusive path.
     if !matches!(original, Err(ShaderError::Unsupported { .. })) {
@@ -739,10 +625,12 @@ pub fn emit(
     let st = structure::structure(&p)?;
     let io = io::raise(&p, native)?;
     let res = resource::track_with(&p, &native.layout, native.stage, res.addresses)?;
-    emit_program(c, native, &p, &st, &io, &res, target)
+    emit_with_retries(c, native, &p, &st, &io, &res, target)
 }
 
-fn emit_program(
+/// [`emit`] once, with the retries for a program that still permutes lanes outside the
+/// whole-wave sections the simulation follows ([`permutes_outside_sections`]).
+fn emit_with_retries(
     c: &Container,
     native: &NativeProgram,
     p: &ir::Program,
@@ -751,7 +639,7 @@ fn emit_program(
     res: &resource::Resources,
     target: Target,
 ) -> Result<HostShader, ShaderError> {
-    let r = emit_any(c, native, p, st, io, res);
+    let r = emit_any(c, native, p, st, io, res, target);
     if r.is_ok() && !permutes_outside_sections(p) {
         return r;
     }
@@ -764,7 +652,7 @@ fn emit_program(
             let st = structure::structure(&q)?;
             let io = io::raise(&q, native)?;
             let res = resource::track(&q, &native.layout, native.stage, Some(&st))?;
-            emit_any(c, native, &q, &st, &io, &res)
+            emit_any(c, native, &q, &st, &io, &res, target)
         });
         if again.is_ok() {
             return again;
@@ -790,7 +678,7 @@ fn emit_program(
         let st = structure::structure(&q)?;
         let io = io::raise(&q, native)?;
         let res = resource::track(&q, &native.layout, native.stage, Some(&st))?;
-        emit_any(c, native, &q, &st, &io, &res)
+        emit_any(c, native, &q, &st, &io, &res, target)
     })();
     match again {
         Ok(shader) => Ok(shader),
@@ -820,8 +708,9 @@ fn emit_any(
     st: &structure::Structured,
     io: &io::Io,
     res: &resource::Resources,
+    target: Target,
 ) -> Result<HostShader, ShaderError> {
-    let r = emit_forms(c, native, p, st, io, res);
+    let r = emit_forms(c, native, p, st, io, res, target);
     // A console wave64 compute program on a host of 32-lane waves that no form above gives
     // the host (it still asks for 64-lane waves, or does not translate): once more in the
     // paired form, each console wave run by one host wave (`paired`; `VICTORY_WAVE_PAIRS=0`
@@ -836,7 +725,7 @@ fn emit_any(
         && lower::host_max_wave() == 32
         && pairs_on()
     {
-        let again = paired(c, native, p, io, res);
+        let again = paired(c, native, p, io, res, target);
         if std::env::var_os("VICTORY_WAVE_WHY").is_some() {
             match &again {
                 Ok((_, wave)) => eprintln!("WAVE64-RETRY paired lanes: wave {wave:?}"),
@@ -876,6 +765,7 @@ fn emit_forms(
     st: &structure::Structured,
     io: &io::Io,
     res: &resource::Resources,
+    target: Target,
 ) -> Result<(HostShader, Option<u32>), ShaderError> {
     // A pixel program that waits for the pixels it overlaps (POPS): the host orders its views
     // instead (`Shader::ordered`), and the program goes past the wait.
@@ -885,11 +775,11 @@ fn emit_forms(
         let st = structure::structure(&q)?;
         let io = io::raise(&q, native)?;
         let res = resource::track(&q, &native.layout, native.stage, Some(&st))?;
-        return emit_forms(c, native, &q, &st, &io, &res);
+        return emit_forms(c, native, &q, &st, &io, &res, target);
     }
     // (what an earlier program's lowering on this thread left behind)
     lower::take_needs();
-    let original = emit_program(c, native, p, st, io, res);
+    let original = emit_program(c, native, p, st, io, res, target);
     // A console wave64 compute program on a host of 32-lane waves that
     // still needs 64 lanes, or whose cross-lane code sits where not every
     // lane runs: once more with its early-outs left out
@@ -948,7 +838,7 @@ fn emit_forms(
         ];
         for (name, f) in &forms {
             if let Some((p, st, io, res)) = f {
-                let again = emit_program(c, native, p, st, io, res);
+                let again = emit_program(c, native, p, st, io, res, target);
                 report(name, &again);
                 if done(&again) {
                     return again;
@@ -977,7 +867,7 @@ fn emit_forms(
         // too.)
         let exactly = |approximate: Result<(HostShader, Option<u32>), ShaderError>| {
             if pairs_on() {
-                let again = paired(c, native, p, io, res);
+                let again = paired(c, native, p, io, res, target);
                 report("paired lanes, before an approximate form", &again);
                 if again.is_ok() {
                     return again;
@@ -1001,7 +891,7 @@ fn emit_forms(
                 let deep_on = std::env::var_os("VICTORY_WAVE_DEEP_SKIPS").is_none_or(|v| v != "0");
                 let deep = if deep_on { form(ir::without_skips(p, true)) } else { None };
                 if let Some((p, st, io, res)) = &deep {
-                    let again = emit_program(c, native, p, st, io, res);
+                    let again = emit_program(c, native, p, st, io, res, target);
                     report("without skips, scalars followed", &again);
                     if done(&again) {
                         return again;
@@ -1018,7 +908,7 @@ fn emit_forms(
                         Some(p),
                     ];
                     if let Some(base) = bases.into_iter().flatten().next() {
-                        let again = widen(c, native, base, why);
+                        let again = widen(c, native, base, why, target);
                         report("wave-wide branches", &again);
                         if done(&again) {
                             return again;
@@ -1036,7 +926,7 @@ fn emit_forms(
                 if let Some((p, st, io, res)) = f
                     && idiom(p, st) == exact
                 {
-                    let local = lower::with_local_waves(|| emit_program(c, native, p, st, io, res));
+                    let local = lower::with_local_waves(|| emit_program(c, native, p, st, io, res, target));
                     report(&format!("local waves ({}), {name}", if exact { "idiom" } else { "APPROXIMATE" }), &local);
                     if done(&local) {
                         return if exact { local } else { exactly(local) };
@@ -1044,7 +934,7 @@ fn emit_forms(
                 }
             }
             if idiom(p, st) == exact {
-                let local = lower::with_local_waves(|| emit_program(c, native, p, st, io, res));
+                let local = lower::with_local_waves(|| emit_program(c, native, p, st, io, res, target));
                 report(if exact { "local waves (idiom)" } else { "local waves (APPROXIMATE)" }, &local);
                 if done(&local) {
                     return if exact { local } else { exactly(local) };
@@ -1056,14 +946,14 @@ fn emit_forms(
             if !strict {
                 for (name, f) in &forms {
                     if let Some((p, st, io, res)) = f {
-                        let local = lower::with_local_waves_any(|| emit_program(c, native, p, st, io, res));
+                        let local = lower::with_local_waves_any(|| emit_program(c, native, p, st, io, res, target));
                         report(&format!("local waves (APPROXIMATE, any mask), {name}"), &local);
                         if done(&local) {
                             return exactly(local);
                         }
                     }
                 }
-                let local = lower::with_local_waves_any(|| emit_program(c, native, p, st, io, res));
+                let local = lower::with_local_waves_any(|| emit_program(c, native, p, st, io, res, target));
                 report("local waves (APPROXIMATE, any mask)", &local);
                 if done(&local) {
                     return exactly(local);
@@ -1079,20 +969,20 @@ fn emit_forms(
             let bases = [forms[0].1.as_ref(), forms[1].1.as_ref()];
             for (name, f) in [("without early-outs", bases[0]), ("without skips", bases[1])] {
                 if let Some((p, st, io, res)) = f {
-                    let again = lower::with_loose_lds(|| emit_program(c, native, p, st, io, res));
+                    let again = lower::with_loose_lds(|| emit_program(c, native, p, st, io, res, target));
                     report(&format!("loose LDS (APPROXIMATE), {name}"), &again);
                     if done(&again) {
                         return again;
                     }
                 }
             }
-            let again = lower::with_loose_lds(|| emit_program(c, native, p, st, io, res));
+            let again = lower::with_loose_lds(|| emit_program(c, native, p, st, io, res, target));
             report("loose LDS (APPROXIMATE)", &again);
             if done(&again) {
                 return again;
             }
             if local_on && !exact_only {
-                let local = lower::with_loose_lds(|| lower::with_local_waves_any(|| emit_program(c, native, p, st, io, res)));
+                let local = lower::with_loose_lds(|| lower::with_local_waves_any(|| emit_program(c, native, p, st, io, res, target)));
                 report("loose LDS + local waves (APPROXIMATE, any mask)", &local);
                 if done(&local) {
                     return local;
@@ -1109,7 +999,7 @@ fn emit_forms(
                 Some(p),
             ];
             if let Some(base) = bases.into_iter().flatten().next() {
-                let again = widen(c, native, base, why);
+                let again = widen(c, native, base, why, target);
                 report("wave-wide branches (last)", &again);
                 if done(&again) {
                     return again;
@@ -1126,10 +1016,10 @@ fn emit_forms(
             if needs_wave_wide(native.stage, what)
                 && std::env::var_os("VICTORY_WAVE_WIDE").is_none_or(|v| v != "0") =>
         {
-            let again = widen(c, native, p, std::env::var_os("VICTORY_WAVE_WHY").is_some());
+            let again = widen(c, native, p, std::env::var_os("VICTORY_WAVE_WHY").is_some(), target);
             match again {
                 Ok(_) => again,
-                Err(_) => emit_program(c, native, p, st, io, res),
+                Err(_) => emit_program(c, native, p, st, io, res, target),
             }
         }
         other => other,
@@ -1140,7 +1030,7 @@ fn emit_forms(
     // with that block copied for each way in ([`split_choices`]).
     let original = match original {
         Err(ShaderError::Unsupported { what, .. }) if what == lower::CHOSEN => {
-            split_choices(c, native, p, res).unwrap_or(original)
+            split_choices(c, native, p, res, target).unwrap_or(original)
         }
         other => other,
     };
@@ -1157,7 +1047,7 @@ fn emit_forms(
     let st = structure::structure(&p)?;
     let io = io::raise(&p, native)?;
     let res = resource::track(&p, &native.layout, native.stage, Some(&st))?;
-    emit_program(c, native, &p, &st, &io, &res)
+    emit_program(c, native, &p, &st, &io, &res, target)
 }
 
 /// `p` translated with the joins of its descriptors chosen by control flow copied for each way
@@ -1169,6 +1059,7 @@ fn split_choices(
     native: &NativeProgram,
     p: &ir::Program,
     res: &resource::Resources,
+    target: Target,
 ) -> Option<Result<(HostShader, Option<u32>), ShaderError>> {
     /// The joins where a descriptor is chosen from what a heap index cannot stand for: a way
     /// in that brings neither a loaded descriptor nor an earlier join's choice.
@@ -1196,7 +1087,7 @@ fn split_choices(
         let st = structure::structure(&form).ok()?;
         let io = io::raise(&form, native).ok()?;
         let res = resource::track(&form, &native.layout, native.stage, Some(&st)).ok()?;
-        match emit_program(c, native, &form, &st, &io, &res) {
+        match emit_program(c, native, &form, &st, &io, &res, target) {
             Err(ShaderError::Unsupported { what, .. }) if what == lower::CHOSEN => {
                 form = ir::split_joins(&form, &joins(&res))?;
             }
@@ -1226,6 +1117,7 @@ fn widen(
     native: &NativeProgram,
     p: &ir::Program,
     why: bool,
+    target: Target,
 ) -> Result<(HostShader, Option<u32>), ShaderError> {
     const NOT: ShaderError = ShaderError::Unsupported {
         offset: 0,
@@ -1249,7 +1141,7 @@ fn widen(
         let io = io::raise(p, native)?;
         let res = resource::track(p, &native.layout, native.stage, Some(&st))?;
         lower::take_needs();
-        let r = emit_program(c, native, p, &st, &io, &res);
+        let r = emit_program(c, native, p, &st, &io, &res, target);
         let needs = lower::take_needs();
         // (or translated for 64-lane waves still: shared memory read and written where not
         // every lane runs, whose blocks the lowering names too)
@@ -1296,6 +1188,7 @@ fn paired(
     p: &ir::Program,
     io: &io::Io,
     res: &resource::Resources,
+    target: Target,
 ) -> Result<(HostShader, Option<u32>), ShaderError> {
     let crate::native::StageIo::Cs(cs) = native.io else {
         return Err(ShaderError::Unsupported {
@@ -1325,7 +1218,7 @@ fn paired(
         }
         wide.extend(lanes);
     };
-    lower::with_paired_lanes(|| emit_program(c, native, p, &st, io, res))
+    lower::with_paired_lanes(|| emit_program(c, native, p, &st, io, res, target))
 }
 
 /// The translated program, and the wave size it requires of the host.
@@ -1336,6 +1229,7 @@ fn emit_program(
     st: &structure::Structured,
     io: &io::Io,
     res: &resource::Resources,
+    target: Target,
 ) -> Result<(HostShader, Option<u32>), ShaderError> {
     let sig = |fourcc| -> Result<Vec<container::SigElement>, ShaderError> {
         match c.part(fourcc) {
@@ -1435,14 +1329,8 @@ fn emit_program(
         }
         _ => 0,
     };
-<<<<<<< HEAD
-    let parts = lower::Parts {
-||||||| merged common ancestors
-    let l = lower::lower(&lower::Parts {
-=======
     let mut parts = lower::Parts {
         psv: c.part(FourCC::PSV0).map(|p| p.data),
->>>>>>> belobug/main
         native,
         p,
         st,
@@ -1452,7 +1340,9 @@ fn emit_program(
         outputs,
         prims,
         mesh_stride,
-<<<<<<< HEAD
+        target,
+        console_cf: false,
+        per_lane_only: false,
     };
     // The ray-structure builder's Box32/16 rehydration kernels encode one
     // header per active thread of the group; their last group can be short.
@@ -1462,25 +1352,14 @@ fn emit_program(
         0xba30_5538_e28d_414c_af39_a51a_4bc2_f308
             | 0xd635_3bf6_df15_ff8e_c4aa_aec1_0dbf_3974
     ) && matches!(native.io, crate::native::StageIo::Cs(cs) if cs.threads == [64, 1, 1]);
-    let l = lower::lower_with_thread_limit(&parts, box_rehydration)?;
-    let wave_size = l.wave_size;
-    let shader = HostShader {
-||||||| merged common ancestors
-    })?;
-    Ok(HostShader {
-=======
-        target,
-        console_cf: false,
-        per_lane_only: false,
-    };
-    let l = match lower::lower(&parts) {
+    let l = match lower::lower_with_thread_limit(&parts, box_rehydration) {
         Err(ShaderError::Unsupported { what, .. }) if what == lower::CONSOLE_FLOW => {
             let console = structure::structure_console(p);
             let lowered = match &console {
                 Ok(console) => {
                     parts.st = console;
                     parts.console_cf = true;
-                    lower::lower(&parts)
+                    lower::lower_with_thread_limit(&parts, box_rehydration)
                 }
                 Err(e) => Err(ShaderError::Unsupported {
                     offset: 0,
@@ -1498,14 +1377,14 @@ fn emit_program(
                     parts.st = st;
                     parts.console_cf = false;
                     parts.per_lane_only = true;
-                    lower::lower(&parts).map_err(|_| e)?
+                    lower::lower_with_thread_limit(&parts, box_rehydration).map_err(|_| e)?
                 }
             }
         }
         l => l?,
     };
-    Ok(HostShader {
->>>>>>> belobug/main
+    let wave_size = l.wave_size;
+    let shader = HostShader {
         stage: native.stage,
         dxil: l.dxil,
         user_data: l.user_data,
@@ -1513,12 +1392,12 @@ fn emit_program(
         samplers: l.samplers,
         root_cbvs: l.root_cbvs,
         root_srvs: l.root_srvs,
-<<<<<<< HEAD
         root_uavs: l.root_uavs,
         written_root_uavs: l.written_root_uavs,
         writes_guest_memory: l.writes_guest_memory,
         root_indexed_views: res.root_indexed_views.clone(),
         half_views: l.half_views,
+        stride_table: l.stride_table,
     };
     Ok((shader, wave_size))
 }
@@ -1601,13 +1480,6 @@ fn vertex_output_interpolation(
         }
     }
     Ok(())
-||||||| merged common ancestors
-    })
-=======
-        root_uavs: l.root_uavs,
-        stride_table: l.stride_table,
-    })
->>>>>>> belobug/main
 }
 
 /// Interpolation modes of the input (for pixel) or output (for vertex/mesh)
@@ -1788,12 +1660,8 @@ fn signature(part: &[u8]) -> Result<Vec<container::SigElement>, ShaderError> {
 
 #[cfg(test)]
 mod tests {
-<<<<<<< HEAD
     #[cfg(windows)]
-||||||| merged common ancestors
-=======
     use super::Target;
->>>>>>> belobug/main
     use super::bitcode::Attr;
     use super::lower::LOOP_LIMIT;
     use super::parse_loop_limit;
@@ -2091,15 +1959,9 @@ mod tests {
         let c = Container::parse(&bytes).unwrap();
         let p = ir::build(&native.patched_code(), native.wave64, native.vgprs).unwrap();
         let st = structure::structure(&p).unwrap();
-<<<<<<< HEAD
         let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
         let io = io::raise(&p, &native).unwrap();
-        let out = emit(&c, &native, &p, &st, &io, &res).unwrap();
-||||||| merged common ancestors
-        let out = emit(&c, &native, &p, &st, &io, &res).unwrap();
-=======
         let out = emit(&c, &native, &p, &st, &io, &res, Target::ANY).unwrap();
->>>>>>> belobug/main
         // dxil.dll, where there is one, checks the flags against the module.
         #[cfg(windows)]
         if let Ok(mut v) = super::validator::Validator::load(
@@ -2592,17 +2454,12 @@ mod tests {
             static_samplers: Vec::new(),
             root_cbvs: Vec::new(),
             root_srvs: Vec::new(),
-<<<<<<< HEAD
             root_uavs: Vec::new(),
             written_root_uavs: Vec::new(),
             writes_guest_memory: false,
             root_indexed_views: Vec::new(),
             half_views: Vec::new(),
-||||||| merged common ancestors
-=======
-            root_uavs: Vec::new(),
             stride_table: false,
->>>>>>> belobug/main
         };
         let file = |var: &str, stage| {
             std::env::var(var).ok().map(|p| super::HostShader {
@@ -2613,17 +2470,12 @@ mod tests {
                 static_samplers: Vec::new(),
                 root_cbvs: Vec::new(),
                 root_srvs: Vec::new(),
-<<<<<<< HEAD
                 root_uavs: Vec::new(),
                 written_root_uavs: Vec::new(),
                 writes_guest_memory: false,
                 root_indexed_views: Vec::new(),
                 half_views: Vec::new(),
-||||||| merged common ancestors
-=======
-                root_uavs: Vec::new(),
                 stride_table: false,
->>>>>>> belobug/main
             })
         };
         let ps = file("VICTORY_REF_PS", crate::HwStage::Ps).unwrap_or(ps);
@@ -3196,16 +3048,10 @@ mod tests {
             let c = super::Container::parse(&bytes).unwrap();
             let p = crate::ir::build(&native.patched_code(), native.wave64, native.vgprs).unwrap();
             let st = crate::structure::structure(&p).unwrap();
-<<<<<<< HEAD
             let res =
                 crate::resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
             let io = crate::io::raise(&p, &native).unwrap();
-            let out = super::emit(&c, &native, &p, &st, &io, &res).unwrap();
-||||||| merged common ancestors
-            let out = super::emit(&c, &native, &p, &st, &io, &res).unwrap();
-=======
             let out = super::emit(&c, &native, &p, &st, &io, &res, Target::ANY).unwrap();
->>>>>>> belobug/main
             // dxil.dll, where there is one, checks PSV0 against the module.
             #[cfg(windows)]
             if let Ok(mut v) = super::validator::Validator::load(
