@@ -65,13 +65,7 @@ extern "system" fn unimplemented_import(site: &'static ImportSite) -> u64 {
             // Into the crash log too: `abort` ends the process without
             // running the handlers that write it.
             let (dll, symbol) = (&site.dll, &site.symbol);
-<<<<<<< HEAD
             let text = format!("VItoriaBr: unimplemented import {dll}!{symbol} called");
-||||||| a66ac212
-            let text = format!("VIctory: unimplemented import {dll}!{symbol} called");
-=======
-            let text = format!("KLBF Lab: unimplemented import {dll}!{symbol} called");
->>>>>>> klbf/beta-2
             crate::log_crash(&text);
             // SAFETY: plain Win32 calls without preconditions.
             unsafe {
@@ -187,13 +181,7 @@ mod tests {
             .unwrap();
         assert!(!out.status.success(), "the trap ends the process");
         let text = std::fs::read_to_string(&log).unwrap_or_default();
-<<<<<<< HEAD
         let named = text.contains("VItoriaBr: unimplemented import probe.dll!Missing called");
-||||||| a66ac212
-        let named = text.contains("VIctory: unimplemented import probe.dll!Missing called");
-=======
-        let named = text.contains("KLBF Lab: unimplemented import probe.dll!Missing called");
->>>>>>> klbf/beta-2
         assert!(named, "crash log: {text:?}");
     }
 }
