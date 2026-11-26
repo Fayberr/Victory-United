@@ -3732,16 +3732,8 @@ static PLACED_RAW: std::sync::Mutex<std::collections::BTreeSet<(u64, [u32; 14])>
 #[cfg(windows)]
 static PLACED_TWINS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-<<<<<<< HEAD
 /// See [`PLACED_TWINS`]. Read by the diagnostics' memory report only.
 #[cfg(all(windows, feature = "diagnostics"))]
-||||||| 9c184b35
-/// See [`PLACED_TWINS`].
-#[cfg(windows)]
-=======
-/// See [`PLACED_TWINS`] (read by the diagnostics build's memory line).
-#[cfg(all(windows, feature = "diagnostics"))]
->>>>>>> fork/main
 pub(crate) fn placed_filler_twins() -> u64 {
     PLACED_TWINS.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -4751,7 +4743,6 @@ mod tests {
         }
     }
 
-<<<<<<< HEAD
     #[cfg(windows)]
     #[test]
     fn retained_array_mip_readback_preserves_box_and_buffer_layout() {
@@ -4906,8 +4897,6 @@ mod tests {
         }
     }
 
-||||||| 9c184b35
-=======
     /// An earlier title-memory upload must not suppress a later alias copy
     /// from a GPU-written probe atlas into the same sampled texture.
     #[cfg(all(windows, feature = "diagnostics"))]
@@ -5000,7 +4989,6 @@ mod tests {
         assert_eq!(actual, packed_light, "the sampled texture kept the CPU upload instead of the GPU atlas");
     }
 
->>>>>>> fork/main
     /// A 16-bit depth texture the title also asks unordered access for gets
     /// a colour twin, and the host copies one into the other, both ways: a
     /// pattern put into the twin is copied to the depth texture, the twin
