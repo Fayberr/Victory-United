@@ -527,6 +527,27 @@ pub(crate) fn bound_ahead(
     clamp_to(list, src, None, spec, ring(), true, own)
 }
 
+/// [`bound_ahead`] as `(scratch, offset)` for a caller that keeps the window
+/// of a draw: the scratch buffer from the state the list left it in, at
+/// offset 0 (one window at a time, as [`bound_ahead`] records it).
+pub(crate) fn bound_ahead_at(
+    list: &HostList,
+    src: (&ID3D12Resource, u64),
+    spec: (u32, u32, u32),
+) -> Option<(ID3D12Resource, u64)> {
+    clamp_to(list, src, None, spec, ring(), true, false)
+}
+
+/// [`bound`] as `(scratch, offset)`, at offset 0 (see [`bound_ahead_at`]).
+pub(crate) fn bound_at(
+    list: &HostList,
+    src: (&ID3D12Resource, u64),
+    count: Option<(&ID3D12Resource, u64)>,
+    spec: (u32, u32, u32),
+) -> Option<(ID3D12Resource, u64)> {
+    clamp_to(list, src, count, spec, ring(), false, false)
+}
+
 /// The parts [`bound_split`] makes of a dispatch, the most groups of each,
 /// and the bytes between them.
 pub(crate) const SPLIT: u32 = 2;
