@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn warp_a_stretch_of_a_reserved_section_is_used_in_place_through_a_view_of_ours() {
         let _turn = crate::indirect::tests::warp_turn();
-        let Some(device) = crate::inplace::tests::warp() else { return };
+        let Some((_serial, device)) = crate::inplace::tests::warp() else { return };
         if windows::core::Interface::cast::<ID3D12Device13>(&device).is_err() {
             return;
         }

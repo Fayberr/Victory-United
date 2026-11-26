@@ -1669,10 +1669,11 @@ fn arrange(base: usize, pages: &[usize]) {
     else {
         return;
     };
-    let Some(section) = {
+    let section = {
         let table = page_table();
         pages.first().and_then(|p| table.pages.get(p)).map(|s| s.section.clone())
-    } else {
+    };
+    let Some(section) = section else {
         return;
     };
     let section_pages = section.size / PAGE;
@@ -1717,10 +1718,11 @@ fn arrange(base: usize, pages: &[usize]) {
     let mut moved = 0u64;
     for (i, number) in pages.iter().enumerate() {
         let want = (base - first) / PAGE + i;
-        let Some(have) = {
+        let have = {
             let table = page_table();
             table.pages.get(number).map(|s| s.index)
-        } else {
+        };
+        let Some(have) = have else {
             continue;
         };
         if have == want {
@@ -3200,16 +3202,16 @@ mod tests {
         let mut pages = [0usize; 4];
         let mut n = 4;
         assert_eq!(XMemAllocatePhysicalPages(0, &mut n, pages.as_mut_ptr()), 1);
-        let index = |number: usize| physical().pages.get(&number).map(|s| s.index);
+        let index = |number: usize| page_table().pages.get(&number).map(|s| s.index);
         let at = |page: usize| base.wrapping_byte_add(page * PAGE);
         // The last two pages' place first, from the array's start.
-        arrange(&mut physical(), at(2) as usize, &pages[..2]);
+        arrange(at(2) as usize, &pages[..2]);
         assert_eq!(XMemMapPhysicalPages(at(2), 2, pages.as_ptr()), at(2));
-        arrange(&mut physical(), base as usize, &pages[2..]);
+        arrange(base as usize, &pages[2..]);
         assert_eq!(XMemMapPhysicalPages(base, 2, pages[2..].as_ptr()), base);
         assert_eq!([index(pages[0]), index(pages[1]), index(pages[2]), index(pages[3])], [Some(2), Some(3), Some(0), Some(1)]);
         // Mapped already: nothing moves any more.
-        arrange(&mut physical(), base as usize, &pages[..2]);
+        arrange(base as usize, &pages[..2]);
         assert_eq!(index(pages[0]), Some(2));
         // SAFETY: mapped read-write.
         unsafe { at(3).cast::<u32>().write(7) };

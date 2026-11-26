@@ -83,6 +83,8 @@ fn next_asking() -> u64 {
     ASKED.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1
 }
 struct Journal {
+    /// Room for the kernel's answer (`ask_kernel_found`).
+    found: Vec<usize>,
     /// Page number → the asking that last found it written.
     written: BTreeMap<usize, u64>,
     /// The same for each of a page's sixteen parts ([`KERNEL_PAGE`]), where
@@ -118,6 +120,7 @@ static GATE: std::sync::RwLock<()> = std::sync::RwLock::new(());
 /// the submitting thread, and one in six of those at the six threads beside
 /// it, found it waiting for that lock (run pooloff1).
 static JOURNAL: RwLock<Journal> = RwLock::new(Journal {
+    found: Vec::new(),
     written: BTreeMap::new(),
     parts: std::collections::HashMap::with_hasher(std::hash::BuildHasherDefault::new()),
     ahead: Vec::new(),
@@ -413,7 +416,7 @@ fn left_open(block: usize, frame: u64, keep: u64) -> bool {
 /// A check found `block` written and without a guard: whether it is left so ([`guard_hot`]).
 /// Under the guards' lock.
 fn stays_open(g: &Guards, block: usize, frame: u64, keep: u64) -> bool {
-    if g.aliased.contains(&block) {
+    if g.aliased.contains(block) {
         return false;
     }
     let v = hot_get(block);
@@ -661,11 +664,6 @@ fn ask_ahead_held(ranges: &[(usize, usize)], held: bool) {
         return;
     }
     pieces.sort_unstable();
-    let _all = (!held).then(Asking::hold_all);
-    let (mut asked, mut written) = (Vec::new(), Vec::new());
-    // (Neptune) `VICTORY_ASK_WIDE_MB`: how far apart and how wide one asking
-    // may be, in place of [`AHEAD_GAP`] and [`AHEAD_MAX`].
-    let (gap, most) = ahead_limits();
     // The submission's one asking stands ([`ask_once`]): what it does not
     // hold is left to `writes`.
     if journal().kept {
@@ -673,6 +671,9 @@ fn ask_ahead_held(ranges: &[(usize, usize)], held: bool) {
     }
     let _all = (!held).then(Asking::hold_all);
     let (mut asked, mut written) = (Vec::new(), Vec::new());
+    // (Neptune) `VICTORY_ASK_WIDE_MB`: how far apart and how wide one asking
+    // may be, in place of [`AHEAD_GAP`] and [`AHEAD_MAX`].
+    let (gap, most) = ahead_limits();
     let mut i = 0;
     while i < pieces.len() {
         let first = pieces[i].0;
@@ -4662,6 +4663,7 @@ mod parts_tests {
     #[test]
     fn the_parts_of_a_page_written_since_it_was_taken() {
         let mut j = Journal {
+            found: Vec::new(),
             written: BTreeMap::new(),
             parts: std::collections::HashMap::with_hasher(std::hash::BuildHasherDefault::new()),
             ahead: Vec::new(),

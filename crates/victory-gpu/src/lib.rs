@@ -181,8 +181,8 @@ pub use inplace::{title_memory_freeing, title_memory_section, title_memory_secti
 #[cfg(windows)]
 pub use watch::{
     Remapping, kernel_writing, notify_view_writes, title_memory_allocated, title_memory_committed,
-    title_memory_freed, title_memory_reading, title_memory_reading_range, title_memory_remapped,
-    title_memory_remapping, title_memory_remapping_range, title_memory_splitting,
+    title_memory_freed, title_memory_reading, title_memory_remapped,
+    title_memory_remapping, title_memory_splitting,
     title_memory_unmapping, title_memory_written, title_pages_changed, title_pages_told,
     writing as kernel_will_write, written_through_view,
 };

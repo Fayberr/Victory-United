@@ -743,7 +743,7 @@ pub(crate) fn save(now: bool) {
         return;
     }
     let began = std::time::Instant::now();
-    write_out(dir, library);
+    write_out(dir, &library);
     *last = Some((std::time::Instant::now(), began.elapsed()));
 }
 

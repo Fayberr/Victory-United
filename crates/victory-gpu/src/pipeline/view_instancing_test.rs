@@ -61,6 +61,8 @@ fn shader_bytes(dxc: &std::path::Path, dir: &std::path::Path) -> [Vec<u8>; 2] {
                 picks: Default::default(),
                 used_written: vec![],
                 write_unknown: false,
+                walks: false,
+                dxil: std::sync::Mutex::new(Some(Arc::new(bytes.clone()))),
             })
         });
         bytes

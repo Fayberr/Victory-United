@@ -36,7 +36,7 @@ pub struct Pass<'a> {
 impl Pass<'_> {
     /// The host `ID3D12GraphicsCommandList` (no reference taken).
     pub fn command_list(&self) -> *mut c_void {
-        windows::core::Interface::as_raw(&self.list.list)
+        windows::core::Interface::as_raw(&*self.list.list)
     }
 
     /// The host texture behind title texture `texture`, moved to the host

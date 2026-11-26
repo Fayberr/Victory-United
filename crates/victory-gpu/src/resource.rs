@@ -1881,7 +1881,7 @@ fn hosted(this: This, make: bool) -> Option<Made> {
             // into tiles is dropped here, and the old kind is made below.)
             if cut.is_some() {
                 tiled = cut;
-                texture = reserved;
+                texture = reserved.map(|t| (t, None));
             }
         }
         // The levels views show ([`held_only`]), those of the slots shaders
@@ -4075,7 +4075,7 @@ fn host_texture_in(
         let key = (d.dimension, d.width, d.height, d.depth_or_array_size, d.mip_levels, d.format, d.sample_count.max(1));
         if let Some((texture, state)) = pool_take(&key) {
             POOLED_STATE.set(Some(state));
-            return Some(texture);
+            return Some((texture, None));
         }
         TEXTURE_POOLED[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
@@ -4105,7 +4105,7 @@ fn host_texture_in(
                         format!("texture {}x{} f{} in a heap", d.width, d.height, d.format)
                     });
                     PLACED.set(Some(placement));
-                    return Some(texture);
+                    return Some((texture, None));
                 }
                 _ => {
                     // Refused there: a resource of its own, as before.

@@ -102,6 +102,8 @@ fn a_buffer_size_read_as_a_number_compiles_on_the_host() {
         root_cbvs: l.root_cbvs,
         root_srvs: l.root_srvs,
         root_uavs: l.root_uavs,
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         root_indexed_views: Vec::new(),
         half_views: Vec::new(),
     };

@@ -5124,6 +5124,7 @@ impl State {
             if let Some(first) = first
                 && ready
             {
+                #[cfg(feature = "diagnostics")]
                 TABLES[0].fetch_add(1, Ordering::Relaxed);
                 made.push((slot, first * 32));
                 continue;
@@ -5133,6 +5134,7 @@ impl State {
             // slots are that one's, and only its own title slots' notes are
             // made here, as its making would have made them.
             if first.is_some() && tables_by_content() && self.seen_tables.insert((table, n, key.2)) {
+                #[cfg(feature = "diagnostics")]
                 TABLES[4].fetch_add(1, Ordering::Relaxed);
                 if let Some(title) = heap.index(table).filter(|first| first + n <= host.count()) {
                     for k in 0..n {
@@ -5156,6 +5158,7 @@ impl State {
                 #[cfg(feature = "diagnostics")]
                 tally(1, 1);
                 let first = known.first;
+                #[cfg(feature = "diagnostics")]
                 TABLES[1].fetch_add(1, Ordering::Relaxed);
                 // This reader had it brought up to date, and nothing in the
                 // list changed since: nothing to do again.
@@ -5571,7 +5574,7 @@ impl State {
                 // and this is the thread that submits.
                 let mut read = vec![0u8; n * 3 * stride];
                 let held = (!crate::host::read_into(from as *const u8, &mut read))
-                    .then(|| crate::watch::title_memory_reading_range(from, n * 3 * stride));
+                    .then(|| crate::watch::title_memory_reading(from, n * 3 * stride));
                 // SAFETY: the vertices lie in a title buffer (checked when
                 // recorded) and the scratch memory is the list's.
                 let (src, dst) = unsafe {

@@ -149,7 +149,7 @@ pub(super) fn writers(items: &[Late]) -> Vec<Writer> {
                     }));
                 }
                 for &i in &flight.order {
-                    for &(_, at, [row, rows, pitch]) in &flight.lists[i].host().deferred().backs {
+                    for &(_, at, [row, rows, pitch], _, _) in &flight.lists[i].host().deferred().backs {
                         out.push(Writer {
                             shadow: None,
                             from: at,
