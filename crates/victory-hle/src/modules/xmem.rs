@@ -1375,13 +1375,6 @@ pub extern "system" fn XMemMapPhysicalPagesScatter(
 /// the title maps pages into a pool view, then has the GPU map them into its tiled
 /// heap. Page by page; false if a source page is not mapped physical memory.
 pub fn map_alias(to: u64, from: u64, len: u64) -> bool {
-<<<<<<< HEAD
-    let (to, from, len) = (to as usize, from as usize, len as usize);
-    let _costed = Costed::begin(None);
-    let _busy = Busy::begin();
-||||||| 9c184b35b
-    let (to, from, len) = (to as usize, from as usize, len as usize);
-=======
     use victory_gpu::framelog::{T, add};
     // From entry to return, the wait for the page table's lock included.
     let entered = std::time::Instant::now();
@@ -1401,7 +1394,8 @@ thread_local! {
 /// [`map_alias`] itself; the caller counts it for the frame log.
 fn alias(to: usize, from: usize, len: usize) -> bool {
     use victory_gpu::framelog::{T, add};
->>>>>>> origin/exp/fork-head
+    let _costed = Costed::begin(None);
+    let _busy = Busy::begin();
     let mut physical = physical();
     // As in `XMemMapPhysicalPages`: no read in place meets the gap.
     let _changing = victory_gpu::title_memory_remapping();
@@ -1832,7 +1826,7 @@ mod pool {
 /// Maps `slice` and the slices after it over `[base, base + len)`, which
 /// must lie in one placeholder.
 fn map(physical: &mut Physical, base: usize, len: usize, slice: Slice) -> bool {
-<<<<<<< HEAD
+    use victory_gpu::framelog::{T, add};
     let own = physical.holes.remove(&base) == Some(len) && lean();
     if !show(base, len, &slice, own) {
         return false;
@@ -1841,10 +1835,12 @@ fn map(physical: &mut Physical, base: usize, len: usize, slice: Slice) -> bool {
     // without notice at these addresses ([`pages_written`]), are there by
     // the time the copies of them go.
     shown_mut().note(base, len, &slice);
+    let noted = std::time::Instant::now();
     // New contents, read-write: the GPU side's copies no longer guard it.
     victory_gpu::title_memory_remapped(base, len);
     // What the range shows now, for the GPU side's in-place census.
     victory_gpu::title_memory_view(base, len, slice.section.handle as usize, (slice.index * PAGE) as u64);
+    add(T::RemapNotesUs, noted.elapsed().as_micros() as u64);
     physical.views.insert(base, (len, slice));
     true
 }
@@ -1852,22 +1848,30 @@ fn map(physical: &mut Physical, base: usize, len: usize, slice: Slice) -> bool {
 /// Cuts `[base, base + len)` out of the placeholder it is in (which fails
 /// harmlessly when the range is the whole placeholder).
 fn split(base: usize, len: usize) {
+    use victory_gpu::framelog::{T, add};
+    let began = std::time::Instant::now();
     // SAFETY: acts only on a placeholder.
-    counted(Call::Split, || unsafe {
+    let done = counted(Call::Split, || unsafe {
         VirtualFree(
             base as *mut c_void,
             len,
             MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER,
         )
-    });
+    }) != 0;
+    add(T::RemapSplits, 1);
+    add(T::RemapSplitsDone, u64::from(done));
+    add(T::RemapSplitUs, began.elapsed().as_micros() as u64);
 }
 
 /// The system calls of [`map`]; `own`: the placeholder at `base` is `len`
 /// long already.
 fn show(base: usize, len: usize, slice: &Slice, own: bool) -> bool {
+    use victory_gpu::framelog::{T, add};
+    let started = std::time::Instant::now();
     let map_view = || {
+        let meter = Meter::begin();
         // SAFETY: maps the section over a placeholder; acts only on one.
-        counted(Call::Map, || unsafe {
+        let view = counted(Call::Map, || unsafe {
             MapViewOfFile3(
                 slice.section.handle,
                 GetCurrentProcess(),
@@ -1879,54 +1883,43 @@ fn show(base: usize, len: usize, slice: &Slice, own: bool) -> bool {
                 std::ptr::null_mut(),
                 0,
             )
-        })
-||||||| 9c184b35b
-    // SAFETY: splits the placeholder around the range (failing harmlessly
-    // when the range is the whole placeholder), then maps the section
-    // there; both act only on placeholders.
-    let view = unsafe {
-        VirtualFree(
-            base as *mut c_void,
-            len,
-            MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER,
-        );
-        MapViewOfFile3(
-            slice.section.0,
-            GetCurrentProcess(),
-            base as *const c_void,
-            (slice.index * PAGE) as u64,
-            len,
-            MEM_REPLACE_PLACEHOLDER,
-            PAGE_READWRITE,
-            std::ptr::null_mut(),
-            0,
-        )
-=======
-    use victory_gpu::framelog::{T, add};
-    let started = std::time::Instant::now();
-    // Splits the placeholder around the range (failing harmlessly when the
-    // range is the whole placeholder).
-    let split = || {
-        let began = std::time::Instant::now();
-        // SAFETY: acts only on a placeholder.
-        let done = unsafe {
+        });
+        meter.end(true);
+        view
+    };
+    // `own`: the placeholder is the range, mapped at once. Otherwise the
+    // range is split out first, or with `VICTORY_REMAP_SPLIT=late` mapped
+    // at once and split and mapped again only if that failed
+    // ([`split_late`]): the range is most often a whole placeholder already
+    // (a page whose own view was just unmapped).
+    let view = if own {
+        map_view()
+    } else if split_late() {
+        let first = map_view();
+        if first.Value as usize == base {
+            first
+        } else {
+            add(T::RemapMapRetries, 1);
+            split(base, len);
+            map_view()
+        }
+    } else {
+        split(base, len);
+        map_view()
+    };
+    let mut view = view;
+    if view.Value as usize != base && len > PAGE {
+        // `[base, base + len)` may consist of placeholders split earlier;
+        // coalesce them and retry once, then page by page.
+        // SAFETY: coalesces adjacent placeholders and maps the section there.
+        view = unsafe {
             VirtualFree(
                 base as *mut c_void,
                 len,
-                MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER,
-            )
-        } != 0;
-        add(T::RemapSplits, 1);
-        add(T::RemapSplitsDone, u64::from(done));
-        add(T::RemapSplitUs, began.elapsed().as_micros() as u64);
-    };
-    // Maps the section over the range, which must be a whole placeholder.
-    let map_view = || {
-        let meter = Meter::begin();
-        // SAFETY: acts only on a placeholder.
-        let view = unsafe {
+                MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS,
+            );
             MapViewOfFile3(
-                slice.section.0,
+                slice.section.handle,
                 GetCurrentProcess(),
                 base as *const c_void,
                 (slice.index * PAGE) as u64,
@@ -1937,30 +1930,18 @@ fn show(base: usize, len: usize, slice: &Slice, own: bool) -> bool {
                 0,
             )
         };
-        meter.end(true);
-        view
-    };
-    let view = if split_late() {
-        // The range is most often a whole placeholder already (a page
-        // whose own view was just unmapped): mapped at once; split and
-        // mapped again only if that failed ([`split_late`]).
-        let first = map_view();
-        if first.Value as usize == base {
-            first
-        } else {
-            add(T::RemapMapRetries, 1);
-            split();
-            map_view()
+        if view.Value as usize != base {
+            for k in 0..len.div_ceil(PAGE) {
+                let page_slice = Slice {
+                    section: slice.section.clone(),
+                    index: slice.index + k,
+                };
+                if !show(base + k * PAGE, PAGE, &page_slice, false) {
+                    return false;
+                }
+            }
+            return true;
         }
-    } else {
-        split();
-        map_view()
->>>>>>> origin/exp/fork-head
-    };
-    let mut view = if own { map_view() } else { MEMORY_MAPPED_VIEW_ADDRESS { Value: std::ptr::null_mut() } };
-    if view.Value as usize != base {
-        split(base, len);
-        view = map_view();
     }
     if view.Value as usize != base {
         tracing::warn!(
@@ -1971,42 +1952,15 @@ fn show(base: usize, len: usize, slice: &Slice, own: bool) -> bool {
         );
         return false;
     }
-<<<<<<< HEAD
-    if !slice.section.commit_shown(slice.index, base, len) {
-||||||| 9c184b35b
-    if !commit(base, len) {
-=======
     let mapped = std::time::Instant::now();
     add(T::RemapMapUs, (mapped - started).as_micros() as u64);
-    if !commit(base, len) {
->>>>>>> origin/exp/fork-head
+    if !slice.section.commit_shown(slice.index, base, len) {
         // SAFETY: the view just mapped, back to a placeholder.
         unsafe { UnmapViewOfFile2(GetCurrentProcess(), view, MEM_PRESERVE_PLACEHOLDER) };
         return false;
     }
-<<<<<<< HEAD
-||||||| 9c184b35b
-    // New contents, read-write: the GPU side's copies no longer guard it.
-    victory_gpu::title_memory_remapped(base, len);
-    // What the range shows now, for the GPU side's in-place census.
-    victory_gpu::title_memory_view(base, len, slice.section.0 as usize, (slice.index * PAGE) as u64);
-    for k in 0..len.div_ceil(PAGE) {
-        physical.shown.entry(slice.key(k)).or_default().push(base + k * PAGE);
-    }
-    physical.views.insert(base, (len, slice));
-=======
     let committed = std::time::Instant::now();
     add(T::RemapCommitUs, (committed - mapped).as_micros() as u64);
-    // New contents, read-write: the GPU side's copies no longer guard it.
-    victory_gpu::title_memory_remapped(base, len);
-    // What the range shows now, for the GPU side's in-place census.
-    victory_gpu::title_memory_view(base, len, slice.section.0 as usize, (slice.index * PAGE) as u64);
-    add(T::RemapNotesUs, committed.elapsed().as_micros() as u64);
-    for k in 0..len.div_ceil(PAGE) {
-        physical.shown.entry(slice.key(k)).or_default().push(base + k * PAGE);
-    }
-    physical.views.insert(base, (len, slice));
->>>>>>> origin/exp/fork-head
     true
 }
 
@@ -2101,18 +2055,12 @@ fn unmap(physical: &mut Physical, base: usize, len: usize) {
             // Parts of it stay, and are mapped again below.
             victory_gpu::title_memory_splitting(at, size);
         }
-<<<<<<< HEAD
-        victory_gpu::title_memory_unmapping(at, size);
-||||||| 9c184b35b
-        victory_gpu::title_memory_remapped(at, size);
-=======
         use victory_gpu::framelog::{T, add};
         let started = std::time::Instant::now();
-        victory_gpu::title_memory_remapped(at, size);
+        victory_gpu::title_memory_unmapping(at, size);
         let noted = std::time::Instant::now();
         add(T::RemapNotesUs, (noted - started).as_micros() as u64);
         let meter = Meter::begin();
->>>>>>> origin/exp/fork-head
         // SAFETY: a view we mapped; it becomes a placeholder again.
         let gone = counted(Call::Unmap, || unsafe {
             UnmapViewOfFile2(
@@ -2122,15 +2070,7 @@ fn unmap(physical: &mut Physical, base: usize, len: usize) {
                 },
                 MEM_PRESERVE_PLACEHOLDER,
             )
-<<<<<<< HEAD
         });
-        if gone != 0 && at >= base && at + size <= end {
-            physical.holes.insert(at, size);
-        }
-||||||| 9c184b35b
-        };
-=======
-        };
         meter.end(false);
         add(T::RemapUnmapUs, noted.elapsed().as_micros() as u64);
         // What of the view lies outside the range asked for is mapped
@@ -2140,7 +2080,9 @@ fn unmap(physical: &mut Physical, base: usize, len: usize) {
             add(T::RemapCuts, 1);
             add(T::RemapCutBytes, outside as u64);
         }
->>>>>>> origin/exp/fork-head
+        if gone != 0 && at >= base && at + size <= end {
+            physical.holes.insert(at, size);
+        }
         if at < base {
             map(physical, at, base - at, slice.clone());
         }
