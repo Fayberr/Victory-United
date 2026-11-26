@@ -1268,7 +1268,7 @@ impl View {
         const BUFFER: u32 = 1;
         match self {
             View::Constant(..) | View::Placed(false, ..) => true,
-            View::Placed(true, resource, _) => resource[0] == BUFFER,
+            View::Placed(true, resource, _) => resource[0] == BUFFER || !crate::resource::placed_uav_mirror(),
             View::Shader(r, _) | View::Unordered(r, _, _) => {
                 crate::resource::buffer_bytes(*r as This).is_some()
             }

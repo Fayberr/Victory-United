@@ -3551,6 +3551,15 @@ pub(crate) fn texture_at(address: u64, desc: &[u32; 14]) -> Option<This> {
     Some(out)
 }
 
+/// Whether unordered access views of textures the title placed in memory
+/// get host textures of their own (`VICTORY_PLACED_UAV`; on unless `0`). Off,
+/// such a view is a view of title memory as it was before the mirror.
+#[cfg(windows)]
+pub(crate) fn placed_uav_mirror() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_PLACED_UAV").is_none_or(|v| v != "0"))
+}
+
 /// The resource for an unordered access view of a texture placed at
 /// `address` with resource description `desc` and view format `view_format`
 /// (0: the resource's own): an existing unordered-access texture at that
@@ -3560,6 +3569,9 @@ pub(crate) fn texture_at(address: u64, desc: &[u32; 14]) -> Option<This> {
 /// through [`alias_of`]).
 #[cfg(windows)]
 pub(crate) fn uav_texture_at(address: u64, desc: &[u32; 14], view_format: u32) -> Option<This> {
+    if !placed_uav_mirror() {
+        return None;
+    }
     const DEPTH: u32 = 0x2;
     const UNORDERED: u32 = 0x4;
     const UNORDERED_ACCESS: u32 = 0x8;
