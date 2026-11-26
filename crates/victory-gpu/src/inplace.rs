@@ -344,21 +344,11 @@ struct Views {
     /// page in every view that shows it. A write through one view of a
     /// page is a write of the bytes every other view shows
     /// (`crate::watch` guards them all).
-<<<<<<< HEAD
     pages: BTreeMap<(usize, u64), PageSet>,
-    /// Sections by handle: bytes, and whether made committed.
-    sections: Vec<(usize, u64, bool)>,
-||||||| 465b94f5
-    pages: BTreeMap<(usize, u64), Vec<usize>>,
-    /// Sections by handle: bytes, and whether made committed.
-    sections: Vec<(usize, u64, bool)>,
-=======
-    pages: BTreeMap<(usize, u64), Vec<usize>>,
     /// Sections by handle: bytes, and whether made committed (thousands of
     /// them with `VICTORY_SECTION_MB`, and looked up by every store through a
     /// view of ours).
     sections: BTreeMap<usize, (u64, bool)>,
->>>>>>> vertex/main
 }
 
 /// Looked at far more often than changed: by every stretch the copy-back
@@ -435,30 +425,6 @@ pub fn title_memory_view(at: usize, len: usize, section: usize, offset: u64) {
 /// physical-page views, and how many of those show a page that has more
 /// than one address. Logging only.
 pub(crate) fn view_census(at: usize, len: usize) -> (usize, usize) {
-    let v = views();
-    let end = at.saturating_add(len);
-    let (mut in_views, mut multi) = (0, 0);
-    for (&base, &(vlen, section, offset)) in v.views.range(..end) {
-        let (lo, hi) = (base.max(at), (base + vlen).min(end));
-        if lo >= hi {
-            continue;
-        }
-        in_views += hi - lo;
-        let first = (lo - base) / K64;
-        let last = (hi - base).div_ceil(K64);
-        for k in first..last {
-            if v.pages.get(&(section, offset + (k * K64) as u64)).is_some_and(|l| l.len() > 1) {
-                multi += (base + (k + 1) * K64).min(hi) - (base + k * K64).max(lo);
-            }
-        }
-    }
-    (in_views, multi)
-}
-
-/// For the census (`crate::census`): how many bytes of `[at, at + len)` are
-/// physical-page views, and how many of those show a page that has more
-/// than one address. Logging only.
-pub(crate) fn view_census(at: usize, len: usize) -> (usize, usize) {
     let v = views_shared();
     let end = at.saturating_add(len);
     let (mut in_views, mut multi) = (0, 0);
@@ -513,7 +479,6 @@ pub(crate) fn views_gone(at: usize, len: usize) -> Vec<(usize, usize)> {
     if was_many.is_empty() {
         return Vec::new();
     }
-<<<<<<< HEAD
     let mut reopen = Vec::new();
     for key in was_many {
         if let Some(shown) = v.pages.get(&key)
@@ -523,6 +488,24 @@ pub(crate) fn views_gone(at: usize, len: usize) -> Vec<(usize, usize)> {
         }
     }
     page_runs(reopen)
+}
+
+/// The title views that overlap `[start, end)`, as `(address, bytes)`.
+pub(crate) fn views_between(start: usize, end: usize) -> Vec<(usize, usize)> {
+    if start >= end {
+        return Vec::new();
+    }
+    let v = views_shared();
+    let mut out = Vec::new();
+    if let Some((&base, &(bytes, _, _))) = v.views.range(..=start).next_back()
+        && base + bytes > start
+    {
+        out.push((base, bytes));
+    }
+    for (&base, &(bytes, _, _)) in v.views.range(start.saturating_add(1)..end) {
+        out.push((base, bytes));
+    }
+    out
 }
 
 /// Batched lookup for `watch::protect`: acquires `VIEWS` once across all 64 KiB
@@ -539,24 +522,9 @@ pub(crate) fn alias_blocks_in(
     if start >= end {
         return (Vec::new(), Vec::new(), 0);
     }
-    let v = views();
+    let v = views_shared();
     if v.views.is_empty() {
         return (Vec::new(), Vec::new(), 0);
-||||||| 465b94f5
-    let v = views();
-    let mut out = Vec::new();
-    if let Some((&base, &(bytes, _, _))) = v.views.range(..=start).next_back()
-        && base + bytes > start
-    {
-        out.push((base, bytes));
-=======
-    let v = views_shared();
-    let mut out = Vec::new();
-    if let Some((&base, &(bytes, _, _))) = v.views.range(..=start).next_back()
-        && base + bytes > start
-    {
-        out.push((base, bytes));
->>>>>>> vertex/main
     }
     let mut all_aliased = Vec::new();
     let mut others = Vec::new();
@@ -616,56 +584,8 @@ pub(crate) fn pages_of(page: usize) -> Vec<usize> {
         .unwrap_or_default()
 }
 
-<<<<<<< HEAD
 /// Coalesces 64 KiB page addresses into contiguous `(address, bytes)` runs.
 fn page_runs(mut pages: Vec<usize>) -> Vec<(usize, usize)> {
-||||||| 465b94f5
-/// The title views that show any of the physical bytes `[offset, offset +
-/// len)` of `section`, as `(address, bytes)` ranges in address order; not
-/// those of a page shown in very many views (`MANY_VIEWS`).
-pub(crate) fn views_of_section(section: usize, offset: u64, len: usize) -> Vec<(usize, usize)> {
-    if len == 0 {
-        return Vec::new();
-    }
-    let v = views();
-    let end = offset.saturating_add(len as u64);
-    let mut pages: Vec<usize> = Vec::new();
-    let mut at = offset - offset % K64 as u64;
-    while at < end {
-        if let Some(shown) = v.pages.get(&(section, at))
-            && shown.len() <= crate::watch::MANY_VIEWS
-        {
-            pages.extend(shown.iter().copied());
-        }
-        match at.checked_add(K64 as u64) {
-            Some(next) => at = next,
-            None => break,
-        }
-    }
-=======
-/// The title views that show any of the physical bytes `[offset, offset +
-/// len)` of `section`, as `(address, bytes)` ranges in address order; not
-/// those of a page shown in very many views (`MANY_VIEWS`).
-pub(crate) fn views_of_section(section: usize, offset: u64, len: usize) -> Vec<(usize, usize)> {
-    if len == 0 {
-        return Vec::new();
-    }
-    let v = views_shared();
-    let end = offset.saturating_add(len as u64);
-    let mut pages: Vec<usize> = Vec::new();
-    let mut at = offset - offset % K64 as u64;
-    while at < end {
-        if let Some(shown) = v.pages.get(&(section, at))
-            && shown.len() <= crate::watch::MANY_VIEWS
-        {
-            pages.extend(shown.iter().copied());
-        }
-        match at.checked_add(K64 as u64) {
-            Some(next) => at = next,
-            None => break,
-        }
-    }
->>>>>>> vertex/main
     pages.sort_unstable();
     pages.dedup();
     let mut runs: Vec<(usize, usize)> = Vec::with_capacity(pages.len());
