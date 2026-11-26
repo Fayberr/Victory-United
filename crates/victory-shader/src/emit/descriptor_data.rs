@@ -87,7 +87,6 @@ impl<'a> Lower<'a> {
         let layers = inst.write(Reg::S(code + 4)).is_some_and(|v| self.read_as_number(v));
         // `sized`: no instruction uses the descriptor, the code reads a size from it
         // ([`Self::unused_descriptor_kind`]).
-<<<<<<< HEAD
         let (first, used, uav, props, image, sized) =
             if let Some((at, first)) = use_at.or(sized.map(|_| (site, 0))) {
                 let src = Source::Loaded { load: site, first };
@@ -122,7 +121,15 @@ impl<'a> Lower<'a> {
                         let props = if un.starts_with("buffer_load_format")
                             || un.starts_with("buffer_store_format")
                         {
-                            (10 | u, 0x409)
+                            // (Unsigned integers where the access moves halves.)
+                            let halves = self
+                                .table_place(&Source::Loaded { load: site, first })
+                                .is_some_and(|p| {
+                                    self.halves_only.contains(&p)
+                                        && (un.contains("_format_d16_")
+                                            || self.format_load_read_as_halves(ui))
+                                });
+                            (10 | u, if halves { 0x405 } else { 0x409 })
                         } else if !counted
                             && *idxen
                             && format.is_none()
@@ -149,89 +156,6 @@ impl<'a> Lower<'a> {
                     }
                     // A constant buffer: nothing of its descriptor is a number.
                     Fields::Smem { .. } => {
-||||||| c7daeea5
-        let (first, used, uav, props, image, sized) = if let Some((at, first)) = use_at {
-            let src = Source::Loaded { load: site, first };
-            let used = self.used_kind(&src);
-            let ui: &Inst = &self.x.p.blocks[at.0].insts[at.1];
-            let un = ui.name();
-            let uav = un.contains("store")
-                || un.contains("atomic")
-                || used.is_some_and(|u| u.kind == ResourceType::Uav);
-            let u = if uav { 0x1000 } else { 0 };
-            let (props, image) = match &ui.fields {
-                // A ray-tracing structure in a buffer of the host: read raw.
-                Fields::Image { .. } if un.starts_with("image_bvh") => ((11, 0), None),
-                Fields::Image { dim, .. } => {
-                    let kind = match dim {
-                        0 => 1,
-                        1 => 2,
-                        2 => 4,
-                        4 => 6,
-                        5 => 7,
-                        _ => return Err("an image dimension (cube or MSAA)"),
-                    };
-                    ((kind | u, 0x409), Some(kind))
-                }
-                Fields::Buffer { idxen, format, .. } => {
-                    let stride = used.map_or(0, |u| u.stride);
-                    let props = if un.starts_with("buffer_load_format")
-                        || un.starts_with("buffer_store_format")
-                    {
-                        (10 | u, 0x409)
-                    } else if *idxen && format.is_none() && stride >= 4 && stride.is_multiple_of(4)
-                    {
-                        (12 | u, stride)
-                    } else {
-                        (11 | u, 0)
-                    };
-                    if used.is_some_and(|u| u.kind == ResourceType::Cbv) {
-=======
-        let (first, used, uav, props, image, sized) = if let Some((at, first)) = use_at {
-            let src = Source::Loaded { load: site, first };
-            let used = self.used_kind(&src);
-            let ui: &Inst = &self.x.p.blocks[at.0].insts[at.1];
-            let un = ui.name();
-            let uav = un.contains("store")
-                || un.contains("atomic")
-                || used.is_some_and(|u| u.kind == ResourceType::Uav);
-            let u = if uav { 0x1000 } else { 0 };
-            let (props, image) = match &ui.fields {
-                // A ray-tracing structure in a buffer of the host: read raw.
-                Fields::Image { .. } if un.starts_with("image_bvh") => ((11, 0), None),
-                Fields::Image { dim, .. } => {
-                    let kind = match dim {
-                        0 => 1,
-                        1 => 2,
-                        2 => 4,
-                        4 => 6,
-                        5 => 7,
-                        _ => return Err("an image dimension (cube or MSAA)"),
-                    };
-                    ((kind | u, 0x409), Some(kind))
-                }
-                Fields::Buffer { idxen, format, .. } => {
-                    let stride = used.map_or(0, |u| u.stride);
-                    let props = if un.starts_with("buffer_load_format")
-                        || un.starts_with("buffer_store_format")
-                    {
-                        // (Unsigned integers where the access moves halves.)
-                        let halves = self
-                            .table_place(&Source::Loaded { load: site, first })
-                            .is_some_and(|p| {
-                                self.halves_only.contains(&p)
-                                    && (un.contains("_format_d16_")
-                                        || self.format_load_read_as_halves(ui))
-                            });
-                        (10 | u, if halves { 0x405 } else { 0x409 })
-                    } else if *idxen && format.is_none() && stride >= 4 && stride.is_multiple_of(4)
-                    {
-                        (12 | u, stride)
-                    } else {
-                        (11 | u, 0)
-                    };
-                    if used.is_some_and(|u| u.kind == ResourceType::Cbv) {
->>>>>>> integ/vertex
                         self.stale.extend(inst.writes.iter().map(|w| w.1));
                         return Err("a constant buffer's descriptor read as data");
                     }
