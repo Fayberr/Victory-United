@@ -9892,6 +9892,8 @@ impl HostList {
                     continue;
                 }
                 Step::Run(work, _) | Step::Host(work, _) => {
+                    #[cfg(feature = "diagnostics")]
+                    let started = std::time::Instant::now();
                     // Its work reads title memory, and the fills noted read
                     // it too: they are done first.
                     batch.fill();
@@ -9916,7 +9918,7 @@ impl HostList {
                     #[cfg(feature = "diagnostics")]
                     {
                         add(C::Runs, 1);
-                        add(C::RunUs, micros_since(started));
+                        add(C::RunUs, micros_since(Some(started)));
                     }
                     continue;
                 }

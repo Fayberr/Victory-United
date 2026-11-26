@@ -427,8 +427,12 @@ struct State {
     running: Vec<(u64, ThreadId)>,
     /// The keyboard and mouse as a pad; `None`: the old stand-in pad.
     controls: Option<Controls>,
-    /// The last poll's host pads and keys, for pad reads in between.
-    host_pads: [Option<PadState>; PADS],
+    /// The last poll's host pads and keys, for pad reads in between. With
+    /// one pad ([`one_pad`]) the stand-in slot holds every host pad folded
+    /// together and the others are empty.
+    host_pads: [Option<PadState>; PADS + 1],
+    /// Whether the last poll folded the host pads into the stand-in slot.
+    one_pad: bool,
     keys: Vec<KeyState>,
     /// Scripted input as a pad (none when nothing is scripted now).
     script: Option<PadState>,
@@ -494,7 +498,8 @@ impl Hub {
                 pending: Vec::new(),
                 running: Vec::new(),
                 controls: settings.enabled.then(|| Controls::new(settings)),
-                host_pads: [None; PADS],
+                host_pads: [None; PADS + 1],
+                one_pad: false,
                 keys: Vec::new(),
                 script: None,
                 mouse: Mouse::default(),
@@ -623,7 +628,7 @@ impl State {
         // mouse go in through the controls, or through the stand-in pad.
         let pads = if one_pad {
             let base = pads.into_iter().flatten().reduce(merged);
-            let mut one: [Option<PadState>; PADS] = [None; PADS];
+            let mut one: [Option<PadState>; PADS + 1] = [None; PADS + 1];
             one[FALLBACK] = match (base, self.controls.is_none()) {
                 (Some(pad), true) => Some(merged(pad, fallback(&keys))),
                 (Some(pad), false) => Some(pad),
@@ -632,7 +637,9 @@ impl State {
             };
             one
         } else {
-            pads
+            let mut all: [Option<PadState>; PADS + 1] = [None; PADS + 1];
+            all[..PADS].copy_from_slice(&pads);
+            all
         };
         // Scripted input (auto input, press file, fast boot) is a third
         // source beside the host pads and the keyboard and mouse: it never
@@ -654,6 +661,7 @@ impl State {
         }
         self.script = script_pad;
         self.host_pads = pads;
+        self.one_pad = one_pad;
         self.keys.clone_from(&keys);
         self.mouse.clone_from(mouse);
         self.publish(devices, now, None, &mut events);
@@ -674,13 +682,18 @@ impl State {
         events: &mut Vec<Event>,
     ) {
         let pads = self.host_pads;
-        let first = pads.iter().position(Option::is_some);
+        let first = pads[..PADS].iter().position(Option::is_some);
         let mut values = [None; PADS + 1];
-        values[..PADS].copy_from_slice(&pads);
-        let target = first.unwrap_or(FALLBACK);
+        values[..PADS].copy_from_slice(&pads[..PADS]);
+        // One pad: the stand-in slot carries every host pad, and is the target.
+        let (target, host) = if self.one_pad {
+            (FALLBACK, pads[FALLBACK])
+        } else {
+            (first.unwrap_or(FALLBACK), first.and_then(|i| pads[i]))
+        };
         match &mut self.controls {
             Some(c) => {
-                let base = first.and_then(|i| pads[i]);
+                let base = host;
                 values[target] = Some(match take {
                     Some(counts) => c.take(now, base, counts),
                     None => c.peek(base),
@@ -691,9 +704,10 @@ impl State {
             // and the presses the title has not looked at yet; scripted
             // input joins whichever pad there is.
             None => {
-                let base = match first {
-                    Some(i) => pads[i],
-                    None => {
+                let base = match (self.one_pad, first) {
+                    (true, _) => host,
+                    (false, Some(i)) => pads[i],
+                    (false, None) => {
                         let layout = binds::layout(|vk| pressed(&self.keys, &self.mouse, vk));
                         let pad = fallback(&self.keys, &self.mouse, &layout);
                         Some(self.unseen.add(pad, now))
