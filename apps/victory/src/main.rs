@@ -8,13 +8,9 @@ mod census;
 #[cfg(windows)]
 mod doctor;
 mod inspect;
-<<<<<<< HEAD
-mod precompile;
-||||||| 465b94f5
-=======
 #[cfg(windows)]
 mod prebuild;
->>>>>>> vertex/main
+mod precompile;
 mod run;
 mod shader;
 mod translate;

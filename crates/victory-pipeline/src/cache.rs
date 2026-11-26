@@ -11,20 +11,11 @@ pub struct CacheKey(blake3::Hash);
 
 impl CacheKey {
     pub fn new(converter: &dyn Converter, input: &[u8]) -> Self {
-<<<<<<< HEAD
-        Self::from_parts(converter.id(), converter.version(), &[input])
-    }
-
-    /// Identifies a conversion without first concatenating its input parts.
-    pub fn from_parts(id: &str, version: u32, input: &[&[u8]]) -> Self {
-||||||| 465b94f5
-=======
         Self::from_parts(converter.id(), converter.version(), &[input])
     }
 
     /// Identifies a conversion without copying the input parts together.
     pub fn from_parts(id: &str, version: u32, input: &[&[u8]]) -> Self {
->>>>>>> vertex/main
         let mut h = blake3::Hasher::new();
         h.update(id.as_bytes());
         h.update(&[0]);
@@ -71,50 +62,14 @@ impl Cache {
         let output = converter
             .convert(input)
             .with_context(|| format!("converter {} v{}", converter.id(), converter.version()))?;
-<<<<<<< HEAD
-        self.store(&key, &output)?;
+        self.write(&key, &output)?;
         Ok(path)
     }
 
     /// Atomically publishes already-converted output, replacing any old entry.
     pub fn store(&self, key: &CacheKey, output: &[u8]) -> Result<()> {
-        let path = self.path_for(key);
-        let dir = path.parent().expect("hashed path has a parent");
-        std::fs::create_dir_all(dir)?;
-        // Write-then-rename so readers never see partial output.
-        let tmp = tempfile_in(dir);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        let written = file.write_all(output);
-        drop(file);
-        let published = written.and_then(|()| std::fs::rename(&tmp, &path));
-        if published.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-        published.with_context(|| format!("publishing {}", path.display()))
-||||||| 465b94f5
-        let dir = path.parent().expect("hashed path has a parent");
-        std::fs::create_dir_all(dir)?;
-        // Write-then-rename so readers never see partial output.
-        let tmp = tempfile_in(dir);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        let written = file.write_all(&output);
-        drop(file);
-        let published = written.and_then(|()| std::fs::rename(&tmp, &path));
-        if published.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-        published?;
-        Ok(path)
-=======
-        self.write(&key, &output)?;
-        Ok(path)
->>>>>>> vertex/main
+        self.write(key, output)
+            .with_context(|| format!("publishing {}", self.path_for(key).display()))
     }
 
     /// Publishes an entry atomically, replacing an unreadable entry if needed.
