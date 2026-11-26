@@ -26,15 +26,11 @@ mod console_insn;
 #[cfg(windows)]
 mod console_ops;
 mod crash;
-<<<<<<< HEAD
-#[cfg(windows)]
-mod hooks;
-||||||| 85d564167
-=======
 #[cfg(windows)]
 pub mod descriptor_sites;
 pub mod frame_rate;
->>>>>>> avatar/main
+#[cfg(windows)]
+mod hooks;
 pub mod prepare;
 pub(crate) mod publish;
 pub mod resolution;
