@@ -9270,7 +9270,7 @@ impl<'a> Lower<'a> {
                     let (wave_off, base) = self.bpermute_base(slot);
                     let cl = self.console_lane();
                     let dst_idx = self.s.m.bin(c, Bin::Add, base, cl);
-                    let lds = self.s.lds();
+                    let lds = self.s.lds(false);
                     let dst_ptr = self.s.m.element(c, lds, dst_idx);
                     self.s.m.store(c, dst_ptr, x);
                     self.group_sync(c);
@@ -9323,7 +9323,7 @@ impl<'a> Lower<'a> {
             let ok = l.s.m.cmp(c, pred::IULT, index, len);
             let z = l.s.m.i32(0);
             let safe_index = l.s.m.select(c, ok, index, z);
-            let lds = l.s.lds();
+            let lds = l.s.lds(false);
             (l.s.m.element(c, lds, safe_index), ok)
         };
         // shortcut: whole-dword LDS addresses are taken as aligned and in bounds.
@@ -9645,8 +9645,6 @@ impl<'a> Lower<'a> {
         let sd = snan(self, data);
         self.s.m.select(c, sd, qd, r)
     }
-
-    // ---- instructions ----
 
     fn write_atomic_result(&mut self, inst: &Inst, reg: u8, old: V, wide: bool, guard: Option<V>) {
         if wide {
@@ -13642,51 +13640,60 @@ impl<'a> Lower<'a> {
                 float(self, r)
             }
             "v_cndmask_b32" => {
+                let tracked = inst
+                    .writes
+                    .first()
+                    .and_then(|&(_, v)| self.x.st.select_masks.get(&v).copied());
                 let mask = match v.src.get(2) {
                     Some(&Operand::Scalar { code, .. }) => inst.read(Reg::S(code)),
                     _ => None,
                 };
                 const UNTRACKED: Why = "a select on an untracked mask";
-                let cond = match mask.and_then(|m| self.x.st.masks.get(&m).copied()) {
-                    Some(m) => self.boolean(m, c)?,
-                    // A mask the code holds as a number (a constant bit
-                    // pattern: every other lane, every other pair...):
-                    // this lane's bit of it. Exact where host lanes are
-                    // the console's.
-                    None if self.mask_data == MaskData::Console => {
-                        let m = mask.ok_or(UNTRACKED)?;
-                        let lo = self.i32_of(m).map_err(|_| UNTRACKED)?;
-                        // wave64: the register after it holds lanes 32-63.
-                        let high = match v.src.get(2) {
-                            Some(&Operand::Scalar { code, .. }) if self.x.native.wave64 => {
-                                Some(inst.read(Reg::S(code + 1)).ok_or(UNTRACKED)?)
+                let cond = if tracked.is_some() {
+                    // The mask was tracked as a select result: its Bool.
+                    self.select_condition(inst, v.src.get(2))?
+                } else {
+                    match mask.and_then(|m| self.x.st.masks.get(&m).copied()) {
+                        Some(m) => self.boolean(m, c)?,
+                        // A mask the code holds as a number (a constant bit
+                        // pattern: every other lane, every other pair...):
+                        // this lane's bit of it. Exact where host lanes are
+                        // the console's.
+                        None if self.mask_data == MaskData::Console => {
+                            let m = mask.ok_or(UNTRACKED)?;
+                            let lo = self.i32_of(m).map_err(|_| UNTRACKED)?;
+                            // wave64: the register after it holds lanes 32-63.
+                            let high = match v.src.get(2) {
+                                Some(&Operand::Scalar { code, .. }) if self.x.native.wave64 => {
+                                    Some(inst.read(Reg::S(code + 1)).ok_or(UNTRACKED)?)
+                                }
+                                _ => None,
+                            };
+                            let hi = match high {
+                                Some(h) => Some(self.i32_of(h).map_err(|_| UNTRACKED)?),
+                                None => None,
+                            };
+                            // A literal mask is available to both host waves.
+                            // Their relabelled console lanes select their own
+                            // bits without exchanging any wave's values.
+                            // (Each host wave taken as a wave of its own has no
+                            // console lane numbers to pick the bits by, except
+                            // where the group's flat thread index is the console's
+                            // lane number, as in compute and mesh groups.)
+                            let threads = matches!(self.x.native.stage, HwStage::Cs | HwStage::Ms);
+                            if self.local
+                                && !(self.local_any && threads)
+                                && !(self.exchange.is_some()
+                                    && self.s.m.int_value(lo).is_some()
+                                    && hi.is_some_and(|h| self.s.m.int_value(h).is_some()))
+                            {
+                                return Err("a constant lane mask in a half-wave");
                             }
-                            _ => None,
-                        };
-                        let hi = match high {
-                            Some(h) => Some(self.i32_of(h).map_err(|_| UNTRACKED)?),
-                            None => None,
-                        };
-                        // A literal mask is available to both host waves.
-                        // Their relabelled console lanes select their own
-                        // bits without exchanging any wave's values.
-                        // (Each host wave taken as a wave of its own has no
-                        // console lane numbers to pick the bits by, except
-                        // where the group's flat thread index is the console's
-                        // lane number, as in compute and mesh groups.)
-                        let threads = matches!(self.x.native.stage, HwStage::Cs | HwStage::Ms);
-                        if self.local
-                            && !(self.local_any && threads)
-                            && !(self.exchange.is_some()
-                                && self.s.m.int_value(lo).is_some()
-                                && hi.is_some_and(|h| self.s.m.int_value(h).is_some()))
-                        {
-                            return Err("a constant lane mask in a half-wave");
+                            self.cross_lane(false)?;
+                            self.lane_bit(c, lo, hi)
                         }
-                        self.cross_lane(false)?;
-                        self.lane_bit(c, lo, hi)
+                        None => return Err(UNTRACKED),
                     }
-                    None => return Err(UNTRACKED),
                 };
                 if v.abs != 0 || v.neg != 0 {
                     let (a, bb) = (f(self, 0)?, f(self, 1)?);
