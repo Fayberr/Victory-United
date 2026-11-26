@@ -555,17 +555,17 @@ mod tests {
             runs.fetch_add(1, Ordering::Relaxed);
             Ok(shader())
         };
-        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
+        assert_eq!(cached(&cache, &build, container, translate, false), Ok(shader()));
         let entries = walk(dir.path());
         assert_eq!(entries.len(), 1);
         std::fs::remove_file(&entries[0]).unwrap();
         std::fs::create_dir(&entries[0]).unwrap();
 
-        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
+        assert_eq!(cached(&cache, &build, container, translate, false), Ok(shader()));
         assert_eq!(runs.load(Ordering::Relaxed), 2);
         assert!(entries[0].is_dir());
         let fail = |_: &[u8]| Err::<HostShader, _>("unsupported".to_owned());
-        assert!(cached(&cache, &build, container, fail).unwrap_err().contains("unsupported"));
+        assert!(cached(&cache, &build, container, fail, false).unwrap_err().contains("unsupported"));
     }
 
     fn walk(dir: &std::path::Path) -> Vec<PathBuf> {

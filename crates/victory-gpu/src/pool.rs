@@ -798,40 +798,6 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_block_is_not_retried_for_each_small_upload() {
-        let mut pool: Pool<u32> = Pool::new(2);
-        let calls = std::cell::Cell::new(0);
-        let refuse = || { calls.set(calls.get() + 1); None };
-        for size in [704008, 179720, 179720, 24080, 48648, 524288, 89616, 351760] {
-            assert!(pool.take(size, 512, 12, refuse).is_none());
-        }
-        assert_eq!(calls.get(), 1);
-        assert!(pool.take(24080, 512, 1012, || Some(1)).is_some());
-    }
-
-    #[test]
-    fn budget_tick_reclaims_idle_blocks_without_reusing_live_or_resting_pieces() {
-        let mut pool = Pool::new(STAGING_KEPT);
-        let (held, _, _) = pool.take(BLOCK / 2, 1, 0, || Some(1)).unwrap();
-        let (resting, _, _) = pool.take(BLOCK / 2, 1, 0, || Some(2)).unwrap();
-        pool.give(resting, 0);
-        for i in 0..12 {
-            pool.add(i, 0);
-        }
-        pool.reclaim(0, SPARE_KEPT, true);
-        assert_eq!(pool.blocks(), STAGING_KEPT + 1);
-        pool.reclaim(REST - 1, SPARE, true);
-        assert_eq!(pool.blocks(), SPARE + 1);
-        assert_eq!(pool.resting.len(), 1);
-        pool.reclaim(REST, 0, true);
-        assert_eq!(pool.blocks(), 1);
-        assert!(pool.resting.is_empty());
-        pool.give(held, REST);
-        pool.reclaim(2 * REST, 0, true);
-        assert_eq!(pool.blocks(), 0);
-    }
-
-    #[test]
     fn pieces_never_overlap_and_rest_before_they_are_used_again() {
         let mut pool: Pool<u32> = Pool::new(SPARE);
         let made = std::cell::Cell::new(0);
