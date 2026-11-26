@@ -57,18 +57,10 @@ pub(crate) struct Host {
     /// The adapter the device is on, for its memory budget
     /// ([`Host::video_memory`]); `None` if the system does not name it.
     adapter: Option<IDXGIAdapter3>,
-<<<<<<< HEAD
     /// Shader-visible heaps of one slot, bound where a list sets no view or
     /// no sampler heap ([`fallback_heaps`]).
     fallback_view: OnceLock<Option<ID3D12DescriptorHeap>>,
     fallback_sampler: OnceLock<Option<ID3D12DescriptorHeap>>,
-||||||| 0a4356653
-=======
-    /// 1-descriptor shader-visible fallback heaps bound when a command list
-    /// omits a view or sampler heap while using directly-indexed root signatures.
-    fallback_view: OnceLock<Option<ID3D12DescriptorHeap>>,
-    fallback_sampler: OnceLock<Option<ID3D12DescriptorHeap>>,
->>>>>>> vicetay/main
 }
 
 // SAFETY: D3D12 devices, queues, fences and descriptor heaps are
@@ -404,22 +396,12 @@ pub(crate) fn keep_freed() -> bool {
 /// when free physical RAM is low. Never returns less than 2,000 ms.
 /// With plenty of it five minutes ([`keep_freed`]).
 pub(crate) fn ram_idle_ms(avail_phys: Option<u64>) -> u64 {
-<<<<<<< HEAD
     // (`VICTORY_RESIDENCY=1`: the smaller of free RAM and free commit.)
     let effective = match (avail_phys, crate::residency::headroom()) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     };
     ram_idle_for(effective, keep_freed() && !crate::residency::limited_host_ram())
-||||||| 0a4356653
-    ram_idle_for(avail_phys, keep_freed())
-=======
-    let effective = match (avail_phys, crate::residency::headroom()) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
-    };
-    ram_idle_for(effective, keep_freed() && !crate::residency::limited_host_ram())
->>>>>>> vicetay/main
 }
 
 fn ram_idle_for(avail_phys: Option<u64>, keep: bool) -> u64 {
@@ -2075,19 +2057,8 @@ fn give_chunks(chunks: Vec<(Chunk, u64)>) {
         let mut spare = SPARE.lock().unwrap_or_else(|e| e.into_inner());
         for (chunk, size) in chunks {
             let back = if scratch_pool() {
-<<<<<<< HEAD
                 let limit = if keep_freed() && !crate::residency::limited_host_ram() { SPARE_KEPT } else { SPARE_MOST };
                 spare.give(chunk, size, limit)
-||||||| 0a4356653
-                spare.give(chunk, size, if keep_freed() { SPARE_KEPT } else { SPARE_MOST })
-=======
-                let limit = if keep_freed() && !crate::residency::limited_host_ram() {
-                    SPARE_KEPT
-                } else {
-                    SPARE_MOST
-                };
-                spare.give(chunk, size, limit)
->>>>>>> vicetay/main
             } else {
                 Some(chunk)
             };
@@ -2108,7 +2079,6 @@ fn give_chunks(chunks: Vec<(Chunk, u64)>) {
     drop(freed);
 }
 
-<<<<<<< HEAD
 /// Lets go of the scratch chunks kept idle, when the system is short of
 /// memory (`VICTORY_RESIDENCY=1`, [`crate::residency::pressured`]).
 fn trim_spare_chunks() {
@@ -2129,28 +2099,6 @@ fn trim_spare_chunks() {
     drop(freed);
 }
 
-||||||| 0a4356653
-=======
-/// Drops spare scratch chunks kept idle when host memory is pressured.
-fn trim_spare_chunks() {
-    let freed: Vec<(Chunk, u64)> = {
-        let mut spare = SPARE.lock().unwrap_or_else(|e| e.into_inner());
-        if spare.kept.is_empty() {
-            return;
-        }
-        spare.bytes = 0;
-        std::mem::take(&mut spare.kept)
-    };
-    let count = freed.len() as u64;
-    let bytes: u64 = freed.iter().map(|(_, s)| *s).sum();
-    ALIVE[1].fetch_sub(count, Ordering::Relaxed);
-    ALIVE[2].fetch_sub(bytes, Ordering::Relaxed);
-    ALIVE[3].fetch_sub(count, Ordering::Relaxed);
-    ALIVE[4].fetch_sub(bytes, Ordering::Relaxed);
-    drop(freed);
-}
-
->>>>>>> vicetay/main
 /// What the host keeps for copies in the card's own memory
 /// ([`crate::shadow::cards`]): three lists of ours and the compare.
 struct CardWork {
@@ -2839,16 +2787,9 @@ struct Flight {
     texture_back_ranges: Vec<(usize, usize)>,
 }
 
-<<<<<<< HEAD
-/// One thing in the line of what waits for the card, in order.
-#[allow(clippy::large_enum_variant)]
-||||||| 0a4356653
-/// One thing in the line of what waits for the card, in order.
-=======
 /// One thing in the line of what waits for the card, in order. (A flight
 /// is large; the line is short and moves often, so it is not boxed.)
 #[allow(clippy::large_enum_variant)]
->>>>>>> vicetay/main
 enum Late {
     Run(Flight),
     /// A bottom-of-pipe write of the flight before it: address, what, bytes.
@@ -8454,12 +8395,7 @@ enum Touch {
     /// The copy is given to shaders.
     Write(usize),
     /// Title memory is written.
-<<<<<<< HEAD
     #[allow(dead_code)]
-||||||| 0a4356653
-=======
-    #[cfg_attr(not(test), allow(dead_code))]
->>>>>>> vicetay/main
     Title,
     Nothing,
     /// Another part of the submission begins.
@@ -9416,13 +9352,8 @@ struct Presenter {
     ahead: Vec<(HostList, u64)>,
     hwnd: HWND,
     meter: Meter,
-<<<<<<< HEAD
     /// Composes a second presented plane over the first ([`crate::compose`]).
     composer: Option<crate::compose::Composer>,
-||||||| 0a4356653
-=======
-    composer: Option<crate::compose::Composer>,
->>>>>>> vicetay/main
     #[cfg(feature = "diagnostics")]
     panel: panel::Panel,
 }

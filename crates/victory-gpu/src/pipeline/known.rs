@@ -68,15 +68,7 @@ fn book() -> Option<&'static Recorder> {
         let mut keys = HashSet::new();
         let mut shaders = HashSet::new();
         let ends = [
-<<<<<<< HEAD
             walk_shaders(&dir, |_, hash, _, _| { let _ = shaders.insert(hash); }),
-||||||| 0a4356653
-            walk_shaders(&dir, |_, hash, _, _| drop(shaders.insert(hash))),
-=======
-            walk_shaders(&dir, |_, hash, _, _| {
-                shaders.insert(hash);
-            }),
->>>>>>> vicetay/main
             walk_pipelines(&dir, |_, bytes| {
                 keys.extend(bytes.first_chunk::<16>().copied());
             }),
@@ -277,15 +269,7 @@ pub fn use_translations(dir: PathBuf) {
 /// there is one.
 pub fn make(dir: &Path, which: &[usize], mut each: impl FnMut(usize, Option<(f64, bool)>)) {
     let mut places = HashMap::new();
-<<<<<<< HEAD
     walk_shaders(dir, |stage, hash, at, len| { let _ = places.insert(hash, (stage, at, len)); });
-||||||| 0a4356653
-    walk_shaders(dir, |stage, hash, at, len| drop(places.insert(hash, (stage, at, len))));
-=======
-    walk_shaders(dir, |stage, hash, at, len| {
-        places.insert(hash, (stage, at, len));
-    });
->>>>>>> vicetay/main
     let Ok(mut file) = std::fs::File::open(dir.join(SHADERS)) else { return };
     let wanted: HashSet<usize> = which.iter().copied().collect();
     let mut entries = HashMap::new();

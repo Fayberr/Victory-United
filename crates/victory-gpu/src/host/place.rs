@@ -146,25 +146,16 @@ pub(super) fn read_by(runs: &[&HostList], written: &[(usize, usize)]) -> bool {
                     (touches(&ranges, at, at + len), 3)
                 }
                 Step::Host(_, (from, to)) => (touches(&ranges, *from, *to), 4),
+                // A plane's fill reads its place on the CPU too (a fill, kind 2).
+                &Step::Plane((at, len), _) => (touches(&ranges, at, at.saturating_add(len)), 2),
                 _ => (false, 0),
             };
             #[cfg(feature = "diagnostics")]
             if read {
                 READERS[kind].fetch_add(1, Ordering::Relaxed);
             }
-<<<<<<< HEAD
             let _ = kind;
             read
-||||||| 0a4356653
-            Step::Host(_, (from, to)) => touches(&ranges, *from, *to),
-            Step::Placed(p) => p.from.is_some() && touches(&ranges, p.src, p.src + p.len),
-            _ => false,
-=======
-            &Step::Plane((at, len), _) => touches(&ranges, at, at.saturating_add(len)),
-            Step::Host(_, (from, to)) => touches(&ranges, *from, *to),
-            Step::Placed(p) => p.from.is_some() && touches(&ranges, p.src, p.src + p.len),
-            _ => false,
->>>>>>> vicetay/main
         })
     })
 }
