@@ -23,7 +23,7 @@ Measured on one machine: Windows 11 Pro (build 26300), NVIDIA GeForce RTX 3080 T
 (driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `fab5286c` (the tree of this repository
 is that commit plus the legal and contributing files), Series S profile, no frame generation, no
 real save (a fresh copy of the throwaway test data), measured in the first playable room, standing
-at the window. The run was started from our test script with these switches set (a switch this tree
+at the window. These switches were set (a switch this tree
 does not know has no effect): internal render scale 0.5 with an own upscaler, relay mode 2, late
 wait 3, 2 GB card buffers, and stubs for exposure, ambient light and the shadow
 mask. The diagnostics build logs every frame and saves every 16th frame.
