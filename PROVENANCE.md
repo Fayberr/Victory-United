@@ -35,3 +35,13 @@ compute pipeline precompile, lighting and exposure fallbacks). The original repo
 
 Plus two small fixes of our own: scalar unspill tracking (`3d13942`) and VOP3 no-op literals
 (`0dbf043`).
+
+## Performance intake, 2026-11-26
+
+- [victory-fork #1044](https://github.com/fxceless/victory-fork/pull/1044) sizes the DirectStorage pool to physical cores, up to the logical CPU capacity available to the process. VU reads the Windows record size at its documented offset and falls back to the available logical CPUs on query failure. `VICTORY_DSTORAGE_WORKERS` overrides the default with a value from 1 to 64.
+- [victory-fork #1094](https://github.com/fxceless/victory-fork/pull/1094) scans sparse copy-back masks eight bytes at a time. The patch originated as [klbf-lab #26](https://github.com/PastiiJay/klbf-lab/pull/26).
+- [victory-fork #1172](https://github.com/fxceless/victory-fork/pull/1172) signals the caller once after all jobs in its copy batch complete.
+- [victory-fork #1185](https://github.com/fxceless/victory-fork/pull/1185) reports the full requested commit range to the GPU memory watch when Windows rounds a fixed allocation address down.
+- [victory-fork #1192](https://github.com/fxceless/victory-fork/pull/1192) prepares descriptor-table records and groups dynamic views once per shader stage. Small sets of table slots and offsets stay inline during draws.
+- [Flamingo #4](https://github.com/realblastex/flamingo/pull/4) contributes the in-place merge of written ranges during GPU submission.
+- [Marvisak/VIctory #2795](https://github.com/Marvisak/VIctory/pull/2795) reuses short XMA2 transform stages and uses stack scratch space for common audio block sizes.
