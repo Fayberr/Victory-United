@@ -17,7 +17,8 @@ endorsed by the game's developer or publisher, see [LEGAL.md](LEGAL.md).
 ## State
 
 Early. It boots, plays the intro and the menus and reaches the first playable room. It is not
-playable yet: it runs at about 11 frames a second in that room, and the aim is 20.
+playable yet: in that room it ran at about 11 frames a second in two runs of 7 and 10 minutes, a 25 minute run
+stalled (see Stability), and the aim is 20.
 
 Measured on one machine: Windows 11 Pro (build 26300), NVIDIA GeForce RTX 3080 Ti with 12 GB
 (driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `fab5286c` (the tree of this repository
