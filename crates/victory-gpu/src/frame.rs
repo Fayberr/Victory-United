@@ -118,38 +118,10 @@ fn next_tick(kind: u32) -> (u64, Duration) {
     let taken = last(kind).load(Ordering::Relaxed);
     let mut tick = (c.first + (elapsed / interval + 1) as u64).max(taken + 1);
     let at = u128::from(tick - c.first) * interval;
-<<<<<<< HEAD
     (
         tick,
         Duration::from_nanos(at.saturating_sub(elapsed) as u64),
     )
-||||||| merged common ancestors
-    let wait = Duration::from_nanos(at.saturating_sub(elapsed) as u64);
-    if wait <= limit {
-        last(kind).fetch_max(tick, Ordering::Relaxed);
-    }
-    (tick, wait)
-=======
-    let mut wait = Duration::from_nanos(at.saturating_sub(elapsed) as u64);
-    // A blocking wait for an event that has happened since the last wait
-    // for it ended (a frame took longer than a tick) ends at once, on the
-    // tick that passed: sleeping on to the next one cost 17 ms of every
-    // 730 ms frame (run 58: "2.0 frame waits sleeping 16.8 ms"). Polls (a
-    // time-out shorter than a tick) answer as before.
-    // `VICTORY_LATE_WAITS=1` sleeps to the next tick, as before.
-    static SLEEP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*SLEEP.get_or_init(|| std::env::var_os("VICTORY_LATE_WAITS").is_some_and(|v| v == "1"))
-        && limit >= wait
-        && tick > taken + 1
-    {
-        tick -= 1;
-        wait = Duration::ZERO;
-    }
-    if wait <= limit {
-        last(kind).fetch_max(tick, Ordering::Relaxed);
-    }
-    (tick, wait)
->>>>>>> vibr/main
 }
 
 /// Device method: blocks until the next tick (or the time-out); an origin
@@ -165,19 +137,8 @@ pub(crate) extern "system" fn wait(
     token: *mut u64,
 ) -> HRESULT {
     let origin = kind == ORIGIN;
-<<<<<<< HEAD
     let (mut tick, mut wait) = next_tick(kind);
-||||||| merged common ancestors
-<<<<<<<<< Temporary merge branch 1
-||||||||| ffe310eb
-    let (tick, wait) = next_tick(kind);
-=========
-    let (mut tick, mut wait) = next_tick(kind);
->>>>>>>>> Temporary merge branch 2
-=======
->>>>>>> vibr/main
     let limit = Duration::from_millis(u64::from(timeout_ms));
-<<<<<<< HEAD
     // A blocking wait for an event that has happened since the last wait
     // for it ended (a frame took longer than a tick) ends at once, on the
     // tick that passed: sleeping on to the next one cost 17 ms of every
@@ -193,31 +154,6 @@ pub(crate) extern "system" fn wait(
         wait = Duration::ZERO;
     }
     let _called = crate::timeline::span("the title's frame wait");
-||||||| merged common ancestors
-<<<<<<<<< Temporary merge branch 1
-    // The tick is only logged (diagnostics); taking it is what counts.
-    #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))]
-    let (tick, wait) = next_tick(kind, limit);
-||||||||| ffe310eb
-=========
-    // A blocking wait for an event that has happened since the last wait
-    // for it ended (a frame took longer than a tick) ends at once, on the
-    // tick that passed: sleeping on to the next one cost 17 ms of every
-    // 730 ms frame (run 58: "2.0 frame waits sleeping 16.8 ms"). Polls (a
-    // time-out shorter than a tick) answer as before.
-    // `VICTORY_LATE_WAITS=1` sleeps to the next tick, as before.
-    static SLEEP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*SLEEP.get_or_init(|| std::env::var_os("VICTORY_LATE_WAITS").is_some_and(|v| v == "1"))
-        && limit >= wait
-        && tick > last(kind).load(Ordering::Relaxed) + 1
-    {
-        tick -= 1;
-        wait = Duration::ZERO;
-    }
->>>>>>>>> Temporary merge branch 2
-=======
-    let (_tick, wait) = next_tick(kind, limit);
->>>>>>> vibr/main
     let hr = if wait > limit {
         std::thread::sleep(limit);
         TIMEOUT
@@ -355,7 +291,6 @@ mod tests {
         let (tick, _) = next_tick(FLIP);
         assert!(tick > flips[3]);
 
-<<<<<<< HEAD
         // A present right after a flip wait goes at once and takes no tick.
         assert_eq!(
             wait(null, FLIP, u32::MAX, std::ptr::null(), 0, &mut token),
@@ -376,32 +311,5 @@ mod tests {
             S_OK
         );
         assert!(LAST[2].load(Ordering::Relaxed) > held);
-||||||| merged common ancestors
-    /// Two waits for one kind that begin together (two threads) take two
-    /// ticks: the first takes its tick before it sleeps. A time-out takes
-    /// none. The old code marked the tick after the sleep, so both got it.
-    #[test]
-    fn waits_begun_together_take_different_ticks() {
-        const VBLANK: u32 = 1;
-        let long = Duration::from_secs(1);
-        let (first, _) = next_tick(VBLANK, long);
-        let (second, _) = next_tick(VBLANK, long);
-        assert!(second > first, "{second} after {first}");
-        next_tick(VBLANK, Duration::ZERO);
-        assert_eq!(last(VBLANK).load(Ordering::Relaxed), second);
-=======
-    /// Two waits for one kind that begin together (two threads) take two
-    /// ticks: the first takes its tick before it sleeps. A time-out takes
-    /// none. Marking the tick after the sleep gave both the same one.
-    #[test]
-    fn waits_begun_together_take_different_ticks() {
-        const VBLANK: u32 = 1;
-        let long = Duration::from_secs(1);
-        let (first, _) = next_tick(VBLANK, long);
-        let (second, _) = next_tick(VBLANK, long);
-        assert!(second > first, "{second} after {first}");
-        next_tick(VBLANK, Duration::ZERO);
-        assert_eq!(last(VBLANK).load(Ordering::Relaxed), second);
->>>>>>> vibr/main
     }
 }

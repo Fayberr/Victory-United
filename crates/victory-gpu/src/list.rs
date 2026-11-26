@@ -1353,9 +1353,10 @@ extern "system" fn copy_texture_region(
         if unlike(dst.resource, src.resource, true) {
             return;
         }
-<<<<<<< HEAD
         // Into a host copy without its largest levels: the level it has,
-        // or nothing (`crate::resource::drop_levels`).
+        // or nothing (`crate::resource::drop_levels`). `to_sub` is that
+        // level of the host copy; `from_sub` the source's, which the
+        // source branch below maps the same way.
         let mut dst = dst;
         if dst.kind != FOOTPRINT && crate::resource::dropped(dst.resource) > 0 {
             match crate::resource::host_subresource(dst.resource, dst.footprint.offset as u32) {
@@ -1363,27 +1364,16 @@ extern "system" fn copy_texture_region(
                 None => return,
             }
         }
-||||||| merged common ancestors
-=======
-        let mut to_sub = dst.footprint.offset as u32;
-        if dst.kind != FOOTPRINT
-            && let Some(host_dst) = crate::resource::host_copy(dst.resource)
-        {
-            let Some(host_sub) = host_dst.host_subresource(to_sub) else {
-                return;
-            };
-            to_sub = host_sub;
-        }
+        let to_sub = dst.footprint.offset as u32;
+        // The source's level in its host copy, mapped as the source branch
+        // below maps it (the same, so the branch keeps it).
         let mut from_sub = src.footprint.offset as u32;
-        if src.kind != FOOTPRINT
-            && let Some(host_src) = crate::resource::host_copy(src.resource)
-        {
-            let Some(host_sub) = host_src.host_subresource(from_sub) else {
-                return;
-            };
-            from_sub = host_sub;
+        if src.kind != FOOTPRINT && crate::resource::dropped(src.resource) > 0 {
+            match crate::resource::host_subresource(src.resource, from_sub) {
+                Some(index) => from_sub = index,
+                None => return,
+            }
         }
->>>>>>> vibr/main
         let mut from = src;
         if src.kind != FOOTPRINT {
             from.footprint.offset = u64::from(from_sub);
@@ -1850,45 +1840,17 @@ extern "system" fn driver_hint(_: This, _feature: u64, _value: u64) -> u64 {
     0
 }
 
-<<<<<<< HEAD
-/// `DispatchX(x, y, z, flags)`: a dispatch with console flags, of which the
-/// host follows one: the counts are threads, not groups (`draw.rs`
-/// `THREAD_DIMENSIONS`; the ray-tracing structure builder dispatches this way).
-extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
-    count_dispatch();
-||||||| merged common ancestors
-/// `DispatchX(x, y, z, flags)`: a dispatch with console flags, which the
-/// host has no use for (the ray-tracing builder dispatches this way).
-extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, _flags: u32) {
-=======
 /// `DispatchX(x, y, z, flags)`: a dispatch with console flags, bits of the
 /// hardware's dispatch initiator (the ray-tracing builder dispatches this
 /// way). With bit 5, `USE_THREAD_DIMENSIONS`, `x`, `y` and `z` count
-/// threads, not groups; the host has no use for the others.
+/// threads, not groups (`draw.rs` `THREAD_DIMENSIONS`); the host has no use
+/// for the others.
 extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
->>>>>>> vibr/main
+    count_dispatch();
     #[cfg(windows)]
-<<<<<<< HEAD
     with_state(this, |list, s| s.dispatch(list, x, y, z, flags));
-||||||| merged common ancestors
-    state::dispatch(this, x, y, z);
-=======
-    state::dispatch_x(this, x, y, z, flags & 0x20 != 0);
->>>>>>> vibr/main
     #[cfg(not(windows))]
-<<<<<<< HEAD
     let _ = (this, x, y, z, flags);
-||||||| merged common ancestors
-    {
-        let _ = (this, x, y, z);
-        count_dispatch();
-    }
-=======
-    {
-        let _ = (this, x, y, z, flags);
-        count_dispatch();
-    }
->>>>>>> vibr/main
 }
 
 /// `BeginQuery`/`EndQuery(heap, type, index)`: queries are answered when
@@ -2231,22 +2193,14 @@ mod state {
         });
     }
     pub(super) extern "system" fn dispatch(this: This, x: u32, y: u32, z: u32) {
-        dispatch_x(this, x, y, z, false);
-    }
-    /// A dispatch whose counts are threads (`threads`) or groups.
-    pub(super) fn dispatch_x(this: This, x: u32, y: u32, z: u32, threads: bool) {
         super::count_dispatch();
-<<<<<<< HEAD
         with_state(this, |list, s| s.dispatch(list, x, y, z, 0));
     }
+    /// A console `DispatchX(x, y, z, flags)`: `flags` carries the
+    /// thread-dimensions bit (`draw.rs` `THREAD_DIMENSIONS`).
     pub(super) fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
         super::count_dispatch();
         with_state(this, |list, s| s.dispatch_x(list, x, y, z, flags));
-||||||| merged common ancestors
-        with_state(this, |list, s| s.dispatch(list, x, y, z));
-=======
-        with_state(this, |list, s| s.dispatch(list, x, y, z, threads));
->>>>>>> vibr/main
     }
     /// `DispatchMesh(x, y, z)` (the PC method of List6); the title's mesh
     /// programs take `x` groups only.
@@ -2897,7 +2851,6 @@ mod tests {
         assert_eq!(release(allocator), 0);
     }
 
-<<<<<<< HEAD
     #[test]
     fn barrier_batches_split_before_duplicate_resource_transitions() {
         let a = 0x1000usize as This;
@@ -3130,12 +3083,29 @@ mod tests {
 
     /// An offset near `u64::MAX` must not overflow and write outside the
     /// query destination buffer.
-||||||| merged common ancestors
-    /// An offset near `u64::MAX` must not overflow and write outside the
-    /// query destination buffer.
-=======
+    #[test]
+    fn resolve_queries_rejects_overflowing_offset() {
+        let null = std::ptr::null();
+        let mut allocator = null;
+        assert_eq!(
+            create_allocator(null, 0, &ALLOCATOR_IIDS[0], &mut allocator),
+            S_OK
+        );
+        let mut list = null;
+        assert_eq!(
+            create_list(null, 0, 0, allocator, null, &LIST_IIDS[1], &mut list),
+            S_OK
+        );
+        let buffer = crate::resource::test_buffer(64);
+        // Used to overflow `offset + count * 8` (panic in debug, wrap in release).
+        resolve_queries(list, null, 0, 0, 2, buffer, u64::MAX - 8);
+        let release = |o: This| slot::<extern "system" fn(This) -> u32>(o, 0x10)(o);
+        for object in [buffer, list, allocator] {
+            assert_eq!(release(object), 0);
+        }
+    }
+
     #[cfg(windows)]
->>>>>>> vibr/main
     #[test]
     fn om_set_render_targets_guards_handles_and_draws_single_range_mrt() {
         use std::sync::atomic::{AtomicU32, Ordering};
