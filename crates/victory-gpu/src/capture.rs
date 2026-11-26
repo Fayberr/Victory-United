@@ -187,7 +187,13 @@ pub(crate) fn frame_drew(frame: u64, drawn: u64) {
 
 /// Whether frame `n` is saved.
 pub(crate) fn wanted(n: u64) -> bool {
-<<<<<<< HEAD
+    let Some(f) = folder() else { return false };
+    // `wantall` in the folder: the targets of a frame soon, once;
+    // `want`: the next frame.
+    if std::fs::remove_file(f.join("wantall")).is_ok() {
+        crate::resource::census_log();
+        ASKED.store(n + 2, std::sync::atomic::Ordering::Relaxed);
+    }
     // Two frames in a row each time: the title draws to two buffers in turn,
     // and every 8th or 16th frame alone only ever showed one of them.
     // Before the world, with `VICTORY_CAPTURE_WORLD` and
@@ -202,20 +208,7 @@ pub(crate) fn wanted(n: u64) -> bool {
     // run, so single frames cannot be compared between runs).
     let first = WORLD.load(std::sync::atomic::Ordering::Relaxed);
     let in_world = world_on() && first != u64::MAX && n > first && (n - first) % world_every() < 2;
-    folder().is_some() && (n.is_power_of_two() || listed(n) || before_world || in_world)
-||||||| merged common ancestors
-    folder().is_some() && (n.is_power_of_two() || listed(n))
-=======
-    folder().is_some_and(|f| {
-        // `wantall` in the folder: the targets of a frame soon, once;
-        // `want`: the next frame.
-        if std::fs::remove_file(f.join("wantall")).is_ok() {
-            crate::resource::census_log();
-            ASKED.store(n + 2, std::sync::atomic::Ordering::Relaxed);
-        }
-        n.is_power_of_two() || listed(n) || std::fs::remove_file(f.join("want")).is_ok()
-    })
->>>>>>> belobug/main
+    n.is_power_of_two() || listed(n) || before_world || in_world || std::fs::remove_file(f.join("want")).is_ok()
 }
 
 /// Saves 8-bit RGBA or BGRA rows (`pitch` bytes apart) as frame `n`.
@@ -788,16 +781,12 @@ pub(crate) fn present_override(frame: u64) -> Option<std::sync::Arc<crate::resou
 
 /// Notes a title texture the frame being built renders to or writes.
 pub(crate) fn note_target(resource: crate::object::This) {
-<<<<<<< HEAD
-    if !resource.is_null() && light_log() {
-        note_texel(resource);
-    }
-||||||| merged common ancestors
-=======
     if !resource.is_null() {
         note_present(resource);
+        if light_log() {
+            note_texel(resource);
+        }
     }
->>>>>>> belobug/main
     if resource.is_null() || !dump_on() || !listed(crate::queue::presented() + 1) {
         return;
     }
@@ -942,18 +931,12 @@ fn dump_one(
     let (read, stencil) = read;
     list.close();
     host.execute(&[&list]);
-<<<<<<< HEAD
     if let Some((buffer, footprint)) = stencil {
         stencil_values(&buffer, &footprint, frame, resource);
     }
-    let Some((buffer, footprint)) = read else { return };
-||||||| merged common ancestors
-    let Some((buffer, footprint)) = read else { return };
-=======
     let Some((buffer, footprint)) = read else {
         return;
     };
->>>>>>> belobug/main
     let f = footprint.Footprint;
     let mut data = std::ptr::null_mut();
     // SAFETY: the copy finished; the mapping spans the footprint's rows.
@@ -963,7 +946,6 @@ fn dump_one(
         }
         let pitch = f.RowPitch as usize;
         let rows = std::slice::from_raw_parts(data.cast::<u8>(), pitch * f.Height as usize);
-<<<<<<< HEAD
         // A 24-bit depth plane comes back as 32-bit words: which depth values
         // (low 24 bits) and which top bytes it holds, the most common first.
         if matches!(d.Format.0, 44..=47) {
@@ -984,10 +966,6 @@ fn dump_one(
             };
             tracing::info!(?resource, depths = ?most(depths), top_bytes = ?most(tops), "24-bit depth plane values (value, texels)");
         }
-        if let Some(rgba) = to_rgba(f.Format.0 as u32, f.Width as usize, f.Height as usize, pitch, rows) {
-||||||| merged common ancestors
-        if let Some(rgba) = to_rgba(f.Format.0 as u32, f.Width as usize, f.Height as usize, pitch, rows) {
-=======
         if std::env::var_os("VICTORY_DUMP_RAW").is_some()
             && (d.Width >= 1200 || d.Width <= 160)
             && let Some(folder) = folder()
@@ -998,14 +976,7 @@ fn dump_one(
             );
             let _ = std::fs::write(std::path::Path::new(folder).join(name), rows);
         }
-        if let Some(rgba) = to_rgba(
-            f.Format.0 as u32,
-            f.Width as usize,
-            f.Height as usize,
-            pitch,
-            rows,
-        ) {
->>>>>>> belobug/main
+        if let Some(rgba) = to_rgba(f.Format.0 as u32, f.Width as usize, f.Height as usize, pitch, rows) {
             let name = format!(
                 "frame-{frame}-{i:02}-{resource:?}-{}x{}-f{}",
                 d.Width, d.Height, d.Format.0
@@ -1202,7 +1173,6 @@ pub(crate) fn to_rgba(format: u32, w: usize, h: usize, pitch: usize, rows: &[u8]
     tracing::info!(format, low, high, most, wild, w, h, "target values");
     let high = most;
     let range = (high - low).max(1e-20);
-<<<<<<< HEAD
     // How much of the target holds anything: a lit scene and one bright
     // lamp on black have the same highest value.
     let above = values.iter().filter(|v| v.iter().any(|c| c.is_finite() && *c > low)).count();
@@ -1282,10 +1252,6 @@ pub(crate) fn to_rgba(format: u32, w: usize, h: usize, pitch: usize, rows: &[u8]
     // Float colours (scene light) go through a cube root: scaled linearly,
     // a night scene under one lamp of 50 units came out all black.
     let curved = matches!(format, 1..=2 | 9..=10 | 26);
-||||||| merged common ancestors
-    tracing::info!(format, low, high, "target values");
-=======
->>>>>>> belobug/main
     for v in values {
         let c = v.map(|c| {
             let t = ((c - low) / range).clamp(0.0, 1.0);
