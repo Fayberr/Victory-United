@@ -44,11 +44,18 @@ pub(crate) struct Pending {
     /// A pass over the screen ([`GraphicsState::screen_pass`]) or a confirmed
     /// opening-scene / bake producer that must never sit behind cold RT shaders.
     screen: bool,
-<<<<<<< HEAD
     /// Confirmed first-scene / bake producer prepared early even on a cold cache.
     scene_input: bool,
     /// Why this pipeline is intentionally skipped (e.g. RT resolve without BVH).
     left_out: Option<&'static str>,
+    /// LOCAL: how long draws have waited for it so far, in microseconds
+    /// ([`wait_once`]).
+    waited_us: AtomicU64,
+    /// LOCAL (fxceless a35c557393): the formats its state declares (zeros
+    /// without a graphics state), and the same shaders and state for other
+    /// formats bound at a draw ([`for_formats`]): a chain, one link per set.
+    pub(crate) formats: TargetFormats,
+    variant: OnceLock<Arc<Pending>>,
 }
 
 fn named(shaders: &[Arc<Shader>], name: &[u8]) -> bool {
@@ -99,17 +106,6 @@ fn scene_input(shaders: &[Arc<Shader>]) -> bool {
                 | "369cbe906ea72764"
         ) || crate::draw::BAKE_PIXEL_SHADERS.contains(&s.hash.as_str())
     })
-||||||| 0a4356653
-=======
-    /// LOCAL: how long draws have waited for it so far, in microseconds
-    /// ([`wait_once`]).
-    waited_us: AtomicU64,
-    /// LOCAL (fxceless a35c557393): the formats its state declares (zeros
-    /// without a graphics state), and the same shaders and state for other
-    /// formats bound at a draw ([`for_formats`]): a chain, one link per set.
-    pub(crate) formats: TargetFormats,
-    variant: OnceLock<Arc<Pending>>,
->>>>>>> nvidia/main
 }
 
 // SAFETY: D3D12 objects are free-threaded; the graphics state (whose input
@@ -132,17 +128,11 @@ impl Pending {
             || scene_input;
         let left_out = left_out(&shaders);
         Pending {
-<<<<<<< HEAD
             screen,
             scene_input,
             left_out,
-||||||| 0a4356653
-            screen: graphics.as_ref().is_some_and(|g| g.screen_pass()),
-=======
             formats: graphics.as_ref().map_or([0; 9], |g| g.formats()),
             variant: OnceLock::new(),
-            screen: graphics.as_ref().is_some_and(|g| g.screen_pass()),
->>>>>>> nvidia/main
             shaders,
             graphics,
             queue_state: AtomicU8::new(NOT_QUEUED),
