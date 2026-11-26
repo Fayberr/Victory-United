@@ -995,21 +995,12 @@ extern "system" fn present(
             .filter(|&over_res| base_res != Some(over_res))
             .and_then(take_copy);
         let resource = texture.as_ref().map_or(0, |t| t.0);
-<<<<<<< HEAD
         behind::present(
             this,
             texture.map(|(_, copy, state)| (copy, state)),
             overlay.map(|(_, copy, state)| (copy, state)),
-            Shown { frame, resource },
+            Shown { frame, resource, over: None },
         );
-||||||| 0a4356653
-        behind::present(this, texture.map(|(_, copy, state)| (copy, state)), Shown { frame, resource });
-=======
-        // LOCAL (port of fxceless #1189): the interface plane, as the first.
-        let over = second_plane(planes, plane_parameters, resource as This)
-            .map(|(copy, state)| (copy, if crate::list::thin::wanted() { u32::MAX } else { state }));
-        behind::present(this, texture.map(|(_, copy, state)| (copy, state)), Shown { frame, resource, over });
->>>>>>> nvidia/main
         called.end();
         #[cfg(feature = "diagnostics")]
         frame_ends();
@@ -1029,7 +1020,6 @@ extern "system" fn present(
         const COPY_SOURCE: u32 = 0x800;
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
-<<<<<<< HEAD
         let overlay = (planes > 1)
             .then(|| overlay_resource(plane_parameters))
             .flatten()
@@ -1045,14 +1035,8 @@ extern "system" fn present(
             texture,
             state,
             overlay.as_ref().map(|(_, tex, st)| (*tex, *st)),
-            Shown { frame, resource: resource as usize },
+            Shown { frame, resource: resource as usize, over: None },
         );
-||||||| 0a4356653
-        show(texture, state, Shown { frame, resource: resource as usize });
-=======
-        let over = second_plane(planes, plane_parameters, resource);
-        show(texture, state, Shown { frame, resource: resource as usize, over });
->>>>>>> nvidia/main
         crate::resource::host_transition(resource, state);
         if let Some((over_res, _, over_state)) = overlay {
             crate::resource::host_transition(over_res, over_state);
@@ -1179,17 +1163,7 @@ fn show_planes(
     let Some(host) = crate::host::host() else {
         return;
     };
-<<<<<<< HEAD
     let shown = host.present_planes(texture, state, overlay, what.frame);
-||||||| 0a4356653
-    let shown = host.present(texture, state, what.frame);
-=======
-    let over = what.over.as_ref().map(|(t, s)| {
-        let s = if *s == u32::MAX { t.state.load(Ordering::Relaxed) } else { *s };
-        (&t.texture, s)
-    });
-    let shown = host.present_over(texture, state, over, what.frame);
->>>>>>> nvidia/main
     #[cfg(feature = "diagnostics")]
     blinks(what.frame, what.resource as This, state, shown);
     #[cfg(not(feature = "diagnostics"))]
