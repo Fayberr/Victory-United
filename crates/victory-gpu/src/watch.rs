@@ -894,7 +894,6 @@ pub(crate) fn writes(start: usize, end: usize, guarded: bool) -> Option<(u64, Ve
     Some(answer)
 }
 
-<<<<<<< HEAD
 /// VU's callers that name the guarded path (`texture.rs`, `shadow.rs`), or
 /// ask whether the range is view memory the guards hold: [`writes`] does the
 /// first, [`guarded`] says the second.
@@ -920,29 +919,6 @@ pub(crate) fn nothing_new(start: usize, end: usize, base: usize, copied: &[u64],
     #[cfg(feature = "diagnostics")]
     if known {
         crate::faultbook::note(crate::faultbook::What::Known, first, last, 1);
-||||||| 085ee7c4
-/// Diagnostics: one in 2,048 of the askings the kernel's write watch
-/// refused for memory the guards did not know (some 200 a frame in the
-/// first rooms, each followed by a question to Windows about the memory):
-/// what the memory is and what the guards hold of its first block.
-#[cfg(feature = "diagnostics")]
-fn failed_asking(start: usize, end: usize) {
-    use windows_sys::Win32::System::Memory::{MEMORY_BASIC_INFORMATION, VirtualQuery};
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 2048 != 0 {
-        return;
-=======
-/// Diagnostics: one in 2,048 of the askings the kernel's write watch
-/// refused for memory the guards did not know (some 200 a frame in the
-/// first rooms, each followed by a question to Windows about the memory):
-/// what the memory is and what the guards hold of its first block.
-#[cfg(feature = "diagnostics")]
-fn failed_asking(start: usize, end: usize) {
-    use windows_sys::Win32::System::Memory::{MEMORY_BASIC_INFORMATION, VirtualQuery};
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    if !N.fetch_add(1, std::sync::atomic::Ordering::Relaxed).is_multiple_of(2048) {
-        return;
->>>>>>> vitoriabr/main
     }
     let j = journal();
     if !known && !j.ahead.iter().any(|&(a, b)| a <= first && last <= b) {
@@ -2605,7 +2581,6 @@ fn protect_here(g: &mut Guards, from: usize, to: usize) {
     while block < to {
         if set(block, block + 1) {
             note(g, block, block + 1);
-<<<<<<< HEAD
             block += 1;
             continue;
         }
@@ -2625,39 +2600,6 @@ fn protect_here(g: &mut Guards, from: usize, to: usize) {
                 // Out of the unclean set while it stays so ([`Guards::parked`]).
                 if g.unclean.contains(&absent) {
                     park(g, absent);
-||||||| 085ee7c4
-        } else {
-            #[cfg(feature = "diagnostics")]
-            let error = std::io::Error::last_os_error();
-            if block < uncommitted_end(block) {
-                g.absent.insert(block);
-            } else {
-                // Diagnostics: a committed block that will not be made
-                // read-only is reported written at every asking and never
-                // known to the guards (one in 1,024 said).
-                #[cfg(feature = "diagnostics")]
-                {
-                    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 1024 == 0 {
-                        tracing::info!("a block of title memory could not be made read-only (one in 1024): {:#x}: {error}", block * BLOCK);
-                    }
-=======
-        } else {
-            #[cfg(feature = "diagnostics")]
-            let error = std::io::Error::last_os_error();
-            if block < uncommitted_end(block) {
-                g.absent.insert(block);
-            } else {
-                // Diagnostics: a committed block that will not be made
-                // read-only is reported written at every asking and never
-                // known to the guards (one in 1,024 said).
-                #[cfg(feature = "diagnostics")]
-                {
-                    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed).is_multiple_of(1024) {
-                        tracing::info!("a block of title memory could not be made read-only (one in 1024): {:#x}: {error}", block * BLOCK);
-                    }
->>>>>>> vitoriabr/main
                 }
             }
             if holes_level() == 2 {
@@ -3611,7 +3553,6 @@ pub fn title_memory_unmapping(at: usize, len: usize) {
     }
 }
 
-<<<<<<< HEAD
 /// The title is about to free or decommit memory of its own,
 /// `[at, at + len)`, or with no length the whole allocation at `at`: what
 /// was noted of its blocks (guarded, clean, absent) would be taken for true
@@ -3670,18 +3611,6 @@ fn allocation_end(at: usize, inside: usize) -> usize {
 /// Tells what keeps track of what title memory shows; the guards, with no
 /// block of the range known unmapped.
 fn title_memory_changed(at: usize, len: usize) -> std::sync::RwLockWriteGuard<'static, Guards> {
-||||||| 085ee7c4
-/// The runtime mapped or unmapped title memory `[at, at + len)`: what it
-/// shows is new and read-write, so it is no longer guarded (nor known
-/// unmapped).
-pub fn title_memory_remapped(at: usize, len: usize) {
-=======
-/// The runtime mapped or unmapped title memory `[at, at + len)`: what it
-/// shows is new and read-write, so it is no longer guarded (nor known
-/// unmapped).
-pub fn title_memory_remapped(at: usize, len: usize) {
-    crate::texback::remapped(at, len);
->>>>>>> vitoriabr/main
     // A placed texture there arrives, goes or changes with no descriptor
     // written.
     crate::descriptor::host::remapped(at, len);
