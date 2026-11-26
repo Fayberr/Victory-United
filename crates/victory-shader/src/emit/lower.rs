@@ -2175,7 +2175,7 @@ fn unsupported(offset: usize, what: Why) -> Stop {
 }
 
 impl<'a> Lower<'a> {
-    fn new(x: &'a Parts<'a>, bad: &'a HashMap<Value, Why>, partial: bool) -> Self {
+    fn new(x: &'a Parts<'a>, bad: &'a HashMap<Value, Why>, _partial: bool) -> Self {
         let p = x.p;
         let mut phi_at = HashMap::new();
         for (b, block) in p.blocks.iter().enumerate() {
@@ -2236,7 +2236,12 @@ impl<'a> Lower<'a> {
             // halves (`v_mbcnt`, `v_readlane`, `v_writelane`, `ds_permute`, masks as numbers or
             // lane-constant masks), nor when LDS may be shared within the console wave without
             // barriers (a group over 32 threads with LDS): those still need 64-lane waves.
-            if !partial && wave == 64 && host_max_wave() == 32 && (console_lanes || one_wave && s.lds_dwords > 0) {
+            // A dispatch counted in threads (`partial`) is no reason to keep 64-lane waves: the
+            // two host waves of 32 stay in the group and `partial_active` leaves the lanes past
+            // the count out of memory and ballots (`run`). VItoriaBr's `!partial` guard here
+            // made every such program ask for `WaveSize(64)`, which a 32-lane host (NVIDIA)
+            // refuses, so its draws were dropped (black picture on an RTX 3080 Ti).
+            if wave == 64 && host_max_wave() == 32 && (console_lanes || one_wave && s.lds_dwords > 0) {
                 let crosses = insts().any(|i| {
                     let n = i.name();
                     n.starts_with("v_mbcnt")
