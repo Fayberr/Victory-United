@@ -69,7 +69,6 @@ impl Cache {
         let output = converter
             .convert(input)
             .with_context(|| format!("converter {} v{}", converter.id(), converter.version()))?;
-<<<<<<< HEAD
         self.write(&key, &output)?;
         Ok(path)
     }
@@ -83,38 +82,7 @@ impl Cache {
     /// Publishes an entry atomically, replacing an unreadable entry if needed.
     pub fn write(&self, key: &CacheKey, output: &[u8]) -> Result<()> {
         let path = self.path_for(key);
-        let dir = path.parent().expect("hashed path has a parent");
-        std::fs::create_dir_all(dir)?;
-        // Write-then-rename so readers never see partial output.
-        let (tmp, mut file) = tempfile_in(dir)?;
-        let written = file.write_all(&output);
-        drop(file);
-        let published = written.and_then(|()| std::fs::rename(&tmp, &path));
-        if published.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-        published.with_context(|| format!("publishing {}", path.display()))
-||||||| merged common ancestors
-        let dir = path.parent().expect("hashed path has a parent");
-        std::fs::create_dir_all(dir)?;
-        // Write-then-rename so readers never see partial output.
-        let tmp = tempfile_in(dir);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        let written = file.write_all(&output);
-        drop(file);
-        let published = written.and_then(|()| std::fs::rename(&tmp, &path));
-        if published.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-        published?;
-        Ok(path)
-=======
-        write_atomic(&path, &output)?;
-        Ok(path)
->>>>>>> vibr/main
+        write_atomic(&path, output).with_context(|| format!("publishing {}", path.display()))
     }
 
     /// Stores `output` under `(converter, input)`, replacing what is there.
@@ -127,11 +95,7 @@ impl Cache {
 fn write_atomic(path: &Path, output: &[u8]) -> Result<()> {
     let dir = path.parent().expect("hashed path has a parent");
     std::fs::create_dir_all(dir)?;
-    let tmp = tempfile_in(dir);
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp)?;
+    let (tmp, mut file) = tempfile_in(dir)?;
     let written = file.write_all(output);
     drop(file);
     let published = written.and_then(|()| std::fs::rename(&tmp, path));
