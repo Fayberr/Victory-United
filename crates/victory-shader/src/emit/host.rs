@@ -154,7 +154,6 @@ impl Host {
         }
     }
 
-<<<<<<< HEAD
     /// The device's wave sizes (`WaveLaneCountMin`, `WaveLaneCountMax`); `None` if it does not
     /// say.
     pub fn wave_lanes(&self) -> Option<(u32, u32)> {
@@ -178,8 +177,6 @@ impl Host {
         self.wave_lanes().is_none_or(|(min, max)| (min..=max).contains(&lanes))
     }
 
-||||||| merged common ancestors
-=======
     /// Tells the translator what a run on this GPU tells it (victory-gpu's device setup and
     /// `probe_view_limit`): its widest wave and whether it caps view heaps at 1 000 000, so
     /// offline translations are the ones a run makes.
@@ -193,7 +190,7 @@ impl Host {
                 .CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, (&raw mut o1).cast(), size_of_val(&o1) as u32)
                 .is_ok()
             {
-                super::set_host_max_wave(o1.WaveLaneCountMax);
+                super::lower::set_host_max_wave(o1.WaveLaneCountMax);
             }
             let mut o0 = D3D12_FEATURE_DATA_D3D12_OPTIONS::default();
             if self
@@ -201,7 +198,7 @@ impl Host {
                 .CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, (&raw mut o0).cast(), size_of_val(&o0) as u32)
                 .is_ok()
             {
-                super::set_host_rovs(o0.ROVsSupported.as_bool());
+                super::lower::set_host_rovs(o0.ROVsSupported.as_bool());
             }
             let made: windows::core::Result<ID3D12DescriptorHeap> =
                 self.device.CreateDescriptorHeap(&D3D12_DESCRIPTOR_HEAP_DESC {
@@ -211,12 +208,11 @@ impl Host {
                     NodeMask: 0,
                 });
             if made.is_err() {
-                super::set_view_heap_limit(PORTABLE_VIEWS - 1);
+                super::shader::set_view_heap_limit(PORTABLE_VIEWS - 1);
             }
         }
     }
 
->>>>>>> vibr/main
     /// The root signature translated shaders expect: user data per stage
     /// at `b0`, immediate samplers per stage at `s<n>`, heaps directly
     /// indexed.

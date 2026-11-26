@@ -26,16 +26,10 @@ mod console_insn;
 #[cfg(windows)]
 mod console_ops;
 mod crash;
-<<<<<<< HEAD
-#[cfg(windows)]
-mod hooks;
-||||||| merged common ancestors
-=======
 #[cfg(windows)]
 mod hooks;
 #[cfg(windows)]
 mod patch;
->>>>>>> vibr/main
 pub mod prepare;
 pub(crate) mod publish;
 pub mod resolve;
