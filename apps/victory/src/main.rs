@@ -118,7 +118,6 @@ enum Command {
         /// Worker threads (default: every logical core).
         #[arg(long)]
         jobs: Option<usize>,
-<<<<<<< HEAD
         /// Fill the shader cache that `run` reads.
         #[arg(long, conflicts_with_all = ["validate", "list"])]
         cache: bool,
@@ -130,22 +129,7 @@ enum Command {
         paths: Vec<PathBuf>,
         /// Also compile compute shaders into `host-pipelines.bin` and the GPU
         /// driver cache.
-||||||| merged common ancestors
-        /// Warm the run's shader cache: a file of shader hashes (the 16
-        /// hex digits a run's log names a shader by, anywhere in a line);
-        /// the containers with those hashes are translated into the
-        /// cache and nothing else is done. Set `VICTORY_HOST_WAVE` and
-        /// `VICTORY_VIEW_LIMIT` to what the run's log says of the host.
-=======
-    },
-    /// Translate the shaders of a title's archives into the cache and make
-    /// their compute pipelines, so that a run finds them there.
-    Warm {
-        paths: Vec<PathBuf>,
-        /// Worker threads (default: every logical core).
->>>>>>> vibr/main
         #[arg(long)]
-<<<<<<< HEAD
         pipelines: bool,
         /// Restrict precompilation to one shader stage.
         #[arg(long, value_enum)]
@@ -190,14 +174,6 @@ enum Command {
         /// (What the processes it starts are given.)
         #[arg(long, hide = true)]
         these: Option<String>,
-||||||| merged common ancestors
-        warm: Option<PathBuf>,
-=======
-        jobs: Option<usize>,
-        /// Only translate: no host pipelines.
-        #[arg(long)]
-        no_pipelines: bool,
->>>>>>> vibr/main
     },
     /// Prepare, map and bind a title executable; with --execute, run it.
     Run {
@@ -297,43 +273,12 @@ fn main() -> Result<()> {
             used_only,
             host_lanes,
             jobs,
-<<<<<<< HEAD
             cache: false,
             ..
-||||||| merged common ancestors
-            warm,
-=======
->>>>>>> vibr/main
         } => {
-<<<<<<< HEAD
             apply_host_shader_overrides_from_env();
             translate::run(paths, validate, pipelines, list, jobs)
-||||||| merged common ancestors
-            // `VICTORY_VIEW_LIMIT=<null slot>`: translate as on a host whose view heap is capped
-            if let Some(n) = std::env::var("VICTORY_VIEW_LIMIT").ok().and_then(|v| v.parse().ok()) {
-                victory_shader::emit::set_view_heap_limit(n);
-            }
-            // `VICTORY_HOST_WAVE=32`: translate as for a GPU whose waves are at most 32 lanes
-            if let Some(n) = std::env::var("VICTORY_HOST_WAVE").ok().and_then(|v| v.parse().ok()) {
-                victory_shader::emit::set_host_max_wave(n);
-            }
-            if let Some(file) = warm {
-                return translate::warm(paths, &file, jobs);
-            }
-            translate::run(paths, validate, pipelines, list, jobs)
-=======
-            // `VICTORY_VIEW_LIMIT=<null slot>`: translate as on a host whose view heap is capped
-            if let Some(n) = std::env::var("VICTORY_VIEW_LIMIT").ok().and_then(|v| v.parse().ok()) {
-                victory_shader::emit::set_view_heap_limit(n);
-            }
-            // `VICTORY_HOST_WAVE=32`: translate as for a GPU whose waves are at most 32 lanes
-            if let Some(n) = std::env::var("VICTORY_HOST_WAVE").ok().and_then(|v| v.parse().ok()) {
-                victory_shader::emit::set_host_max_wave(n);
-            }
-            translate::run(paths, validate, pipelines, list, write_cache, used_only, host_lanes, jobs)
->>>>>>> vibr/main
         }
-<<<<<<< HEAD
         Command::Precompile {
             paths,
             pipelines,
@@ -348,10 +293,6 @@ fn main() -> Result<()> {
         }
         #[cfg(windows)]
         Command::Warm { jobs, limit, again, used, these } => warm::run(jobs, limit, again, used, these),
-||||||| merged common ancestors
-=======
-        Command::Warm { paths, jobs, no_pipelines } => translate::warm(paths, jobs, !no_pipelines),
->>>>>>> vibr/main
         Command::Run {
             exe,
             unimplemented,
