@@ -5759,12 +5759,12 @@ fn stale_under_flights(runs: &[&HostList]) -> Vec<(std::sync::Arc<crate::shadow:
                 // card in place and has no pending shader writes to merge around: if the title
                 // wrote pages of it, the flights that may read it are settled before the refresh
                 // overwrites them (a card copy ordered the change behind them on the queue).
-                let stale = shadow.rebar_stale(*address, *len) || shadow.writes_pending();
-                let place = places.entry(Arc::as_ptr(shadow) as usize).or_insert(None);
-                if place.is_none() && stale {
-                    spans.push((shadow.clone(), *address, *address + *len));
-                    *place = Some(spans.len() - 1);
-                }
+                let place = places.entry(Arc::as_ptr(shadow) as usize).or_insert_with(|| {
+                    ((shadow.is_rebar() && shadow.rebar_stale(*address, *len)) || shadow.writes_pending()).then(|| {
+                        spans.push((shadow.clone(), *address, *address + *len));
+                        spans.len() - 1
+                    })
+                });
                 if let Some(i) = *place {
                     let s = &mut spans[i];
                     (s.1, s.2) = (s.1.min(*address), s.2.max(*address + *len));
