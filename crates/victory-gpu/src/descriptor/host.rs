@@ -1737,6 +1737,7 @@ fn find_dynamic_run(taken: &[bool], cursor: usize, n: usize) -> Option<usize> {
 
 /// Tables refused for want of free dynamic slots, since the start.
 pub(crate) static REFUSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 impl HostHeap {
     pub(crate) fn new(sampler: bool, count: u32) -> Option<Self> {
         let host = host()?;
@@ -1770,6 +1771,9 @@ impl HostHeap {
         };
         let raw = if sampler { 0 } else { victory_shader::emit::raw_views() };
         let extra = if sampler { 0 } else { dynamic_slots(count, null) };
+        if !sampler {
+            tracing::info!(count, extra, null, "view heap: the title's slots, dynamic slots, the null slot");
+        }
         let (heap, count, size) = if null == 0 {
             match make(count + extra) {
                 Ok(heap) => (heap, count, count + extra),
