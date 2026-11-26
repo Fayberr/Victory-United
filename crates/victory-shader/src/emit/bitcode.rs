@@ -32,13 +32,8 @@ enum TypeDef {
     Void,
     Int(u32),
     Float,
-<<<<<<< HEAD
     /// A 64-bit float.
     Double,
-||||||| merged common ancestors
-=======
-    Double,
->>>>>>> belobug/main
     /// Pointee and address space.
     Ptr(Ty, u32),
     Struct(Option<String>, Vec<Ty>),
@@ -116,13 +111,8 @@ pub(crate) enum Cast {
     FpToSi = 4,
     UiToFp = 5,
     SiToFp = 6,
-<<<<<<< HEAD
-    FpExt = 8,
-||||||| merged common ancestors
-=======
     FpTrunc = 7,
     FpExt = 8,
->>>>>>> belobug/main
     Bitcast = 11,
 }
 
