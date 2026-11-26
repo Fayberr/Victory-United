@@ -588,18 +588,11 @@ struct Lane {
     clock: u64,
     /// Enqueued, not yet submitted.
     unsubmitted: Vec<Command>,
-<<<<<<< HEAD
-||||||| 9c184b35b
-    /// Left out when the queue submitted itself, until the title's Submit:
-    /// reads into physical pages and the status entries behind them.
-    held: Vec<Command>,
-=======
     /// Left out when the queue submitted itself, until the title's Submit:
     /// reads into physical pages and the status entries behind them.
     held: Vec<Command>,
     /// When the first of `held` was left out (for the held-wait line).
     held_since: Option<std::time::Instant>,
->>>>>>> origin/exp/fork-head
     /// Submitted, by sequence number: reads not started, status entries
     /// not written, reads running, and failures not yet reported.
     reads: VecDeque<(u64, Read)>,
@@ -955,45 +948,28 @@ impl Lanes {
         if lane.reads.is_empty() {
             lane.clock = lane.clock.max(self.lane_now[class]);
         }
-<<<<<<< HEAD
-        trace_batch(id, &lane.unsubmitted, early);
-        for command in std::mem::take(&mut lane.unsubmitted) {
-||||||| 9c184b35b
-        let mut commands = if explicit { std::mem::take(&mut lane.held) } else { Vec::new() };
-        commands.append(&mut lane.unsubmitted);
-        for command in commands {
-            let hold = !explicit
-                && match &command {
-                    Command::Read(r) => r.options & PAGE_DESTINATION != 0,
-                    Command::Status(_) => !lane.held.is_empty(),
-                };
-            if hold {
-                lane.held.push(command);
-                continue;
-            }
-=======
         let now = std::time::Instant::now();
         // The title's Submit releases what a self-submit held: how long it waited.
-        let released = if explicit && !lane.held.is_empty() {
+        let released = if !early && !lane.held.is_empty() {
             lane.held_since
                 .take()
                 .map(|since| (lane.held.len() as u64, now.saturating_duration_since(since).as_micros() as u64))
         } else {
             None
         };
-        let mut commands = if explicit { std::mem::take(&mut lane.held) } else { Vec::new() };
+        let mut commands = if early { Vec::new() } else { std::mem::take(&mut lane.held) };
         commands.append(&mut lane.unsubmitted);
+        trace_batch(id, &commands, early);
         for command in commands {
-            let hold = !explicit
+            let hold = early
                 && match &command {
-                    Command::Read(r) => r.options & PAGE_DESTINATION != 0,
+                    Command::Read(r) => r.request.options & PAGE_DESTINATION != 0,
                     Command::Status(_) => !lane.held.is_empty(),
                 };
             if hold {
                 lane.held.push(command);
                 continue;
             }
->>>>>>> origin/exp/fork-head
             let seq = self.next_seq;
             self.next_seq += 1;
             match command {
@@ -1046,13 +1022,8 @@ impl Lane {
             capacity: usize::from(capacity),
             clock: 0,
             unsubmitted: Vec::new(),
-<<<<<<< HEAD
-||||||| 9c184b35b
-            held: Vec::new(),
-=======
             held: Vec::new(),
             held_since: None,
->>>>>>> origin/exp/fork-head
             reads: VecDeque::new(),
             statuses: VecDeque::new(),
             running: BTreeSet::new(),
