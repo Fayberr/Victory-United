@@ -92,22 +92,12 @@ struct Journal {
     parts: std::collections::HashMap<usize, [u64; PARTS], std::hash::BuildHasherDefault<PageHash>>,
     /// Page ranges asked ahead for a submission's refreshes ([`ask_ahead`])
     /// and the asking that did: `writes` answers for a range inside one
-<<<<<<< HEAD
-    /// from the journal, without another kernel call. In order and joined
-    /// ([`add_range`]): two ranges asked about next to each other answer for
-    /// a range over both.
-    ahead: Vec<(usize, usize)>,
+    /// from the journal, without another kernel call.
+    ahead: Ahead,
     /// As `ahead`, of view memory the guards were asked about with the
     /// submission's one asking ([`ask_views`]): answers only askings about
     /// guarded memory (`writes` with `guarded`).
     ahead_views: Vec<(usize, usize)>,
-||||||| 85d564167
-    /// from the journal, without another kernel call.
-    ahead: Vec<(usize, usize)>,
-=======
-    /// from the journal, without another kernel call.
-    ahead: Ahead,
->>>>>>> avatar/main
     ahead_asked: u64,
     /// The ahead asking stands for a whole submission ([`ask_once`]): no
     /// other ahead asking is made, and `ahead` stays, until
@@ -129,61 +119,12 @@ static GATE: std::sync::RwLock<()> = std::sync::RwLock::new(());
 static JOURNAL: RwLock<Journal> = RwLock::new(Journal {
     written: BTreeMap::new(),
     parts: std::collections::HashMap::with_hasher(std::hash::BuildHasherDefault::new()),
-<<<<<<< HEAD
-    ahead: Vec::new(),
-    ahead_views: Vec::new(),
-||||||| 85d564167
-    ahead: Vec::new(),
-=======
     ahead: Ahead::new(),
->>>>>>> avatar/main
+    ahead_views: Vec::new(),
     ahead_asked: 0,
     kept: false,
 });
 
-<<<<<<< HEAD
-impl Journal {
-    /// Page `page` was found written by asking `now`: the parts in `parts`
-    /// (a bit each). The asking that found it written before (0: none).
-    fn note(&mut self, page: usize, parts: u16, now: u64) -> u64 {
-        let before = self.written.insert(page, now).unwrap_or(0);
-        if parts == WHOLE || !parts_on() {
-            self.parts.remove(&page);
-            return before;
-        }
-        let all = self.parts.entry(page).or_insert([before; PARTS]);
-        for (k, at) in all.iter_mut().enumerate() {
-            if parts >> k & 1 != 0 {
-                *at = now;
-            }
-        }
-        before
-    }
-
-    /// Whether the standing asking holds pages `[first, last)`.
-    fn stands(&self, first: usize, last: usize, guarded: bool) -> bool {
-        covered(&self.ahead, first, last) || guarded && covered(&self.ahead_views, first, last)
-    }
-
-    /// The parts of `page` written by an asking after `taken`.
-    fn parts_since(&self, page: usize, taken: u64) -> u16 {
-        match self.parts.get(&page) {
-            Some(all) => all.iter().enumerate().filter(|(_, at)| **at > taken).fold(0, |m, (k, _)| m | 1 << k),
-            None => WHOLE,
-        }
-    }
-}
-
-/// Of the pages of a copy that were written after it took them (page number,
-/// the asking it took the page at): the parts to take again, a bit for each
-/// 4 KiB, in the same order.
-pub(crate) fn parts_written(pages: &[(usize, u64)]) -> Vec<u16> {
-    let j = journal();
-    pages.iter().map(|&(page, taken)| j.parts_since(page, taken)).collect()
-}
-
-||||||| 85d564167
-=======
 /// The page ranges of [`Journal::ahead`], by their starts, and for each the
 /// furthest end of it and those before it: whether one holds a range is
 /// found in a few steps. Each refresh asked it two or three times, through
@@ -196,6 +137,10 @@ struct Ahead {
 impl Ahead {
     const fn new() -> Ahead {
         Ahead { ranges: Vec::new(), most: Vec::new() }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.ranges.is_empty()
     }
 
     fn set(&mut self, mut ranges: Vec<(usize, usize)>) {
@@ -227,7 +172,46 @@ impl Ahead {
     }
 }
 
->>>>>>> avatar/main
+impl Journal {
+    /// Page `page` was found written by asking `now`: the parts in `parts`
+    /// (a bit each). The asking that found it written before (0: none).
+    fn note(&mut self, page: usize, parts: u16, now: u64) -> u64 {
+        let before = self.written.insert(page, now).unwrap_or(0);
+        if parts == WHOLE || !parts_on() {
+            self.parts.remove(&page);
+            return before;
+        }
+        let all = self.parts.entry(page).or_insert([before; PARTS]);
+        for (k, at) in all.iter_mut().enumerate() {
+            if parts >> k & 1 != 0 {
+                *at = now;
+            }
+        }
+        before
+    }
+
+    /// Whether the standing asking holds pages `[first, last)`.
+    fn stands(&self, first: usize, last: usize, guarded: bool) -> bool {
+        self.ahead.holds(first, last) || guarded && covered(&self.ahead_views, first, last)
+    }
+
+    /// The parts of `page` written by an asking after `taken`.
+    fn parts_since(&self, page: usize, taken: u64) -> u16 {
+        match self.parts.get(&page) {
+            Some(all) => all.iter().enumerate().filter(|(_, at)| **at > taken).fold(0, |m, (k, _)| m | 1 << k),
+            None => WHOLE,
+        }
+    }
+}
+
+/// Of the pages of a copy that were written after it took them (page number,
+/// the asking it took the page at): the parts to take again, a bit for each
+/// 4 KiB, in the same order.
+pub(crate) fn parts_written(pages: &[(usize, u64)]) -> Vec<u16> {
+    let j = journal();
+    pages.iter().map(|&(page, taken)| j.parts_since(page, taken)).collect()
+}
+
 fn journal() -> std::sync::RwLockReadGuard<'static, Journal> {
     if let Ok(j) = JOURNAL.try_read() {
         return j;
@@ -853,15 +837,8 @@ fn ask_rest(ranges: &[(usize, usize)], held: bool) {
     for (page, parts) in written {
         j.note(page, parts, now);
     }
-<<<<<<< HEAD
-    j.ahead = ahead;
-    j.kept = !(j.ahead.is_empty() && j.ahead_views.is_empty());
-||||||| 85d564167
-    j.kept = !ahead.is_empty();
-    j.ahead = ahead;
-=======
-    j.kept = !ahead.is_empty();
     j.ahead.set(ahead);
+    j.kept = !(j.ahead.is_empty() && j.ahead_views.is_empty());
 }
 
 /// Diagnostics: the ranges a submission's asking asks about alone
@@ -903,8 +880,6 @@ pub(crate) fn alone_line(frames: f64) {
         us as f64 / 1e3 / frames,
         top.join("; ")
     );
->>>>>>> avatar/main
-}
 
 /// The submission's one asking stands no longer: its refreshes are done,
 /// or title memory was written in a way the journal was not told.
@@ -1015,16 +990,7 @@ fn ask_run(pieces: &[(usize, usize)], asked: &mut Vec<(usize, usize)>, written: 
 pub(crate) fn asked(start: usize, end: usize) -> Option<(u64, Vec<(usize, u64)>)> {
     let (first, last) = (start / PAGE, end.div_ceil(PAGE));
     let j = journal();
-<<<<<<< HEAD
     j.stands(first, last, true)
-||||||| 85d564167
-    j.ahead
-        .iter()
-        .any(|&(a, b)| a <= first && last <= b)
-=======
-    j.ahead
-        .holds(first, last)
->>>>>>> avatar/main
         .then(|| (j.ahead_asked, j.written.range(first..last).map(|(&p, &w)| (p, w)).collect()))
 }
 
@@ -1037,15 +1003,9 @@ pub(crate) fn writes(start: usize, end: usize, guarded: bool) -> Option<(u64, Ve
     let (first, last) = (start / PAGE, end.div_ceil(PAGE));
     let of = |j: &Journal| -> Vec<(usize, u64)> { j.written.range(first..last).map(|(&p, &w)| (p, w)).collect() };
     // Asked ahead with the submission's other ranges: the journal has it.
-<<<<<<< HEAD
     // With `guarded`, the askings of view memory made with it count too
     // ([`Journal::stands`], [`ask_views`]).
     let ahead = |j: &Journal| j.stands(first, last, guarded).then(|| (j.ahead_asked, of(j)));
-||||||| 85d564167
-    let ahead = |j: &Journal| j.ahead.iter().any(|&(a, b)| a <= first && last <= b).then(|| (j.ahead_asked, of(j)));
-=======
-    let ahead = |j: &Journal| j.ahead.holds(first, last).then(|| (j.ahead_asked, of(j)));
->>>>>>> avatar/main
     if let Some(known) = ahead(&journal()) {
         return Some(known);
     }
@@ -4122,14 +4082,8 @@ mod parts_tests {
         let mut j = Journal {
             written: BTreeMap::new(),
             parts: std::collections::HashMap::with_hasher(std::hash::BuildHasherDefault::new()),
-<<<<<<< HEAD
-            ahead: Vec::new(),
-            ahead_views: Vec::new(),
-||||||| 85d564167
-            ahead: Vec::new(),
-=======
             ahead: Ahead::new(),
->>>>>>> avatar/main
+            ahead_views: Vec::new(),
             ahead_asked: 0,
             kept: false,
         };
