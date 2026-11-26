@@ -15,10 +15,16 @@
 //! share, [`console`] which console model the title sees. Planned:
 //! `present` (swap chain).
 
+<<<<<<< HEAD
 #[cfg(windows)]
 mod ambient;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod backreads;
+||||||| 085ee7c4
+=======
+#[cfg(windows)]
+mod ambient;
+>>>>>>> vitoriabr/main
 #[cfg(all(windows, feature = "diagnostics"))]
 mod capture;
 #[cfg(windows)]
@@ -27,6 +33,8 @@ mod cardmeter;
 mod renderdoc;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod shot;
+#[cfg(windows)]
+mod compose;
 pub mod console;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod copystat;
@@ -79,12 +87,18 @@ mod picked;
 #[cfg(windows)]
 mod plaincopy;
 #[cfg(windows)]
+<<<<<<< HEAD
 mod pool;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod popwatch;
 #[cfg(windows)]
 pub mod precompile;
 #[cfg(windows)]
+||||||| 085ee7c4
+=======
+mod ranges;
+#[cfg(windows)]
+>>>>>>> vitoriabr/main
 mod primitive;
 #[cfg(windows)]
 mod ranges;

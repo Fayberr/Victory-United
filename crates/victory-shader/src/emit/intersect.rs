@@ -46,9 +46,23 @@ enum NodeAt {
     Buffer { handle: V, byte: V },
     /// In title memory: the raw view of the host copy holding the node's
     /// first 64 bytes and the node's byte in it ([`Lower::bvh_memory`]),
+<<<<<<< HEAD
     /// the node's address, for the second half of a 128-byte node, and
     /// whether there is a copy.
     Memory { handle: V, byte: V, low: V, high: V, mapped: V },
+||||||| 085ee7c4
+    /// and the node's address, for the second half of a 128-byte node.
+    Memory { handle: V, byte: V, low: V, high: V },
+=======
+    /// and the node's address, for the second half of a 128-byte node.
+    Memory {
+        handle: V,
+        byte: V,
+        low: V,
+        high: V,
+        mapped: V,
+    },
+>>>>>>> vitoriabr/main
 }
 
 /// The ray operands, as floats.
@@ -286,8 +300,34 @@ impl<'a> Lower<'a> {
         for start in (0..count).step_by(4) {
             let n = (count - start).min(4);
             let node_byte = offset + 4 * start;
+<<<<<<< HEAD
             let mut byte = start_byte;
             let c = self.cur;
+||||||| 085ee7c4
+            let (handle, mut byte) = match at {
+                NodeAt::Buffer { handle, byte } => (handle, byte),
+                NodeAt::Memory { handle, byte, .. } if node_byte < 64 => (handle, byte),
+                NodeAt::Memory { low, high, .. } => *second.get_or_insert_with(|| {
+                    let (low, high) = self.address_plus(low, high, 64);
+                    // Every lane in this block runs the instruction.
+                    let (handle, byte) = self.bvh_memory(low, high, None);
+                    let k64 = self.s.m.i32(64);
+                    (handle, self.s.m.bin(c, Bin::Sub, byte, k64))
+                }),
+            };
+=======
+            let (handle, mut byte) = match at {
+                NodeAt::Buffer { handle, byte } => (handle, byte),
+                NodeAt::Memory { handle, byte, .. } if node_byte < 64 => (handle, byte),
+                NodeAt::Memory { low, high, .. } => *second.get_or_insert_with(|| {
+                    let (low, high) = self.address_plus(low, high, 64);
+                    // Every lane in this block runs the instruction.
+                    let (handle, byte, _) = self.bvh_memory(low, high, None);
+                    let k64 = self.s.m.i32(64);
+                    (handle, self.s.m.bin(c, Bin::Sub, byte, k64))
+                }),
+            };
+>>>>>>> vitoriabr/main
             if let Some(b) = base {
                 byte = self.s.m.bin(c, Bin::Add, byte, b);
             }
@@ -439,12 +479,22 @@ impl<'a> Lower<'a> {
             let on = self.s.m.bin(c, Bin::Xor, off, on);
             let hit = self.s.m.bin(c, Bin::And, through, before);
             let hit = self.s.m.bin(c, Bin::And, hit, on);
+<<<<<<< HEAD
             let child = self.s.m.cmp(c, pred::NE, children[n], none);
             let hit = self.s.m.bin(c, Bin::And, hit, child);
             let hit = match there {
                 Some(there) => self.s.m.bin(c, Bin::And, hit, there[n]),
                 None => hit,
             };
+||||||| 085ee7c4
+=======
+            let child_present = self.s.m.cmp(c, pred::NE, children[n], none);
+            let hit = self.s.m.bin(c, Bin::And, hit, child_present);
+            let hit = match at {
+                NodeAt::Memory { mapped, .. } => self.s.m.bin(c, Bin::And, hit, mapped),
+                NodeAt::Buffer { .. } => hit,
+            };
+>>>>>>> vitoriabr/main
             ids[n] = self.s.m.select(c, hit, children[n], none);
             distances[n] = self.s.m.select(c, hit, enter, infinity);
         }

@@ -255,6 +255,8 @@ fn lower_words(words: Vec<u32>, threads: u32, lds_bytes: u32, rsrc2: u32) -> Hos
         root_cbvs: lowered.root_cbvs,
         root_srvs: lowered.root_srvs,
         root_uavs: lowered.root_uavs,
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         root_indexed_views: res.root_indexed_views,
         half_views: lowered.half_views,
     };
@@ -295,6 +297,7 @@ fn run_cases_on(
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let (mut ran, mut no_32_lanes) = (0, 0);
     for &(label, warp) in devices {
+<<<<<<< HEAD
         let host = match Host::new(warp) {
             Ok(host) => host,
             Err(e) => {
@@ -313,6 +316,15 @@ fn run_cases_on(
                 continue;
             }
             Err(e) => panic!("{label}: compute_pipeline failed: {e}"),
+||||||| 085ee7c4
+        let Ok(host) = Host::new(warp) else {
+            eprintln!("no SM 6.6 {label} device; skipped");
+            continue;
+=======
+        let Ok(host) = Host::new(warp) else {
+            crate::emit::test_skip::skip(&format!("no SM 6.6 {label} device; skipped"));
+            continue;
+>>>>>>> vitoriabr/main
         };
         for (i, &inputs) in cases.iter().enumerate() {
             let mut ud = vec![0u32; shader.user_data_dwords().max(1) as usize];
@@ -2287,6 +2299,8 @@ fn whole_wave_f64_sum_and_cvt_f32_f64() {
         root_cbvs: lowered.root_cbvs,
         root_srvs: lowered.root_srvs,
         root_uavs: lowered.root_uavs,
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         root_indexed_views: Vec::new(),
         half_views: lowered.half_views,
     };
@@ -2299,13 +2313,14 @@ fn whole_wave_f64_sum_and_cvt_f32_f64() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     for (label, warp) in [("hardware", false), ("warp", true)] {
         let Ok(host) = Host::new(warp) else {
+            crate::emit::test_skip::skip(&format!("no SM 6.6 {label} device"));
             continue;
         };
         let (root, pso) = match host.compute_pipeline(&shader) {
             Ok(p) => p,
             // WARP does not support fixed WaveSize(32) on SM 6.6.
             Err(e) if warp => {
-                eprintln!("{label}: compute_pipeline skipped ({e})");
+                crate::emit::test_skip::skip(&format!("{label}: compute_pipeline refused ({e})"));
                 continue;
             }
             Err(e) => panic!("{label}: compute_pipeline failed: {e}"),
@@ -2344,6 +2359,7 @@ fn whole_wave_f64_sum_and_cvt_f32_f64() {
         }
     }
 }
+<<<<<<< HEAD
 
 #[test]
 fn ps_sample_coverage_input_reads_coverage_mask() {
@@ -3357,3 +3373,141 @@ fn a_format_load_read_as_halves_loads_the_integer() {
     }
     assert!(ran > 0, "no SM 6.6 device available");
 }
+||||||| 085ee7c4
+=======
+
+#[test]
+fn packed_dot_products_and_clamps_execute_cleanly() {
+    let [iw0, iw1] = vop3p(0x016, 0, vgpr(1), vgpr(2), vgpr(3));
+    let dot4_i8_shader = build_valu_cs(&[iw0, iw1]);
+    let inputs = [[0x0403_0201u32, 0x0504_0302u32, 10u32, 0]];
+    run_cases(&dot4_i8_shader, &inputs, |backend, _i, _inp, got| {
+        assert_eq!(got, 50, "{backend}: v_dot4_i32_i8 got {got}, want 50");
+    });
+
+    // v_mov_b32 v0, v3; v_dot4c_i32_i8 v0, v1, v2
+    let d4c_copy = vop1(0x001, 0, vgpr(3));
+    let d4c = (0x0Du32 << 25) | (2u32 << 9) | (vgpr(1) as u32);
+    let dot4c_i8_shader = build_valu_cs(&[d4c_copy, d4c]);
+    run_cases(&dot4c_i8_shader, &inputs, |backend, _i, _inp, got| {
+        assert_eq!(got, 50, "{backend}: v_dot4c_i32_i8 got {got}, want 50");
+    });
+
+    let [uw0, uw1] = vop3p(0x017, 0, vgpr(1), vgpr(2), vgpr(3));
+    let dot4_u8_shader = build_valu_cs(&[uw0, uw1]);
+    run_cases(&dot4_u8_shader, &inputs, |backend, _i, _inp, got| {
+        assert_eq!(got, 50, "{backend}: v_dot4_u32_u8 got {got}, want 50");
+    });
+
+    // opsel_hi / opsel swapping the halves of s0 on v_dot4_u32_u8 (opsel=0b001, opsel_hi=0b110)
+    let mut u8_op = vop3p(0x017, 0, vgpr(1), vgpr(2), vgpr(3));
+    u8_op[0] |= 1 << 11;
+    u8_op[1] = (u8_op[1] & !(3 << 27)) | (2 << 27);
+    let dot4_u8_opsel_shader = build_valu_cs(&u8_op);
+    run_cases(&dot4_u8_opsel_shader, &inputs, |backend, _i, _inp, got| {
+        assert_eq!(got, 42, "{backend}: v_dot4_u32_u8 opsel got {got}, want 42");
+    });
+
+    let [d2i_w0, d2i_w1] = vop3p(0x014, 0, vgpr(1), vgpr(2), vgpr(3));
+    let dot2_i16_shader = build_valu_cs(&[d2i_w0, d2i_w1]);
+    run_cases(
+        &dot2_i16_shader,
+        &[[0x0003_FFFEu32, 0xFFFB_0004u32, 10u32, 0]],
+        |backend, _i, _inp, got| {
+            assert_eq!(got, 0xFFFF_FFF3, "{backend}: v_dot2_i32_i16 got {got:#x}");
+        },
+    );
+
+    let [d2u_w0, d2u_w1] = vop3p(0x015, 0, vgpr(1), vgpr(2), vgpr(3));
+    let dot2_u16_shader = build_valu_cs(&[d2u_w0, d2u_w1]);
+    run_cases(
+        &dot2_u16_shader,
+        &[[0x0003_0002u32, 0x0005_0004u32, 10u32, 0]],
+        |backend, _i, _inp, got| {
+            assert_eq!(got, 33, "{backend}: v_dot2_u32_u16 got {got}, want 33");
+        },
+    );
+
+    let [d8u_w0, d8u_w1] = vop3p(0x019, 0, vgpr(1), vgpr(2), vgpr(3));
+    let dot8_u4_shader = build_valu_cs(&[d8u_w0, d8u_w1]);
+    run_cases(
+        &dot8_u4_shader,
+        &[[0x1111_1111u32, 0x2222_2222u32, 10u32, 0]],
+        |backend, _i, _inp, got| {
+            assert_eq!(got, 26, "{backend}: v_dot8_u32_u4 got {got}, want 26");
+        },
+    );
+
+    // Signed nibbles: -1 * 7 in every lane plus 100, and -8 * -8 in every lane.
+    let [d8i_w0, d8i_w1] = vop3p(0x018, 0, vgpr(1), vgpr(2), vgpr(3));
+    let dot8_i4_shader = build_valu_cs(&[d8i_w0, d8i_w1]);
+    run_cases(
+        &dot8_i4_shader,
+        &[
+            [0xFFFF_FFFFu32, 0x7777_7777u32, 100u32, 0],
+            [0x8888_8888u32, 0x8888_8888u32, 0u32, 0],
+        ],
+        |backend, i, _inp, got| {
+            let want = [44, 512][i];
+            assert_eq!(got, want, "{backend}: v_dot8_i32_i4 case {i} got {got}, want {want}");
+        },
+    );
+
+    let [mut d2f_w0, d2f_w1] = vop3p(0x013, 0, vgpr(1), vgpr(2), vgpr(3));
+    let d2f_in = [[0x4000_3C00u32, 0x4400_4200u32, 5.0f32.to_bits(), 0]];
+    let dot2_f16_shader = build_valu_cs(&[d2f_w0, d2f_w1]);
+    run_cases(&dot2_f16_shader, &d2f_in, |backend, _i, _inp, got| {
+        assert_eq!(got, 16.0f32.to_bits(), "{backend}: v_dot2_f32_f16 got {got:#x}");
+    });
+    d2f_w0 |= 1 << 15;
+    let dot2_f16_clamp_shader = build_valu_cs(&[d2f_w0, d2f_w1]);
+    run_cases(&dot2_f16_clamp_shader, &d2f_in, |backend, _i, _inp, got| {
+        assert_eq!(got, 1.0f32.to_bits(), "{backend}: v_dot2_f32_f16 clamp got {got:#x}");
+    });
+
+    // VOP2 v_dot2c_f32_f16 v3, v1, v2 (opcode 0x02): 1.0*3.0 + 2.0*4.0 + 5.0 = 16.0
+    let d2c = (0x02u32 << 25) | (3u32 << 17) | ((2u32) << 9) | (vgpr(1) as u32);
+    let copy_v3_v0 = vop1(0x001, 0, vgpr(3));
+    let dot2c_f16_shader = build_valu_cs(&[d2c, copy_v3_v0]);
+    run_cases(&dot2c_f16_shader, &d2f_in, |backend, _i, _inp, got| {
+        assert_eq!(got, 16.0f32.to_bits(), "{backend}: v_dot2c_f32_f16 got {got:#x}");
+    });
+
+    // Clamped integer dot products saturate instead of wrapping.
+    let [mut cu_w0, cu_w1] = vop3p(0x017, 0, vgpr(1), vgpr(2), vgpr(3));
+    cu_w0 |= 1 << 15;
+    let clamp_u8_shader = build_valu_cs(&[cu_w0, cu_w1]);
+    run_cases(
+        &clamp_u8_shader,
+        &[[0xFFFF_FFFFu32, 0xFFFF_FFFFu32, 0xFFFF_FFF0u32, 0]],
+        |backend, _i, _inp, got| {
+            assert_eq!(got, 0xFFFF_FFFFu32, "{backend}: v_dot4_u32_u8 clamp got {got:#x}");
+        },
+    );
+
+    let [mut ci_w0, ci_w1] = vop3p(0x016, 0, vgpr(1), vgpr(2), vgpr(3));
+    ci_w0 |= 1 << 15;
+    let clamp_i8_shader = build_valu_cs(&[ci_w0, ci_w1]);
+    let ci_in = [
+        [0x7F7F_7F7Fu32, 0x7F7F_7F7Fu32, 0x7FFF_FFF0u32, 0],
+        [0x7F7F_7F7Fu32, 0xFFFF_FFFFu32, 0x8000_0010u32, 0],
+    ];
+    run_cases(&clamp_i8_shader, &ci_in, |backend, i, _inp, got| {
+        let want = if i == 0 { 0x7FFF_FFFFu32 } else { 0x8000_0000u32 };
+        assert_eq!(got, want, "{backend}: v_dot4_i32_i8 clamp case {i} got {got:#x}");
+    });
+
+    // v_dot2_u32_u16 with opsel picking high half of v1 for pair 0 (opsel[0] = 1, opsel_hi[0] = 0).
+    let mut u16_op = vop3p(0x015, 0, vgpr(1), vgpr(2), vgpr(3));
+    u16_op[0] |= 1 << 11;
+    u16_op[1] &= !(1 << 27);
+    let opsel_u16_shader = build_valu_cs(&u16_op);
+    run_cases(
+        &opsel_u16_shader,
+        &[[0x0003_0002u32, 0x0005_0004u32, 10u32, 0]],
+        |backend, _i, _inp, got| {
+            assert_eq!(got, 32, "{backend}: v_dot2_u32_u16 opsel got {got}, want 32");
+        },
+    );
+}
+>>>>>>> vitoriabr/main

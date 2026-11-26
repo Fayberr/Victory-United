@@ -715,15 +715,25 @@ fn user_data(s: &HostShader, k: &[u32; 4]) -> Vec<u32> {
 #[test]
 fn translated_shaders_draw_as_pc_ones() {
     let Some((console, pc)) = tools() else {
-        eprintln!("no console or PC compiler; skipped");
+        crate::emit::test_skip::skip("no console or PC compiler; skipped");
         return;
     };
+<<<<<<< HEAD
     let host = match Host::new(false) {
         Ok(host) => host,
         Err(e) => {
             eprintln!("no SM 6.6 device ({e}); skipped");
             return;
         }
+||||||| 085ee7c4
+    let Ok(host) = Host::new(false) else {
+        eprintln!("no SM 6.6 device; skipped");
+        return;
+=======
+    let Ok(host) = Host::new(false) else {
+        crate::emit::test_skip::skip("no SM 6.6 device; skipped");
+        return;
+>>>>>>> vitoriabr/main
     };
     let dir = std::env::temp_dir().join(format!("victory-diff-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -874,15 +884,25 @@ fn translated_shaders_draw_as_pc_ones() {
 #[test]
 fn translated_mesh_shaders_draw_as_pc_ones() {
     let Some((console, pc)) = tools() else {
-        eprintln!("no console or PC compiler; skipped");
+        crate::emit::test_skip::skip("no console or PC compiler; skipped");
         return;
     };
+<<<<<<< HEAD
     let host = match Host::new(false) {
         Ok(host) => host,
         Err(e) => {
             eprintln!("no SM 6.6 device ({e}); skipped");
             return;
         }
+||||||| 085ee7c4
+    let Ok(host) = Host::new(false) else {
+        eprintln!("no SM 6.6 device; skipped");
+        return;
+=======
+    let Ok(host) = Host::new(false) else {
+        crate::emit::test_skip::skip("no SM 6.6 device; skipped");
+        return;
+>>>>>>> vitoriabr/main
     };
     let dir = std::env::temp_dir().join(format!("victory-diff-ms-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -994,15 +1014,25 @@ fn translated_mesh_shaders_draw_as_pc_ones() {
 fn float_semantics_are_the_consoles() {
     use super::host::{Dispatch, View};
     let Some((console, _)) = tools() else {
-        eprintln!("no console compiler; skipped");
+        crate::emit::test_skip::skip("no console compiler; skipped");
         return;
     };
+<<<<<<< HEAD
     let host = match Host::new(false) {
         Ok(host) => host,
         Err(e) => {
             eprintln!("no SM 6.6 device ({e}); skipped");
             return;
         }
+||||||| 085ee7c4
+    let Ok(host) = Host::new(false) else {
+        eprintln!("no SM 6.6 device; skipped");
+        return;
+=======
+    let Ok(host) = Host::new(false) else {
+        crate::emit::test_skip::skip("no SM 6.6 device; skipped");
+        return;
+>>>>>>> vitoriabr/main
     };
     let dir = std::env::temp_dir().join(format!("victory-float-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -1086,15 +1116,25 @@ fn close(a: u32, b: u32) -> bool {
 fn translated_compute_matches_pc() {
     use super::host::{Dispatch, Stride, View};
     let Some((console, pc)) = tools() else {
-        eprintln!("no console or PC compiler; skipped");
+        crate::emit::test_skip::skip("no console or PC compiler; skipped");
         return;
     };
+<<<<<<< HEAD
     let host = match Host::new(false) {
         Ok(host) => host,
         Err(e) => {
             eprintln!("no SM 6.6 device ({e}); skipped");
             return;
         }
+||||||| 085ee7c4
+    let Ok(host) = Host::new(false) else {
+        eprintln!("no SM 6.6 device; skipped");
+        return;
+=======
+    let Ok(host) = Host::new(false) else {
+        crate::emit::test_skip::skip("no SM 6.6 device; skipped");
+        return;
+>>>>>>> vitoriabr/main
     };
     let dir = std::env::temp_dir().join(format!("victory-diff-cs-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -1218,7 +1258,7 @@ fn translated_compute_matches_pc() {
             Ok(p) => p,
             // WARP runs no fixed wave size of 64.
             Err(e) if std::env::var("VICTORY_WARP").is_ok_and(|v| v == "1") => {
-                eprintln!("{name}: skipped on WARP ({e})");
+                crate::emit::test_skip::skip(&format!("{name}: refused on WARP ({e})"));
                 continue;
             }
             Err(e) => panic!("{name}: {e}"),

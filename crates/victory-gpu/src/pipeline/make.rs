@@ -39,7 +39,7 @@ use super::host::{GraphicsState, HostPipeline};
 
 /// What a host pipeline is made from, and the host pipeline once made.
 pub(crate) struct Pending {
-    shaders: Vec<Arc<Shader>>,
+    pub(crate) shaders: Vec<Arc<Shader>>,
     pub(crate) graphics: Option<Box<GraphicsState>>,
     queue_state: AtomicU8,
     /// Taken by a worker from [`Queue::slow`].
@@ -638,11 +638,36 @@ struct Queue {
     /// [`SCREEN_WORKERS`] take.
     screen: VecDeque<Arc<Pending>>,
     early: VecDeque<Arc<Pending>>,
+<<<<<<< HEAD
     /// Those of the early ones known to take long, and how many of them are
     /// being made ([`slow_limit`]).
     slow: VecDeque<Arc<Pending>>,
     slow_now: usize,
+||||||| 085ee7c4
+=======
+    /// Depth-only / shadow-map prewarmed pipelines: rebuilt ahead of other
+    /// early pipelines while no draw is actively requesting one.
+    early_depth: VecDeque<Arc<Pending>>,
+    /// Requested vertex/pixel graphics pipelines (including screen composition
+    /// and tonemapping): compiled ahead of compute/mesh so the 3D image shows
+    /// up quickly when the shader cache is cold.
+    requested_graphics: VecDeque<Arc<Pending>>,
+    /// Requested compute pipelines (lighting resolve, tonemap, post-processing):
+    /// compiled ahead of mesh pipelines so the 3D screen lights up quickly.
+    requested_compute: VecDeque<Arc<Pending>>,
+>>>>>>> vitoriabr/main
     requested: VecDeque<Arc<Pending>>,
+}
+
+/// Whether `p` is a traditional vertex graphics pipeline (as opposed to mesh
+/// or compute).
+fn is_vertex_graphics(p: &Pending) -> bool {
+    p.shaders.iter().any(|s| s.stage == "vertex")
+}
+
+/// Whether `p` is a compute pipeline.
+fn is_compute(p: &Pending) -> bool {
+    p.shaders.iter().any(|s| s.stage == "compute")
 }
 
 impl Queue {
@@ -650,8 +675,15 @@ impl Queue {
         Self {
             screen: VecDeque::new(),
             early: VecDeque::new(),
+<<<<<<< HEAD
             slow: VecDeque::new(),
             slow_now: 0,
+||||||| 085ee7c4
+=======
+            early_depth: VecDeque::new(),
+            requested_graphics: VecDeque::new(),
+            requested_compute: VecDeque::new(),
+>>>>>>> vitoriabr/main
             requested: VecDeque::new(),
         }
     }
@@ -668,18 +700,35 @@ impl Queue {
             return None;
         }
         p.queue_state.store(priority, Ordering::Relaxed);
+<<<<<<< HEAD
         if priority == REQUESTED && p.screen && screens_first() {
             self.screen.push_back(p.clone());
         } else if priority == REQUESTED {
             self.requested.push_back(p.clone());
         } else if slow {
             self.slow.push_back(p.clone());
+||||||| 085ee7c4
+        if priority == REQUESTED {
+            self.requested.push_back(p.clone());
+=======
+        if priority == REQUESTED {
+            if is_vertex_graphics(p) {
+                self.requested_graphics.push_back(p.clone());
+            } else if is_compute(p) {
+                self.requested_compute.push_back(p.clone());
+            } else {
+                self.requested.push_back(p.clone());
+            }
+        } else if p.graphics.as_ref().is_some_and(|state| state.writes_depth_only()) {
+            self.early_depth.push_back(p.clone());
+>>>>>>> vitoriabr/main
         } else {
             self.early.push_back(p.clone());
         }
         Some(prev == NOT_QUEUED)
     }
 
+<<<<<<< HEAD
     /// The passes over the screen first, then the most asked for of the
     /// requested ones (the first of equals), then the early ones in order,
     /// then one long one if there is room for it. In the order of the first
@@ -712,6 +761,26 @@ impl Queue {
             }
         }
         let p = p?;
+||||||| 085ee7c4
+    fn pop(&mut self) -> Option<Arc<Pending>> {
+        let p = self.requested.pop_front().or_else(|| {
+            // An early entry can have been promoted and claimed already.
+            std::iter::from_fn(|| self.early.pop_front())
+                .find(|p| p.queue_state.load(Ordering::Relaxed) == EARLY)
+        })?;
+=======
+    fn pop(&mut self) -> Option<Arc<Pending>> {
+        let p = self
+            .requested_graphics
+            .pop_front()
+            .or_else(|| self.requested_compute.pop_front())
+            .or_else(|| self.requested.pop_front())
+            .or_else(|| {
+                // An early entry can have been promoted and claimed already.
+                std::iter::from_fn(|| self.early_depth.pop_front().or_else(|| self.early.pop_front()))
+                    .find(|p| p.queue_state.load(Ordering::Relaxed) == EARLY)
+            })?;
+>>>>>>> vitoriabr/main
         p.queue_state.store(MAKING, Ordering::Relaxed);
         Some(p)
     }

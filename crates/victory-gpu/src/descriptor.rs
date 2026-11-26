@@ -143,6 +143,7 @@ static SHADER_HEAPS: std::sync::RwLock<Vec<(u64, u64, usize)>> = std::sync::RwLo
 #[cfg(windows)]
 static SYNCING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+<<<<<<< HEAD
 /// An owned COM reference to a shader-visible [`Heap`], keeping it (and its
 /// host heap and backing memory) alive past the [`SHADER_HEAPS`] lookup.
 #[cfg(windows)]
@@ -183,9 +184,31 @@ fn shader_slot(handle: u64) -> Option<(HeapRef, u32)> {
     Some((heap, index?))
 }
 
+||||||| 085ee7c4
+/// The shader-visible heap holding `handle`, and the descriptor's index.
+#[cfg(windows)]
+fn shader_slot<'a>(handle: u64) -> Option<(&'a Heap, u32)> {
+    let heaps = SHADER_HEAPS.read().unwrap_or_else(|e| e.into_inner());
+    let &(_, _, at) = heaps
+        .iter()
+        .find(|&&(start, end, _)| (start..end).contains(&handle))?;
+    // SAFETY: registered heaps are live (removed when dropped).
+    let heap = unsafe { &*(at as *const Heap) };
+    Some((heap, heap.index(handle)?))
+}
+
+=======
+>>>>>>> vitoriabr/main
 /// Makes the host descriptor for what the title wrote at `handle`, if it
+<<<<<<< HEAD
 /// is in a shader-visible heap. Keeps `SHADER_HEAPS` locked for the duration
 /// so `Heap::drop` cannot free the heap concurrently.
+||||||| 085ee7c4
+/// is in a shader-visible heap.
+=======
+/// is in a shader-visible heap. Keeps `SHADER_HEAPS` read-locked for the
+/// duration so `Heap::drop` cannot free the heap concurrently.
+>>>>>>> vitoriabr/main
 #[cfg(windows)]
 fn mirror(handle: u64) {
     let heaps = SHADER_HEAPS.read().unwrap_or_else(|e| e.into_inner());
@@ -1004,12 +1027,16 @@ pub(crate) enum View {
 
 impl View {
     /// Whether the view reads buffer memory (constant buffers, buffer views
-    /// of resources or of memory) or memory the title placed a texture in:
-    /// such views get host slots only for draws.
+    /// of resources or of memory) or memory the title placed a texture in
+    /// to sample: such views get host slots only for draws. Placed
+    /// unordered texture views live on the host alone, as texture objects'
+    /// unordered views do, so shader-visible heap writes mirror them.
     #[cfg(windows)]
     fn is_buffer(&self) -> bool {
+        const BUFFER: u32 = 1;
         match self {
-            View::Constant(..) | View::Placed(..) => true,
+            View::Constant(..) | View::Placed(false, ..) => true,
+            View::Placed(true, resource, _) => resource[0] == BUFFER,
             View::Shader(r, _) | View::Unordered(r, _, _) => {
                 crate::resource::buffer_bytes(*r as This).is_some()
             }
@@ -1388,6 +1415,7 @@ pub(crate) fn make_waiting() {
             // texture without a host copy must go on waiting).
             // (Looked up first: the handle is read only while its heap is
             // there.)
+<<<<<<< HEAD
             // (The heap stays while the lock is held: `mirror`.)
             let heaps = SHADER_HEAPS.read().unwrap_or_else(|e| e.into_inner());
             let Some(&(_, _, at)) = heaps.iter().find(|&&(start, end, _)| (start..end).contains(&handle)) else {
@@ -1396,6 +1424,21 @@ pub(crate) fn make_waiting() {
             // SAFETY: a registered heap, live while the lock is held.
             let heap = unsafe { &*(at as *const Heap) };
             let Some(index) = heap.index(handle) else {
+||||||| 085ee7c4
+            let Some((heap, index)) = shader_slot(handle) else {
+=======
+            let heaps = SHADER_HEAPS.read().unwrap_or_else(|e| e.into_inner());
+            let Some(&(_, _, at)) = heaps
+                .iter()
+                .find(|&&(start, end, _)| (start..end).contains(&handle))
+            else {
+                continue;
+            };
+            // SAFETY: registered heaps stay alive until `Heap::drop`, which
+            // takes the `SHADER_HEAPS` lock we hold here.
+            let heap = unsafe { &*(at as *const Heap) };
+            let Some(index) = heap.index(handle) else {
+>>>>>>> vitoriabr/main
                 continue;
             };
             let same = match view(handle) {

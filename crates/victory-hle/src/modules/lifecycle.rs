@@ -124,9 +124,18 @@ pub extern "system" fn CreateWindowExW(
     instance: HINSTANCE,
     param: *const c_void,
 ) -> HWND {
+<<<<<<< HEAD
     let top = parent.is_null();
     // SAFETY: the title's own arguments, forwarded (a top-level window
     // made message-only).
+||||||| 085ee7c4
+    let (x, y, width, height) = fit(parent, x, y, width, height);
+    // SAFETY: the title's own arguments, forwarded (the size fitted).
+=======
+    let (x, y, width, height) = fit(parent, x, y, width, height);
+    let (ex_style, x, y) = hide(parent, ex_style, x, y);
+    // SAFETY: the title's own arguments, forwarded (the size fitted).
+>>>>>>> vitoriabr/main
     let hwnd = unsafe {
         wm::CreateWindowExW(
             ex_style,
@@ -165,9 +174,18 @@ pub extern "system" fn CreateWindowExA(
     instance: HINSTANCE,
     param: *const c_void,
 ) -> HWND {
+<<<<<<< HEAD
     let top = parent.is_null();
     // SAFETY: the title's own arguments, forwarded (a top-level window
     // made message-only).
+||||||| 085ee7c4
+    let (x, y, width, height) = fit(parent, x, y, width, height);
+    // SAFETY: the title's own arguments, forwarded (the size fitted).
+=======
+    let (x, y, width, height) = fit(parent, x, y, width, height);
+    let (ex_style, x, y) = hide(parent, ex_style, x, y);
+    // SAFETY: the title's own arguments, forwarded (the size fitted).
+>>>>>>> vitoriabr/main
     let hwnd = unsafe {
         wm::CreateWindowExA(
             ex_style,
@@ -189,6 +207,25 @@ pub extern "system" fn CreateWindowExA(
         stand_in(hwnd, ex_style, style, x, y, width, height);
     }
     hwnd
+}
+
+/// `VICTORY_HIDDEN_WINDOW=1`: the title's top-level window is made off the
+/// screens (right of the virtual desktop), out of the taskbar and never
+/// activated by a click, for unattended runs on a machine in use. The swap
+/// chain presents to it as usual (it is visible, only not on any screen).
+fn hide(parent: HWND, ex_style: u32, x: i32, y: i32) -> (u32, i32, i32) {
+    static ON: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
+        std::env::var("VICTORY_HIDDEN_WINDOW").is_ok_and(|v| v != "0")
+    });
+    if !*ON || !parent.is_null() {
+        return (ex_style, x, y);
+    }
+    // SAFETY: plain metrics queries.
+    let right = unsafe {
+        wm::GetSystemMetrics(wm::SM_XVIRTUALSCREEN) + wm::GetSystemMetrics(wm::SM_CXVIRTUALSCREEN)
+    };
+    tracing::info!(x = right + 64, "title window made off the screens (VICTORY_HIDDEN_WINDOW)");
+    (ex_style | wm::WS_EX_TOOLWINDOW | wm::WS_EX_NOACTIVATE, right + 64, 0)
 }
 
 /// A console title sizes its window to its render target (

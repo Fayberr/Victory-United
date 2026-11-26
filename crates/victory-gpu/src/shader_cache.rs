@@ -137,6 +137,7 @@ pub(crate) fn translation() -> [u8; 32] {
     build()
 }
 
+<<<<<<< HEAD
 /// The offline warm-up (`victory translate --warm`): `container` is
 /// translated into the cache unless it is there already. `Ok(true)`: it
 /// was translated now. Needs [`use_shader_cache`] and the same host facts
@@ -162,9 +163,27 @@ pub fn precompile(container: &[u8]) -> Result<bool, String> {
     Ok(MISSES.load(Ordering::Relaxed) == misses)
 }
 
+||||||| 085ee7c4
+/// The offline warm-up (`victory translate --warm`): `container` is
+/// translated into the cache unless it is there already. `Ok(true)`: it
+/// was translated now. Needs [`use_shader_cache`] and the same host facts
+/// the run will have (`victory_shader::emit::translation_fingerprint`).
+pub fn warm(container: &[u8]) -> Result<bool, String> {
+    let cache = CACHE.get().ok_or("no shader cache")?;
+    let ran = AtomicBool::new(false);
+    let translate = |c: &[u8]| {
+        ran.store(true, Ordering::Relaxed);
+        victory_shader::emit::translate(c).map_err(|e| e.to_string())
+    };
+    cached(cache, &build(), container, translate).map(|_| ran.load(Ordering::Relaxed))
+}
+
+=======
+>>>>>>> vitoriabr/main
 /// The translation of a console shader container, from the cache when
 /// there is one.
 pub(crate) fn host_shader(container: &[u8]) -> Result<HostShader, String> {
+<<<<<<< HEAD
     host_shader_cached(container).map(|(shader, _)| shader)
 }
 
@@ -302,14 +321,72 @@ fn exposure_stub(container: &[u8]) -> Option<HostShader> {
             tracing::warn!(%hash, error = %e, "exposure stand-in does not translate either");
             None
         }
+||||||| 085ee7c4
+    let translate = |c: &[u8]| victory_shader::emit::translate(c).map_err(|e| e.to_string());
+    match CACHE.get() {
+        Some(cache) => cached(cache, &build(), container, translate),
+        None => translate(container),
+=======
+    match CACHE.get() {
+        Some(cache) => cached(cache, &build(), container, translate).map(|(shader, _)| shader),
+        None => translate(container),
+>>>>>>> vitoriabr/main
     }
 }
 
+<<<<<<< HEAD
 fn target() -> [u32; 2] {
     [
         victory_shader::emit::host_max_wave(),
         victory_shader::emit::view_heap_limit(),
     ]
+||||||| 085ee7c4
+/// The cache entry's converter: the build and the container in, the
+/// encoded translation out. `ran` tells a miss from a hit.
+struct Translate<F> {
+    translate: F,
+    ran: AtomicBool,
+=======
+fn translate(container: &[u8]) -> Result<HostShader, String> {
+    victory_shader::emit::translate(container).map_err(|e| e.to_string())
+}
+
+/// Translates `container` into the cache before a run (`victory warm` /
+/// `victory translate --warm`), so the run finds it there instead of
+/// translating it while the title waits.
+///
+/// `Ok(true)`: translated and stored now; `Ok(false)`: it was cached
+/// already. An `Err` is a shader that does not translate (a run drops its
+/// draws as well), or one whose entry did not read back.
+pub fn warm(container: &[u8]) -> Result<bool, String> {
+    crate::descriptor::host::probe_view_limit();
+    let cache = CACHE
+        .get()
+        .ok_or("no shader cache folder (use_shader_cache)")?;
+    match cached(cache, &build(), container, translate)?.1 {
+        Outcome::Hit => Ok(false),
+        Outcome::Stored => Ok(true),
+        Outcome::Unstored => Err("translated, but the cache entry did not read back".to_owned()),
+    }
+}
+
+/// Where [`cached`]'s translation came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    /// Read from the cache.
+    Hit,
+    /// Translated now and stored.
+    Stored,
+    /// Translated now; the entry would not read back, so nothing is stored.
+    Unstored,
+}
+
+/// The cache entry's converter: the build and the container in, the
+/// encoded translation out. `ran` tells a miss from a hit.
+struct Translate<F> {
+    translate: F,
+    ran: AtomicBool,
+>>>>>>> vitoriabr/main
 }
 
 /// DXBC's declared size excludes trailing allocation padding. Keep the title's
@@ -381,6 +458,7 @@ fn cached(
     build: &[u8; 32],
     target: [u32; 2],
     container: &[u8],
+<<<<<<< HEAD
     translate: impl FnOnce(&[u8]) -> Result<HostShader, ShaderError>,
     still_current: impl FnOnce() -> bool,
 ) -> (Translation, CacheStatus) {
@@ -390,10 +468,62 @@ fn cached(
         std::fs::read(&path)
             .ok()
             .and_then(|bytes| decode_record(&bytes))
+||||||| 085ee7c4
+    translate: impl Fn(&[u8]) -> Result<HostShader, String> + Send + Sync,
+) -> Result<HostShader, String> {
+    let input = [&build[..], container].concat();
+    let converter = Translate {
+        translate,
+        ran: AtomicBool::new(false),
+=======
+    translate: impl Fn(&[u8]) -> Result<HostShader, String> + Send + Sync,
+) -> Result<(HostShader, Outcome), String> {
+    let input = [&build[..], container].concat();
+    let converter = Translate {
+        translate,
+        ran: AtomicBool::new(false),
+>>>>>>> vitoriabr/main
     };
+<<<<<<< HEAD
     if let Some(entry) = read() {
         return (entry, CacheStatus::Hit);
+||||||| 085ee7c4
+    for _ in 0..2 {
+        let path = cache
+            .get_or_convert(&converter, &input)
+            .map_err(|e| format!("{e:#}"))?;
+        if let Some(shader) = std::fs::read(&path).ok().and_then(|b| decode(&b)) {
+            let (counter, what) = if converter.ran.load(Ordering::Relaxed) {
+                (&MISSES, "translated and cached")
+            } else {
+                (&HITS, "from the cache")
+            };
+            counter.fetch_add(1, Ordering::Relaxed);
+            tracing::debug!(path = %path.display(), "shader {what}");
+            return Ok(shader);
+        }
+        tracing::debug!(path = %path.display(), "unreadable shader cache entry; translating again");
+        let _ = std::fs::remove_file(&path);
+=======
+    for _ in 0..2 {
+        let path = cache
+            .get_or_convert(&converter, &input)
+            .map_err(|e| format!("{e:#}"))?;
+        if let Some(shader) = std::fs::read(&path).ok().and_then(|b| decode(&b)) {
+            let (counter, what, outcome) = if converter.ran.load(Ordering::Relaxed) {
+                (&MISSES, "translated and cached", Outcome::Stored)
+            } else {
+                (&HITS, "from the cache", Outcome::Hit)
+            };
+            counter.fetch_add(1, Ordering::Relaxed);
+            tracing::debug!(path = %path.display(), "shader {what}");
+            return Ok((shader, outcome));
+        }
+        tracing::debug!(path = %path.display(), "unreadable shader cache entry; translating again");
+        let _ = std::fs::remove_file(&path);
+>>>>>>> vitoriabr/main
     }
+<<<<<<< HEAD
     let translated = translate(container);
     let persist = matches!(translated, Ok(_) | Err(ShaderError::Unsupported { .. }));
     let result = translated.map_err(|e| e.to_string());
@@ -431,9 +561,16 @@ fn decode_record(bytes: &[u8]) -> Option<Translation> {
         return Some(Err(std::str::from_utf8(reason).ok()?.to_owned()));
     }
     decode(payload).map(Ok)
+||||||| 085ee7c4
+    MISSES.fetch_add(1, Ordering::Relaxed);
+    (converter.translate)(container)
+=======
+    MISSES.fetch_add(1, Ordering::Relaxed);
+    (converter.translate)(container).map(|shader| (shader, Outcome::Unstored))
+>>>>>>> vitoriabr/main
 }
 
-const MAGIC: &[u8; 4] = b"VSH1";
+const MAGIC: &[u8; 4] = b"VSH3";
 const STAGES: [HwStage; 8] = [
     HwStage::Ls,
     HwStage::Hs,
@@ -508,10 +645,11 @@ fn encode(s: &HostShader) -> Vec<u8> {
             word(&mut out, v);
         }
     }
-    for slots in [&s.root_cbvs, &s.root_srvs, &s.root_uavs] {
+    for slots in [&s.root_cbvs, &s.root_srvs, &s.root_uavs, &s.written_root_uavs] {
         word(&mut out, slots.len() as u32);
         out.extend(slots);
     }
+    word(&mut out, u32::from(s.writes_guest_memory));
     word(&mut out, s.root_indexed_views.len() as u32);
     for view in &s.root_indexed_views {
         for value in [
@@ -586,6 +724,12 @@ fn decode(bytes: &[u8]) -> Option<HostShader> {
     let root_cbvs = r.list()?;
     let root_srvs = r.list()?;
     let root_uavs = r.list()?;
+    let written_root_uavs = r.list()?;
+    let writes_guest_memory = match r.word()? {
+        0 => false,
+        1 => true,
+        _ => return None,
+    };
     let n = r.word()? as usize;
     let mut root_indexed_views = Vec::with_capacity(n.min(256));
     for _ in 0..n {
@@ -611,6 +755,8 @@ fn decode(bytes: &[u8]) -> Option<HostShader> {
         root_cbvs,
         root_srvs,
         root_uavs,
+        written_root_uavs,
+        writes_guest_memory,
         root_indexed_views,
         half_views,
     })
@@ -639,7 +785,9 @@ mod tests {
             ])],
             root_cbvs: vec![2],
             root_srvs: vec![0, 3],
-            root_uavs: vec![1],
+            root_uavs: vec![1, 2],
+            written_root_uavs: vec![2],
+            writes_guest_memory: true,
             root_indexed_views: vec![RootIndexedView {
                 table_slot: 1,
                 constant_slot: 2,
@@ -658,6 +806,7 @@ mod tests {
         let build = [7u8; 32];
         let target = [32, 999_999];
         let container = b"a console container".as_slice();
+<<<<<<< HEAD
         let translate = |_: &[u8]| Ok(shader());
         let entry = || cached(&cache, &build, target, container, translate, || true);
         assert_eq!(entry(), (Ok(shader()), CacheStatus::Stored));
@@ -667,11 +816,73 @@ mod tests {
                 cached(&cache, &build, other_target, container, translate, || true),
                 (Ok(shader()), CacheStatus::Stored)
             );
+||||||| 085ee7c4
+        let runs = AtomicU64::new(0);
+        let translate = |_: &[u8]| {
+            runs.fetch_add(1, Ordering::Relaxed);
+            Ok(shader())
+        };
+        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
+        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
+        assert_eq!(runs.load(Ordering::Relaxed), 1, "the second came from disk");
+
+        // Another build translates again.
+        assert_eq!(cached(&cache, &[8; 32], container, translate), Ok(shader()));
+        assert_eq!(runs.load(Ordering::Relaxed), 2);
+
+        // A damaged entry is a miss, translated and stored again.
+        for e in walk(dir.path()) {
+            std::fs::write(e, b"VSH1 broken").unwrap();
+=======
+        let runs = AtomicU64::new(0);
+        let translate = |_: &[u8]| {
+            runs.fetch_add(1, Ordering::Relaxed);
+            Ok(shader())
+        };
+        assert_eq!(
+            cached(&cache, &build, container, translate),
+            Ok((shader(), Outcome::Stored))
+        );
+        assert_eq!(
+            cached(&cache, &build, container, translate),
+            Ok((shader(), Outcome::Hit))
+        );
+        assert_eq!(runs.load(Ordering::Relaxed), 1, "the second came from disk");
+
+        // Another build translates again.
+        assert_eq!(
+            cached(&cache, &[8; 32], container, translate),
+            Ok((shader(), Outcome::Stored))
+        );
+        assert_eq!(runs.load(Ordering::Relaxed), 2);
+
+        // A damaged entry is a miss, translated and stored again.
+        for e in walk(dir.path()) {
+            std::fs::write(e, b"VSH3 broken").unwrap();
+>>>>>>> vitoriabr/main
         }
+<<<<<<< HEAD
         assert_eq!(
             cached(&cache, &[8; 32], target, container, translate, || true),
             (Ok(shader()), CacheStatus::Stored)
         );
+||||||| 085ee7c4
+        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
+        assert_eq!(runs.load(Ordering::Relaxed), 3);
+        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
+        assert_eq!(runs.load(Ordering::Relaxed), 3);
+=======
+        assert_eq!(
+            cached(&cache, &build, container, translate),
+            Ok((shader(), Outcome::Stored))
+        );
+        assert_eq!(runs.load(Ordering::Relaxed), 3);
+        assert_eq!(
+            cached(&cache, &build, container, translate),
+            Ok((shader(), Outcome::Hit))
+        );
+        assert_eq!(runs.load(Ordering::Relaxed), 3);
+>>>>>>> vitoriabr/main
 
         let path = cache.path_for(&shader_key(&build, target, container));
         let mut damaged = std::fs::read(&path).unwrap();
@@ -753,6 +964,12 @@ mod tests {
     fn entries_round_trip_and_reject_damage() {
         let bytes = encode(&shader());
         assert_eq!(decode(&bytes), Some(shader()));
+        let mut read_only = shader();
+        read_only.writes_guest_memory = false;
+        assert_eq!(decode(&encode(&read_only)), Some(read_only));
+        let mut stale = bytes.clone();
+        stale[..4].copy_from_slice(b"VSH1");
+        assert_eq!(decode(&stale), None);
         assert_eq!(decode(&bytes[..bytes.len() - 1]), None);
         assert_eq!(decode(&[bytes.as_slice(), &[0]].concat()), None);
         assert_eq!(decode(b"VSH0"), None);
