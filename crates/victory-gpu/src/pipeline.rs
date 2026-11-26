@@ -340,22 +340,12 @@ pub(crate) fn builder_runs() -> bool {
     if b.whole {
         return true;
     }
-<<<<<<< HEAD
     let missing: Vec<String> = b.pipelines.iter().filter(|p| !make::now(p)).map(|p| make::hashes(p)).collect();
     if !missing.is_empty() {
         b.off = b.pipelines.len();
-||||||| 9c184b35b
-    let missing = b.pipelines.iter().filter(|p| !make::now(p)).count();
-    if missing > 0 {
-        b.off = true;
-=======
-    let missing = b.pipelines.iter().filter(|p| !make::now(p)).count();
-    if missing > 0 {
-        b.off = true;
         for p in b.pipelines.iter().filter(|p| !make::now(p)) {
             tracing::warn!(shaders = ?make::shaders(p), "a builder pipeline with no host pipeline");
         }
->>>>>>> origin/exp/fork-head
         tracing::warn!(
             missing = missing.len(),
             of = b.pipelines.len(),
