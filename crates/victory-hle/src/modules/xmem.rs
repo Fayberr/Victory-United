@@ -195,22 +195,18 @@ fn virtual_alloc(
             "XMemVirtualAlloc"
         );
     }
-<<<<<<< HEAD
-    if !at.is_null() && !placeholder {
-        victory_gpu::title_memory_allocated(at as usize, size);
-    }
-    note_protection(asked, kind, flags, at as usize, size);
-||||||| 9c184b35b
-=======
-    // Memory committed for the title: the GPU side's notes that blocks there
-    // are uncommitted go (`VICTORY_ABSENT_ONCE`).
+    // Committed: what the GPU side found uncommitted there is no longer so
+    // (it looks again only now and then otherwise).
     if !at.is_null() && kind & MEM_COMMIT != 0 {
         // Windows rounds a fixed commit's address down to a page. The
         // caller's last byte can be in the next 64 KiB watch block.
         let start = if base.is_null() { at } else { base };
         on_commit(start as usize, size);
     }
->>>>>>> origin/exp/fork-head
+    if !at.is_null() && !placeholder {
+        victory_gpu::title_memory_allocated(at as usize, size);
+    }
+    note_protection(asked, kind, flags, at as usize, size);
     at
 }
 
@@ -926,20 +922,13 @@ impl View {
             return None;
         }
         let view = View { at, len };
-<<<<<<< HEAD
         if !commit(at.Value as usize, len) {
             tracing::warn!(error = %std::io::Error::last_os_error(), n, "physical pages not committed for a write");
             return None;
         }
-        Some(view)
-||||||| 9c184b35b
-        commit(at.Value as usize, len).then_some(view)
-=======
-        let committed = commit(at.Value as usize, len);
         victory_gpu::framelog::add(victory_gpu::framelog::T::DiskViews, 1);
         victory_gpu::framelog::add(victory_gpu::framelog::T::DiskViewUs, started.elapsed().as_micros() as u64);
-        committed.then_some(view)
->>>>>>> origin/exp/fork-head
+        Some(view)
     }
 
     fn bytes(&mut self) -> &mut [u8] {
