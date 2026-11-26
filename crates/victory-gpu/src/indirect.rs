@@ -54,18 +54,11 @@ cbuffer Record : register(b0) {
     uint args_offset;
     // Bit 0: a count buffer bounds the records. Bit 1: the records are a
     // window clamped ahead of their draws: one that asks for more than can
-<<<<<<< HEAD
     // run is left empty and costs nothing. Bit 2: one dispatch, written as
     // SPLIT records of at most 65,535 groups in x each. Bit 3: the records
     // are gathered (`gather`): record i lies in the source where word i of
     // the table behind `count_buf` says (from `count_offset` on), and goes
     // to slot i.
-||||||| a66ac212
-    // run is left empty and costs nothing.
-=======
-    // run is left empty and costs nothing. Bit 2: one dispatch, written as
-    // SPLIT records of at most 65,535 groups in x each.
->>>>>>> klbf/beta-2
     uint has_count;
     uint count_offset;
     // The first record this dispatch clamps: the caller dispatches one group
@@ -84,7 +77,6 @@ static const uint BUDGET = 1u << 27;
 static const uint MOST_DRAW = 1u << 23;
 // Groups of one dispatch; more run empty.
 static const uint GROUPS = 1u << 20;
-<<<<<<< HEAD
 static const uint SPLIT = 2;
 // Each active record charges the budget once, saturating without 32-bit
 // wraparound. A compare and swap per record, 64 threads racing for one
@@ -96,10 +88,6 @@ static const uint SPLIT = 2;
 // which no barrier orders: see the note where the records charge.
 groupshared uint largest_asked;
 groupshared uint all_asked;
-||||||| a66ac212
-=======
-static const uint SPLIT = 2;
->>>>>>> klbf/beta-2
 [RootSignature(RS)]
 [numthreads(64, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
@@ -156,7 +144,6 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
             cost = 0;
         }
         draw_counts = uint2(count, instances);
-<<<<<<< HEAD
     } else if (active && kind == 2) {
         uint3 wants = src_args.Load3(src_at);
         uint3 g = min(wants, uint3(65535u, 65535u, 65535u));
@@ -165,31 +152,6 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
         if (split && g.y <= 1u && g.z <= 1u && wants.x <= SPLIT * 65535u) {
             g.x = wants.x;
         }
-||||||| a66ac212
-    } else if (kind == 2) {
-        uint3 g = min(src_args.Load3(src_at), uint3(65535u, 65535u, 65535u));
-=======
-    } else if (kind == 2) {
-        uint3 asked = src_args.Load3(src_at);
-        // Diagnostics, in the budget buffer's words after the mesh ones:
-        // the largest x a compute record asked for, and the records that
-        // asked for more groups in x than one dispatch runs (they are cut
-        // to 65,535 below, so the groups past it never run). Not the
-        // garbage of a slot nothing wrote.
-        if (asked.x <= (1u << 24) && asked.y <= 64u && asked.z <= 64u) {
-            uint noted;
-            budget.InterlockedMax(12, asked.x, noted);
-            if (asked.x > 65535u) {
-                budget.InterlockedAdd(16, 1u, noted);
-            }
-        }
-        uint3 g = min(asked, uint3(65535u, 65535u, 65535u));
-        // In parts: one dimension, and not the garbage of an argument
-        // nothing wrote.
-        if (split && g.y <= 1u && g.z <= 1u && asked.x <= SPLIT * 65535u) {
-            g.x = asked.x;
-        }
->>>>>>> klbf/beta-2
         // x * y fits 32 bits; the whole count may not.
         if (g.z != 0 && g.x * g.y > GROUPS / g.z) {
             g = uint3(0, 0, 0);
@@ -199,23 +161,11 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
     } else if (active) {
         // Mesh dispatches: the console's are one-dimensional.
         uint3 g = src_args.Load3(src_at);
-<<<<<<< HEAD
         // A record over the most a dispatch runs is a slot the title has
         // not filled (the title leaves all ones there): empty,
         // and not counted below either. (65,535 groups of meshlets read
         // through the garbage beside it read past every buffer.)
         if (g.x > 65535u) {
-||||||| a66ac212
-        // Ahead of its draw, a record over the most a dispatch runs is a
-        // slot the title has not filled (Grand Theft Auto VI leaves all
-        // ones there): empty, and not counted below either.
-        if (ahead && g.x > 65535u) {
-=======
-        // Ahead of its draw, a record over the most a dispatch runs is a
-        // slot the title has not filled (the title leaves all
-        // ones there): empty, and not counted below either.
-        if (ahead && g.x > 65535u) {
->>>>>>> klbf/beta-2
             g = uint3(0, 0, 0);
         }
         asked = g.x;
@@ -321,7 +271,6 @@ fn make() -> windows::core::Result<Clamp> {
 }
 
 fn make_for(device: &ID3D12Device) -> windows::core::Result<Clamp> {
-<<<<<<< HEAD
     make_from(device, SOURCE)
 }
 
@@ -371,31 +320,14 @@ fn make_from(device: &ID3D12Device, source: &str) -> windows::core::Result<Clamp
     #[cfg(feature = "diagnostics")]
     let batched = source == batch::SOURCE;
     let source = &format!("#define WIDEST {}u\n#define REST {}\n{source}", widest(amd(device)), rest());
-||||||| a66ac212
-=======
-    make_from(device, SOURCE, s!("clamp"))
-}
-
-fn make_from(device: &ID3D12Device, source: &str, name: windows::core::PCSTR) -> windows::core::Result<Clamp> {
->>>>>>> klbf/beta-2
     let mut code: Option<ID3DBlob> = None;
     let mut errors: Option<ID3DBlob> = None;
     // SAFETY: the source and names live through the call; out pointers ours.
     let compiled = unsafe {
         D3DCompile(
-<<<<<<< HEAD
             source.as_ptr().cast(),
             source.len(),
             s!("clamp"),
-||||||| a66ac212
-            SOURCE.as_ptr().cast(),
-            SOURCE.len(),
-            s!("clamp"),
-=======
-            source.as_ptr().cast(),
-            source.len(),
-            name,
->>>>>>> klbf/beta-2
             None,
             None,
             s!("main"),
@@ -589,103 +521,11 @@ pub(crate) fn bound_ahead(
     list: &HostList,
     src: (&ID3D12Resource, u64),
     spec: (u32, u32, u32),
-<<<<<<< HEAD
     own: bool,
 ) -> Option<(ID3D12Resource, u64)> {
     clamp_to(list, src, None, spec, ring(), true, own)
-||||||| a66ac212
-) -> Option<ID3D12Resource> {
-    let bytes = validate_layout(spec, src.1, None)?;
-    let (c, budget, dst) = (clamp()?, list.budget()?, list.indirect_scratch(bytes)?);
-    record_clamp_as(c, &list.list, &dst, budget, src, None, spec, true).then_some(dst)
-=======
-) -> Option<ID3D12Resource> {
-    let bytes = validate_layout(spec, src.1, None)?;
-    let (c, budget, dst) = (clamp()?, list.budget()?, list.indirect_scratch(bytes)?);
-    record_clamp_as(c, &list.list, &dst, budget, src, None, spec, AHEAD).then_some(dst)
->>>>>>> klbf/beta-2
 }
 
-<<<<<<< HEAD
-/// The parts [`bound_split`] makes of a dispatch, the most groups of each,
-/// and the bytes between them.
-pub(crate) const SPLIT: u32 = 2;
-pub(crate) const PART: u32 = 65_535;
-pub(crate) const PART_BYTES: u64 = 12;
-
-/// [`bound`] for one dispatch that a program with a group base runs
-/// (`victory_shader::emit::USER_GROUP_BASE`): [`SPLIT`] records follow each
-/// other in the scratch buffer, of which the first has the first [`PART`]
-/// groups in x and the next the ones after (empty if there are none). The
-/// console runs 115,200 groups in one dispatch (the title's final gather of
-/// indirect light: 8 for each 16x16 tile of 2560x1440); clamped to what the
-/// host runs, the tiles at the bottom of the screen kept what they showed
-/// before.
-pub(crate) fn bound_split(
-    list: &HostList,
-    src: (&ID3D12Resource, u64),
-    own: bool,
-) -> Option<ID3D12Resource> {
-    let spec = (2, 12, 1);
-    validate_layout(spec, src.1, None)?;
-    let (c, budget) = (clamp()?, list.budget()?);
-    let dst = list.indirect_scratch(u64::from(SPLIT) * PART_BYTES)?;
-    let waits = clamp_waits(list, own);
-    let recorded = clamp_into(list, c, &dst, budget, src, None, spec, IN_PARTS, waits);
-    clamp_recorded(list, waits, recorded);
-    recorded.then_some(dst)
-}
-
-/// [`bound_ahead`] into the list's ring ([`ring`]) or its one scratch buffer.
-#[cfg(test)]
-fn bound_ahead_in(
-    list: &HostList,
-    src: (&ID3D12Resource, u64),
-    spec: (u32, u32, u32),
-    ring: bool,
-) -> Option<(ID3D12Resource, u64)> {
-    clamp_to(list, src, None, spec, ring, true, false)
-}
-
-/// [`bound_in`] and [`bound_ahead`]: the clamp into room of the list's ring,
-/// or into its scratch buffer from the state the list left it in. `own`:
-/// `src` and `count` are dedicated buffers, not placed over title memory that
-/// another buffer may alias ([`clamp_scoped`]).
-fn clamp_to(
-    list: &HostList,
-    src: (&ID3D12Resource, u64),
-    count: Option<(&ID3D12Resource, u64)>,
-    spec: (u32, u32, u32),
-    ring: bool,
-    ahead: bool,
-    own: bool,
-) -> Option<(ID3D12Resource, u64)> {
-    let bytes = validate_layout(spec, src.1, count.map(|(_, off)| off))?;
-    if ring {
-        let (c, budget, (dst, at)) = (clamp()?, list.budget()?, list.indirect_ring(bytes)?);
-        return record_clamp_ring(c, list, &dst, at, budget, src, count, spec, ahead).then_some((dst, at));
-    }
-    let (c, budget, dst) = (clamp()?, list.budget()?, list.indirect_scratch(bytes)?);
-    let waits = clamp_waits(list, own);
-    let recorded = clamp_into(list, c, &dst, budget, src, count, spec, if ahead { AHEAD } else { 0 }, waits);
-    clamp_recorded(list, waits, recorded);
-    recorded.then_some((dst, 0))
-}
-
-/// Bits of the clamp's `has_count`.
-const AHEAD: u32 = 2;
-const IN_PARTS: u32 = 4;
-const GATHERED: u32 = 8;
-
-/// [`record_clamp_waits`] into `list`'s scratch buffer `dst`, from the state
-/// the list left it in; afterwards the list knows it is readable as
-/// indirect arguments.
-#[allow(clippy::too_many_arguments)]
-fn clamp_into(
-    list: &HostList,
-||||||| a66ac212
-fn record_clamp(
-=======
 /// (Neptune) `VICTORY_CLAMP_AFTER_WRITER=1` (off by default): a single indirect record that an
 /// earlier shader of its list may write is not clamped by a pass of its own. A pass of ours
 /// ([`sanitized`]) rewrites, in place in the title's buffer, every record of the records the
@@ -794,7 +634,7 @@ fn sanitizer() -> Option<&'static Clamp> {
     static S: std::sync::OnceLock<Option<Clamp>> = std::sync::OnceLock::new();
     S.get_or_init(|| {
         let device = &host()?.device;
-        make_from(device, SANITIZE, s!("sanitize")).map_err(|e| tracing::warn!(error = %e, "no argument sanitizer")).ok()
+        make_from(device, SANITIZE).map_err(|e| tracing::warn!(error = %e, "no argument sanitizer")).ok()
     })
     .as_ref()
 }
@@ -914,24 +754,72 @@ pub(crate) const PART_BYTES: u64 = 12;
 /// (`victory_shader::emit::USER_GROUP_BASE`): [`SPLIT`] records follow each
 /// other in the scratch buffer, of which the first has the first [`PART`]
 /// groups in x and the next the ones after (empty if there are none). The
-/// console runs 115,200 groups in one dispatch (the title's final
-/// gather of indirect light: 8 for each 16x16 tile of 2560x1440); clamped
-/// to what the host runs, the tiles at the bottom of the screen kept what
-/// they showed before.
-pub(crate) fn bound_split(list: &HostList, src: (&ID3D12Resource, u64)) -> Option<ID3D12Resource> {
+/// console runs 115,200 groups in one dispatch (the title's final gather of
+/// indirect light: 8 for each 16x16 tile of 2560x1440); clamped to what the
+/// host runs, the tiles at the bottom of the screen kept what they showed
+/// before.
+pub(crate) fn bound_split(
+    list: &HostList,
+    src: (&ID3D12Resource, u64),
+    own: bool,
+) -> Option<ID3D12Resource> {
     let spec = (2, 12, 1);
     validate_layout(spec, src.1, None)?;
     let (c, budget) = (clamp()?, list.budget()?);
     let dst = list.indirect_scratch(u64::from(SPLIT) * PART_BYTES)?;
-    record_clamp_as(c, &list.list, &dst, budget, src, None, spec, IN_PARTS).then_some(dst)
+    let waits = clamp_waits(list, own);
+    let recorded = clamp_into(list, c, &dst, budget, src, None, spec, IN_PARTS, waits);
+    clamp_recorded(list, waits, recorded);
+    recorded.then_some(dst)
+}
+
+/// [`bound_ahead`] into the list's ring ([`ring`]) or its one scratch buffer.
+#[cfg(test)]
+fn bound_ahead_in(
+    list: &HostList,
+    src: (&ID3D12Resource, u64),
+    spec: (u32, u32, u32),
+    ring: bool,
+) -> Option<(ID3D12Resource, u64)> {
+    clamp_to(list, src, None, spec, ring, true, false)
+}
+
+/// [`bound_in`] and [`bound_ahead`]: the clamp into room of the list's ring,
+/// or into its scratch buffer from the state the list left it in. `own`:
+/// `src` and `count` are dedicated buffers, not placed over title memory that
+/// another buffer may alias ([`clamp_scoped`]).
+fn clamp_to(
+    list: &HostList,
+    src: (&ID3D12Resource, u64),
+    count: Option<(&ID3D12Resource, u64)>,
+    spec: (u32, u32, u32),
+    ring: bool,
+    ahead: bool,
+    own: bool,
+) -> Option<(ID3D12Resource, u64)> {
+    let bytes = validate_layout(spec, src.1, count.map(|(_, off)| off))?;
+    if ring {
+        let (c, budget, (dst, at)) = (clamp()?, list.budget()?, list.indirect_ring(bytes)?);
+        return record_clamp_ring(c, list, &dst, at, budget, src, count, spec, ahead).then_some((dst, at));
+    }
+    let (c, budget, dst) = (clamp()?, list.budget()?, list.indirect_scratch(bytes)?);
+    let waits = clamp_waits(list, own);
+    let recorded = clamp_into(list, c, &dst, budget, src, count, spec, if ahead { AHEAD } else { 0 }, waits);
+    clamp_recorded(list, waits, recorded);
+    recorded.then_some((dst, 0))
 }
 
 /// Bits of the clamp's `has_count`.
 const AHEAD: u32 = 2;
 const IN_PARTS: u32 = 4;
+const GATHERED: u32 = 8;
 
-fn record_clamp(
->>>>>>> klbf/beta-2
+/// [`record_clamp_waits`] into `list`'s scratch buffer `dst`, from the state
+/// the list left it in; afterwards the list knows it is readable as
+/// indirect arguments.
+#[allow(clippy::too_many_arguments)]
+fn clamp_into(
+    list: &HostList,
     c: &Clamp,
     dst: &ID3D12Resource,
     budget: u64,
@@ -941,21 +829,14 @@ fn record_clamp(
     how: u32,
     waits: Waits,
 ) -> bool {
-<<<<<<< HEAD
     let before = list.indirect_state(dst);
     let recorded = record_clamp_waits(c, &list.list, (dst, before), budget, src, count, spec, how, waits);
     if recorded {
         list.indirect_readable(dst);
     }
     recorded
-||||||| a66ac212
-    record_clamp_as(c, l, dst, budget, src, count, spec, false)
-=======
-    record_clamp_as(c, l, dst, budget, src, count, spec, 0)
->>>>>>> klbf/beta-2
 }
 
-<<<<<<< HEAD
 /// Whether indirect records that no shader of the list may have written
 /// before the command are clamped in the list's prelude (on with [`ring`];
 /// `VICTORY_INDIRECT_EARLY=0` clamps each in the list, as before).
@@ -1202,14 +1083,6 @@ fn record_clamp_ring(
 /// dispatch in parts ([`bound_split`]); 0. False, with nothing recorded, if the
 /// layout or the addresses do not fit the clamp.
 #[cfg(test)]
-||||||| a66ac212
-/// [`record_clamp`]; `ahead`: the records are a window clamped ahead of
-/// their draws ([`bound_ahead`]).
-=======
-/// [`record_clamp`]; `how`: [`AHEAD`], the records are a window clamped
-/// ahead of their draws ([`bound_ahead`]); [`IN_PARTS`], one dispatch in
-/// parts ([`bound_split`]).
->>>>>>> klbf/beta-2
 #[allow(clippy::too_many_arguments)]
 fn record_clamp_as(
     c: &Clamp,
@@ -1243,14 +1116,8 @@ fn record_clamp_waits(
     (src, src_offset): (&ID3D12Resource, u64),
     count: Option<(&ID3D12Resource, u64)>,
     (kind, stride, records): (u32, u32, u32),
-<<<<<<< HEAD
     how: u32,
     Waits { before, after, scoped }: Waits,
-||||||| a66ac212
-    ahead: bool,
-=======
-    how: u32,
->>>>>>> klbf/beta-2
 ) -> bool {
     // SAFETY: a live D3D12 buffer resource.
     let dst_gpu = unsafe { dst.GetGPUVirtualAddress() };
@@ -1259,84 +1126,6 @@ fn record_clamp_waits(
     else {
         return false;
     };
-<<<<<<< HEAD
-||||||| a66ac212
-    // SAFETY: live D3D12 buffer resources.
-    let (src_base, dst_gpu) = unsafe { (src.GetGPUVirtualAddress(), dst.GetGPUVirtualAddress()) };
-    if !src_base.is_multiple_of(4) || !dst_gpu.is_multiple_of(4) || !budget.is_multiple_of(4) {
-        return false;
-    }
-    let (src_gpu, args_offset) = match src_offset
-        .checked_add(bytes)
-        .filter(|&end| end <= u64::from(u32::MAX))
-    {
-        Some(_) => (src_base, src_offset as u32),
-        None => {
-            let Some(rebased) = src_base.checked_add(src_offset) else {
-                return false;
-            };
-            (rebased, 0)
-        }
-    };
-    let (count_gpu, has_count, count_offset) = match count {
-        Some((buf, off)) => {
-            // SAFETY: a live D3D12 buffer resource.
-            let base = unsafe { buf.GetGPUVirtualAddress() };
-            if !base.is_multiple_of(4) {
-                return false;
-            }
-            match off.checked_add(4).filter(|&end| end <= u64::from(u32::MAX)) {
-                Some(_) => (base, 1u32, off as u32),
-                None => {
-                    let Some(rebased) = base.checked_add(off) else {
-                        return false;
-                    };
-                    (rebased, 1u32, 0u32)
-                }
-            }
-        }
-        None => (src_gpu, 0u32, 0u32),
-    };
-    let constants = [kind, stride, records, args_offset, has_count | (u32::from(ahead) << 1), count_offset];
-=======
-    // SAFETY: live D3D12 buffer resources.
-    let (src_base, dst_gpu) = unsafe { (src.GetGPUVirtualAddress(), dst.GetGPUVirtualAddress()) };
-    if !src_base.is_multiple_of(4) || !dst_gpu.is_multiple_of(4) || !budget.is_multiple_of(4) {
-        return false;
-    }
-    let (src_gpu, args_offset) = match src_offset
-        .checked_add(bytes)
-        .filter(|&end| end <= u64::from(u32::MAX))
-    {
-        Some(_) => (src_base, src_offset as u32),
-        None => {
-            let Some(rebased) = src_base.checked_add(src_offset) else {
-                return false;
-            };
-            (rebased, 0)
-        }
-    };
-    let (count_gpu, has_count, count_offset) = match count {
-        Some((buf, off)) => {
-            // SAFETY: a live D3D12 buffer resource.
-            let base = unsafe { buf.GetGPUVirtualAddress() };
-            if !base.is_multiple_of(4) {
-                return false;
-            }
-            match off.checked_add(4).filter(|&end| end <= u64::from(u32::MAX)) {
-                Some(_) => (base, 1u32, off as u32),
-                None => {
-                    let Some(rebased) = base.checked_add(off) else {
-                        return false;
-                    };
-                    (rebased, 1u32, 0u32)
-                }
-            }
-        }
-        None => (src_gpu, 0u32, 0u32),
-    };
-    let constants = [kind, stride, records, args_offset, has_count | how, count_offset];
->>>>>>> klbf/beta-2
     // SAFETY: an open list; our root signature and pipeline; live source,
     // count, scratch destination, and budget buffers. `src` and `count` stay
     // in `COMMON` / `GENERIC_READ` via implicit buffer promotion while `dst`
@@ -1510,7 +1299,6 @@ fn done_on(list: &ID3D12GraphicsCommandList, scratch: &ID3D12Resource) {
     };
 }
 
-<<<<<<< HEAD
 /// The batched clamp's pipeline ([`batch`]).
 fn batch_clamp() -> Option<&'static Clamp> {
     static CLAMP: std::sync::OnceLock<Option<Clamp>> = std::sync::OnceLock::new();
@@ -2224,12 +2012,7 @@ fn uav_barrier_on(resource: &ID3D12Resource) -> D3D12_RESOURCE_BARRIER {
     }
 }
 
-fn uav_barrier() -> D3D12_RESOURCE_BARRIER {
-||||||| a66ac212
-fn uav_barrier() -> D3D12_RESOURCE_BARRIER {
-=======
 pub(crate) fn uav_barrier() -> D3D12_RESOURCE_BARRIER {
->>>>>>> klbf/beta-2
     D3D12_RESOURCE_BARRIER {
         Type: D3D12_RESOURCE_BARRIER_TYPE_UAV,
         Flags: D3D12_RESOURCE_BARRIER_FLAG_NONE,
@@ -2606,17 +2389,11 @@ void main() {
                 warp.list.SetComputeRootShaderResourceView(1, now_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(2, hashes_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(3, differs_gpu);
-<<<<<<< HEAD
                 warp.list.SetComputeRootUnorderedAccessView(4, inline_gpu);
                 // Both compares take a group of 64 threads to a piece now, so
                 // a group a piece; `groups` was for the thread-a-piece form.
                 let _ = groups;
                 warp.list.Dispatch(PIECES, 1, 1);
-||||||| a66ac212
-                warp.list.Dispatch(PIECES.div_ceil(64), 1, 1);
-=======
-                warp.list.Dispatch(PIECES, 1, 1);
->>>>>>> klbf/beta-2
             }
             warp.submit_and_wait();
             // SAFETY: as above.
@@ -4596,7 +4373,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
     /// preserving `StartIndexLocation`, `BaseVertexLocation`,
     /// `StartInstanceLocation`, and custom stride padding, and leaving
     /// `src_args` untouched.
-<<<<<<< HEAD
     /// One dispatch in parts: groups past what the host runs in one
     /// dimension go into the second record; what nothing wrote stays
     /// clamped, or empty.
@@ -4652,57 +4428,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         }
     }
 
-||||||| a66ac212
-=======
-    /// One dispatch in parts: groups past what the host runs in one
-    /// dimension go into the second record; what nothing wrote stays
-    /// clamped, or empty.
-    #[test]
-    fn warp_large_dispatch_is_made_in_parts() {
-        let Some(mut warp) = WarpHarness::new() else {
-            return;
-        };
-        let cases: [([u32; 3], [u32; 6]); 6] = [
-            ([115_200, 1, 1], [65_535, 1, 1, 49_665, 1, 1]),
-            ([65_535, 1, 1], [65_535, 1, 1, 0, 1, 1]),
-            ([65_536, 1, 1], [65_535, 1, 1, 1, 1, 1]),
-            ([5, 3, 2], [5, 3, 2, 0, 3, 2]),
-            ([0, 1, 1], [0, 1, 1, 0, 1, 1]),
-            // Past both parts: as before, what one dispatch runs.
-            ([200_000, 1, 1], [65_535, 1, 1, 0, 1, 1]),
-        ];
-        for (asked, parts) in cases {
-            let (src_buf, src_ptr, _) = warp.shared_buffer(16);
-            let (_budget_buf, budget_ptr, budget_gpu) = warp.shared_buffer(256);
-            let (readback_buf, readback_ptr, _) = warp.shared_buffer(64);
-            let dst_buf = warp.default_uav(64);
-            // SAFETY: mapped buffers of these sizes.
-            unsafe {
-                std::ptr::copy_nonoverlapping(asked.as_ptr().cast(), src_ptr, 12);
-                std::ptr::write_bytes(budget_ptr, 0, 256);
-                std::ptr::write_bytes(readback_ptr, 0, 64);
-            }
-            assert!(record_clamp_as(
-                &warp.clamp,
-                &warp.list,
-                &dst_buf,
-                budget_gpu,
-                (&src_buf, 0),
-                None,
-                (2, 12, 1),
-                IN_PARTS,
-            ));
-            done_on(&warp.list, &dst_buf);
-            // SAFETY: an open list and live buffers.
-            unsafe { warp.list.CopyBufferRegion(&readback_buf, 0, &dst_buf, 0, 24) };
-            warp.submit_and_wait();
-            // SAFETY: the mapping holds 24 bytes the copy wrote.
-            let made: [u32; 6] = unsafe { readback_ptr.cast::<[u32; 6]>().read_volatile() };
-            assert_eq!(made, parts, "{asked:?}");
-        }
-    }
-
->>>>>>> klbf/beta-2
     /// A window of mesh records clamped ahead: the filled ones come out as
     /// they are and are charged, the slots of all ones come out empty and
     /// charge nothing; clamped as single records the same slots are clamped
