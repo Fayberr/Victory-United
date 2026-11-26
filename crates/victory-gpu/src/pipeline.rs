@@ -139,20 +139,16 @@ pub(crate) struct Translated {
     /// Whether the shader's code can store to buffer memory ([`stores`]);
     /// true when its code is not known.
     pub(crate) stores: bool,
-<<<<<<< HEAD
     /// Whether the code can write anything through unordered access:
     /// [`stores`], or an image store or atomic (a texture shaders write).
     /// True when its code is not known. What `VICTORY_BARRIER_MERGE` asks
     /// of an op before it counts it as unordered writes to wait for.
     pub(crate) writes: bool,
-||||||| a26859fc
-=======
     /// Whether it can store through raw addresses ([`stores_by_address`]).
     pub(crate) stores_by_address: bool,
     /// Whether it stores through a view it picks from the heap by an index,
     /// once asked (`crate::picked`).
     pub(crate) picks: std::sync::atomic::AtomicU8,
->>>>>>> avatar/main
 }
 
 #[cfg(windows)]
@@ -222,16 +218,12 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
     };
     let host = crate::shader_cache::host_shader(container)?;
     let stores = programs.is_empty() || programs.iter().any(stores);
-<<<<<<< HEAD
     let writes = stores || programs.iter().any(image_stores);
-||||||| a26859fc
-=======
     let threads = programs.iter().find_map(|p| match &p.io {
         victory_shader::native::StageIo::Cs(cs) if cs.threads.iter().all(|&n| n > 0) => Some(cs.threads),
         _ => None,
     });
     let stores_by_address = programs.is_empty() || programs.iter().any(stores_by_address);
->>>>>>> avatar/main
     let used = programs
         .into_iter()
         .find(|p| {
@@ -242,8 +234,15 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         })
         .map(|p| p.used)
         .unwrap_or_default();
-<<<<<<< HEAD
-    Ok(Translated { host, used, stores, writes })
+    Ok(Translated {
+        host,
+        threads,
+        used,
+        stores,
+        writes,
+        stores_by_address,
+        picks: Default::default(),
+    })
 }
 
 /// Whether a console program has an image store or atomic (it writes a
@@ -258,18 +257,6 @@ fn image_stores(program: &victory_shader::NativeProgram) -> bool {
         matches!(i.encoding, Encoding::Mimg)
             && i.name().is_none_or(|n| n.contains("store") || n.contains("atomic"))
     })
-||||||| a26859fc
-    Ok(Translated { host, used, stores })
-=======
-    Ok(Translated {
-        host,
-        threads,
-        used,
-        stores,
-        stores_by_address,
-        picks: Default::default(),
-    })
->>>>>>> avatar/main
 }
 
 /// The compute pipelines of the console's ray-tracing structure builder
