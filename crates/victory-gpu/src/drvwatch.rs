@@ -29,17 +29,6 @@ use windows_sys::Win32::System::EventLog::{
     EVT_HANDLE, EVT_SUBSCRIBE_NOTIFY_ACTION, EvtSubscribe, EvtSubscribeActionDeliver, EvtSubscribeToFutureEvents,
 };
 
-/// The kernel drivers of the three vendors: every entry of theirs counts.
-const DRIVERS: [&str; 5] = ["nvlddmkm", "amdkmdag", "amdwddmg", "igfx", "igfxn"];
-
-/// The subscription's query: every entry of `drivers`, and the entries of
-/// `system` from warning level up (critical 1, error 2, warning 3; its
-/// information entries, level 4, are left out).
-fn query(drivers: &[&str], system: &str) -> String {
-    let drivers = drivers.iter().map(|d| format!("@Name='{d}'")).collect::<Vec<_>>().join(" or ");
-    format!("*[System[Provider[{drivers}] or (Provider[@Name='{system}'] and (Level=1 or Level=2 or Level=3))]]")
-}
-
 /// Entries of a display driver seen since the start.
 static ERRORS: AtomicU64 = AtomicU64::new(0);
 /// Whether one was seen ([`tripped`]).
@@ -78,10 +67,16 @@ unsafe extern "system" fn on_event(action: EVT_SUBSCRIBE_NOTIFY_ACTION, _context
     0
 }
 
-/// The entries [`start`] subscribes to: the display drivers' and the
-/// `Display` source's, at levels 1-3 (critical, error, warning).
-const QUERY: &str = "*[System[Provider[@Name='nvlddmkm' or @Name='amdkmdag' or @Name='amdwddmg' or @Name='igfx' \
-                     or @Name='igfxn' or @Name='Display'] and (Level=1 or Level=2 or Level=3)]]";
+/// The kernel drivers of the three vendors: every entry of theirs counts.
+const DRIVERS: [&str; 5] = ["nvlddmkm", "amdkmdag", "amdwddmg", "igfx", "igfxn"];
+
+/// The subscription's query: every entry of `drivers`, and the entries of
+/// `system` from warning level up (critical 1, error 2, warning 3; its
+/// information entries, level 4, are left out).
+fn query(drivers: &[&str], system: &str) -> String {
+    let drivers = drivers.iter().map(|d| format!("@Name='{d}'")).collect::<Vec<_>>().join(" or ");
+    format!("*[System[Provider[{drivers}] or (Provider[@Name='{system}'] and (Level=1 or Level=2 or Level=3))]]")
+}
 
 /// Subscribes to the display drivers' entries in the system's event log,
 /// once. Entries from before the call are not delivered.
@@ -93,7 +88,6 @@ pub(crate) fn start() {
         }
         let wide = |s: &str| -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() };
         let channel = wide("System");
-<<<<<<< HEAD
         // The kernel drivers of the three vendors, and the system's own
         // "display driver stopped responding" source (4101, a warning).
         // Critical, error and warning entries only: the `Display` source
@@ -102,20 +96,7 @@ pub(crate) fn start() {
         // which Windows 11 writes when a game's window first shows. On a
         // machine with Auto HDR on it tripped the switch a second into
         // every run, and the draw windows were off from the start.
-        let query = wide(QUERY);
-||||||| merged common ancestors
-        // The kernel drivers of the three vendors, and the system's own
-        // "display driver stopped responding" source.
-        let query = wide(
-            "*[System[Provider[@Name='nvlddmkm' or @Name='amdkmdag' or @Name='amdwddmg' or @Name='igfx' or @Name='igfxn' \
-             or @Name='Display']]]",
-        );
-=======
-        // The kernel drivers of the three vendors, and the warnings and
-        // errors of the system's own "display driver stopped responding"
-        // source.
         let query = wide(&query(&DRIVERS, "Display"));
->>>>>>> vibr/main
         // SAFETY: valid strings for the call's length; the callback is a
         // plain function that touches only statics; the subscription is
         // kept for the life of the process.
@@ -215,13 +196,7 @@ mod tests {
     #[test]
     fn the_system_takes_the_subscription() {
         let wide = |s: &str| -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() };
-<<<<<<< HEAD
-        let (channel, query) = (wide("System"), wide(QUERY));
-||||||| merged common ancestors
-        let (channel, query) = (wide("System"), wide("*[System[Provider[@Name='nvlddmkm' or @Name='Display']]]"));
-=======
         let (channel, query) = (wide("System"), wide(&query(&DRIVERS, "Display")));
->>>>>>> vibr/main
         // SAFETY: as in `start`.
         let subscription = unsafe {
             EvtSubscribe(0, std::ptr::null_mut(), channel.as_ptr(), query.as_ptr(), 0, std::ptr::null(), Some(on_event), EvtSubscribeToFutureEvents)

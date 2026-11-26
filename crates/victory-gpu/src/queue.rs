@@ -901,13 +901,7 @@ fn release_held_now(all: bool) {
                     Held::Present(texture, state, frame) => {
                         let show = || {
                             if let Some(host) = crate::host::host() {
-<<<<<<< HEAD
                                 let _ = host.present(&texture, state, frame, None);
-||||||| merged common ancestors
-                                let _ = host.present(&texture, state, frame);
-=======
-                                let _ = host.present(&[(&texture, state, None)], frame);
->>>>>>> vibr/main
                             }
                         };
                         if all {
@@ -1633,7 +1627,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         }
     }
     #[cfg(windows)]
-<<<<<<< HEAD
     if !sent_behind && behind::on() && !this.is_null() {
         const COPY_SOURCE: u32 = 0x800;
         let texture = if planes > 0
@@ -1699,6 +1692,7 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
                 crate::descriptor::host::REFUSED.load(Ordering::Relaxed)
             ));
         }
+        log_planes(frame, planes, plane_parameters, &shown(planes, plane_parameters));
         let shown = host.present(texture, state, frame, over.map(|(_, t, was)| (t, was)));
         if let Some((r, _, was)) = over {
             crate::resource::host_transition(r, was);
@@ -1709,49 +1703,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         let _ = shown;
         crate::resource::host_transition(resource, state);
         let _ = host;
-||||||| merged common ancestors
-    if !sent_behind
-        && planes > 0
-        // SAFETY: the title passes `planes` plane descriptions.
-        && let Some(plane) = unsafe { plane_parameters.as_ref() }
-        && plane.count > 0
-        && !plane.resources.is_null()
-        // SAFETY: the plane lists `count` resources.
-        && let resource = unsafe { *plane.resources }
-        && let Some(texture) = crate::resource::host_resource(resource)
-        && let Some(host) = crate::host::host()
-    {
-        const COPY_SOURCE: u32 = 0x800;
-        let state = crate::resource::host_transition(resource, COPY_SOURCE)
-            .map_or(COPY_SOURCE, |(_, before)| before);
-        let shown = host.present(texture, state, frame);
-        crate::resource::host_transition(resource, state);
-        #[cfg(feature = "diagnostics")]
-        blinks(frame, resource, state, shown);
-        #[cfg(not(feature = "diagnostics"))]
-        let _ = shown;
-=======
-    if !sent_behind {
-        let shown = shown(planes, plane_parameters);
-        log_planes(frame, planes, plane_parameters, &shown);
-        // Each plane that has a host texture, in the state the lists
-        // leave it in; nothing without the first.
-        let mut textures = shown.iter().map(|&(resource, part)| {
-            Some((crate::resource::host_resource(resource)?, state_of(resource), part))
-        });
-        if let Some(Some(first)) = textures.next()
-            && let Some(host) = crate::host::host()
-        {
-            let (resource, state) = (shown[0].0, first.1);
-            let textures: Vec<crate::host::Shown> =
-                std::iter::once(first).chain(textures.flatten()).collect();
-            let black = host.present(&textures, frame);
-            #[cfg(feature = "diagnostics")]
-            blinks(frame, resource, state, black);
-            #[cfg(not(feature = "diagnostics"))]
-            let _ = (resource, state, black);
-        }
->>>>>>> vibr/main
     }
     #[cfg(windows)]
     crate::pipeline::frame_drew(crate::draw::drawn());
