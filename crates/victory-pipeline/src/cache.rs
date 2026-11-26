@@ -1,15 +1,7 @@
-<<<<<<< HEAD
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-||||||| c7daeea5
-use std::io::Write;
-use std::path::{Path, PathBuf};
-=======
-use std::io::Write;
-use std::path::PathBuf;
->>>>>>> integ/vertex
 
 use anyhow::{Context, Result};
 
@@ -87,7 +79,6 @@ impl Cache {
         let path = self.path_for(key);
         let dir = path.parent().expect("hashed path has a parent");
         std::fs::create_dir_all(dir)?;
-<<<<<<< HEAD
         // Write-then-rename so readers never see partial output.
         let (tmp, mut file) = tempfile_in(dir)?;
         let written = file.write_all(&output);
@@ -97,30 +88,9 @@ impl Cache {
             let _ = std::fs::remove_file(&tmp);
         }
         published.with_context(|| format!("publishing {}", path.display()))
-||||||| c7daeea5
-        // Write-then-rename so readers never see partial output.
-        let tmp = tempfile_in(dir);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        let written = file.write_all(output);
-        drop(file);
-        let published = written.and_then(|()| std::fs::rename(&tmp, &path));
-        if published.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-        published.with_context(|| format!("publishing {}", path.display()))
-=======
-        let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
-        tmp.write_all(output)?;
-        tmp.persist(path)?;
-        Ok(())
->>>>>>> integ/vertex
     }
 }
 
-<<<<<<< HEAD
 fn tempfile_in(dir: &Path) -> io::Result<(PathBuf, File)> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     create_tempfile_in(dir, &COUNTER)
@@ -148,16 +118,6 @@ fn create_tempfile_in(dir: &Path, counter: &AtomicU64) -> io::Result<(PathBuf, F
     ))
 }
 
-||||||| c7daeea5
-fn tempfile_in(dir: &Path) -> PathBuf {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    dir.join(format!(".tmp-{}-{n}", std::process::id()))
-}
-
-=======
->>>>>>> integ/vertex
 #[cfg(test)]
 mod tests {
     use super::*;
