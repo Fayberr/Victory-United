@@ -631,18 +631,24 @@ fn joined(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     out
 }
 
-/// Runs of pieces to hash again (`Host::card_before`), those that overlap
-/// or touch as one, in order: every piece of `runs` is in the result once
-/// and no other piece is. Ranges sent up lie close together (514 a frame
-/// for 87 MB in run 102), and each had a pass of its own over its pieces,
-/// so a piece that held several ranges was hashed once for each.
-pub(crate) fn joined_piece_runs(mut runs: Vec<CardSpan>) -> Vec<CardSpan> {
+/// [`joined_piece_runs_within`] with no gap: only runs that touch.
+#[cfg(test)]
+pub(crate) fn joined_piece_runs(runs: Vec<CardSpan>) -> Vec<CardSpan> {
+    joined_piece_runs_within(runs, 0)
+}
+
+/// Joins piece runs that touch or are separated by at most `max_gap` 64 KiB
+/// pieces. Re-hashing a few unchanged pieces in parallel inside one compute
+/// dispatch costs the same card wall clock as hashing a single piece while
+/// cutting hundreds of small `Dispatch` launches a frame.
+pub(crate) fn joined_piece_runs_within(mut runs: Vec<CardSpan>, max_gap: u32) -> Vec<CardSpan> {
     runs.sort_unstable_by_key(|r| r.first);
     let mut out: Vec<CardSpan> = Vec::with_capacity(runs.len());
     for run in runs {
         match out.last_mut() {
-            Some(last) if run.first <= last.first + last.pieces => {
-                last.pieces = last.pieces.max(run.first + run.pieces - last.first);
+            Some(last) if run.first <= last.first.saturating_add(last.pieces).saturating_add(max_gap) => {
+                let end = (last.first + last.pieces).max(run.first + run.pieces);
+                last.pieces = end - last.first;
                 last.to = last.to.max(run.to);
             }
             _ => out.push(run),
