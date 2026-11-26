@@ -52,13 +52,19 @@ pub(crate) struct Pending {
     /// whether a draw or dispatch has requested it yet.
     pub(super) key: String,
     used: AtomicBool,
-<<<<<<< HEAD
     /// A pass over the screen ([`GraphicsState::screen_pass`]).
     screen: bool,
     /// When a worker began it ([`slow`]).
     begun: OnceLock<Instant>,
     /// Why it is not made, if it is not ([`left_out`]).
     left_out: Option<&'static str>,
+    /// The formats its state declares for what a draw draws into (zeros
+    /// without a graphics state).
+    pub(crate) formats: TargetFormats,
+    /// The same shaders and state for other formats, bound at a draw
+    /// ([`for_formats`]): a chain from the title's pipeline, one link per
+    /// set of formats met, never shortened.
+    variant: OnceLock<Arc<Pending>>,
 }
 
 /// Why a pipeline with these shaders is not made, if it is not: what
@@ -106,16 +112,6 @@ fn without_structures(shaders: &[Arc<Shader>]) -> bool {
     let is = |name, value| std::env::var_os(name).is_some_and(|v| v == value);
     let out = *OUT.get_or_init(|| is("VICTORY_RT_RESOLVE", "0") && !is("VICTORY_BVH_BUILDER", "1"));
     out && named(shaders, b"CS_RaytracingResolve")
-||||||| 9c184b35
-=======
-    /// The formats its state declares for what a draw draws into (zeros
-    /// without a graphics state).
-    pub(crate) formats: TargetFormats,
-    /// The same shaders and state for other formats, bound at a draw
-    /// ([`for_formats`]): a chain from the title's pipeline, one link per
-    /// set of formats met, never shortened.
-    variant: OnceLock<Arc<Pending>>,
->>>>>>> fork/main
 }
 
 // SAFETY: D3D12 objects are free-threaded; the graphics state (whose input
@@ -129,13 +125,9 @@ impl Pending {
         let key = key(&shaders, graphics.as_deref());
         let left_out = left_out(&shaders);
         Pending {
-<<<<<<< HEAD
             screen: graphics.as_ref().is_some_and(|g| g.screen_pass()),
-||||||| 9c184b35
-=======
             formats: graphics.as_ref().map_or([0; 9], |g| g.formats()),
             variant: OnceLock::new(),
->>>>>>> fork/main
             shaders,
             graphics,
             left_out,
@@ -360,7 +352,6 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
     p.made.get()?.as_ref()
 }
 
-<<<<<<< HEAD
 /// Starts `p` on the workers, before anything asks for it.
 pub(crate) fn begin(p: &Arc<Pending>) {
     if p.left_out.is_none() {
@@ -390,8 +381,6 @@ pub(crate) fn failures(pipelines: &[Arc<Pending>]) -> Vec<String> {
         .collect()
 }
 
-||||||| 9c184b35
-=======
 /// Pipelines made again for the formats bound at a draw, since the start.
 static VARIANTS: AtomicU64 = AtomicU64::new(0);
 
@@ -447,7 +436,6 @@ fn variant<'a>(p: &'a Arc<Pending>, g: &GraphicsState, bound: &TargetFormats) ->
     p
 }
 
->>>>>>> fork/main
 /// Makes `p` on this thread if it is not made yet (waiting for a worker
 /// that is making it); whether it has a host pipeline.
 pub(crate) fn now(p: &Arc<Pending>) -> bool {
@@ -1044,7 +1032,6 @@ mod tests {
         assert!(matches!(p.made.get(), Some(None)));
     }
 
-<<<<<<< HEAD
     /// Threads waiting at the same time share the time they wait, none
     /// takes it from the others, and a new frame starts anew.
     #[test]
@@ -1081,8 +1068,6 @@ mod tests {
         assert!(matches!(next.made.get(), Some(None)));
     }
 
-||||||| 9c184b35
-=======
     /// A draw into other formats than its pipeline declares finds the
     /// pipeline for them, which exists once per set of formats and is
     /// queued by its first draw like any other.
@@ -1107,7 +1092,6 @@ mod tests {
         assert_eq!(p.queue_state.load(Ordering::Relaxed), NOT_QUEUED);
     }
 
->>>>>>> fork/main
     #[test]
     fn pending_pipeline_is_recorded_for_the_next_launch() {
         let mut p = Pending::new(Vec::new(), None);
