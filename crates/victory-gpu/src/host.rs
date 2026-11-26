@@ -13700,23 +13700,12 @@ impl HostList {
                 let (largest, all) = (words.add(1).read_volatile(), words.add(2).read_volatile());
                 MESH_GROUPS[0].fetch_max(u64::from(largest), Ordering::Relaxed);
                 MESH_GROUPS[1].fetch_add(u64::from(all), Ordering::Relaxed);
-<<<<<<< HEAD
                 let (refused, biggest) = (words.add(3).read_volatile(), words.add(4).read_volatile());
                 BUDGET_NOTES[0].fetch_add(u64::from(refused), Ordering::Relaxed);
                 BUDGET_NOTES[1].fetch_max(u64::from(biggest), Ordering::Relaxed);
-                for k in 0..5 {
-||||||| a66ac212
-                for k in 0..3 {
-=======
-                // And of its indirect compute records: the largest x asked
-                // for, and how many asked for more than a dispatch runs.
-                let (widest, cut) = (words.add(3).read_volatile(), words.add(4).read_volatile());
-                COMPUTE_GROUPS[0].fetch_max(u64::from(widest), Ordering::Relaxed);
-                COMPUTE_GROUPS[1].fetch_add(u64::from(cut), Ordering::Relaxed);
-                // And the records the sanitizer made empty.
+                // (klbf) And the records the sanitizer made empty, in the word after.
                 crate::indirect::SAN[2].fetch_add(u64::from(words.add(5).read_volatile()), Ordering::Relaxed);
                 for k in 0..6 {
->>>>>>> klbf/beta-2
                     words.add(k).write_volatile(0);
                 }
             });
@@ -13990,7 +13979,6 @@ impl HostList {
     /// `work` may write title memory (refreshes after it copy again).
     #[allow(dead_code)]
     pub(crate) fn defer(&self, work: impl Fn() + Send + 'static) {
-<<<<<<< HEAD
         let mut deferred = self.deferred();
         deferred.copies.push(Step::Run(Box::new(work), None));
         deferred.title_written();
@@ -14008,22 +13996,10 @@ impl HostList {
         deferred.memory_read_seen = 0;
         drop(deferred);
         self.changed_something();
-||||||| a66ac212
-        self.deferred().copies.push(Step::Run(Box::new(work)));
-        self.deferred().refreshed.clear();
-=======
-        // (Neptune) Title memory changes at this place in the list: a view or a table made
-        // ready before it is made ready again after it (`crate::draw`).
-        self.changes.fetch_add(1, Ordering::Relaxed);
-        let mut deferred = self.deferred();
-        deferred.copies.push(Step::Run(Box::new(work)));
-        deferred.title_written();
->>>>>>> klbf/beta-2
     }
 
     /// As [`HostList::defer`], for work that writes only host memory.
     pub(crate) fn defer_host(&self, work: impl Fn() + Send + 'static) {
-<<<<<<< HEAD
         self.deferred().copies.push(Step::Host(Box::new(work), (0, 0)));
     }
 
@@ -14053,14 +14029,6 @@ impl HostList {
                 work();
             }
         }
-||||||| a66ac212
-        self.deferred().copies.push(Step::Host(Box::new(work)));
-=======
-        // (Neptune) Title memory or a buffer changes at this place in the list: a table made
-        // ready before it is made ready again after it (`crate::draw`).
-        self.changes.fetch_add(1, Ordering::Relaxed);
-        self.deferred().copies.push(Step::Host(Box::new(work)));
->>>>>>> klbf/beta-2
     }
 
     /// Brings a texture's staging buffer up to date when the list is
@@ -14092,7 +14060,6 @@ impl HostList {
     fn run_deferred(&self, batch: &mut Batch, air: &[(usize, usize)], taken: impl Fn(usize) -> bool) {
         #[cfg(feature = "diagnostics")]
         use crate::copystat::{C, add};
-<<<<<<< HEAD
         let deferred = self.deferred();
         let steps = &deferred.copies;
         let workers = fill_workers();
@@ -14112,69 +14079,28 @@ impl HostList {
                 continue;
             }
             let (started, copied) = match step {
-||||||| a66ac212
-        for step in &self.deferred().copies {
-            let started = std::time::Instant::now();
-            let copied = match step {
-=======
-        let wide_fills = wide_fills();
-        if wide_textures() {
-            // (Neptune) The list's textures, up to its first step that writes title memory,
-            // together and ahead of its steps: nothing before that step changes what they
-            // read, and a step of our own code right behind a texture's (the note of an
-            // upload with levels on demand) finds it done. Where they are named they are
-            // then found up to date.
-            for step in &self.deferred().copies {
-                match step {
-                    Step::Copy(..) | Step::Run(_) => break,
-                    Step::Texture(staging) if batch.texture_due(staging) => batch.due.push(Wide(staging.clone())),
-                    _ => {}
-                }
-            }
-            batch.refresh_textures();
-        }
-        for step in &self.deferred().copies {
-            // (Neptune) The clock is read for the steps that copy here: it was read for
-            // every step, tens of thousands a frame (14 of 400 samples, run ve174).
-            let (copied, started) = match step {
->>>>>>> klbf/beta-2
                 &Step::Copy(dst, src, len) => {
                     let started = std::time::Instant::now();
                     #[cfg(feature = "diagnostics")]
                     {
                         copies += 1;
                     }
-<<<<<<< HEAD
                     batch.fill();
                     batch.title_wrote(dst, len);
                     #[cfg(feature = "diagnostics")]
                     fill_check::copy_runs(dst, src, len);
                     #[cfg(feature = "diagnostics")]
                     let _reads_as = crate::backreads::reading_as(crate::backreads::TITLE_COPY, 0);
-||||||| a66ac212
-                    batch.title_written();
-=======
-                    batch.title_written();
-                    crate::port::copied(dst, src, len);
-                    let started = std::time::Instant::now();
->>>>>>> klbf/beta-2
                     copy_mapped(dst as *mut u8, src as *const u8, len, true);
                     // With the submission's one asking: the journal learns it.
                     crate::watch::wrote(dst, len);
-<<<<<<< HEAD
                     // What the card holds there may be another value although
                     // ours did not change.
                     if send::own() {
                         crate::shadow::send_copied(dst, len);
                     }
                     (started, len)
-||||||| a66ac212
-                    len
-=======
-                    (len, started)
->>>>>>> klbf/beta-2
                 }
-<<<<<<< HEAD
                 &Step::Fill(dst, src, len, _) if wide_fills() => {
                     // Done together with the run's others, at the next step
                     // that writes title memory or runs code of ours
@@ -14185,18 +14111,12 @@ impl HostList {
                 }
                 &Step::Fill(dst, src, len, _) if workers < 2 => {
                     let started = std::time::Instant::now();
-||||||| a66ac212
-                &Step::Fill(dst, src, len) => {
-=======
-                &Step::Fill(dst, src, len, _) => {
->>>>>>> klbf/beta-2
                     #[cfg(feature = "diagnostics")]
                     {
                         add(C::Copies, 1);
                         add(C::CopyBytes, len as u64);
                         fill_check::runs(src, len);
                     }
-<<<<<<< HEAD
                     #[cfg(feature = "diagnostics")]
                     let _reads_as = crate::backreads::reading_as(crate::backreads::TITLE_COPY, 0);
                     copy_fill(dst as *mut u8, src as *const u8, len);
@@ -14228,19 +14148,6 @@ impl HostList {
                     }
                     run_fills(&run, workers);
                     (started, bytes)
-||||||| a66ac212
-                    copy_mapped(dst as *mut u8, src as *const u8, len, false);
-                    len
-=======
-                    crate::port::filled(src, len);
-                    if wide_fills {
-                        batch.fills.push((dst, src, len));
-                        continue;
-                    }
-                    let started = std::time::Instant::now();
-                    copy_mapped(dst as *mut u8, src as *const u8, len, false);
-                    (len, started)
->>>>>>> klbf/beta-2
                 }
                 Step::Refresh(shadow, address, len) => {
                     #[cfg(feature = "diagnostics")]
@@ -14251,7 +14158,6 @@ impl HostList {
                     batch.add(shadow, *address, *len);
                     continue;
                 }
-<<<<<<< HEAD
                 Step::Run(work, _) | Step::Host(work, _) => {
                     #[cfg(feature = "diagnostics")]
                     let started = std::time::Instant::now();
@@ -14259,15 +14165,6 @@ impl HostList {
                     // it too: they are done first.
                     batch.fill();
                     if matches!(step, Step::Run(..)) {
-||||||| a66ac212
-                Step::Run(work) | Step::Host(work) => {
-                    if matches!(step, Step::Run(_)) {
-=======
-                Step::Run(work) | Step::Host(work) => {
-                    #[cfg(feature = "diagnostics")]
-                    let started = std::time::Instant::now();
-                    if matches!(step, Step::Run(_)) {
->>>>>>> klbf/beta-2
                         batch.title_written();
                     } else {
                         // (Code of ours may read what the fills before it put there.)
@@ -14846,7 +14743,6 @@ struct Batch {
     /// written since.
     current: std::collections::HashMap<usize, (std::sync::Arc<crate::shadow::Shadow>, usize, usize)>,
     /// Staging buffers (by address) refreshed since the last title write.
-<<<<<<< HEAD
     textures: crate::fx::Set<usize>,
     /// Texture refreshes running beside the submitting thread
     /// ([`crate::memcopy::texture_overlap`]).
@@ -15083,54 +14979,6 @@ fn wide_fills() -> bool {
 fn wide_textures() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_WIDE_TEXTURES").is_none_or(|v| v != "0") && wide_refresh())
-||||||| a66ac212
-    textures: std::collections::HashSet<usize>,
-=======
-    textures: std::collections::HashSet<usize>,
-    /// (Neptune, from avatarmanz/VIctory-7900XTX) Textures to bring up to date, together
-    /// ([`wide_textures`]).
-    due: Vec<Wide<std::sync::Arc<crate::texture::Staging>>>,
-    /// (Neptune, from avatarmanz/VIctory-7900XTX) Fills of upload memory to do, together
-    /// ([`wide_fills`]): destination, source, bytes.
-    fills: Vec<(usize, usize, usize)>,
-}
-
-/// (Neptune) Something handed to the threads a submission shares its work with: each piece
-/// goes to one thread, which the submitting thread waits for.
-struct Wide<T>(T);
-
-// SAFETY: see above; what is inside has locks of its own for what other threads touch.
-unsafe impl<T> Send for Wide<T> {}
-
-/// (Neptune, from avatarmanz/VIctory-7900XTX) Whether a submission's textures are brought up
-/// to date on several threads (`VICTORY_WIDE_TEXTURES=0`: one after the other, where the
-/// lists name them).
-///
-/// They are read, hashed and, if they changed, detiled into their staging buffers: 28 of
-/// 400 samples of the thread that runs the lines (run ve174, 26 of them hashing), with the
-/// list ahead of a frame naming a frame's worth at once. Each has its own buffer, notes and
-/// lock. They are done before the next step that writes title memory, as the copies'
-/// refreshes are, and before the lists go to the card.
-fn wide_textures() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    // (Off unless asked for, `VICTORY_WIDE_TEXTURES=1`: the hashing left the thread that runs
-    // the lines, 26 of 400 samples to 3, and as many went into waiting for the helpers; a
-    // frame took 85.3 ms without and 85.2 with, runs ve181a and ve181b.)
-    *ON.get_or_init(|| std::env::var_os("VICTORY_WIDE_TEXTURES").is_some_and(|v| v == "1") && wide_refresh())
-}
-
-/// (Neptune, from avatarmanz/VIctory-7900XTX) Whether the fills of a submission's upload
-/// memory are done together on several threads (`VICTORY_WIDE_FILLS=0`: one after the
-/// other, where the lists name them). Each reads title memory and writes memory of its own
-/// that the card alone reads, when the lists run; they are done before the next step that
-/// writes title memory or runs code of ours, and before the submission goes on.
-fn wide_fills() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    // (Off unless asked for, `VICTORY_WIDE_FILLS=1`: the thread that runs the lines waited
-    // for its helpers 122 of 400 samples with them, 53 without, run ve178 against ve174;
-    // the fills themselves were 13.)
-    *ON.get_or_init(|| std::env::var_os("VICTORY_WIDE_FILLS").is_some_and(|v| v == "1") && wide_refresh())
->>>>>>> klbf/beta-2
 }
 
 impl Batch {
@@ -15279,7 +15127,6 @@ impl Batch {
         self.current.clear();
     }
 
-<<<<<<< HEAD
     /// [`Batch::title_written`] for a write of ours whose place is known
     /// (a title buffer copy into `[at, at + len)`): of a copy up to date
     /// in this submission that holds some of those bytes, the larger part
@@ -15490,68 +15337,6 @@ impl Batch {
     /// Flushes pending buffer refreshes without joining overlapped textures.
     fn flush_refreshes(&mut self) {
         self.refresh_textures();
-||||||| a66ac212
-    fn flush(&mut self) {
-=======
-    /// (Neptune) The fills kept are done ([`wide_fills`]).
-    fn fill(&mut self) {
-        const FEW: usize = 64;
-        const PART: usize = 256;
-        if self.fills.is_empty() {
-            return;
-        }
-        let started = std::time::Instant::now();
-        let bytes: usize = self.fills.iter().map(|f| f.2).sum();
-        if self.fills.len() < FEW {
-            for (dst, src, len) in self.fills.drain(..) {
-                copy_mapped(dst as *mut u8, src as *const u8, len, false);
-            }
-        } else {
-            let fills = std::sync::Arc::new(std::mem::take(&mut self.fills));
-            let jobs: Vec<Box<dyn FnOnce() + Send>> = (0..fills.len().div_ceil(PART))
-                .map(|i| {
-                    let fills = fills.clone();
-                    Box::new(move || {
-                        for &(dst, src, len) in fills.iter().skip(i * PART).take(PART) {
-                            copy_mapped(dst as *mut u8, src as *const u8, len, false);
-                        }
-                    }) as Box<dyn FnOnce() + Send>
-                })
-                .collect();
-            crate::shadow::wide_run(jobs);
-        }
-        PREPARING[0].fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
-        PREPARING[1].fetch_add(bytes as u64, Ordering::Relaxed);
-    }
-
-    /// (Neptune) The textures due are brought up to date ([`wide_textures`]).
-    fn refresh_textures(&mut self) {
-        if self.due.len() < 2 {
-            self.due.drain(..).for_each(|staging| staging.0.refresh());
-            return;
-        }
-        // The time counted is the time it took, not the threads' sum.
-        let started = std::time::Instant::now();
-        let before = PREPARING[2].load(Ordering::Relaxed);
-        let jobs: Vec<Box<dyn FnOnce() + Send>> = self
-            .due
-            .drain(..)
-            .map(|staging| {
-                Box::new(move || {
-                    let staging = staging;
-                    staging.0.refresh()
-                }) as Box<dyn FnOnce() + Send>
-            })
-            .collect();
-        crate::shadow::wide_run(jobs);
-        let summed = PREPARING[2].load(Ordering::Relaxed).saturating_sub(before);
-        PREPARING[2].fetch_sub(summed.saturating_sub(started.elapsed().as_micros() as u64), Ordering::Relaxed);
-    }
-
-    fn flush(&mut self) {
-        self.fill();
-        self.refresh_textures();
->>>>>>> klbf/beta-2
         self.index.clear();
         if self.refreshes.is_empty() {
             return;
@@ -15821,7 +15606,6 @@ pub(crate) fn copy_mapped(dst: *mut u8, src: *const u8, len: usize, title_dst: b
         // The kernel writes the destination: it must not be guarded.
         crate::watch::writing(dst as usize, len);
     }
-<<<<<<< HEAD
     // `VICTORY_COPY_FAST=1`: the source is all there, so move it with the
     // CPU ([`fast_reads`] has why this is off by default).
     if !title_dst && len >= 64 << 10 && fast_reads() && crate::texture::committed(src, len) {
@@ -15830,30 +15614,6 @@ pub(crate) fn copy_mapped(dst: *mut u8, src: *const u8, len: usize, title_dst: b
         unsafe { std::ptr::copy_nonoverlapping(src, dst, len) };
         return;
     }
-||||||| a66ac212
-=======
-    // (Neptune) Into host memory, the plain copy first (`fast_copy`).
-    // (Any length: a frame fills thousands of small ranges of upload memory, and each was a
-    // call into the kernel, a tenth of the submitting thread's time in a sample.)
-    if !title_dst && fast_copy(src, dst, len) {
-        return;
-    }
-    // (Neptune) Title memory to title memory (the title's own buffer copies, done at
-    // submission: 6% of the submitting thread through the kernel): the plain copy with both
-    // sides watched, where they do not overlap. A missing page on either side ends it and
-    // the kernel's copy below does the whole again. `VICTORY_TITLE_COPY_PLAIN=0`: as before.
-    if title_dst && (src as usize + len <= dst as usize || dst as usize + len <= src as usize) {
-        static PLAIN: OnceLock<bool> = OnceLock::new();
-        if *PLAIN.get_or_init(|| std::env::var_os("VICTORY_TITLE_COPY_PLAIN").is_none_or(|v| v != "0")) {
-            FAST_COPY_TOO.with(|too| too.set((dst as usize, dst as usize + len)));
-            let whole = fast_copy(src, dst, len);
-            FAST_COPY_TOO.with(|too| too.set((0, 0)));
-            if whole {
-                return;
-            }
-        }
-    }
->>>>>>> klbf/beta-2
     #[cfg(feature = "diagnostics")]
     let moved = std::time::Instant::now();
     let since = crate::watch::changes();
@@ -15965,12 +15725,19 @@ fn zero(to: *mut u8, n: usize) {
 /// Reads title memory at `src` into `dst`; false if a page of it is not
 /// readable.
 pub(crate) fn read_into(src: *const u8, dst: &mut [u8]) -> bool {
-<<<<<<< HEAD
     #[cfg(feature = "diagnostics")]
     crate::backreads::touched(src as usize, dst.len(), false);
     // In place first, if asked for (`crate::plaincopy`): the destination is
     // memory of ours, as in `copy_mapped`.
     crate::plaincopy::copy(dst.as_mut_ptr(), src, dst.len()) || read(src, dst.as_mut_ptr(), dst.len())
+}
+
+/// (klbf) Host bytes written into title memory through a view of our own of the
+/// same physical pages (`crate::inplace::host_alias`): ours' copy in place
+/// ([`crate::plaincopy::write`]), which ends where a page of the destination is
+/// not there. `true` when all of it was written.
+pub(crate) fn write_alias(dst: *mut u8, src: *const u8, len: usize) -> bool {
+    len > 0 && crate::plaincopy::write(dst, src, len)
 }
 
 /// Reads what is there of the `dst.len()` bytes of title memory at `src`,
@@ -16012,157 +15779,13 @@ pub(crate) fn read_there(src: *const u8, dst: &mut [u8]) -> usize {
         });
     }
     got
-||||||| a66ac212
-    read(src, dst.as_mut_ptr(), dst.len())
-=======
-    // (Neptune) The plain copy first (`fast_copy`); the kernel's where a page is missing.
-    // Below `FAST_LEAST` bytes it is a readability probe (`texture::readable`): the kernel's
-    // read answers it without a fault, and a probe may land on a guard page.
-    if dst.len() >= FAST_LEAST && fast_copy(src, dst.as_mut_ptr(), dst.len()) {
-        return true;
-    }
-    let ok = read(src, dst.as_mut_ptr(), dst.len());
-    // The kernel's read may itself have spent the guard of a page the plain copy met.
-    rearm_guard(FAST_GUARDED.with(|page| page.replace(0)));
-    ok
-}
-
-/// (Neptune) The fewest bytes the plain copy is used for (fxceless/victory-fork 0b0074e).
-const FAST_LEAST: usize = 256;
-
-/// Sets `PAGE_GUARD` again on the page at `page` if a guard fault cleared it (0: none).
-/// Only kernel calls, no allocation and no lock: fine inside a vectored handler.
-fn rearm_guard(page: usize) {
-    use windows_sys::Win32::System::Memory::{VirtualProtect, VirtualQuery, MEMORY_BASIC_INFORMATION, PAGE_GUARD};
-    if page == 0 {
-        return;
-    }
-    // SAFETY: plain queries of the page's own state; `info` is ours.
-    unsafe {
-        let mut info: MEMORY_BASIC_INFORMATION = core::mem::zeroed();
-        if VirtualQuery(page as *const _, &mut info, size_of::<MEMORY_BASIC_INFORMATION>()) == 0
-            || info.Protect & PAGE_GUARD != 0
-            || info.Protect == 0
-            || info.State != windows_sys::Win32::System::Memory::MEM_COMMIT
-        {
-            return;
-        }
-        let mut old = 0;
-        VirtualProtect(info.BaseAddress, 4096.min(info.RegionSize), info.Protect | PAGE_GUARD, &mut old);
-    }
->>>>>>> klbf/beta-2
 }
 
 /// Copies `len` bytes from `src` to `dst` unless a source page is not
-<<<<<<< HEAD
 /// readable. Uses `NtReadVirtualMemory` directly to avoid the `kernelbase`
 /// wrapper overhead on every refresh copy. A read that stops short is not
 /// a success: the destination is then partly the old bytes, which merges
 /// reuse (`crate::shadow`'s scratch).
-||||||| a66ac212
-/// readable.
-=======
-/// readable.
-thread_local! {
-    /// The source range of the plain copy this thread is in the middle of, and whether a page
-    /// of it turned out not to be there ([`fast_copy`]).
-    static FAST_COPY: std::cell::Cell<(usize, usize, bool)> = const { std::cell::Cell::new((0, 0, false)) };
-    /// (Neptune) The other side of such a copy, when it is title memory too.
-    static FAST_COPY_TOO: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
-    /// (Neptune) The page whose guard the plain copy met (and re-armed), for [`read_into`].
-    static FAST_GUARDED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// (Neptune) Title memory copied into host memory by this process itself (`rep movsb`), not
-/// through the kernel. The kernel's copy (`ReadProcessMemory`) is there because a page of the
-/// source may have been unmapped by the title; it moves about 3 GB a second, and a frame of
-/// the world copies some 150 MB this way: 45-48 ms of the submitting thread (2026-11-25). Here
-/// a missing page faults, the handler below ends the copy where it stands and says so, and
-/// the caller falls back on the kernel's copy for the whole range, as before.
-/// `VICTORY_FAST_COPY=0`: always the kernel's copy. `true` when all of it was copied.
-fn fast_copy(src: *const u8, dst: *mut u8, len: usize) -> bool {
-    plain_copy(src, dst, len, src as usize)
-}
-
-/// (Neptune) Host bytes written into title memory through a view of our own of the same
-/// physical pages (`crate::inplace::host_alias`): the plain copy, ended by the handler if a
-/// page of the destination is not there. `true` when all of it was written.
-pub(crate) fn write_alias(dst: *mut u8, src: *const u8, len: usize) -> bool {
-    len > 0 && plain_copy(src, dst, len, dst as usize)
-}
-
-/// The plain copy of [`fast_copy`]; `watched` is the start of the side (source or
-/// destination, `len` bytes) whose missing pages end it.
-fn plain_copy(src: *const u8, dst: *mut u8, len: usize, watched: usize) -> bool {
-    use windows_sys::Win32::System::Diagnostics::Debug::{
-        AddVectoredExceptionHandler, EXCEPTION_CONTINUE_EXECUTION, EXCEPTION_CONTINUE_SEARCH, EXCEPTION_POINTERS,
-    };
-    /// A read fault inside the source of this thread's plain copy: the copy's count goes to
-    /// zero, so the instruction ends, and the range is marked as not all there.
-    unsafe extern "system" fn missing_page(info: *mut EXCEPTION_POINTERS) -> i32 {
-        const ACCESS_VIOLATION: i32 = 0xC000_0005_u32 as i32;
-        // (Neptune) A guard page or a failed page-in ends the copy too (fxceless/victory-fork
-        // 0b0074e); unhandled they crash the title.
-        const GUARD_PAGE: i32 = 0x8000_0001_u32 as i32;
-        const IN_PAGE_ERROR: i32 = 0xC000_0006_u32 as i32;
-        // SAFETY: the system's own record and context of the faulting thread.
-        unsafe {
-            let record = &*(*info).ExceptionRecord;
-            let code = record.ExceptionCode;
-            if !matches!(code, ACCESS_VIOLATION | GUARD_PAGE | IN_PAGE_ERROR) || record.NumberParameters < 2 {
-                return EXCEPTION_CONTINUE_SEARCH;
-            }
-            let at = record.ExceptionInformation[1];
-            let ours = FAST_COPY.with(|copy| {
-                let (from, to, _) = copy.get();
-                let (from_too, to_too) = FAST_COPY_TOO.with(std::cell::Cell::get);
-                let hit = to != 0 && ((at >= from && at < to) || (at >= from_too && at < to_too));
-                if hit {
-                    copy.set((from, to, true));
-                }
-                hit
-            });
-            if !ours {
-                return EXCEPTION_CONTINUE_SEARCH;
-            }
-            if code == GUARD_PAGE {
-                // The fault spent the page's one-shot guard (a stack's or the title's own).
-                let page = at & !4095;
-                rearm_guard(page);
-                FAST_GUARDED.with(|g| g.set(page));
-            }
-            (*(*info).ContextRecord).Rcx = 0;
-            EXCEPTION_CONTINUE_EXECUTION
-        }
-    }
-    static ON: OnceLock<bool> = OnceLock::new();
-    let on = *ON.get_or_init(|| {
-        let on = std::env::var_os("VICTORY_FAST_COPY").is_none_or(|v| v != "0");
-        if on {
-            // SAFETY: a handler that takes only this code's own faults.
-            unsafe { AddVectoredExceptionHandler(1, Some(missing_page)) };
-        }
-        on
-    });
-    if !on {
-        return false;
-    }
-    FAST_COPY.with(|copy| copy.set((watched, watched + len, false)));
-    // SAFETY: the destination is host memory of `len` bytes; a source page that is not there
-    // ends the copy through the handler above.
-    unsafe {
-        core::arch::asm!(
-            "rep movsb",
-            inout("rcx") len => _,
-            inout("rsi") src => _,
-            inout("rdi") dst => _,
-            options(nostack, preserves_flags)
-        );
-    }
-    !FAST_COPY.with(|copy| copy.replace((0, 0, false)).2)
-}
-
->>>>>>> klbf/beta-2
 fn read(src: *const u8, dst: *mut u8, len: usize) -> bool {
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
     if crate::safecopy::on() {
@@ -16645,7 +16268,6 @@ impl Meter {
         tracing::info!(
             "indirect mesh dispatches: the largest group count asked for {mesh_largest} (run: at most 65535), {mesh_groups:.0} groups asked per frame; {refused:.2} indirect records a frame ran empty for want of their list's budget (2^27), the largest cost of one {biggest} (0: under 2^22)"
         );
-<<<<<<< HEAD
         {
             let [texture_us, slots, look_us, refresh_us, copies] =
                 [0, 1, 2, 3, 4].map(|i| crate::draw::HEAP_PASS_PARTS[i].swap(0, Ordering::Relaxed) as f64 / frames);
@@ -16701,28 +16323,7 @@ impl Meter {
         crate::shadow::back_line(frames);
         #[cfg(feature = "diagnostics")]
         split_line(frames);
-||||||| a66ac212
-        late_line(frames);
-        card_clock_line(frames, ms);
-        crate::shadow::back_line(frames);
-=======
-        let compute_widest = COMPUTE_GROUPS[0].swap(0, Ordering::Relaxed);
-        let compute_cut = COMPUTE_GROUPS[1].swap(0, Ordering::Relaxed) as f64 / frames;
-        tracing::info!(
-            "indirect compute dispatches: the largest group count in x asked for {compute_widest} (run: at most 65535),              {compute_cut:.1} records per frame asked for more and were cut to that"
-        );
->>>>>>> klbf/beta-2
-        {
-            let [texture_us, slots] = [0, 1].map(|i| crate::draw::HEAP_PASS_PARTS[i].swap(0, Ordering::Relaxed));
-            tracing::info!(
-                "the pass over the heap per frame (the frame line's \"heap buffers ... ms\" is both parts): {:.1} ms in its                  pass over textures picked by index; {:.0} buffer slots looked at by its pass over buffer views",
-                texture_us as f64 / 1e3 / frames,
-                slots as f64 / frames
-            );
-        }
-        crate::shadow::exact_line(frames);
-        crate::descriptor::sync_line(frames);
-            crate::resource::room_line();
+        crate::resource::room_line();
         {
             let t = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(|i| crate::draw::TABLES[i].swap(0, Ordering::Relaxed) as f64 / frames);
             tracing::info!(
@@ -16787,9 +16388,6 @@ impl Meter {
                 );
             }
         }
-        late_line(frames);
-        card_clock_line(frames, ms);
-        crate::shadow::back_line(frames);
         let [card_passes, card_pieces, card_compares] =
             [0, 1, 2].map(|i| CARD_PASSES[i].swap(0, Ordering::Relaxed) as f64 / frames);
         if card_passes + card_compares > 0.0 {
@@ -16801,13 +16399,6 @@ impl Meter {
         }
         let [own, asking, still, texture_refresh_ms] =
             [0, 1, 2, 3].map(|i| crate::texture::REFRESH_WAITS[i].swap(0, Ordering::Relaxed) as f64 / 1000.0 / frames);
-        if texture_refresh_ms >= 1.0 {
-            tracing::info!(
-                "texture refreshes per frame, all threads: {texture_refresh_ms:.1} ms, of them {own:.1} ms waiting for a texture another thread \
-                 is refreshing, {asking:.1} ms asking the write watch and the guards, {still:.1} ms waiting for title memory to \
-                 hold still (the runtime remapping it); the rest is reading, hashing and detiling"
-            );
-        }
         #[cfg(feature = "diagnostics")]
         for (file, line, [n, waited, held, longest]) in crate::watch::remaps_taken() {
             let per = |x: u64| x as f64 / 1000.0 / frames;
@@ -16819,21 +16410,11 @@ impl Meter {
                 longest as f64 / 1000.0
             );
         }
-        let [through, left] = [0, 1].map(|i| crate::texture::UNLOCKED[i].swap(0, Ordering::Relaxed) as f64 / frames);
-        if through + left > 0.0 {
-            tracing::info!(
-                "texture refreshes that did not wait for title memory to hold still, per frame (VICTORY_TEXTURE_NO_WAIT=1): \
-                 {through:.1} read through the kernel, {left:.1} left for the next refresh (a page was not there)"
-            );
-        }
         {
-<<<<<<< HEAD
-            let [own, asking, still, all] =
-                [0, 1, 2, 3].map(|i| crate::texture::REFRESH_WAITS[i].swap(0, Ordering::Relaxed) as f64 / 1000.0 / frames);
             let staging = STAGING_WAIT_US.swap(0, Ordering::Relaxed) as f64 / 1000.0 / frames;
-            if all >= 1.0 {
+            if texture_refresh_ms >= 1.0 {
                 tracing::info!(
-                    "texture refreshes per frame, all threads: {all:.1} ms, of them {own:.1} ms waiting for a texture another thread \
+                    "texture refreshes per frame, all threads: {texture_refresh_ms:.1} ms, of them {own:.1} ms waiting for a texture another thread \
                      is refreshing, {asking:.1} ms asking the write watch and the guards, {still:.1} ms waiting for title memory to \
                      hold still (the runtime remapping it), {staging:.1} ms waiting for the staging upload; \
                      the rest is reading, hashing and detiling"
@@ -16859,28 +16440,7 @@ impl Meter {
                     if crate::watch::by_range() { "the bytes it changes" } else { "all of title memory" }
                 );
             }
-        }
-        if crate::texture::alias_once() {
-            let [made, left] = [0, 1].map(|i| ALIAS_COUNTS[i].swap(0, Ordering::Relaxed) as f64 / frames);
-            tracing::info!("alias copies in preludes per frame (VICTORY_ALIAS_ONCE=1): {made:.1} made, {left:.1} left out (source not written since)");
-||||||| a66ac212
-            let [own, asking, still, all] =
-                [0, 1, 2, 3].map(|i| crate::texture::REFRESH_WAITS[i].swap(0, Ordering::Relaxed) as f64 / 1000.0 / frames);
-            if all >= 1.0 {
-                tracing::info!(
-                    "texture refreshes per frame, all threads: {all:.1} ms, of them {own:.1} ms waiting for a texture another thread \
-                     is refreshing, {asking:.1} ms asking the write watch and the guards, {still:.1} ms waiting for title memory to \
-                     hold still (the runtime remapping it); the rest is reading, hashing and detiling"
-                );
-            }
-            let [through, left] = [0, 1].map(|i| crate::texture::UNLOCKED[i].swap(0, Ordering::Relaxed) as f64 / frames);
-            if through + left > 0.0 {
-                tracing::info!(
-                    "texture refreshes that did not wait for title memory to hold still, per frame (VICTORY_TEXTURE_NO_WAIT=1): \
-                     {through:.1} read through the kernel, {left:.1} left for the next refresh (a page was not there)"
-                );
-            }
-=======
+            // (klbf) What was said once a list, per frame.
             let [declared, fills, targets, pipelines] = [0, 1, 2, 3].map(|i| SAID_ONCE[i].swap(0, Ordering::Relaxed) as f64 / frames);
             tracing::info!(
                 "said once a list, per frame: {declared:.0} ranges shaders write declared again and left out \
@@ -16932,7 +16492,10 @@ impl Meter {
                  card copies, {:.1} into the others",
                 by[0], by[2], by[3], by[4], by[5], by[1], kinds[0], kinds[1], kinds[2], kinds[3]
             );
->>>>>>> klbf/beta-2
+        }
+        if crate::texture::alias_once() {
+            let [made, left] = [0, 1].map(|i| ALIAS_COUNTS[i].swap(0, Ordering::Relaxed) as f64 / frames);
+            tracing::info!("alias copies in preludes per frame (VICTORY_ALIAS_ONCE=1): {made:.1} made, {left:.1} left out (source not written since)");
         }
         {
             let [copies, joined] = [0, 1].map(|i| COPIES_JOINED[i].swap(0, Ordering::Relaxed) as f64 / frames);
@@ -16971,12 +16534,6 @@ impl Meter {
         let slow = crate::watch::slow_asks();
         // Over the same frames as the counts above.
         let drops = crate::pipeline::take_drops();
-<<<<<<< HEAD
-        // The lines of every 5 s (sorting, system calls and some forty lines
-        // written: a hitch of about 30 ms on the presenting thread, the lane,
-        // once every 5 s) are made by a thread of ours ([`meter_lines`]).
-||||||| a66ac212
-=======
         // (Neptune) In a release build too, the first of them every 30 s: which pipelines
         // the dropped draws were for.
         #[cfg(not(feature = "diagnostics"))]
@@ -17031,151 +16588,25 @@ impl Meter {
             ram_mb: self.ram_mb,
             cpu_pct: self.cpu_pct,
         });
->>>>>>> klbf/beta-2
+        // The lines of every 5 s (sorting, system calls and some forty lines
+        // written: a hitch of about 30 ms on the presenting thread, the lane,
+        // once every 5 s) are made by a thread of ours ([`meter_lines`]).
         if self.logged.elapsed() >= std::time::Duration::from_secs(5) {
             self.logged = std::time::Instant::now();
-<<<<<<< HEAD
             let logged_frames = std::mem::take(&mut self.logged_frames).max(1) as f64;
-||||||| a66ac212
-            tracing::info!(
-                "placed texture views: {} writes of another view of the texture a slot showed (it kept the old view until the new was made)",
-                crate::descriptor::host::KEPT_VIEWS.load(Ordering::Relaxed)
-            );
-            {
-                let [queued, due, away, partly, oldest] =
-                    [0, 1, 2, 3, 4].map(|i| crate::draw::HEAP_TEXTURES_QUEUE[i].load(Ordering::Relaxed));
-                let [same, parts, tails] =
-                    [0, 1, 2].map(|i| crate::draw::HEAP_TEXTURES_PARTLY[i].load(Ordering::Relaxed));
-                tracing::info!(
-                    "textures picked by index, the queue: {queued} slots, {due} of them due (the oldest written {oldest} frames ago), \
-                     {away} waiting for their memory, {partly} uploaded in part; since the start: {} slots found uploaded already by \
-                     the draws that read them through tables, {} writes of tables' slots (due some frames later), {} slots taken out \
-                     as read through a table, {parts} uploads of textures not all mapped ({tails} of them without their first page), \
-                     {same} looks that found no more mapped; {} slots made stale by a newer view of other memory there, \
-                     {} ranges of memory mapped, unmapped or written under texture views ({} dropped), {} slots made due by them, \
-                     {} made slots found unmapped and made null",
-                    crate::draw::HEAP_TEXTURES_TABLED.load(Ordering::Relaxed),
-                    crate::descriptor::host::TABLED_WRITES[0].load(Ordering::Relaxed),
-                    crate::descriptor::host::TABLED_WRITES[1].load(Ordering::Relaxed),
-                    crate::descriptor::host::STALE[0].load(Ordering::Relaxed),
-                    crate::descriptor::host::STALE[1].load(Ordering::Relaxed),
-                    crate::descriptor::host::STALE[2].load(Ordering::Relaxed),
-                    crate::descriptor::host::STALE[3].load(Ordering::Relaxed),
-                    crate::descriptor::host::STALE[4].load(Ordering::Relaxed)
-                );
-            }
-=======
-            crate::ramline::log();
-            tracing::info!(
-                "placed texture views: {} writes of another view of the texture a slot showed (it kept the old view until the new was made); \
-                 {} writes of a view of another texture (it kept showing the old texture until then, VICTORY_KEEP_OTHER_VIEWS=0: null at once)",
-                crate::descriptor::host::KEPT_VIEWS.load(Ordering::Relaxed),
-                crate::descriptor::host::KEPT_OTHER_VIEWS.load(Ordering::Relaxed)
-            );
-            {
-                let a: Vec<u64> = crate::descriptor::host::QUEUE_AGE.iter().map(|a| a.swap(0, Ordering::Relaxed)).collect();
-                if a.iter().sum::<u64>() != 0 {
-                    tracing::info!(
-                        "textures picked by index, done since the last line, by the frames after their slot was written:                          {} in the same frame, {} one later, {} two, {} three to five, {} six to fifteen, {} sixteen to 63, {} later still; {} passes made within frames to catch up, {:.1} ms a frame in them (VICTORY_TEXTURE_CATCH_UP_MS)",
-                        a[0], a[1], a[2], a[3], a[4], a[5], a[6],
-                        crate::draw::EARLY_CATCH_UPS.swap(0, Ordering::Relaxed),
-                        crate::draw::EARLY_CATCH_UP_MICROS.swap(0, Ordering::Relaxed) as f64 / 1000.0 / frames
-                    );
-                }
-            }
-            {
-                let (heaps, used, free) = crate::placement::stats();
-                let [placed, refused] = [0, 1].map(|i| crate::resource::TEXTURES_PLACED[i].load(Ordering::Relaxed));
-                tracing::info!(
-                    "host textures placed in heaps made ahead (VICTORY_TEXTURE_HEAPS=0: each a resource of its own), so far: {placed} \
-                     placed, {refused} refused there; {heaps} heaps hold {} MB of them and {} MB free",
-                    used >> 20,
-                    free >> 20
-                );
-            }
-            {
-                let left = crate::pipeline::LEFT_WITHOUT_RAYS.swap(0, Ordering::Relaxed);
-                tracing::info!(
-                    "dispatches of the program that activates the screen probes' rays left out per frame (no rays run; VICTORY_RAYS=1: it runs): {:.1}",
-                    left as f64 / frames
-                );
-            }
-            {
-                let [taken, new, put, out] = [0, 1, 2, 3].map(|i| crate::resource::TEXTURE_POOLED[i].load(Ordering::Relaxed));
-                tracing::info!(
-                    "host textures of textures the title fills, so far: {taken} taken from the pool of ones let go, {new} made new, \
-                     {put} put into the pool, {out} let go from it; the pool holds {} MB (VICTORY_TEXTURE_POOL_MB)",
-                    crate::resource::texture_pool_bytes() >> 20
-                );
-            }
-            {
-                let [kept, nulled, again] = [0, 1, 2].map(|i| crate::descriptor::host::STALE_KEPT[i].swap(0, Ordering::Relaxed));
-                tracing::info!(
-                    "slots whose view a newer view made stale, in the last period: {kept} went on showing their texture (VICTORY_STALE_KEEP_MS=0: \
-                     null at once), {again} were replaced by their new view, {nulled} hit the cap (VICTORY_STALE_KEEP_MAX_MS) and were made null"
-                );
-            }
-            crate::tiles::status();
-            {
-                let [same, changed, waiting] =
-                    [0, 1, 2].map(|i| crate::draw::HEAP_TEXTURES_RECHECKED[i].load(Ordering::Relaxed));
-                tracing::info!(
-                    "textures picked by index, looked at again after their upload: {same} looks found them unchanged, \
-                     {changed} changed (uploaded again), {waiting} wait for a look"
-                );
-                let [queued, due, away, partly, oldest] =
-                    [0, 1, 2, 3, 4].map(|i| crate::draw::HEAP_TEXTURES_QUEUE[i].load(Ordering::Relaxed));
-                let [same, parts, tails] =
-                    [0, 1, 2].map(|i| crate::draw::HEAP_TEXTURES_PARTLY[i].load(Ordering::Relaxed));
-                tracing::info!(
-                    "textures picked by index, the queue: {queued} slots, {due} of them due (the oldest written {oldest} frames ago), \
-                     {away} waiting for their memory, {partly} uploaded in part; since the start: {} slots found uploaded already by \
-                     the draws that read them through tables, {} writes of tables' slots (due some frames later), {} slots taken out \
-                     as read through a table, {parts} uploads of textures not all mapped ({tails} of them without their first page), \
-                     {same} looks that found no more mapped; {} slots made stale by a newer view of other memory there, \
-                     {} ranges of memory mapped, unmapped or written under texture views ({} dropped), {} slots made due by them, \
-                     {} made slots found unmapped and made null",
-                    crate::draw::HEAP_TEXTURES_TABLED.load(Ordering::Relaxed),
-                    crate::descriptor::host::TABLED_WRITES[0].load(Ordering::Relaxed),
-                    crate::descriptor::host::TABLED_WRITES[1].load(Ordering::Relaxed),
-                    crate::descriptor::host::STALE[0].load(Ordering::Relaxed),
-                    crate::descriptor::host::STALE[1].load(Ordering::Relaxed),
-                    crate::descriptor::host::STALE[2].load(Ordering::Relaxed),
-                    crate::descriptor::host::STALE[3].load(Ordering::Relaxed),
-                    crate::descriptor::host::STALE[4].load(Ordering::Relaxed)
-                );
-                let [views, shown, waiting, tables, gone, own, free, start, other, shows, back] =
-                    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(|i: usize| crate::descriptor::host::SWEPT[i].load(Ordering::Relaxed));
-                tracing::info!(
-                    "placed texture views in the heap at the last look: {views}, of them {shown} shown, {waiting} in the queue, \
-                     {tables} read through tables, {gone} without memory; with memory and nothing to bring them up to date: \
-                     {own} of their own memory, {free} of memory no other view describes, {start} of memory another texture \
-                     begins at, {other} of another's memory ({shows} of all these show another view); {back} put back into the \
-                     queue since the start"
-                );
-            }
-            {
-                let mode = crate::watch::page_writes();
-                let [writes, bytes, guarded, plain] = [0, 1, 2, 3].map(|i| crate::watch::WRITTEN[i].load(Ordering::Relaxed));
-                let [kept, dropped, slots, uploaded] =
-                    [0, 1, 2, 3].map(|i| crate::descriptor::host::PAGE_WRITES[i].load(Ordering::Relaxed));
-                tracing::info!(
-                    "writes behind the guards, since the start: {writes} DirectStorage writes into physical pages at addresses the                      title had mapped ({} MB); {guarded} guarded 64 KiB blocks of host copies lay under them ({}); {plain} reads to                      plain addresses finished ({}); {kept} ranges under texture views kept for the texture pass ({dropped} dropped);                      {slots} slots of placed textures held their bytes, {uploaded} of them uploaded before the write ({})                      (VICTORY_PAGE_WRITES: unset or guards opens the guarded blocks, 0 counts only, 1, slots, all)",
-                    bytes >> 20,
-                    if mode & 1 != 0 { "opened, taken again" } else { "left as they were" },
-                    if mode & 4 != 0 { "told as well" } else { "counted only" },
-                    if mode & 2 != 0 { "made due again" } else { "left as they were" }
-                );
-            }
->>>>>>> klbf/beta-2
             #[cfg(feature = "diagnostics")]
             let copy_stats_frames = std::mem::take(&mut self.copy_stats_frames) as f64;
+            // (klbf) The machine's share of the frame, for the frame line.
+            let (cpu_pct, gpu_pct, ram_mb) = (self.cpu_pct, self.gpu_pct, self.ram_mb);
             meter_lines(move || {
+                // (klbf) The process's own memory, one line a period.
+                crate::ramline::log();
                 tracing::info!(
-                    "placed texture views: {} writes of another view of the texture a slot showed (it kept the old view until the new was made)",
-                    crate::descriptor::host::KEPT_VIEWS.load(Ordering::Relaxed)
+                    "placed texture views: {} writes of another view of the texture a slot showed (it kept the old view until the new was made); \
+                     {} writes of a view of another texture (it kept showing the old texture until then, VICTORY_KEEP_OTHER_VIEWS=0: null at once)",
+                    crate::descriptor::host::KEPT_VIEWS.load(Ordering::Relaxed),
+                    crate::descriptor::host::KEPT_OTHER_VIEWS.load(Ordering::Relaxed)
                 );
-<<<<<<< HEAD
                 tracing::info!(
                     "copies left out since the start because both sides were one host texture: {}",
                     crate::list::SELF_COPIES.load(Ordering::Relaxed)
@@ -17184,85 +16615,6 @@ impl Meter {
                     tracing::warn!(
                         "errors the graphics driver reported to the system since the start: {} (the paths under suspicion are off)",
                         crate::drvwatch::errors()
-||||||| a66ac212
-            }
-            tracing::info!(
-                "{fps:.1} fps, {ms:.1} ms/frame ({cpu:.1} preparing: copies {copy_ms:.1} ms \
-                 {copy_mb:.1} MB, textures {texture_ms:.1} ms {texture_mb:.1} MB; {gpu:.1} on the \
-                 GPU; {back_ms:.1} copying back {back_mb:.1} MB), {draws:.0} draws/frame, \
-                 dropped {dropped:.0} without a host pipeline ({making} being made) and \
-                 {indirect:.0} indirect; heap buffers {picked:.1} passes {picked_ms:.1} ms;                  texture slots written so far: {placed} placed, {objects} of objects; \
-                 textures picked by index: {picked_textures} uploaded so far ({picked_mb} MB), \
-                 {picked_waiting} waiting, {picked_away} passed over unmapped; depth textures with                  unordered access: {du0} made, bound as depth {du1}x, cleared as depth {du2}x,                  unordered views refused {du3}x; buffer views left null as the host would refuse them: {refused}",
-                picked_textures = crate::draw::HEAP_TEXTURES.load(Ordering::Relaxed),
-                picked_mb = crate::draw::HEAP_TEXTURE_BYTES.load(Ordering::Relaxed) >> 20,
-                picked_waiting = crate::draw::HEAP_TEXTURES_WAITING.load(Ordering::Relaxed),
-                picked_away = crate::draw::HEAP_TEXTURES_AWAY.load(Ordering::Relaxed),
-                du0 = crate::resource::DEPTH_UNORDERED[0].load(Ordering::Relaxed),
-                du1 = crate::resource::DEPTH_UNORDERED[1].load(Ordering::Relaxed),
-                du2 = crate::resource::DEPTH_UNORDERED[2].load(Ordering::Relaxed),
-                du3 = crate::resource::DEPTH_UNORDERED[3].load(Ordering::Relaxed),
-                refused = format!(
-                    "{}; depth twins: {} alive, {} depth textures left without one; twin copies per frame: {twin_to_depth:.1} into depth textures, {twin_to_colour:.1} into twins; depth planes: {planes:.1} drawn from their twins per frame, {} times not given back to a twin, {} times used before the pass",
-                    crate::descriptor::host::REFUSED_VIEWS.load(Ordering::Relaxed),
-                    crate::resource::TWINS[0].load(Ordering::Relaxed),
-                    crate::resource::TWINS[1].load(Ordering::Relaxed),
-                    crate::resource::PLANES[1].load(Ordering::Relaxed),
-                    crate::resource::PLANES[2].load(Ordering::Relaxed)
-                ),
-                making = crate::pipeline::making(),
-                placed = crate::descriptor::host::PLACED_TEXTURE_SLOTS.load(Ordering::Relaxed),
-                objects = crate::descriptor::host::OBJECT_TEXTURE_SLOTS.load(Ordering::Relaxed)
-            );
-            #[cfg(feature = "diagnostics")]
-            {
-                crate::copystat::log(std::mem::take(&mut self.copy_stats_frames) as f64);
-                for (why, n) in drops.iter().take(40) {
-                    tracing::info!(
-                        "dropped {:.1}/frame without a host pipeline: {why}",
-                        *n as f64 / frames
-=======
-            }
-            tracing::info!(
-                "{fps:.1} fps, {ms:.1} ms/frame ({cpu:.1} preparing: copies {copy_ms:.1} ms \
-                 {copy_mb:.1} MB, textures {texture_ms:.1} ms {texture_mb:.1} MB; {gpu:.1} on the \
-                 GPU; {back_ms:.1} copying back {back_mb:.1} MB), {draws:.0} draws/frame, \
-                 dropped {dropped:.0} without a host pipeline ({making} being made) and \
-                 {indirect:.0} indirect; heap buffers {picked:.1} passes {picked_ms:.1} ms;                  texture slots written so far: {placed} placed, {objects} of objects; \
-                 textures picked by index: {picked_textures} uploaded so far ({picked_mb} MB), \
-                 {picked_waiting} waiting, {picked_away} passed over unmapped; depth textures with                  unordered access: {du0} made, bound as depth {du1}x, cleared as depth {du2}x,                  unordered views refused {du3}x; buffer views left null as the host would refuse them: {refused}; \
-                 cpu {cpu_pct:.1}% gpu {gpu_pct:.0}% busy ram {ram_mb:.0} MB",
-                picked_textures = crate::draw::HEAP_TEXTURES.load(Ordering::Relaxed),
-                picked_mb = crate::draw::HEAP_TEXTURE_BYTES.load(Ordering::Relaxed) >> 20,
-                picked_waiting = crate::draw::HEAP_TEXTURES_WAITING.load(Ordering::Relaxed),
-                picked_away = crate::draw::HEAP_TEXTURES_AWAY.load(Ordering::Relaxed),
-                du0 = crate::resource::DEPTH_UNORDERED[0].load(Ordering::Relaxed),
-                du1 = crate::resource::DEPTH_UNORDERED[1].load(Ordering::Relaxed),
-                du2 = crate::resource::DEPTH_UNORDERED[2].load(Ordering::Relaxed),
-                du3 = crate::resource::DEPTH_UNORDERED[3].load(Ordering::Relaxed),
-                refused = format!(
-                    "{}; depth twins: {} alive, {} depth textures left without one; twin copies per frame: {twin_to_depth:.1} into depth textures, {twin_to_colour:.1} into twins; depth planes: {planes:.1} drawn from their twins per frame, {} times not given back to a twin, {} times used before the pass",
-                    crate::descriptor::host::REFUSED_VIEWS.load(Ordering::Relaxed),
-                    crate::resource::TWINS[0].load(Ordering::Relaxed),
-                    crate::resource::TWINS[1].load(Ordering::Relaxed),
-                    crate::resource::PLANES[1].load(Ordering::Relaxed),
-                    crate::resource::PLANES[2].load(Ordering::Relaxed)
-                ),
-                making = crate::pipeline::making(),
-                placed = crate::descriptor::host::PLACED_TEXTURE_SLOTS.load(Ordering::Relaxed),
-                objects = crate::descriptor::host::OBJECT_TEXTURE_SLOTS.load(Ordering::Relaxed),
-                cpu_pct = self.cpu_pct,
-                gpu_pct = self.gpu_pct,
-                ram_mb = self.ram_mb
-            );
-            #[cfg(feature = "diagnostics")]
-            {
-                crate::copystat::log(std::mem::take(&mut self.copy_stats_frames) as f64);
-                for (why, n) in drops.iter().take(40) {
-                    tracing::info!(
-                        "dropped {:.1}/frame without a host pipeline: {why}",
-                        *n as f64 / frames
->>>>>>> klbf/beta-2
                     );
                 }
                 crate::tiles::status();
@@ -17385,7 +16737,8 @@ impl Meter {
                      dropped {dropped:.0} without a host pipeline ({making} being made) and \
                      {indirect:.0} indirect; heap buffers {picked:.1} passes {picked_ms:.1} ms;                  texture slots written so far: {placed} placed, {objects} of objects; \
                      textures picked by index: {picked_textures} uploaded so far ({picked_mb} MB), \
-                     {picked_waiting} waiting, {picked_away} passed over unmapped; depth textures with                  unordered access: {du0} made, bound as depth {du1}x, cleared as depth {du2}x,                  unordered views refused {du3}x; buffer views left null as the host would refuse them: {refused}",
+                     {picked_waiting} waiting, {picked_away} passed over unmapped; depth textures with                  unordered access: {du0} made, bound as depth {du1}x, cleared as depth {du2}x,                  unordered views refused {du3}x; buffer views left null as the host would refuse them: {refused}; \
+                     cpu {cpu_pct:.1}% gpu {gpu_pct:.0}% busy ram {ram_mb:.0} MB",
                     picked_textures = crate::draw::HEAP_TEXTURES.load(Ordering::Relaxed),
                     picked_mb = crate::draw::HEAP_TEXTURE_BYTES.load(Ordering::Relaxed) >> 20,
                     picked_waiting = crate::draw::HEAP_TEXTURES_WAITING.load(Ordering::Relaxed),
@@ -17405,7 +16758,10 @@ impl Meter {
                     ),
                     making = crate::pipeline::making(),
                     placed = crate::descriptor::host::PLACED_TEXTURE_SLOTS.load(Ordering::Relaxed),
-                    objects = crate::descriptor::host::OBJECT_TEXTURE_SLOTS.load(Ordering::Relaxed)
+                    objects = crate::descriptor::host::OBJECT_TEXTURE_SLOTS.load(Ordering::Relaxed),
+                    cpu_pct,
+                    gpu_pct,
+                    ram_mb
                 );
                 crate::memcopy::log(logged_frames);
                 barrier_line(logged_frames);
@@ -17430,7 +16786,6 @@ impl Meter {
                 }
             });
         }
-<<<<<<< HEAD
         if self.caption.is_none() {
             // The window's own text, read without a message.
             let mut buffer = vec![0u16; 512];
@@ -17443,22 +16798,6 @@ impl Meter {
         let text = format!(" | Vertex {fps:.0} fps {ms:.1} ms/frame {draws:.0} draws/frame");
         let mut text: Vec<u16> = caption.iter().copied().chain(text.encode_utf16()).collect();
         text.push(0);
-||||||| a66ac212
-        if self.caption.is_none() {
-            // The window's own text, read without a message.
-            let mut buffer = vec![0u16; 512];
-            // SAFETY: a window handle and a buffer of that length.
-            let n = unsafe { InternalGetWindowText(hwnd, &mut buffer) };
-            buffer.truncate(n.max(0) as usize);
-            self.caption = Some(buffer);
-        }
-        let Some(caption) = &self.caption else { return };
-        let text = format!(" | VIctory {fps:.0} fps {ms:.1} ms/frame {draws:.0} draws/frame");
-        let mut text: Vec<u16> = caption.iter().copied().chain(text.encode_utf16()).collect();
-        text.push(0);
-=======
-        let text = format!("{TITLE}  \u{b7}  {fps:.0} FPS  \u{b7}  {ms:.0} ms");
->>>>>>> klbf/beta-2
         // Setting the text waits for the window's thread (a title thread,
         // which may not pump for a while), so a thread of ours does it and
         // presenting never waits; it takes the newest figures when free, and
@@ -17498,7 +16837,6 @@ impl Host {
     /// Shows `texture`, which is in `state` (a host state) and stays in it,
     /// as frame `frame` (saved if captures are on). `None` if nothing was
     /// shown; else, in diagnostics builds, whether the frame was black.
-<<<<<<< HEAD
     pub(crate) fn present(
         &self,
         texture: &ID3D12Resource,
@@ -17519,17 +16857,6 @@ impl Host {
         frame: u64,
         over: Option<(&ID3D12Resource, u32)>,
     ) -> Option<bool> {
-||||||| a66ac212
-    pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-=======
-    pub(crate) fn present(
-        &self,
-        texture: &ID3D12Resource,
-        state: u32,
-        frame: u64,
-        over: Option<(&ID3D12Resource, u32)>,
-    ) -> Option<bool> {
->>>>>>> klbf/beta-2
         // SAFETY: a live resource.
         let desc = unsafe { texture.GetDesc() };
         let Some(format) = swap_format(desc.Format) else {
@@ -17620,20 +16947,14 @@ impl Host {
                     D3D12_RESOURCE_STATE_COPY_DEST,
                 ),
             ]);
-<<<<<<< HEAD
             list.CopyResource(&back, laid.as_ref().unwrap_or(texture));
+            let shot = shot_now.then(|| crate::screenshot::read_back(&self.device, list, texture)).flatten();
             // The frame rate, into the corner of what is shown (not of the
             // title's own frame, which the lines below read back).
             crate::fpsbox::draw(self, list, &back, (width, height, format));
             let traced = crate::present_trace::on()
                 .then(|| crate::present_trace::record(&self.device, list, texture))
                 .flatten();
-||||||| a66ac212
-            list.CopyResource(&back, texture);
-=======
-            list.CopyResource(&back, texture);
-            let shot = shot_now.then(|| crate::screenshot::read_back(&self.device, list, texture)).flatten();
->>>>>>> klbf/beta-2
             #[cfg(feature = "diagnostics")]
             let capture = crate::capture::wanted(frame)
                 .then(|| crate::capture::read_back(&self.device, list, texture))
@@ -17646,7 +16967,6 @@ impl Host {
             p.panel.draw(self, copy, &back, (width, height), format);
             #[cfg(not(feature = "diagnostics"))]
             let _ = frame;
-<<<<<<< HEAD
             // The present's second plane, if it has one (e.g. Series S HUD
             // plane over game plane), goes over the copy (`crate::over`):
             // the back buffer is a target meanwhile.
@@ -17674,21 +16994,7 @@ impl Host {
                 drawn = crate::over::record(
                     &self.device,
                     list,
-||||||| a66ac212
-            list.ResourceBarrier(&[
-                transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state),
-                transition(
-=======
-            // A second plane over the first (the title's UI over its game plane).
-            let composed = over.is_some_and(|(plane, before)| {
-                self.record_overlay(list, &back, p.format, (p.width, p.height), plane, D3D12_RESOURCE_STATES(before as i32))
-            });
-            list.ResourceBarrier(&[
-                transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state),
-                transition(
->>>>>>> klbf/beta-2
                     &back,
-<<<<<<< HEAD
                     format,
                     (width, height),
                     plane,
@@ -17697,11 +17003,6 @@ impl Host {
                 let mut barriers = vec![transition(
                     &back,
                     D3D12_RESOURCE_STATE_RENDER_TARGET,
-||||||| a66ac212
-                    D3D12_RESOURCE_STATE_COPY_DEST,
-=======
-                    if composed { D3D12_RESOURCE_STATE_RENDER_TARGET } else { D3D12_RESOURCE_STATE_COPY_DEST },
->>>>>>> klbf/beta-2
                     D3D12_RESOURCE_STATE_PRESENT,
                 )];
                 if moved {
@@ -17737,15 +17038,11 @@ impl Host {
             if let Some(taken) = watched {
                 crate::popwatch::sent(taken, flown, frame);
             }
-<<<<<<< HEAD
             #[cfg(not(feature = "diagnostics"))]
             let _ = flown;
-||||||| a66ac212
-=======
             if let Some(shot) = shot {
                 crate::screenshot::finish(shot);
             }
->>>>>>> klbf/beta-2
             #[cfg(feature = "diagnostics")]
             if let Some((buffer, footprint)) = capture {
                 crate::capture::save_read_back(frame, &buffer, &footprint);
@@ -17910,13 +17207,8 @@ impl Host {
             let copy = self.new_list()?;
             copy.close();
             tracing::info!(width, height, format = format.0, "presenting to a window");
-<<<<<<< HEAD
-            self.log_video_memory("right after the swap chain is made");
-||||||| a66ac212
-=======
             crate::overlay::start(hwnd, self.adapter.clone());
             self.log_video_memory("right after the swap chain is made");
->>>>>>> klbf/beta-2
             Ok(Presenter {
                 swap_chain,
                 width,
@@ -17998,7 +17290,6 @@ impl Host {
                 .QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &mut shared)
                 .ok()?;
         }
-<<<<<<< HEAD
         // The card's budget moved by 256 MB or more since the last look:
         // said at once, with what was in use at the last look, so the log
         // has the moment. (It fell from 11,242 MB to some 10,300 MB with
@@ -18024,33 +17315,9 @@ impl Host {
         VIDEO_PEAK[1].fetch_min(own.Budget, Ordering::Relaxed);
         VIDEO_PEAK[2].fetch_max(shared.CurrentUsage, Ordering::Relaxed);
         VIDEO_PEAK[3].fetch_add(1, Ordering::Relaxed);
-||||||| a66ac212
-=======
-        // The card's budget moved by 256 MB or more since the last look:
-        // said at once, with what was in use at the last look, so the log
-        // has the moment. (It fell from 11,242 MB to some 10,300 MB with
-        // the first world frame in runs 179 to 185, and the memory line,
-        // seconds later, was the first to show it. We reserve nothing
-        // and make the swap chain once, at the start.)
-        static LAST: [std::sync::atomic::AtomicU64; 3] = [const { std::sync::atomic::AtomicU64::new(0) }; 3];
-        let now = [own.Budget, own.CurrentUsage, shared.CurrentUsage];
-        let last = [0, 1, 2].map(|i| LAST[i].swap(now[i], Ordering::Relaxed));
-        if last[0] != 0 && last[0].abs_diff(own.Budget) >= (256u64 << 20) {
-            tracing::info!(
-                "the system changed the budget of the card's memory from {} MB to {} MB (frame {}); at the last look {} MB of the card's and {} MB of the PC's shared memory were in use",
-                last[0] >> 20,
-                own.Budget >> 20,
-                crate::frame::current(),
-                last[1] >> 20,
-                last[2] >> 20
-            );
-            self.log_video_memory("right after that change");
-        }
->>>>>>> klbf/beta-2
         Some([own.Budget, own.CurrentUsage, shared.Budget, shared.CurrentUsage])
     }
 
-<<<<<<< HEAD
     /// One look at the card's memory of our own, at most every tenth of a
     /// second, before a submission is prepared: for [`VIDEO_PEAK`], and so
     /// that a change of the budget is said within a tenth of a second
@@ -18194,51 +17461,6 @@ impl Host {
         }
     }
 
-||||||| a66ac212
-=======
-    /// Both of the system's memory groups for this process, in bytes: for
-    /// the card's own memory and then for the PC's memory shared with the
-    /// card, the budget, the use, what could still be reserved and what
-    /// is reserved (the layer reserves none).
-    pub(crate) fn video_memory_groups(&self) -> Option<[[u64; 4]; 2]> {
-        let adapter = self.adapter.as_ref()?;
-        let mut own = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
-        let mut shared = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
-        // SAFETY: plain queries that fill our structures.
-        unsafe {
-            adapter
-                .QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut own)
-                .ok()?;
-            adapter
-                .QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &mut shared)
-                .ok()?;
-        }
-        let all = |m: &DXGI_QUERY_VIDEO_MEMORY_INFO| {
-            [m.Budget, m.CurrentUsage, m.AvailableForReservation, m.CurrentReservation]
-        };
-        Some([all(&own), all(&shared)])
-    }
-
-    /// Logs [`Self::video_memory_groups`], with `when` it is said.
-    pub(crate) fn log_video_memory(&self, when: &str) {
-        let Some([own, shared]) = self.video_memory_groups() else {
-            return;
-        };
-        tracing::info!(
-            "video memory as the system counts it, {}: the card's own: budget {} MB, in use {} MB, {} MB could still be reserved, {} MB reserved; the PC's shared with the card: budget {} MB, in use {} MB, {} MB could still be reserved, {} MB reserved (the layer reserves none)",
-            when,
-            own[0] >> 20,
-            own[1] >> 20,
-            own[2] >> 20,
-            own[3] >> 20,
-            shared[0] >> 20,
-            shared[1] >> 20,
-            shared[2] >> 20,
-            shared[3] >> 20
-        );
-    }
-
->>>>>>> klbf/beta-2
     /// A buffer in system memory that the CPU maps (write-back, so reading
     /// it is fast too) and shaders read and write: for host copies of title
     /// memory that shaders write, which upload memory cannot be. Starts in
@@ -18302,7 +17524,6 @@ impl Host {
         }
     }
 
-<<<<<<< HEAD
     /// Whether buffers can lie in the card's memory and be mapped by the CPU
     /// (`D3D12_HEAP_TYPE_GPU_UPLOAD`: a resizable BAR, and a system and driver
     /// that offer it); logged once.
@@ -18386,70 +17607,14 @@ impl Host {
         }
     }
 
-||||||| a66ac212
-=======
-    /// (Neptune) Whether the device has GPU upload heaps (`GPUUploadHeapSupported`: a CPU-mappable,
-    /// write-combined buffer in the card's own memory, through Resizable BAR); asked once.
+
+    /// (klbf) The same question as [`Self::mapped_card_memory`], under the name
+    /// klbf/beta-2 gives it: its window path (`crate::shadow::window_rebar_for`)
+    /// asks with this.
     pub(crate) fn gpu_upload_supported(&self) -> bool {
-        static OK: OnceLock<bool> = OnceLock::new();
-        *OK.get_or_init(|| {
-            let mut o = D3D12_FEATURE_DATA_D3D12_OPTIONS16::default();
-            // SAFETY: writes `o` of the given size.
-            let ok = unsafe {
-                self.device
-                    .CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, (&raw mut o).cast(), size_of_val(&o) as u32)
-                    .is_ok()
-            } && o.GPUUploadHeapSupported.as_bool();
-            tracing::info!(ok, "host GPU upload heap support");
-            ok
-        })
+        self.mapped_card_memory()
     }
 
-    /// (Neptune) A buffer in a GPU upload heap, mapped for good. The CPU only writes it (the
-    /// memory is write-combined: a read is very slow); shaders and copies only read it, so it has
-    /// no unordered access. Starts in the common state, from which reads promote it as they do
-    /// for [`Host::shared_buffer`].
-    pub(crate) fn gpu_upload_buffer(&self, size: u64) -> Option<(ID3D12Resource, *mut u8)> {
-        if !self.gpu_upload_supported() {
-            return None;
-        }
-        let heap = D3D12_HEAP_PROPERTIES {
-            Type: D3D12_HEAP_TYPE_GPU_UPLOAD,
-            ..Default::default()
-        };
-        let desc = D3D12_RESOURCE_DESC {
-            Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
-            Width: size.max(1),
-            Height: 1,
-            DepthOrArraySize: 1,
-            MipLevels: 1,
-            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-            Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-            ..Default::default()
-        };
-        let mut buffer: Option<ID3D12Resource> = None;
-        let mut data = std::ptr::null_mut();
-        // SAFETY: plain creation and mapping of a buffer.
-        let made = unsafe {
-            self.device
-                .CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON, None, &mut buffer)
-                .and_then(|()| {
-                    let b = buffer.as_ref().ok_or_else(windows::core::Error::empty)?;
-                    // An empty read range: the CPU reads none of it.
-                    b.Map(0, Some(&D3D12_RANGE::default()), Some(&mut data))
-                })
-        };
-        match made {
-            Ok(()) if !data.is_null() => Some((buffer?, data.cast())),
-            Ok(()) => None,
-            Err(e) => {
-                tracing::warn!(error = %e, size, "no GPU upload buffer");
-                None
-            }
-        }
-    }
-
->>>>>>> klbf/beta-2
     /// A device-local buffer shaders may write (unordered access) and indirect
     /// execution may read, starting in the common state.
     pub(crate) fn uav_buffer(&self, size: u64) -> Option<ID3D12Resource> {
@@ -19576,7 +18741,6 @@ mod batch {   // Batch::texture_due lives here; `mod tests` is already taken at 
             before.as_secs_f64() / after.as_secs_f64()
         );
     }
-<<<<<<< HEAD
 
     #[test]
     fn vram_idle_ms_scales_with_pressure() {
@@ -19649,45 +18813,6 @@ mod batch {   // Batch::texture_due lives here; `mod tests` is already taken at 
         assert!(!should_record_brought(1, None));
         assert!(should_record_brought(2, None));
     }
-||||||| a66ac212
-=======
-
-    #[test]
-    fn vram_idle_ms_scales_with_pressure() {
-        use super::vram_idle_ms;
-        let gib = 1024 * 1024 * 1024;
-        // Normal (< 75%)
-        assert_eq!(vram_idle_ms(Some([10 * gib, 0, 0, 0])), 5_000);
-        assert_eq!(vram_idle_ms(Some([10 * gib, 7 * gib, 0, 0])), 5_000);
-        assert_eq!(vram_idle_ms(Some([100, 74, 0, 0])), 5_000);
-        // Moderate (75%..85%)
-        assert_eq!(vram_idle_ms(Some([100, 75, 0, 0])), 2_500);
-        assert_eq!(vram_idle_ms(Some([100, 84, 0, 0])), 2_500);
-        // High (>= 85%, including over-budget)
-        assert_eq!(vram_idle_ms(Some([100, 85, 0, 0])), 1_000);
-        assert_eq!(vram_idle_ms(Some([10 * gib, 12 * gib, 0, 0])), 1_000);
-        // Missing or zero budget falls back to normal
-        assert_eq!(vram_idle_ms(None), 5_000);
-        assert_eq!(vram_idle_ms(Some([0, 100, 0, 0])), 5_000);
-    }
-
-    #[test]
-    fn ram_idle_ms_scales_with_pressure() {
-        use super::ram_idle_ms;
-        let gib = 1024 * 1024 * 1024;
-        // Normal (>= 4 GiB)
-        assert_eq!(ram_idle_ms(Some(8 * gib)), 10_000);
-        assert_eq!(ram_idle_ms(Some(4 * gib)), 10_000);
-        // Moderate (2 GiB..4 GiB)
-        assert_eq!(ram_idle_ms(Some(4 * gib - 1)), 5_000);
-        assert_eq!(ram_idle_ms(Some(2 * gib)), 5_000);
-        // High (< 2 GiB)
-        assert_eq!(ram_idle_ms(Some(2 * gib - 1)), 2_000);
-        assert_eq!(ram_idle_ms(Some(0)), 2_000);
-        // Missing falls back to normal
-        assert_eq!(ram_idle_ms(None), 10_000);
-    }
->>>>>>> klbf/beta-2
 }
 
 /// The host's own paths for a copy in the card's memory, end to end, on
