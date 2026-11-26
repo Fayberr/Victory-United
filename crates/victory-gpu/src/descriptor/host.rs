@@ -2619,11 +2619,6 @@ impl HostHeap {
         /// Slots looked at at a time, and the least time between.
         const SLOTS: u32 = 1 << 13;
         const EVERY_MS: u64 = 250;
-        // (Neptune) The slots kept past their view whose time is up go null here
-        // ([`HostHeap::stale_expire`]), sampler heap or not.
-        if !self.sampler {
-            self.stale_expire();
-        }
         static MODE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
         let mode = *MODE.get_or_init(|| match std::env::var("VICTORY_TEXTURE_SWEEP").as_deref() {
             Ok("0") => 0,
