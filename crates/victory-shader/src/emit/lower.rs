@@ -3282,6 +3282,8 @@ impl<'a> Lower<'a> {
                 if !self.one_dimensional() {
                     return id;
                 }
+                // (Neptune, from ZSlayerHQ's tree) A dispatch of more groups than the host
+                // runs in one dimension goes in parts: the groups before this part.
                 let Val::I32(id) = id else { unreachable!() };
                 let base = self.host_word(RootType::Other(super::shader::USER_GROUP_BASE), 0, 0);
                 return Val::I32(self.s.m.bin(self.s.entry, Bin::Add, id, base));
