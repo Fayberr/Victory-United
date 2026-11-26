@@ -161,61 +161,43 @@ pub(crate) extern "system" fn wait(
     token: *mut u64,
 ) -> HRESULT {
     let origin = kind == ORIGIN;
-<<<<<<< HEAD
-    let (mut tick, mut wait) = next_tick(kind);
     let limit = Duration::from_millis(u64::from(timeout_ms));
-    // A blocking wait for an event that has happened since the last wait
-    // for it ended (a frame took longer than a tick) ends at once, on the
-    // tick that passed: sleeping on to the next one cost 17 ms of every
-    // 730 ms frame (run 58: "2.0 frame waits sleeping 16.8 ms"). Polls (a
-    // time-out shorter than a tick) answer as before.
-    // `VICTORY_LATE_WAITS=1` sleeps to the next tick, as before.
-    static SLEEP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*SLEEP.get_or_init(|| std::env::var_os("VICTORY_LATE_WAITS").is_some_and(|v| v == "1"))
-        && limit >= wait
-        && tick > last(kind).load(Ordering::Relaxed) + 1
-    {
-        tick -= 1;
-        wait = Duration::ZERO;
-    }
     let _called = crate::timeline::span("the title's frame wait");
-    let hr = if wait > limit {
-        std::thread::sleep(limit);
-        TIMEOUT
-||||||| merged common ancestors
-    let limit = Duration::from_millis(u64::from(timeout_ms));
-    let (_, wait) = next_tick(kind, limit);
-    let hr = if wait > limit {
-        std::thread::sleep(limit);
-        TIMEOUT
-=======
-    let (wait, hr) = if uncapped() {
+    let (mut tick, mut wait) = next_tick(kind);
+    let hr = if uncapped() {
+        // Uncapped (`VICTORY_FPS=0`): a wait takes a tick and returns at once.
         last(kind).fetch_add(1, Ordering::Relaxed);
-        (Duration::ZERO, S_OK)
->>>>>>> belobug/main
-    } else {
-<<<<<<< HEAD
-        std::thread::sleep(wait);
-        last(kind).fetch_max(tick, Ordering::Relaxed);
+        wait = Duration::ZERO;
         if kind == FLIP {
             FLIPPED.store(true, Ordering::Relaxed);
         }
         S_OK
-||||||| merged common ancestors
-        std::thread::sleep(wait);
-        S_OK
-=======
-        let limit = Duration::from_millis(u64::from(timeout_ms));
-        let (_, wait) = next_tick(kind, limit);
-        let hr = if wait > limit {
+    } else {
+        // A blocking wait for an event that has happened since the last wait
+        // for it ended (a frame took longer than a tick) ends at once, on the
+        // tick that passed: sleeping on to the next one cost 17 ms of every
+        // 730 ms frame (run 58: "2.0 frame waits sleeping 16.8 ms"). Polls (a
+        // time-out shorter than a tick) answer as before.
+        // `VICTORY_LATE_WAITS=1` sleeps to the next tick, as before.
+        static SLEEP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*SLEEP.get_or_init(|| std::env::var_os("VICTORY_LATE_WAITS").is_some_and(|v| v == "1"))
+            && limit >= wait
+            && tick > last(kind).load(Ordering::Relaxed) + 1
+        {
+            tick -= 1;
+            wait = Duration::ZERO;
+        }
+        if wait > limit {
             std::thread::sleep(limit);
             TIMEOUT
         } else {
             std::thread::sleep(wait);
+            last(kind).fetch_max(tick, Ordering::Relaxed);
+            if kind == FLIP {
+                FLIPPED.store(true, Ordering::Relaxed);
+            }
             S_OK
-        };
-        (wait, hr)
->>>>>>> belobug/main
+        }
     };
     #[cfg(windows)]
     {
