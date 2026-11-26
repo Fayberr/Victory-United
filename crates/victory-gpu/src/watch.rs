@@ -2608,64 +2608,11 @@ fn guard(start: usize, end: usize) -> Option<Vec<usize>> {
             #[cfg(feature = "diagnostics")]
             tally(9, 1);
         }
-<<<<<<< HEAD
-        let is_clean = next_clean < clean.len() && clean[next_clean] == block;
-        let mut open = block < last && !is_clean;
-        if open && g.absent.contains(&block) {
-            // Ordinary commits need no runtime mapping notification. Reuse
-            // this asking's query for the following blocks in the same region.
-            if block >= uncommitted_until {
-                uncommitted_until = uncommitted_end(block);
-            }
-            open = block >= uncommitted_until;
-            if open {
-                g.absent.remove(&block);
-                if !is_view(block * BLOCK, (block + 1) * BLOCK) {
-                    open = false;
-                }
-            }
-||||||| a26859fc
-        let is_clean = next_clean < clean.len() && clean[next_clean] == block;
-        let mut open = block < last && !is_clean;
-        if open && g.absent.contains(&block) {
-            // Ordinary commits need no runtime mapping notification. Reuse
-            // this asking's query for the following blocks in the same region.
-            if block >= uncommitted_until {
-                uncommitted_until = uncommitted_end(block);
-            }
-            open = block >= uncommitted_until;
-            if open {
-                g.absent.remove(&block);
-            }
-=======
         if block >= uncommitted_until {
             // The hole may have been given up, and its address be the
             // title's heap's, or code's, now: not ours to guard.
             came.push((block, is_view(block * BLOCK, (block + 1) * BLOCK)));
->>>>>>> avatar/main
         }
-<<<<<<< HEAD
-        if open {
-            written.extend(block * BLOCK / PAGE..(block + 1) * BLOCK / PAGE);
-            if g.protected.contains(&block) {
-                // Written through the runtime, or through another view of
-                // its pages (`open`), still read-only. That view may be one
-                // no copy checks: guarded again here, with the others.
-                g.clean.insert(block);
-                if view_guard() {
-                    protect_aliases(&mut g, block);
-                }
-            } else {
-                run.get_or_insert(block);
-||||||| a26859fc
-        if open {
-            written.extend(block * BLOCK / PAGE..(block + 1) * BLOCK / PAGE);
-            if g.protected.contains(&block) {
-                // Written through the runtime, still read-only.
-                g.clean.insert(block);
-            } else {
-                run.get_or_insert(block);
-=======
     }
     let rest = rest();
     let mut g = guards_timed();
@@ -2708,7 +2655,6 @@ fn guard(start: usize, end: usize) -> Option<Vec<usize>> {
                 protect(&mut g, from, to);
             }
             if g.clean.contains(block) {
->>>>>>> avatar/main
                 continue;
             }
             if cover(&mut g, block, block + 1) {
@@ -2854,55 +2800,27 @@ fn protect(g: &mut Guards, from: usize, to: usize) {
     #[cfg(feature = "diagnostics")]
     crate::faultbook::note(crate::faultbook::What::Taken, from, to, 0);
     protect_here(g, from, to);
-<<<<<<< HEAD
     if !view_guard() {
         return;
     }
-    // Single `inplace::VIEWS` lock across `[from, to)` + coalesced `VirtualProtect`
-    // runs across contiguous alias blocks (avoids thousands of per-block locks/syscalls).
-    let (all_aliased, others, blocks_counted) = crate::inplace::alias_blocks_in(from, to, MANY_VIEWS);
-    if blocks_counted == 0 {
-        return;
-    }
-    #[cfg(feature = "diagnostics")]
-    ALIASES[0].fetch_add(blocks_counted, std::sync::atomic::Ordering::Relaxed);
-    g.aliased.extend(all_aliased);
-    let mut run: Option<(usize, usize)> = None;
-    for alias in others {
-        if g.protected.contains(&alias) {
-            continue;
-        }
-        match run {
-            Some((a, b)) if alias == b => run = Some((a, alias + 1)),
-            Some((a, b)) => {
-                protect_alias_run(g, a, b);
-                run = Some((alias, alias + 1));
-            }
-            None => run = Some((alias, alias + 1)),
-        }
-    }
-    if let Some((a, b)) = run {
-        protect_alias_run(g, a, b);
-    }
+    cover(g, from, to);
 }
 
-/// Coalesced `protect_alias` for contiguous alias blocks `[from, to)`: one
-/// `VirtualProtect` syscall when the run succeeds, per-block fallback otherwise.
-fn protect_alias_run(g: &mut Guards, from: usize, to: usize) {
-    use windows_sys::Win32::System::Memory::{PAGE_READONLY, VirtualProtect};
-    if to <= from {
-        return;
-    }
-    let mut old = 0;
-    // SAFETY: title view memory; only its protection changes.
-    if unsafe { VirtualProtect((from * BLOCK) as *const _, (to - from) * BLOCK, PAGE_READONLY, &mut old) } != 0 {
-        g.protected.extend(from..to);
-        return;
-    }
-    for block in from..to {
-        protect_alias(g, block);
-    }
+/// Views of one page past which its views are not guarded together.
+pub(crate) const MANY_VIEWS: usize = 64;
+
+/// Whether all the views of a guarded page are guarded together
+/// (`VICTORY_VIEW_GUARD`).
+fn view_guard() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_VIEW_GUARD").is_none_or(|v| v != "0"))
 }
+
+/// Diagnostics: blocks guarded together with their other views, blocks
+/// noted written because another view of theirs was written, and blocks
+/// opened because a view of theirs was mapped; since the start.
+#[cfg(feature = "diagnostics")]
+pub(crate) static ALIASES: [std::sync::atomic::AtomicU64; 3] = [const { std::sync::atomic::AtomicU64::new(0) }; 3];
 
 /// Makes the other views of `block`'s pages read-only and notes them all
 /// guarded together, `block` included (see [`protect`]).
@@ -2923,80 +2841,8 @@ fn protect_aliases(g: &mut Guards, block: usize) {
             protect_alias(g, alias);
         }
     }
-||||||| a26859fc
-    if !view_guard() {
-        return;
-    }
-    for (base, bytes) in crate::inplace::views_between(from.saturating_mul(BLOCK), to.saturating_mul(BLOCK)) {
-        let first = (base / BLOCK).max(from);
-        let last = (base.saturating_add(bytes).div_ceil(BLOCK)).min(to);
-        for block in first..last {
-            let shown = crate::inplace::pages_of(block * BLOCK);
-            // One view (nothing else to guard), or the page the title shows
-            // wherever it has nothing (thousands of views): each view of
-            // that one is guarded by itself.
-            if shown.len() < 2 || shown.len() > MANY_VIEWS {
-                continue;
-            }
-            #[cfg(feature = "diagnostics")]
-            ALIASES[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            for alias in shown {
-                let alias = alias / BLOCK;
-                g.aliased.insert(alias);
-                if alias != block {
-                    protect_alias(g, alias);
-                }
-            }
-        }
-    }
-=======
-    cover(g, from, to);
->>>>>>> avatar/main
 }
 
-/// Views of one page past which its views are not guarded together.
-pub(crate) const MANY_VIEWS: usize = 64;
-
-/// Whether all the views of a guarded page are guarded together
-/// (`VICTORY_VIEW_GUARD`).
-fn view_guard() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("VICTORY_VIEW_GUARD").is_none_or(|v| v != "0"))
-}
-
-/// Diagnostics: blocks guarded together with their other views, blocks
-/// noted written because another view of theirs was written, and blocks
-/// opened because a view of theirs was mapped; since the start.
-#[cfg(feature = "diagnostics")]
-pub(crate) static ALIASES: [std::sync::atomic::AtomicU64; 3] = [const { std::sync::atomic::AtomicU64::new(0) }; 3];
-
-<<<<<<< HEAD
-/// Makes `block` read-only: another view of pages a copy has just taken
-/// through its own view, so that a write through this one faults too. It is
-/// not noted clean. The copies of title memory at this view have not taken
-/// the pages: noted clean, the block would not be reported written at their
-/// next check and they would keep the bytes from before the write (`guard`
-/// reports a block that is read-only and not clean as written, then notes it
-/// clean). A block that is clean stays so: had the pages been written since
-/// its copies took them, `open` would have noted it written.
-fn protect_alias(g: &mut Guards, block: usize) {
-    use windows_sys::Win32::System::Memory::{PAGE_READONLY, VirtualProtect};
-    if g.protected.contains(&block) {
-        return;
-||||||| a26859fc
-/// Makes `block` read-only: another view of pages a copy has just taken
-/// through its own view, so that a write through this one faults too. It is
-/// not noted clean. The copies of title memory at this view have not taken
-/// the pages: noted clean, the block would not be reported written at their
-/// next check and they would keep the bytes from before the write (`guard`
-/// reports a block that is read-only and not clean as written, then notes it
-/// clean). A block that is clean stays so: had the pages been written since
-/// its copies took them, `open` would have opened it.
-fn protect_alias(g: &mut Guards, block: usize) {
-    use windows_sys::Win32::System::Memory::{PAGE_READONLY, VirtualProtect};
-    if g.protected.contains(&block) {
-        return;
-=======
 /// Of the blocks `[from, to)`, which are read-only by our hand where they
 /// can be: every other view of their pages is made read-only too. Where one
 /// cannot be (the kernel writes through it now, or the runtime is changing
@@ -3020,7 +2866,6 @@ fn cover(g: &mut Guards, from: usize, to: usize) -> bool {
             all = false;
             g.clean.remove(block);
         }
->>>>>>> avatar/main
     }
     all
 }
@@ -3098,19 +2943,11 @@ fn protect_here(g: &mut Guards, from: usize, to: usize) {
         done
     };
     let note = |g: &mut Guards, from: usize, to: usize| {
-<<<<<<< HEAD
-        g.protected.extend(from..to);
-        g.clean.extend(from..to);
+        g.protected.insert_all(from..to);
+        g.clean.insert_all(from..to);
         for block in from..to {
             g.unclean.remove(&block);
         }
-||||||| a26859fc
-        g.protected.extend(from..to);
-        g.clean.extend(from..to);
-=======
-        g.protected.insert_all(from..to);
-        g.clean.insert_all(from..to);
->>>>>>> avatar/main
     };
     // Ahead of the protection (`PROTECTED`).
     (from..to).for_each(|block| PROTECTED.set(block));
@@ -3123,35 +2960,12 @@ fn protect_here(g: &mut Guards, from: usize, to: usize) {
         // (Not one question a block of a region that is not there.)
         if block >= uncommitted_until && set(block, block + 1) {
             note(g, block, block + 1);
-<<<<<<< HEAD
-        } else {
-            #[cfg(feature = "diagnostics")]
-            let error = std::io::Error::last_os_error();
-            if block < uncommitted_end(block) {
-                g.absent.insert(block);
-                // Out of the unclean set while it stays so ([`Guards::parked`]).
-                if g.unclean.contains(&block) {
-                    park(g, block);
-                }
-            } else {
-                // Diagnostics: a committed block that will not be made
-                // read-only is reported written at every asking and never
-                // known to the guards (one in 1,024 said).
-                #[cfg(feature = "diagnostics")]
-                {
-                    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 1024 == 0 {
-                        tracing::info!("a block of title memory could not be made read-only (one in 1024): {:#x}: {error}", block * BLOCK);
-                    }
-                }
-            }
-||||||| a26859fc
-        } else if block < uncommitted_end(block) {
-            g.absent.insert(block);
-=======
             continue;
         }
         PROTECTED.clear(block);
+        // (Asked here, before the questions below: it is this block's.)
+        #[cfg(feature = "diagnostics")]
+        let error = std::io::Error::last_os_error();
         if block >= uncommitted_until {
             uncommitted_until = uncommitted_end(block);
             #[cfg(feature = "diagnostics")]
@@ -3162,7 +2976,21 @@ fn protect_here(g: &mut Guards, from: usize, to: usize) {
             if known_holes() && placeholder(block) {
                 g.held.insert(block);
             }
->>>>>>> avatar/main
+            // Out of the unclean set while it stays so ([`Guards::parked`]).
+            if g.unclean.contains(&block) {
+                park(g, block);
+            }
+        } else {
+            // Diagnostics: a committed block that will not be made
+            // read-only is reported written at every asking and never
+            // known to the guards (one in 1,024 said).
+            #[cfg(feature = "diagnostics")]
+            {
+                static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 1024 == 0 {
+                    tracing::info!("a block of title memory could not be made read-only (one in 1024): {:#x}: {error}", block * BLOCK);
+                }
+            }
         }
     }
 }
@@ -3184,32 +3012,6 @@ fn uncommitted_end(block: usize) -> usize {
 }
 
 /// Gives write access back to the guarded blocks of `[start, end)` and
-<<<<<<< HEAD
-/// notes them written; true if any was guarded. The same physical pages at
-/// every other view of them are noted written too: the write that faulted
-/// (or is ours, `crate::host::copy_mapped`) goes through one view, and
-/// every guard over the pages must copy them again.
-///
-/// Those other views stay read-only. `guard` reports a block that is
-/// read-only and not clean as written, and a write through one of them
-/// still faults and opens it. Opening them all cost two changes of
-/// protection for every other view of every page written (one here, one
-/// when the next check guarded it again), most of them for views the
-/// title did not write through before that check.
-fn open(g: &mut Guards, start: usize, end: usize) -> bool {
-    let any = open_here(g, start, end);
-    if start >= end || g.aliased.is_empty() {
-        return any;
-||||||| a26859fc
-/// notes them written; true if any was guarded. The same physical pages at
-/// every other view of them are opened too: the write that faulted (or is
-/// ours, `crate::host::copy_mapped`) goes through one view, and every
-/// guard over the pages must copy them again.
-fn open(g: &mut Guards, start: usize, end: usize) -> bool {
-    let any = open_here(g, start, end);
-    if start >= end || g.aliased.is_empty() {
-        return any;
-=======
 /// notes them written; how many there were. The same physical pages at
 /// every other view of them are written by that too (the write that faulted,
 /// or is ours, `crate::host::copy_mapped`, goes through one view): they are
@@ -3219,31 +3021,7 @@ fn open(g: &mut Guards, start: usize, end: usize) -> usize {
     let (first, last) = (start / BLOCK, end.div_ceil(BLOCK));
     if first >= last {
         return 0;
->>>>>>> avatar/main
     }
-<<<<<<< HEAD
-    let aliased: Vec<usize> = g.aliased.range(start / BLOCK..end.div_ceil(BLOCK)).copied().collect();
-    for block in aliased {
-        // Guarded with the others again when its own check, or the next
-        // check of one of them, finds the pages written.
-        g.aliased.remove(&block);
-        for alias in crate::inplace::pages_of(block * BLOCK) {
-            let alias = alias / BLOCK;
-            if alias != block && g.protected.contains(&alias) && g.clean.remove(&alias) {
-                if covered(&g.views, alias, alias + 1) {
-                    g.unclean.insert(alias);
-                }
-                #[cfg(feature = "diagnostics")]
-                ALIASES[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-||||||| a26859fc
-    let aliased: Vec<usize> = g.aliased.range(start / BLOCK..end.div_ceil(BLOCK)).copied().collect();
-    for block in aliased {
-        g.aliased.remove(&block);
-        for alias in crate::inplace::pages_of(block * BLOCK) {
-            if alias / BLOCK != block && open_here(g, alias, alias.saturating_add(BLOCK)) {
-                #[cfg(feature = "diagnostics")]
-                ALIASES[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-=======
     let mut blocks: Vec<usize> = g.protected.range(first..last).collect();
     let here = blocks.len();
     let aliased: Vec<usize> = g.aliased.range(first..last).collect();
@@ -3263,7 +3041,6 @@ fn open(g: &mut Guards, start: usize, end: usize) -> usize {
                 if !(first..last).contains(&other) && g.protected.contains(other) {
                     blocks.push(other);
                 }
->>>>>>> avatar/main
             }
         }
         #[cfg(feature = "diagnostics")]
@@ -3288,15 +3065,6 @@ fn unguard(g: &mut Guards, blocks: &[usize]) {
     for &block in blocks {
         let mut old = 0;
         // SAFETY: a block we made read-only.
-<<<<<<< HEAD
-        unsafe { VirtualProtect((block * BLOCK) as *const _, BLOCK, PAGE_READWRITE, &mut old) };
-        // A view block: not clean ([`Guards::unclean`]).
-        if covered(&g.views, block, block + 1) {
-            g.unclean.insert(block);
-        }
-||||||| a26859fc
-        unsafe { VirtualProtect((block * BLOCK) as *const _, BLOCK, PAGE_READWRITE, &mut old) };
-=======
         unsafe {
             if VirtualProtect((block * BLOCK) as *const _, BLOCK, PAGE_READWRITE, &mut old) != 0
                 && !matches!(old, PAGE_READONLY | PAGE_READWRITE)
@@ -3307,11 +3075,14 @@ fn unguard(g: &mut Guards, blocks: &[usize]) {
             }
         }
         PROTECTED.clear(block);
+        // A view block: not clean ([`Guards::unclean`]).
+        if covered(&g.views, block, block + 1) {
+            g.unclean.insert(block);
+        }
     }
     #[cfg(feature = "diagnostics")]
     if !blocks.is_empty() {
         tally(8, started.elapsed().as_nanos() as u64);
->>>>>>> avatar/main
     }
 }
 
@@ -3492,36 +3263,14 @@ pub fn title_memory_written(at: usize, len: usize, pages: bool) {
     crate::descriptor::host::page_written(at, len);
 }
 
-<<<<<<< HEAD
 /// The runtime mapped a view of physical pages (`crate::inplace::title_memory_view`):
 /// the new view is writable, so the same bytes guarded at another view must be
-/// checked again — and are, the pages noted written, which also has the next
-/// check guard the new view (`protect`).
+/// checked again - and are, the pages noted written, which also has the next
+/// check guard the new view ([`cover`]).
 pub(crate) fn views_mapped(ranges: &[(usize, usize)]) {
     if !view_guard() || ranges.is_empty() {
-||||||| a26859fc
-/// The runtime mapped a view of the physical bytes `[offset, offset + len)`
-/// of `section` (`crate::inplace::title_memory_view`): the view is
-/// writable, so the same bytes guarded at another view must be checked
-/// again — and are, the pages noted written, which also has the next check
-/// guard the new view (`protect`).
-pub(crate) fn views_mapped(section: usize, offset: u64, len: usize) {
-    if !view_guard() {
         return;
     }
-    let ranges = crate::inplace::views_of_section(section, offset, len);
-    if ranges.is_empty() {
-=======
-/// The runtime mapped a view of the physical bytes `[offset, offset + len)`
-/// of `section` (`crate::inplace::title_memory_view`): the view is
-/// writable, so the same bytes guarded at another view must be checked
-/// again - and are, the pages noted written, which also has the next check
-/// guard the new view ([`cover`]).
-pub(crate) fn views_mapped(section: usize, offset: u64, len: usize) {
-    if !view_guard() {
-        return;
-    }
-    let ranges = crate::inplace::views_of_section(section, offset, len);
     // (A block is noted in `PROTECTED` ahead of the look at its page's views
     // that did not find this one yet.)
     if !ranges.iter().any(|&(at, n)| PROTECTED.any(at / BLOCK, (at + n).div_ceil(BLOCK))) {
@@ -3547,26 +3296,9 @@ pub(crate) fn views_mapped(section: usize, offset: u64, len: usize) {
 pub fn title_memory_splitting(at: usize, len: usize) {
     let others: Vec<usize> = elsewhere(at, len).into_iter().flat_map(|(_, others)| others).collect();
     if others.is_empty() {
->>>>>>> avatar/main
         return;
     }
     let mut g = guards();
-<<<<<<< HEAD
-    for &(at, n) in ranges {
-        let end = at.saturating_add(n);
-        let aliased: Vec<usize> = g.aliased.range(at / BLOCK..end.div_ceil(BLOCK)).copied().collect();
-        for block in aliased {
-            g.aliased.remove(&block);
-        }
-        if open_here(&mut g, at, end) {
-            #[cfg(feature = "diagnostics")]
-            ALIASES[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-||||||| a26859fc
-    for &(at, n) in &ranges {
-        if open_here(&mut g, at, at.saturating_add(n)) {
-            #[cfg(feature = "diagnostics")]
-            ALIASES[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-=======
     // (The view itself too: the part that stays is read-only until then. And
     // all of them told as written before the first is writable.)
     for &other in &others {
@@ -3579,7 +3311,6 @@ pub fn title_memory_splitting(at: usize, len: usize) {
         if CHANGING.get().0 {
             CHANGING.set((true, true));
             g.changing.push((other / BLOCK, other / BLOCK + 1));
->>>>>>> avatar/main
         }
     }
 }
@@ -3607,11 +3338,6 @@ impl Drop for Remapping {
     fn drop(&mut self) {
         // From asking for the lock until it is let go (the frame log).
         crate::framelog::add(crate::framelog::T::RemapUs, self.1.elapsed().as_micros() as u64);
-    }
-}
-
-impl Drop for Remapping {
-    fn drop(&mut self) {
         // The change is done: what is there now may be guarded.
         if CHANGING.replace((false, false)).1 {
             guards().changing.clear();
@@ -3755,15 +3481,6 @@ pub(crate) fn lost(what: &'static str, at: usize, len: usize) {
 /// place is under way and none begins ([`title_memory_reading`]). Taken
 /// around the whole change, the unmapping and the mapping again.
 pub fn title_memory_remapping() -> Remapping {
-<<<<<<< HEAD
-    let asked = std::time::Instant::now();
-    let held = MAPPING.write().unwrap_or_else(|e| e.into_inner());
-    crate::framelog::add(crate::framelog::T::Remaps, 1);
-    crate::framelog::add(crate::framelog::T::RemapWaitUs, asked.elapsed().as_micros() as u64);
-    Remapping(held, asked)
-||||||| a26859fc
-    Remapping(MAPPING.write().unwrap_or_else(|e| e.into_inner()))
-=======
     // For the title's own threads ([`came_back`]).
     install();
     let met = MET.load(std::sync::atomic::Ordering::Relaxed);
@@ -3774,11 +3491,13 @@ pub fn title_memory_remapping() -> Remapping {
             tracing::info!(met, "accesses of title threads that waited for a change of mapping");
         }
     }
+    let asked = std::time::Instant::now();
     let changing = MAPPING.write().unwrap_or_else(|e| e.into_inner());
+    crate::framelog::add(crate::framelog::T::Remaps, 1);
+    crate::framelog::add(crate::framelog::T::RemapWaitUs, asked.elapsed().as_micros() as u64);
     CHANGES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     CHANGING.set((true, false));
-    Remapping(changing)
->>>>>>> avatar/main
+    Remapping(changing, asked)
 }
 
 /// What a read of title memory in place holds ([`title_memory_reading`]).
@@ -3814,13 +3533,9 @@ pub fn title_memory_reading_now() -> Option<Reading> {
 /// neither guarded nor writable) and a kernel read into it fail, so the
 /// write access is given back.
 pub fn title_memory_remapped(at: usize, len: usize) {
-<<<<<<< HEAD
     // Stored pages followed there end (`VICTORY_BACK_READS`): counted only.
     #[cfg(feature = "diagnostics")]
     crate::backreads::remapped(at, len);
-    crate::texback::remapped(at, len);
-||||||| a26859fc
-=======
     crate::texback::remapped(at, len);
     open(&mut title_memory_changed(at, len), at, at.saturating_add(len));
 }
@@ -3908,7 +3623,6 @@ fn allocation_end(at: usize, inside: usize) -> usize {
 /// Tells what keeps track of what title memory shows; the guards, with no
 /// block of the range known unmapped.
 fn title_memory_changed(at: usize, len: usize) -> std::sync::MutexGuard<'static, Guards> {
->>>>>>> avatar/main
     // A placed texture there arrives, goes or changes with no descriptor
     // written.
     crate::descriptor::host::remapped(at, len);
@@ -3925,34 +3639,26 @@ fn title_memory_changed(at: usize, len: usize) -> std::sync::MutexGuard<'static,
             PUBLISHED.clear(block);
         }
     }
-<<<<<<< HEAD
     let blocks: Vec<usize> = g.protected.range(range.clone()).copied().collect();
     for block in blocks {
         g.protected.remove(&block);
         g.clean.remove(&block);
-||||||| a26859fc
-    let blocks: Vec<usize> = g.protected.range(range).copied().collect();
-    for block in blocks {
-        g.protected.remove(&block);
-        g.clean.remove(&block);
-=======
+    }
     let foreign: Vec<usize> = g.foreign.range(range.clone()).copied().collect();
     for block in foreign {
         g.foreign.remove(&block);
->>>>>>> avatar/main
     }
     let aliased: Vec<usize> = g.aliased.range(range).collect();
     for block in aliased {
         g.aliased.remove(block);
     }
-<<<<<<< HEAD
     for (addr, n) in reopen {
         let end = addr.saturating_add(n);
         let stale: Vec<usize> = g.aliased.range(addr / BLOCK..end.div_ceil(BLOCK)).copied().collect();
         for block in stale {
             g.aliased.remove(&block);
         }
-        open_here(&mut g, addr, end);
+        open(&mut g, addr, end);
     }
     // Nor parked: the views below go back to the unclean set.
     let parked: Vec<usize> = g.parked.range(range.clone()).copied().collect();
@@ -3968,6 +3674,7 @@ fn title_memory_changed(at: usize, len: usize) -> std::sync::MutexGuard<'static,
         .flat_map(|&(a, b)| a.max(range.start)..b.min(range.end))
         .collect();
     g.unclean.extend(views);
+    g
 }
 
 /// The title committed `[at, at + len)` through the runtime
@@ -3988,10 +3695,6 @@ pub fn title_memory_committed(at: usize, len: usize) {
     for block in absent {
         g.absent.remove(&block);
     }
-||||||| a26859fc
-=======
-    g
->>>>>>> avatar/main
 }
 
 /// Registers the handler that takes writes to guarded blocks, once, ahead
@@ -4035,31 +3738,15 @@ pub(crate) fn install() {
             };
         }
         let at = r.ExceptionInformation[1];
-<<<<<<< HEAD
-        // Held across both checks: another thread may have opened the block
-        // since this one faulted, and a copy may have guarded it again since
-        // (then it is ours again, not read-only for some other reason).
-        let mut g = guards();
-        if open(&mut g, at, at + 1) {
-            #[cfg(feature = "diagnostics")]
-            crate::copystat::add(crate::copystat::C::GuardFaults, 1);
-            crate::framelog::add(crate::framelog::T::GuardFaults, 1);
-||||||| a26859fc
-        // Held across both checks: another thread may have opened the block
-        // since this one faulted, and a copy may have guarded it again since
-        // (then it is ours again, not read-only for some other reason).
-        let mut g = guards();
-        if open(&mut g, at, at + 1) {
-            #[cfg(feature = "diagnostics")]
-            crate::copystat::add(crate::copystat::C::GuardFaults, 1);
-=======
         let block = at / BLOCK;
         if ours.is_none()
             && PROTECTED.any(block, block + 1)
             // SAFETY: the context the system passes, to go on from.
             && crate::titlewrite::store(unsafe { &mut *context }, at)
         {
->>>>>>> avatar/main
+            #[cfg(feature = "diagnostics")]
+            crate::copystat::add(crate::copystat::C::GuardFaults, 1);
+            crate::framelog::add(crate::framelog::T::GuardFaults, 1);
             return EXCEPTION_CONTINUE_EXECUTION;
         }
         // Another thread may have opened the block since this one faulted
@@ -5105,7 +4792,6 @@ mod tests {
         drop_views(section, &[one, two], SIZE);
     }
 
-<<<<<<< HEAD
     /// A write through a view that no copy checks: the checked view is
     /// noted written and left read-only, its check reports the pages and
     /// guards the written view again, so a second write through it is seen
@@ -5132,8 +4818,6 @@ mod tests {
         drop_views(section, &[checked, other], BLOCK);
     }
 
-||||||| a26859fc
-=======
     /// A write opens the view it goes through and no other: the others stay
     /// read-only, are told as written, and take writes of their own.
     #[test]
@@ -5481,7 +5165,6 @@ mod tests {
         drop_views(section, &[one, two], SIZE);
     }
 
->>>>>>> avatar/main
     /// A page shown in more than `MANY_VIEWS` views is guarded at each by
     /// itself: the others stay writable, and nothing looks through them all.
     #[test]
@@ -5680,7 +5363,6 @@ mod mapping_tests {
         assert!(read.load(Ordering::SeqCst));
     }
 }
-<<<<<<< HEAD
 
 #[cfg(test)]
 mod wrote_tests {
@@ -5727,8 +5409,6 @@ mod wrote_tests {
         );
     }
 }
-||||||| a26859fc
-=======
 
 #[cfg(test)]
 mod many_askers_tests {
@@ -6185,4 +5865,3 @@ mod many_askers_tests {
         assert!(!BITS.all(1 << 40, (1 << 40) + 1), "outside the address space");
     }
 }
->>>>>>> avatar/main
