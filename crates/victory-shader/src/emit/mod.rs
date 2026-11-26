@@ -559,7 +559,6 @@ pub fn emit(
         // lost the card in a submission of two programs that had just moved to it
         // (`ptfx_CS_lightAtlas_Sprite` and `_Trail`). The 32-lane programs' form below, which
         // has no barrier, stays on.
-<<<<<<< HEAD
         let wide_option = std::env::var_os("VICTORY_WAVE_WIDE");
         // Both archived kernels use one logical wave per group and have
         // validated wave32 PSOs on RTX. Explicit policy wins.
@@ -578,17 +577,6 @@ pub fn emit(
             && c.part(FourCC::ACCC).is_some()
             && matches!(&original, Err(ShaderError::Unsupported { what, .. })
                 if *what == lower::DIVERGENT_MASK_EXCHANGE);
-||||||| merged common ancestors
-        let wide_on = std::env::var_os("VICTORY_WAVE_WIDE").is_some_and(|v| v == "1");
-=======
-        let wide_on = std::env::var_os("VICTORY_WAVE_WIDE").is_some_and(|v| v == "1");
-        let wide_form = |deep: Option<&ir::Program>| {
-            let bases = [deep, forms[1].1.as_ref().map(|f| &f.0), forms[0].1.as_ref().map(|f| &f.0), Some(p)];
-            let again = widen(c, native, bases.into_iter().flatten().next().expect("the program itself"), why);
-            report("wave-wide branches", &again);
-            again
-        };
->>>>>>> origin/exp/vibr-head
         // exact first: each host wave on its own where that is exact (the idiom, every
         // form; no barriers), then the other exact forms; then approximate
         for exact in [true, false] {
@@ -610,7 +598,6 @@ pub fn emit(
                 // Still stopped where not every lane runs: the per-lane branches around
                 // those places taken as the console takes them, by the whole wave at once
                 // ([`widen`]), at two group barriers per such branch.
-<<<<<<< HEAD
                 if wide_on || driver_loop {
                     let bases = [
                         deep.as_ref().map(|f| &f.0),
@@ -624,26 +611,6 @@ pub fn emit(
                         if done(&again) {
                             return again.map(|(shader, _)| shader);
                         }
-||||||| merged common ancestors
-                if wide_on {
-                    let bases = [
-                        deep.as_ref().map(|f| &f.0),
-                        forms[1].1.as_ref().map(|f| &f.0),
-                        forms[0].1.as_ref().map(|f| &f.0),
-                        Some(p),
-                    ];
-                    if let Some(base) = bases.into_iter().flatten().next() {
-                        let again = widen(c, native, base, why);
-                        report("wave-wide branches", &again);
-                        if done(&again) {
-                            return again.map(|(shader, _)| shader);
-                        }
-=======
-                if wide_on {
-                    let again = wide_form(deep.as_ref().map(|f| &f.0));
-                    if done(&again) {
-                        return again.map(|(shader, _)| shader);
->>>>>>> origin/exp/vibr-head
                     }
                 }
                 if strict {
@@ -691,7 +658,6 @@ pub fn emit(
                 }
             }
         }
-<<<<<<< HEAD
         // Last of all (`VICTORY_WAVE_LDS_LOOSE=0` turns it off): LDS read and written inside
         // one lane-branch region, ordered between the two host waves only where the region
         // is entered and left (`loose_lds::with`, approximate). A 32-lane host refuses
@@ -721,23 +687,24 @@ pub fn emit(
                 }
             }
         }
-||||||| merged common ancestors
-=======
-        // Last of all, for a program that would still ask for 64-lane waves, which this host
+        // Still last, for a program that would ask for 64-lane waves even so, which this host
         // refuses outright: the wave-wide form after all (unless `VICTORY_WAVE_WIDE=0`). Every
         // group barrier it adds now stands behind decisions the two host waves take as one
         // ([`widen`]). Not before the forms above: the programs they take keep their
         // translation.
-        let wide_last = !wide_on && std::env::var_os("VICTORY_WAVE_WIDE").is_none_or(|v| v != "0");
+        let wide_last = !wide_on && wide_option.as_ref().is_none_or(|v| v != "0");
         if wide_last && matches!(&original, Ok((_, Some(64)))) {
             let deep_on = std::env::var_os("VICTORY_WAVE_DEEP_SKIPS").is_none_or(|v| v != "0");
-            let deep = if deep_on { form(ir::without_skips(p, true)) } else { None };
-            let again = wide_form(deep.as_ref().map(|f| &f.0));
-            if done(&again) {
-                return again.map(|(shader, _)| shader);
+            let deep = if deep_on { form("without skips, scalars followed", ir::without_skips(p, true)) } else { None };
+            let bases = [deep.as_ref().map(|f| &f.0), forms[1].1.as_ref().map(|f| &f.0), forms[0].1.as_ref().map(|f| &f.0), Some(p)];
+            if let Some(base) = bases.into_iter().flatten().next() {
+                let again = widen(c, native, base, why, driver_loop);
+                report("wave-wide branches", &again);
+                if done(&again) {
+                    return again.map(|(shader, _)| shader);
+                }
             }
         }
->>>>>>> origin/exp/vibr-head
     }
     // SCC of a mask operation joined with a scalar test behind a per-lane skip (the 32-lane
     // trace programs): right once the wave takes that skip together ([`widen`]; the
@@ -862,7 +829,6 @@ fn widen_from(
                 }
             }
             if why {
-<<<<<<< HEAD
                 let order = ir::reverse_postorder(&p.blocks);
                 let mut rpo = vec![0usize; p.blocks.len()];
                 for (i, &b) in order.iter().enumerate() {
@@ -878,12 +844,7 @@ fn widen_from(
                         format!("B{b}({nm}{})", if back { ",BACK" } else { "" })
                     })
                     .collect();
-                eprintln!("WAVE64-WIDE {} branches taken wave-wide: [{}]", wide.len(), desc.join(", "));
-||||||| merged common ancestors
-                eprintln!("WAVE64-WIDE {} branches taken wave-wide", wide.len());
-=======
-                eprintln!("WAVE64-WIDE {} branches taken wave-wide, {} scalar branches agreed on", wide.len(), agreed.len());
->>>>>>> origin/exp/vibr-head
+                eprintln!("WAVE64-WIDE {} branches taken wave-wide, {} scalar branches agreed on: [{}]", wide.len(), agreed.len(), desc.join(", "));
             }
             return r;
         }
