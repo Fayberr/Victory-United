@@ -198,20 +198,12 @@ pub fn boxes(children: &[u32; 4], boxes: &[[f32; 6]; 4], ray: &Ray, sort: bool) 
         }
         let enter = near[0].max(near[1]).max(near[2]);
         let leave = far[0].min(far[1]).min(far[2]);
-<<<<<<< HEAD
         // A box whose minimum x is NaN is switched off. A child that is not
         // there may have inverted infinite bounds, which every ray enters at
         // minus infinity: it would be first of the sorted children and end
-        // the walk before them (DexNom/VIctory bc3cd4b0).
+        // the walk before them (DexNom/VIctory bc3cd4b0). Their pointers must
+        // also keep the miss distance when sorting real hits.
         if children[n] != NONE && !b[0].is_nan() && leave >= enter.max(0.0) && enter < ray.extent {
-||||||| 085ee7c4
-        // A box whose minimum x is NaN is switched off.
-        if !b[0].is_nan() && leave >= enter.max(0.0) && enter < ray.extent {
-=======
-        // Empty builder slots can have inverted infinite bounds. Their
-        // pointers must keep the miss distance when sorting real hits.
-        if children[n] != NONE && !b[0].is_nan() && leave >= enter.max(0.0) && enter < ray.extent {
->>>>>>> vitoriabr/main
             ids[n] = children[n];
             distances[n] = enter;
         }
