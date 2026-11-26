@@ -61,74 +61,7 @@ const DEVICES: usize = PADS + 2;
 const HISTORY: usize = 32;
 const POLL: Duration = Duration::from_millis(8);
 
-<<<<<<< HEAD
 const TAB: u8 = 0x09;
-||||||| merged common ancestors
-/// The keyboard's stand-in gamepad (virtual key, button); README lists it.
-/// Sticks: W/A/S/D left, I/J/K/L right; triggers Z and C.
-const FALLBACK_BUTTONS: [(u8, u32); 14] = [
-    (0x1B, MENU), // Esc
-    (0x09, VIEW), // Tab
-    (0x0D, A),    // Enter
-    (0x08, B),    // Backspace
-    (b'X', X),
-    (b'Y', Y),
-    (0x26, UP), // arrows
-    (0x28, DOWN),
-    (0x25, LEFT),
-    (0x27, RIGHT),
-    (b'Q', LEFT_SHOULDER),
-    (b'E', RIGHT_SHOULDER),
-    (b'F', LEFT_STICK),
-    (b'H', RIGHT_STICK),
-];
-
-/// A gamepad reading: triggers 0 to 1, sticks -1 to 1 (up positive).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct PadState {
-    buttons: u32,
-    left_trigger: f32,
-    right_trigger: f32,
-    left_x: f32,
-    left_y: f32,
-    right_x: f32,
-    right_y: f32,
-}
-=======
-/// The keyboard's stand-in gamepad (virtual key, button); README lists it.
-/// Sticks: W/A/S/D left, I/J/K/L right; triggers Z and C.
-const FALLBACK_BUTTONS: [(u8, u32); 15] = [
-    (0x1B, MENU), // Esc
-    (0x09, VIEW), // Tab
-    (0x0D, A),    // Enter
-    (0x08, B),    // Backspace
-    (b'O', B),    // Circle, for PlayStation players
-    (b'X', X),
-    (b'Y', Y),
-    (0x26, UP), // arrows
-    (0x28, DOWN),
-    (0x25, LEFT),
-    (0x27, RIGHT),
-    (b'Q', LEFT_SHOULDER),
-    (b'E', RIGHT_SHOULDER),
-    (b'F', LEFT_STICK),
-    (b'H', RIGHT_STICK),
-];
-
-/// A gamepad reading: triggers 0 to 1, sticks -1 to 1 (up positive).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct PadState {
-    buttons: u32,
-    left_trigger: f32,
-    right_trigger: f32,
-    left_x: f32,
-    left_y: f32,
-    right_x: f32,
-    right_y: f32,
-}
->>>>>>> belobug/main
 
 /// Motor speeds for one pad, each 0 (off) to `u16::MAX` (full), in the
 /// order of the title's four rumble levels.
@@ -160,7 +93,6 @@ trait Source: Send {
     fn pad(&mut self, slot: usize) -> Option<PadState>;
     /// Keys held down; none while the title's window lacks focus.
     fn keys(&mut self) -> Vec<KeyState>;
-<<<<<<< HEAD
     /// Mouse buttons held down (`controls::MOUSE_BUTTONS`); none while the
     /// cursor is not captured.
     fn mouse_buttons(&mut self) -> Vec<u8> {
@@ -171,16 +103,9 @@ trait Source: Send {
     fn mouse(&mut self, _now: u64, _wanted: bool, _window: Duration) -> Mouse {
         Mouse::default()
     }
-    /// Motor speeds: low frequency (left), high frequency (right).
-    fn rumble(&mut self, slot: usize, low: u16, high: u16);
-||||||| merged common ancestors
-    /// Motor speeds: low frequency (left), high frequency (right).
-    fn rumble(&mut self, slot: usize, low: u16, high: u16);
-=======
     /// Motor speeds for the pad in host slot `slot`; a host without
     /// trigger motors drops those two.
     fn rumble(&mut self, slot: usize, motors: Motors);
->>>>>>> belobug/main
 }
 
 /// How many current readings the title has taken: what a [`Latch`] counts
@@ -1485,20 +1410,12 @@ extern "system" fn device_status(this: *const Device) -> u32 {
         0
     }
 }
-<<<<<<< HEAD
 // shortcut: trigger motors are dropped (XInput has none). The host API that
 // drives them without a redistributable is Windows.Gaming.Input (WinRT
 // `Gamepad.Vibration`), which needs WinRT bindings this crate lacks outside
-// diagnostics builds; the title sends trigger levels in slot 0x50.
-||||||| merged common ancestors
-// shortcut: trigger motors are dropped (XInput has none). The host API that
-// drives them without a redistributable is Windows.Gaming.Input (WinRT
-// `Gamepad.Vibration`), which needs WinRT bindings this crate lacks outside
-// diagnostics builds; Grand Theft Auto VI sends trigger levels in slot 0x50.
-=======
-// Grand Theft Auto VI sends trigger levels in slot 0x50; all four reach the
-// host, which drops the trigger motors (see `host::Host::rumble`).
->>>>>>> belobug/main
+// diagnostics builds; the title sends trigger levels in slot 0x50. All four
+// levels reach the host, which drops the trigger motors (see
+// `host::Host::rumble`).
 extern "system" fn set_rumble(this: *const Device, params: *const [f32; 4]) {
     // SAFETY: one of our devices.
     let device = unsafe { &*this };
@@ -1513,29 +1430,23 @@ extern "system" fn set_rumble(this: *const Device, params: *const [f32; 4]) {
         unsafe { *params }
     };
     let speed = |level: f32| (level.clamp(0.0, 1.0) * f32::from(u16::MAX)) as u16;
-<<<<<<< HEAD
-    let mut source = lock(&device.hub().source);
-    if one_pad {
-        // The one pad is every host pad.
-        for slot in 0..PADS {
-            if source.pad(slot).is_some() {
-                source.rumble(slot, speed(low), speed(high));
-            }
-        }
-    } else {
-        source.rumble(device.index, speed(low), speed(high));
-    }
-||||||| merged common ancestors
-    lock(&device.hub().source).rumble(device.index, speed(low), speed(high));
-=======
     let motors = Motors {
         low: speed(low),
         high: speed(high),
         left_trigger: speed(left_trigger),
         right_trigger: speed(right_trigger),
     };
-    lock(&device.hub().source).rumble(device.index, motors);
->>>>>>> belobug/main
+    let mut source = lock(&device.hub().source);
+    if one_pad {
+        // The one pad is every host pad.
+        for slot in 0..PADS {
+            if source.pad(slot).is_some() {
+                source.rumble(slot, motors);
+            }
+        }
+    } else {
+        source.rumble(device.index, motors);
+    }
 }
 extern "system" fn unsupported<const SLOT: usize>(_: *const c_void) -> HRESULT {
     tracing::warn!(
@@ -2050,7 +1961,21 @@ mod host {
                 }
                 self.empty_until[slot] = Some(Instant::now() + EMPTY_SLOT_RECHECK);
             }
-<<<<<<< HEAD
+            // A DualSense is a HID device, not an XInput one; it plays slot 0
+            // when no XInput pad answers there.
+            if slot == 0
+                && let Some(pad) = super::super::dualsense::latest()
+            {
+                return Some(PadState {
+                    buttons: pad.buttons,
+                    left_trigger: pad.left_trigger,
+                    right_trigger: pad.right_trigger,
+                    left_x: pad.left_x,
+                    left_y: pad.left_y,
+                    right_x: pad.right_x,
+                    right_y: pad.right_y,
+                });
+            }
             self.empty_until[slot] = None;
             #[allow(unused_mut)]
             let mut pad = convert(&state.Gamepad);
@@ -2077,27 +2002,6 @@ mod host {
                 }
             }
             Some(pad)
-||||||| merged common ancestors
-            self.empty_until[slot] = None;
-            Some(convert(&state.Gamepad))
-=======
-            // A DualSense is a HID device, not an XInput one; it plays slot 0
-            // when no XInput pad answers there.
-            if slot == 0
-                && let Some(pad) = super::super::dualsense::latest()
-            {
-                return Some(PadState {
-                    buttons: pad.buttons,
-                    left_trigger: pad.left_trigger,
-                    right_trigger: pad.right_trigger,
-                    left_x: pad.left_x,
-                    left_y: pad.left_y,
-                    right_x: pad.right_x,
-                    right_y: pad.right_y,
-                });
-            }
-            None
->>>>>>> belobug/main
         }
 
         fn keys(&mut self) -> Vec<KeyState> {
@@ -2148,7 +2052,6 @@ mod host {
                 .collect()
         }
 
-<<<<<<< HEAD
         fn mouse_buttons(&mut self) -> Vec<u8> {
             let captured = cursor::FOCUSED.load(Ordering::Relaxed) && cursor::captured();
             let mut down = Vec::new();
@@ -2178,16 +2081,11 @@ mod host {
             self.mouse.poll(now, wanted, window)
         }
 
-        fn rumble(&mut self, slot: usize, low: u16, high: u16) {
-||||||| merged common ancestors
-        fn rumble(&mut self, slot: usize, low: u16, high: u16) {
-=======
         // shortcut: trigger motors are dropped (XInput has none). The host
         // API that drives them without a redistributable is
         // Windows.Gaming.Input (WinRT `Gamepad.Vibration`), which needs WinRT
         // bindings this crate lacks outside diagnostics builds.
         fn rumble(&mut self, slot: usize, motors: Motors) {
->>>>>>> belobug/main
             let speeds = XINPUT_VIBRATION {
                 wLeftMotorSpeed: motors.low,
                 wRightMotorSpeed: motors.high,
@@ -2208,100 +2106,25 @@ mod host {
             let list = std::env::var("VICTORY_KEYS").unwrap_or_default();
             let keys = list.split(',').filter_map(|entry| {
                 let (at, key) = entry.split_once(':')?;
-<<<<<<< HEAD
-                let vk = match key.trim() {
-                    "Enter" => 0x0D,
-                    "Esc" => 0x1B,
-                    "Tab" => 0x09,
-                    "Back" => 0x08,
-                    "Up" => 0x26,
-                    "Down" => 0x28,
-                    "Left" => 0x25,
-                    "Right" => 0x27,
-                    k if k.len() == 1 && k.as_bytes()[0].is_ascii_alphanumeric() => {
-                        k.as_bytes()[0].to_ascii_uppercase()
-                    }
-                    _ => return None,
-                };
+                let vk = key_named(key.trim())?;
                 let time = |t: &str| Duration::try_from_secs_f64(t.trim().parse().ok()?).ok();
                 let (from, to) = match at.split_once('-') {
                     Some((from, to)) => (time(from)?, time(to)?),
                     None => (time(at)?, time(at)? + Duration::from_millis(200)),
                 };
                 Some((from, to, vk))
-||||||| merged common ancestors
-                let vk = match key.trim() {
-                    "Enter" => 0x0D,
-                    "Esc" => 0x1B,
-                    "Tab" => 0x09,
-                    "Back" => 0x08,
-                    "Up" => 0x26,
-                    "Down" => 0x28,
-                    "Left" => 0x25,
-                    "Right" => 0x27,
-                    k if k.len() == 1 && k.as_bytes()[0].is_ascii_alphanumeric() => {
-                        k.as_bytes()[0].to_ascii_uppercase()
-                    }
-                    _ => return None,
-                };
-                Some((
-                    Duration::try_from_secs_f64(at.trim().parse().ok()?).ok()?,
-                    vk,
-                ))
-=======
-                let vk = key_named(key.trim())?;
-                Some((
-                    Duration::try_from_secs_f64(at.trim().parse().ok()?).ok()?,
-                    vk,
-                ))
->>>>>>> belobug/main
             });
             (Instant::now(), keys.collect())
         });
         let (start, keys) = &*SCRIPT;
         let now = start.elapsed();
         keys.iter()
-<<<<<<< HEAD
             .filter(|&&(from, to, _)| (from..to).contains(&now))
             .map(|&(_, _, vk)| vk)
-||||||| merged common ancestors
-            .filter(|&&(at, _)| (at..at + Duration::from_millis(200)).contains(&now))
-            .map(|&(_, vk)| vk)
-=======
-            .filter(|&&(at, _)| (at..at + Duration::from_millis(200)).contains(&now))
-            .map(|&(_, vk)| vk)
             .chain(asked())
->>>>>>> belobug/main
             .collect()
     }
 
-<<<<<<< HEAD
-    /// Debugging aid: `VICTORY_KBM_SCRIPT=<seconds>:<key>[*<hold seconds>],...`
-    /// plays keyboard and mouse input into the controls layer as if held
-    /// (with or without focus or capture). A key is a `[controls]` key name
-    /// (`W`, `LShift`, `MouseLeft`...) held 0.2 s unless a hold is given;
-    /// `MouseX=<counts>` / `MouseY=<counts>` move the mouse that far, spread
-    /// over the hold; `Wheel=<steps>` turns the wheel (up positive).
-    #[cfg(feature = "diagnostics")]
-    mod kbm {
-        use std::time::{Duration, Instant};
-
-        use super::super::Counts;
-        use crate::modules::controls::key_code;
-
-        enum What {
-            Key(u8),
-            Mouse(f64, f64),
-            Wheel(i32),
-||||||| merged common ancestors
-    /// The foreground window is one of ours (the title's or our fallback).
-    fn focused() -> bool {
-        let mut process = 0;
-        // SAFETY: plain queries; a null window gives process 0.
-        unsafe {
-            GetWindowThreadProcessId(GetForegroundWindow(), &mut process);
-            process == GetCurrentProcessId()
-=======
     #[cfg(feature = "diagnostics")]
     fn key_named(name: &str) -> Option<u8> {
         Some(match name {
@@ -2359,14 +2182,23 @@ mod host {
         a.held.map(|h| h.1)
     }
 
-    /// The foreground window is one of ours (the title's or our fallback).
-    fn focused() -> bool {
-        let mut process = 0;
-        // SAFETY: plain queries; a null window gives process 0.
-        unsafe {
-            GetWindowThreadProcessId(GetForegroundWindow(), &mut process);
-            process == GetCurrentProcessId()
->>>>>>> belobug/main
+    /// Debugging aid: `VICTORY_KBM_SCRIPT=<seconds>:<key>[*<hold seconds>],...`
+    /// plays keyboard and mouse input into the controls layer as if held
+    /// (with or without focus or capture). A key is a `[controls]` key name
+    /// (`W`, `LShift`, `MouseLeft`...) held 0.2 s unless a hold is given;
+    /// `MouseX=<counts>` / `MouseY=<counts>` move the mouse that far, spread
+    /// over the hold; `Wheel=<steps>` turns the wheel (up positive).
+    #[cfg(feature = "diagnostics")]
+    mod kbm {
+        use std::time::{Duration, Instant};
+
+        use super::super::Counts;
+        use crate::modules::controls::key_code;
+
+        enum What {
+            Key(u8),
+            Mouse(f64, f64),
+            Wheel(i32),
         }
 
         pub(super) struct Script {
@@ -2545,15 +2377,9 @@ mod tests {
     struct FakeHost {
         pads: [Option<PadState>; PADS],
         keys: Vec<KeyState>,
-<<<<<<< HEAD
         buttons: Vec<u8>,
         mouse: Mouse,
-        rumble: Vec<(usize, u16, u16)>,
-||||||| merged common ancestors
-        rumble: Vec<(usize, u16, u16)>,
-=======
         rumble: Vec<(usize, Motors)>,
->>>>>>> belobug/main
     }
 
     struct Fake(Arc<Mutex<FakeHost>>);
@@ -2565,7 +2391,6 @@ mod tests {
         fn keys(&mut self) -> Vec<KeyState> {
             self.0.lock().unwrap().keys.clone()
         }
-<<<<<<< HEAD
         fn mouse_buttons(&mut self) -> Vec<u8> {
             self.0.lock().unwrap().buttons.clone()
         }
@@ -2576,15 +2401,8 @@ mod tests {
                 Mouse::default()
             }
         }
-        fn rumble(&mut self, slot: usize, low: u16, high: u16) {
-            self.0.lock().unwrap().rumble.push((slot, low, high));
-||||||| merged common ancestors
-        fn rumble(&mut self, slot: usize, low: u16, high: u16) {
-            self.0.lock().unwrap().rumble.push((slot, low, high));
-=======
         fn rumble(&mut self, slot: usize, motors: Motors) {
             self.0.lock().unwrap().rumble.push((slot, motors));
->>>>>>> belobug/main
         }
     }
 

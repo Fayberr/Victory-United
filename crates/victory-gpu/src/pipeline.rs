@@ -61,19 +61,13 @@ pub(crate) struct Shader {
     /// The first 8 bytes of its BLAKE3, as logged.
     pub(crate) hash: String,
     container: Vec<u8>,
-<<<<<<< HEAD
     /// Its part in the stand-in for the indirect light.
     #[cfg(windows)]
     pub(crate) ambient: Option<crate::ambient::Role>,
-||||||| merged common ancestors
-=======
     /// It is left out: it animates or draws hair strands ([`hair_strands`]),
     /// or serves rays that do not run ([`idle_without_rays`]).
     #[cfg(windows)]
     hair: bool,
-    /// Its result gets the least indirect light ([`crate::ambient`]).
-    #[cfg(windows)]
-    pub(crate) resolves_light: bool,
     /// It draws the sky as the title reflects it ([`crate::ambient::SKY`]).
     #[cfg(windows)]
     pub(crate) draws_sky: bool,
@@ -81,7 +75,6 @@ pub(crate) struct Shader {
     /// ([`crate::ambient::REFLECTED`]).
     #[cfg(windows)]
     pub(crate) ends_reflections: bool,
->>>>>>> belobug/main
     #[cfg(windows)]
     translated: OnceLock<Option<Translated>>,
     /// Whether its code walks the ray-tracing structures, once looked at
@@ -175,7 +168,6 @@ impl std::fmt::Debug for Shader {
 /// Every container seen, by full content hash.
 static SHADERS: Mutex<Option<HashMap<[u8; 32], Arc<Shader>>>> = Mutex::new(None);
 
-<<<<<<< HEAD
 /// For the memory lines: containers kept and their bytes, translations
 /// kept and the bytes of their host code. None of them is ever let go.
 static KEPT: [std::sync::atomic::AtomicU64; 4] = [const { std::sync::atomic::AtomicU64::new(0) }; 4];
@@ -199,8 +191,6 @@ pub(crate) fn kept() -> [u64; 7] {
     ]
 }
 
-||||||| merged common ancestors
-=======
 /// `VICTORY_SHADER_SWAP=<folder>`: a container whose hash (16 digits, as
 /// logged) names a file `<hash>.dxbc` there is replaced by that file's
 /// container, of the same stage and root signature.
@@ -228,7 +218,6 @@ fn swapped(hash: &str) -> Option<&'static [u8]> {
         .map(Vec::as_slice)
 }
 
->>>>>>> belobug/main
 /// The shared container for `bytes`.
 fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
     let full = blake3::hash(bytes);
@@ -241,41 +230,9 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
         .get_or_insert_with(HashMap::new)
         .entry(*full.as_bytes())
         .or_insert_with(|| {
-<<<<<<< HEAD
             KEPT[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             KEPT[1].fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
             Arc::new(Shader::new(stage, bytes, full))
-||||||| merged common ancestors
-            Arc::new(Shader {
-                stage,
-                hash: full.to_hex()[..16].to_owned(),
-                container: bytes.to_vec(),
-                #[cfg(windows)]
-                translated: OnceLock::new(),
-            })
-=======
-            Arc::new(Shader {
-                stage,
-                hash: full.to_hex()[..16].to_owned(),
-                container: bytes.to_vec(),
-                #[cfg(windows)]
-                hair: hair_strands(bytes) || idle_without_rays(bytes),
-                #[cfg(windows)]
-                resolves_light: bytes
-                    .windows(crate::ambient::PROGRAM.len())
-                    .any(|w| w == crate::ambient::PROGRAM),
-                #[cfg(windows)]
-                draws_sky: bytes
-                    .windows(crate::ambient::SKY.len())
-                    .any(|w| w == crate::ambient::SKY),
-                #[cfg(windows)]
-                ends_reflections: bytes
-                    .windows(crate::ambient::REFLECTED.len())
-                    .any(|w| w == crate::ambient::REFLECTED),
-                #[cfg(windows)]
-                translated: OnceLock::new(),
-            })
->>>>>>> belobug/main
         })
         .clone()
 }
@@ -293,7 +250,17 @@ impl Shader {
             #[cfg(windows)]
             walks: OnceLock::new(),
             #[cfg(windows)]
+            hair: hair_strands(bytes) || idle_without_rays(bytes),
+            #[cfg(windows)]
             resolves_light: bytes.windows(crate::ambient::PROGRAM.len()).any(|w| w == crate::ambient::PROGRAM),
+            #[cfg(windows)]
+            draws_sky: bytes
+                .windows(crate::ambient::SKY.len())
+                .any(|w| w == crate::ambient::SKY),
+            #[cfg(windows)]
+            ends_reflections: bytes
+                .windows(crate::ambient::REFLECTED.len())
+                .any(|w| w == crate::ambient::REFLECTED),
         }
     }
 }
@@ -305,7 +272,6 @@ pub(crate) struct Translated {
     /// A compute program's threads in a group.
     pub(crate) threads: Option<[u32; 3]>,
     pub(crate) used: Vec<victory_shader::UsedResource>,
-<<<<<<< HEAD
     /// Whether the shader's code can store to buffer memory ([`stores`]);
     /// true when its code is not known.
     pub(crate) stores: bool,
@@ -316,6 +282,8 @@ pub(crate) struct Translated {
     pub(crate) writes: bool,
     /// Whether it can store through raw addresses ([`stores_by_address`]).
     pub(crate) stores_by_address: bool,
+    /// Whether the shader indexes `ResourceDescriptorHeap[]` directly.
+    pub(crate) resource_heap: bool,
     /// Whether it stores through a view it picks from the heap by an index,
     /// once asked (`crate::picked`).
     pub(crate) picks: std::sync::atomic::AtomicU8,
@@ -324,14 +292,6 @@ pub(crate) struct Translated {
     pub(crate) used_written: Vec<bool>,
     /// A buffer store whose descriptor could not be matched to `used`.
     pub(crate) write_unknown: bool,
-||||||| merged common ancestors
-=======
-    /// Whether the shader indexes `ResourceDescriptorHeap[]` directly.
-    pub(crate) resource_heap: bool,
-    /// Whether the shader may write memory (buffer, image, or global stores
-    /// and atomics); `true` when its code is not known.
-    pub(crate) writes_memory: bool,
->>>>>>> belobug/main
 }
 
 #[cfg(windows)]
@@ -341,7 +301,6 @@ impl Shader {
     pub(crate) fn translated(&self) -> Option<&Translated> {
         self.translated
             .get_or_init(|| {
-<<<<<<< HEAD
                 // (a panic once, not again in each pipeline with this shader)
                 let done = std::panic::catch_unwind(|| translate(&self.container))
                     .unwrap_or_else(|_| Err("the translator panicked".to_owned()));
@@ -360,10 +319,8 @@ impl Shader {
                     KEPT[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     KEPT[3].fetch_add(t.host.dxil.len() as u64, std::sync::atomic::Ordering::Relaxed);
                 }
-||||||| merged common ancestors
-                let done = translate(&self.container);
-=======
-                let done = translate(&self.container);
+                // `VICTORY_SHADER_HASHES` names shaders to save as well, and
+                // a shader that does not translate is always worth looking at.
                 #[cfg(feature = "diagnostics")]
                 if done.is_err()
                     || std::env::var("VICTORY_SHADER_HASHES")
@@ -371,7 +328,6 @@ impl Shader {
                 {
                     dump(self);
                 }
->>>>>>> belobug/main
                 match &done {
                     Ok(t) => tracing::info!(
                         stage = self.stage,
@@ -438,80 +394,14 @@ impl Shader {
 
 #[cfg(windows)]
 fn translate(container: &[u8]) -> Result<Translated, String> {
-<<<<<<< HEAD
-    use victory_shader::{Container, FourCC, HwStage};
+    use victory_shader::{Container, FourCC, HwStage, RootType};
     // The translation depends on it (a view index past a capped heap).
     crate::descriptor::host::probe_view_limit();
     let c = Container::parse(container).map_err(|e| e.to_string())?;
     let programs = match c.part(FourCC::DXIL).or(c.part(FourCC::ACCC)) {
         Some(part) => victory_shader::native_programs(part.data).map_err(|e| e.to_string())?,
         None => Vec::new(),
-||||||| merged common ancestors
-    use victory_shader::{Container, FourCC, HwStage};
-    let host = crate::shader_cache::host_shader(container)?;
-    let c = Container::parse(container).map_err(|e| e.to_string())?;
-    let used = match c.part(FourCC::DXIL) {
-        Some(part) => victory_shader::native_programs(part.data)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .find(|p| {
-                matches!(
-                    p.stage,
-                    HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-                )
-            })
-            .map(|p| p.used)
-            .unwrap_or_default(),
-        None => Vec::new(),
-=======
-    use victory_shader::{Container, FourCC, HwStage, RootType};
-    let target = crate::host::host().map_or(victory_shader::emit::Target::ANY, |h| h.target());
-    let host = crate::shader_cache::host_shader(container, target)?;
-    let dxil_heap = Container::parse(&host.dxil).is_ok_and(|c| {
-        c.part(FourCC::SFI0)
-            .and_then(|p| p.data.get(..8))
-            .is_some_and(|b| {
-                let flags = u64::from_le_bytes(b.try_into().unwrap_or_default());
-                flags & (1 << 32) != 0
-            })
-    });
-    let c = Container::parse(container).map_err(|e| e.to_string())?;
-    let programs = victory_shader::container_programs(&c).unwrap_or_default();
-    let writes_memory = programs.is_empty() || programs.iter().any(writes_memory);
-    let (used, native_heap) = programs
-        .into_iter()
-        .find(|p| {
-            matches!(
-                p.stage,
-                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-            )
-        })
-        .map(|p| {
-            let rh = p.layout.iter().any(|rp| rp.root == RootType::ResourceHeap)
-                || p.used.iter().any(|u| u.root == RootType::ResourceHeap);
-            (p.used, rh)
-        })
-        .unwrap_or_default();
-    Ok(Translated {
-        host,
-        used,
-        resource_heap: dxil_heap || native_heap,
-        writes_memory,
-    })
-}
-
-/// Whether a native program may write memory: it has a buffer, image,
-/// flat, or global store or atomic, or code that is not all known (an
-/// instruction outside our table, an indirect jump, or code that does not
-/// decode).
-#[cfg(windows)]
-fn writes_memory(program: &victory_shader::NativeProgram) -> bool {
-    use victory_shader::gfx10::{Encoding, decode};
-    let Ok(code) = decode(&program.code) else {
-        return true;
->>>>>>> belobug/main
     };
-<<<<<<< HEAD
     let host = crate::shader_cache::host_shader(container)?;
     let stores = programs.is_empty() || programs.iter().any(stores);
     let writes = stores || programs.iter().any(image_stores);
@@ -520,6 +410,21 @@ fn writes_memory(program: &victory_shader::NativeProgram) -> bool {
         _ => None,
     });
     let stores_by_address = programs.is_empty() || programs.iter().any(stores_by_address);
+    // The shader reaches the CBV/SRV/UAV heap by index: the DXIL declares it
+    // (SM 6.6 dynamic resources) or a root range is the heap itself.
+    let dxil_heap = Container::parse(&host.dxil).is_ok_and(|c| {
+        c.part(FourCC::SFI0)
+            .and_then(|p| p.data.get(..8))
+            .is_some_and(|b| {
+                let flags = u64::from_le_bytes(b.try_into().unwrap_or_default());
+                flags & (1 << 32) != 0
+            })
+    });
+    let native_heap = programs.iter().any(|p| {
+        p.layout.iter().any(|rp| rp.root == RootType::ResourceHeap)
+            || p.used.iter().any(|u| u.root == RootType::ResourceHeap)
+    });
+    let resource_heap = dxil_heap || native_heap;
     let chosen = programs.iter().find(|p| {
         matches!(
             p.stage,
@@ -541,6 +446,7 @@ fn writes_memory(program: &victory_shader::NativeProgram) -> bool {
         stores,
         writes,
         stores_by_address,
+        resource_heap,
         picks: Default::default(),
         used_written,
         write_unknown,
@@ -1033,28 +939,6 @@ fn written_used(
         }
     }
     (written, unknown)
-||||||| merged common ancestors
-    Ok(Translated { host, used })
-=======
-    code.iter().any(|i| {
-        let name = i.name();
-        match i.encoding {
-            Encoding::Mubuf
-            | Encoding::Mtbuf
-            | Encoding::Mimg
-            | Encoding::Flat
-            | Encoding::Global => name.is_none_or(stores),
-            Encoding::Sop1 => name.is_none_or(|n| matches!(n, "s_setpc_b64" | "s_swappc_b64")),
-            _ => false,
-        }
-    })
-}
-
-/// Whether a memory instruction (by name) writes memory.
-#[cfg(windows)]
-fn stores(name: &str) -> bool {
-    name.contains("store") || name.contains("atomic")
->>>>>>> belobug/main
 }
 
 #[repr(C)]
@@ -1175,21 +1059,9 @@ fn skipped_among(shaders: &[Arc<Shader>]) -> Option<&str> {
         let value = std::env::var("VICTORY_SKIP_PIPELINES").unwrap_or_default();
         parse_skip_hashes(&value)
     });
-<<<<<<< HEAD
-    if hashes.is_empty() {
-        return None;
-    }
     shaders
-||||||| merged common ancestors
-    if hashes.is_empty() {
-        return None;
-    }
-    p.shaders
-=======
-    p.shaders
->>>>>>> belobug/main
         .iter()
-        .find(|shader| shader.hair || !hashes.is_empty() && hashes.contains(&shader.hash))
+        .find(|shader| shader.hair || hashes.contains(&shader.hash))
         .map(|shader| shader.hash.as_str())
 }
 
@@ -1217,13 +1089,6 @@ pub(crate) fn note_drop(this: This) {
     }
 }
 
-<<<<<<< HEAD
-/// Counts a draw or dispatch dropped for `why`.
-#[cfg(windows)]
-||||||| merged common ancestors
-/// Counts a draw or dispatch dropped for `why` (diagnostics).
-#[cfg(all(windows, feature = "diagnostics"))]
-=======
 /// A title pipeline's shaders (diagnostics).
 #[cfg(all(windows, feature = "diagnostics"))]
 pub(crate) fn names(this: This) -> String {
@@ -1233,9 +1098,8 @@ pub(crate) fn names(this: This) -> String {
     pipeline(this).shaders.iter().map(|s| format!("{} {}", s.name(), s.hash)).collect()
 }
 
-/// Counts a draw or dispatch dropped for `why` (diagnostics).
-#[cfg(all(windows, feature = "diagnostics"))]
->>>>>>> belobug/main
+/// Counts a draw or dispatch dropped for `why`.
+#[cfg(windows)]
 pub(crate) fn note_why(why: String) {
     #[cfg(feature = "diagnostics")]
     crate::capture::op(0, || format!("DROPPED {why}"));
