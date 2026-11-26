@@ -52,14 +52,6 @@ pub const LOADS: u32 = 16;
 /// half has a lane where every lane is in EXEC (`lower.rs`,
 /// `v_readfirstlane_b32`).
 pub const FIRST: u32 = 32;
-<<<<<<< HEAD
-/// Not a pass over the module either: the lowering reads the dwords of one
-/// console load (`s_buffer_load_dwordx2` to `x16` from an SRV, a
-/// `global_load_dwordx2` to `x4`) by one call for every four of them, not
-/// by a call each (`lower.rs`, `raw_dwords`). The same bytes are read.
-pub const WIDE: u32 = 64;
-||||||| a26859fc
-=======
 /// Not a pass over the module either: the lowering reads the dwords of one
 /// console load (`s_buffer_load_dwordx2` to `x16` from an SRV, a
 /// `global_load_dwordx2` to `x4`) by one call for every four of them, not
@@ -68,7 +60,6 @@ pub const WIDE: u32 = 64;
 /// the yard's frame replayed turn by turn, dispatches and draws 18.47 -> 18.45
 /// ms (12 loops) and 18.23 -> 18.16 (5 loops): the driver joins the loads.
 pub const WIDE: u32 = 64;
->>>>>>> avatar/main
 /// The passes over the module.
 pub const MODULE: u32 = DEAD | FOLD | REUSE | FACTS | LOADS;
 /// Every pass.
