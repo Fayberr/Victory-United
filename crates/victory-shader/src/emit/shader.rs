@@ -129,14 +129,9 @@ pub const USER_DISPATCH_THREADS: u32 = 0x105;
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {
-<<<<<<< HEAD
     /// ForceEarlyDepthStencil (`[earlydepthstencil]`; no `SFI0` bit).
     pub const EARLY_DEPTH: u64 = 1 << 3;
     pub const DOUBLES: u64 = 1 << 2;
-||||||| merged common ancestors
-=======
-    pub const DOUBLES: u64 = 1 << 2;
->>>>>>> belobug/main
     pub const RAW_BUFFERS: u64 = 1 << 4;
     pub const DOUBLE_EXT: u64 = 1 << 6;
     pub const STENCIL_REF: u64 = 1 << 11;
@@ -147,15 +142,9 @@ pub(crate) mod flags {
     pub const WAVE_OPS: u64 = 1 << 19;
     pub const BARYCENTRICS: u64 = 1 << 22;
     pub const INT64: u64 = 1 << 20;
-<<<<<<< HEAD
-    pub const ATOMIC_TYPED64: u64 = 1 << 27;
-    pub const ATOMIC_HEAP64: u64 = 1 << 32;
-||||||| merged common ancestors
-=======
     pub const ATOMIC_TYPED64: u64 = 1 << 27;
     pub const ATOMIC_INT64_GROUP_SHARED: u64 = 1 << 28;
     pub const ATOMIC_HEAP64: u64 = 1 << 32;
->>>>>>> belobug/main
     pub const RESOURCE_HEAP: u64 = 1 << 30;
     pub const SAMPLER_HEAP: u64 = 1 << 31;
 }
@@ -256,15 +245,11 @@ pub(crate) struct Shader {
     pub prims: Vec<SigElement>,
     /// A mesh shader (`threads` is its thread-group size).
     pub mesh: Option<Mesh>,
-<<<<<<< HEAD
     /// A geometry shader (the rectangle stage, `rect.rs`); `pixel` is false.
     pub geometry: Option<Geometry>,
-||||||| merged common ancestors
-=======
     /// A geometry shader from triangles to two-triangle strips
     /// (`rectangle`).
     pub rectangles: bool,
->>>>>>> belobug/main
     /// Dwords of user data the shader reads (0: no user-data buffer).
     pub user_data: u32,
     /// Immediate samplers, bound as `s0..` in [`SAMPLER_SPACE`]; entry `n` is
@@ -274,26 +259,19 @@ pub(crate) struct Shader {
     pub root_cbvs: Vec<(u8, V)>,
     /// Root SRVs (raw buffers) read, likewise.
     pub root_srvs: Vec<(u8, V)>,
-<<<<<<< HEAD
-    /// Root UAVs (raw buffers) read or written, likewise.
-    pub root_uavs: Vec<(u8, V)>,
-    /// Root UAV slots through which an emitted operation may write.
-    pub written_root_uavs: Vec<u8>,
-    /// A translated store or atomic can write through the guest page directory.
-    pub writes_guest_memory: bool,
-||||||| merged common ancestors
-=======
     /// Where reads through a handle (a root view's) may start at most.
     pub limits: Vec<(V, V)>,
     /// Root UAVs (raw buffers) read or written, likewise.
     pub root_uavs: Vec<(u8, V)>,
     /// Whether they are globally coherent.
     pub root_uavs_shared: bool,
+    /// Root UAV slots through which an emitted operation may write.
+    pub written_root_uavs: Vec<u8>,
+    /// A translated store or atomic can write through the guest page directory.
+    pub writes_guest_memory: bool,
     /// Handle of the runtime stride table (`t0`, [`STRIDE_SPACE`]), if read.
     pub stride_table: Option<V>,
->>>>>>> belobug/main
     pub flags: u64,
-<<<<<<< HEAD
     /// A pixel shader whose writes to views the console orders by primitive (POPS): its
     /// heap views written or read as UAVs are rasterizer-ordered views.
     pub ordered: bool,
@@ -301,11 +279,6 @@ pub(crate) struct Shader {
     pub rov: bool,
     /// Heap handles made with a non-uniform index.
     pub nonuniform_handles: u32,
-||||||| merged common ancestors
-=======
-    /// Heap handles made with a non-uniform index.
-    pub nonuniform_handles: u32,
->>>>>>> belobug/main
     /// A compute shader with this thread-group size.
     pub threads: Option<[u32; 3]>,
     /// The wave size a compute shader requires (`WaveSize`).
@@ -355,36 +328,22 @@ impl Shader {
             outputs: Vec::new(),
             prims: Vec::new(),
             mesh: None,
-<<<<<<< HEAD
             geometry: None,
-||||||| merged common ancestors
-=======
             rectangles: false,
->>>>>>> belobug/main
             user_data: 0,
             sampler_cmp: Vec::new(),
             root_cbvs: Vec::new(),
             root_srvs: Vec::new(),
-<<<<<<< HEAD
-            root_uavs: Vec::new(),
-            written_root_uavs: Vec::new(),
-            writes_guest_memory: false,
-||||||| merged common ancestors
-=======
             limits: Vec::new(),
             root_uavs: Vec::new(),
             root_uavs_shared: false,
             stride_table: None,
->>>>>>> belobug/main
+            written_root_uavs: Vec::new(),
+            writes_guest_memory: false,
             flags: 0,
-<<<<<<< HEAD
             ordered: false,
             rov: false,
             nonuniform_handles: 0,
-||||||| merged common ancestors
-=======
-            nonuniform_handles: 0,
->>>>>>> belobug/main
             threads: None,
             wave_size: None,
             lds_dwords: 0,
@@ -423,7 +382,6 @@ impl Shader {
         opcode: u32,
         args: &[V],
     ) -> V {
-<<<<<<< HEAD
         // Raw root UAVs are also legal inputs. Only a read through a handle
         // is known to leave it unchanged; any other use, including atomics,
         // is treated conservatively.
@@ -434,32 +392,20 @@ impl Shader {
         {
             self.written_root_uavs.push(slot);
         }
-||||||| merged common ancestors
-=======
-        // A raw buffer load through a limited handle.
+        // A raw buffer load through a limited handle reads no further than
+        // the view behind it (see [`Shader::limits`]).
         const RAW_LOAD: u32 = 139;
+        let mut limited: Option<Vec<V>> = None;
         if opcode == RAW_LOAD
             && let Some(&(_, limit)) = self.limits.iter().find(|l| l.0 == args[0])
         {
             let i32t = self.t.i32;
             let at = self.op(block, "binary.i32", Attr::ReadNone, i32t, 40, &[args[1], limit]);
-            let mut args = args.to_vec();
-            args[1] = at;
-            return self.op_as_is(block, name, attr, ret, opcode, &args);
+            let mut a = args.to_vec();
+            a[1] = at;
+            limited = Some(a);
         }
-        self.op_as_is(block, name, attr, ret, opcode, args)
-    }
-
-    fn op_as_is(
-        &mut self,
-        block: usize,
-        name: &str,
-        attr: Attr,
-        ret: Ty,
-        opcode: u32,
-        args: &[V],
-    ) -> V {
->>>>>>> belobug/main
+        let args: &[V] = limited.as_deref().unwrap_or(args);
         let mut params = vec![self.t.i32];
         params.extend(args.iter().map(|&a| self.m.type_of(a)));
         let fty = self.m.func_ty(ret, params);
@@ -543,7 +489,6 @@ impl Shader {
         h
     }
 
-<<<<<<< HEAD
     /// Loads the four dwords of one entry in the host view-address table.
     pub fn read_view_slot(&mut self, block: usize, slot: V) -> V {
         let last = self.m.i32(SLOT_VIEWS_COUNT - 1);
@@ -568,36 +513,12 @@ impl Shader {
     /// The handle of the root UAV (a raw buffer) of root parameter `slot`:
     /// `u<slot>` in [`ROOT_CBV_SPACE`].
     pub fn root_uav_handle(&mut self, slot: u8) -> V {
-        if let Some(&(_, h)) = self.root_uavs.iter().find(|r| r.0 == slot) {
-            return h;
-        }
-        let r = self.m.i32(u32::from(slot));
-        let bind = [r, r, self.m.i32(ROOT_CBV_SPACE), self.m.i8(1)];
-        let bind = self.m.aggregate(self.t.bind, &bind);
-        let f = self.m.bool(false);
-        let block = self.entry;
-        let h = self.op(
-            block,
-            "createHandleFromBinding",
-            Attr::ReadNone,
-            self.t.handle,
-            217,
-            &[bind, r, f],
-        );
-        let h = self.annotate(block, h, 11 | 0x1000, 0);
-        self.flags |= flags::RAW_BUFFERS;
-        self.root_uavs.push((slot, h));
-        h
+        self.root_uav_handle_shared(slot, false)
     }
 
-    /// The handle of immediate sampler `n` (a comparison sampler when
-    /// `self.sampler_cmp[n]` is `true`).
-||||||| merged common ancestors
-    /// The handle of immediate sampler `n` (a comparison sampler when its
-    /// bit in `cmp_samplers` is set).
-=======
-    /// The handle of the root UAV (a raw buffer) of root parameter `slot`.
-    pub fn root_uav_handle(&mut self, slot: u8, shared: bool) -> V {
+    /// [`Shader::root_uav_handle`]; `shared` marks the buffer globally
+    /// coherent (other groups of a dispatch write what a builder reads).
+    pub fn root_uav_handle_shared(&mut self, slot: u8, shared: bool) -> V {
         if let Some(&(_, h)) = self.root_uavs.iter().find(|r| r.0 == slot) {
             return h;
         }
@@ -616,7 +537,7 @@ impl Shader {
         );
         self.root_uavs_shared |= shared;
         let shared = if shared { 0x4000 } else { 0 };
-        let h = self.annotate(block, h, 0x1000 | 11 | shared, 0);
+        let h = self.annotate(block, h, 11 | 0x1000 | shared, 0);
         self.flags |= flags::RAW_BUFFERS;
         self.root_uavs.push((slot, h));
         h
@@ -648,9 +569,8 @@ impl Shader {
         h
     }
 
-    /// The handle of immediate sampler `n` (a comparison sampler when its
-    /// bit in `cmp_samplers` is set).
->>>>>>> belobug/main
+    /// The handle of immediate sampler `n` (a comparison sampler when
+    /// `self.sampler_cmp[n]` is `true`).
     pub fn sampler_handle(&mut self, block: usize, n: u32) -> V {
         let bind = [
             self.m.i32(n),
@@ -709,18 +629,14 @@ impl Shader {
     /// Annotates a handle with its resource properties. Bit 12 of `props0` is
     /// "UAV"; with `rov` set a UAV also gets bit 13, rasterizer ordered.
     pub fn annotate(&mut self, block: usize, h: V, props0: u32, props1: u32) -> V {
-<<<<<<< HEAD
         let props0 = if self.rov && props0 & 0x1000 != 0 {
             self.flags |= flags::ROVS;
             props0 | 0x2000
         } else {
             props0
         };
-||||||| merged common ancestors
-=======
         #[cfg(test)]
         self.annotations.push((props0, props1));
->>>>>>> belobug/main
         let p = [self.m.i32(props0), self.m.i32(props1)];
         let p = self.m.aggregate(self.t.props, &p);
         self.op(
@@ -733,7 +649,6 @@ impl Shader {
         )
     }
 
-<<<<<<< HEAD
     /// A descriptor heap handle, annotated with `props`; `nonuniform` when
     /// the index may differ between lanes (`NonUniformResourceIndex`).
     pub fn heap_handle(
@@ -782,28 +697,6 @@ impl Shader {
         } else {
             index
         };
-||||||| merged common ancestors
-    /// A descriptor heap handle, annotated with `props`.
-    pub fn heap_handle(&mut self, block: usize, index: V, sampler: bool, props: (u32, u32)) -> V {
-=======
-    /// A descriptor heap handle, annotated with `props`; `nonuniform` when
-    /// the index may differ between lanes (`NonUniformResourceIndex`).
-    pub fn heap_handle(
-        &mut self,
-        block: usize,
-        index: V,
-        sampler: bool,
-        nonuniform: bool,
-        props: (u32, u32),
-    ) -> V {
-        // An index past the heap is a fault that stops the host GPU.
-        let index = if !sampler && super::limits_indices() {
-            let last = self.m.i32(super::OWN_SLOTS - 1);
-            let i32t = self.t.i32;
-            self.op(block, "binary.i32", Attr::ReadNone, i32t, 40, &[index, last])
-        } else {
-            index
-        };
         self.handle_at(block, index, sampler, nonuniform, props)
     }
 
@@ -816,13 +709,11 @@ impl Shader {
         nonuniform: bool,
         props: (u32, u32),
     ) -> V {
->>>>>>> belobug/main
         self.flags |= if sampler {
             flags::SAMPLER_HEAP
         } else {
             flags::RESOURCE_HEAP
         };
-<<<<<<< HEAD
         // (bit 12 of the kind field: a UAV; bit 13: rasterizer-ordered)
         let props = if self.ordered && !sampler && props.0 & 0x1000 != 0 {
             self.flags |= flags::ROVS;
@@ -832,12 +723,6 @@ impl Shader {
         };
         self.nonuniform_handles += u32::from(nonuniform);
         let (s, n) = (self.m.bool(sampler), self.m.bool(nonuniform));
-||||||| merged common ancestors
-        let (s, n) = (self.m.bool(sampler), self.m.bool(false));
-=======
-        self.nonuniform_handles += u32::from(nonuniform);
-        let (s, n) = (self.m.bool(sampler), self.m.bool(nonuniform));
->>>>>>> belobug/main
         let h = self.op(
             block,
             "createHandleFromHeap",
@@ -874,7 +759,6 @@ impl Shader {
         }
         let ud_size = (self.user_data * 4).next_multiple_of(16);
         self.fix_user_data_size(ud_size);
-<<<<<<< HEAD
         // The clean-up, before anything is declared about the code: a
         // feature whose last use it removed must not be declared (the
         // validator compares the flags with what the code uses).
@@ -905,29 +789,6 @@ impl Shader {
         if !self.root_uavs.is_empty() && !self.pixel && !compute {
             self.flags |= flags::UAVS_EVERY_STAGE;
         }
-||||||| merged common ancestors
-=======
-        // The clean-up, before anything is declared about the code: a
-        // feature whose last use it removed must not be declared (the
-        // validator compares the flags with what the code uses).
-        let passes = super::shader_opt() & super::bitcode::opt::MODULE;
-        if passes != 0 {
-            self.m.optimise(passes);
-            let used = self.m.usage();
-            for (flag, used) in [
-                (flags::WAVE_OPS, used.wave_ops),
-                (flags::INT64, used.int64),
-                (flags::TYPED_UAV_LOADS, used.typed_uav_loads),
-                (flags::RESOURCE_HEAP, used.heap_views),
-                (flags::SAMPLER_HEAP, used.heap_samplers),
-                (flags::ATOMIC_TYPED64 | flags::ATOMIC_HEAP64, used.atomic64),
-            ] {
-                if !used {
-                    self.flags &= !flag;
-                }
-            }
-        }
->>>>>>> belobug/main
         let mut resources = None;
         let mut bindings = Vec::new();
         let i32c = |s: &mut Self, v: u32| {
@@ -938,13 +799,8 @@ impl Shader {
             || !self.sampler_cmp.is_empty()
             || !self.root_cbvs.is_empty()
             || !self.root_srvs.is_empty()
-<<<<<<< HEAD
-            || !self.root_uavs.is_empty()
-||||||| merged common ancestors
-=======
             || !self.root_uavs.is_empty()
             || self.stride_table.is_some()
->>>>>>> belobug/main
         {
             let empty = self.m.md_str("");
             let mut cbvs = None;
@@ -1036,9 +892,10 @@ impl Shader {
                 }
                 srvs = Some(self.m.md_node(list));
             }
-<<<<<<< HEAD
             let mut uavs = None;
             if !self.root_uavs.is_empty() {
+                let shared = self.m.bool(self.root_uavs_shared);
+                let shared_md = self.m.md_value(shared);
                 let ty = self
                     .m
                     .named_struct("struct.RWByteAddressBuffer", vec![self.t.i32]);
@@ -1061,7 +918,7 @@ impl Shader {
                         Some(i32c(&mut self, u32::from(slot))),
                         Some(i32c(&mut self, 1)),
                         Some(i32c(&mut self, 11)),
-                        Some(no),
+                        Some(shared_md),
                         Some(no),
                         Some(ordered),
                         None,
@@ -1076,46 +933,6 @@ impl Shader {
                 }
                 uavs = Some(self.m.md_node(list));
             }
-||||||| merged common ancestors
-=======
-            let mut uavs = None;
-            if !self.root_uavs.is_empty() {
-                let shared = self.m.bool(self.root_uavs_shared);
-                let shared_md = self.m.md_value(shared);
-                let ty = self
-                    .m
-                    .named_struct("struct.RWByteAddressBuffer", vec![self.t.i32]);
-                let p = self.m.ptr(ty);
-                let u = self.m.undef(p);
-                let f = self.m.bool(false);
-                let f_md = self.m.md_value(f);
-                let mut list = Vec::new();
-                for (n, &(slot, _)) in self.root_uavs.clone().iter().enumerate() {
-                    let reg = u32::from(slot);
-                    let ops = vec![
-                        Some(i32c(&mut self, n as u32)),
-                        Some(self.m.md_value(u)),
-                        Some(empty),
-                        Some(i32c(&mut self, ROOT_CBV_SPACE)),
-                        Some(i32c(&mut self, reg)),
-                        Some(i32c(&mut self, 1)),
-                        Some(i32c(&mut self, 11)),
-                        Some(shared_md),
-                        Some(f_md),
-                        Some(f_md),
-                        None,
-                    ];
-                    list.push(Some(self.m.md_node(ops)));
-                    bindings.push(Binding {
-                        kind: 7,
-                        space: ROOT_CBV_SPACE,
-                        register: reg,
-                        dxil_kind: 11,
-                    });
-                }
-                uavs = Some(self.m.md_node(list));
-            }
->>>>>>> belobug/main
             let mut samplers = None;
             if !self.sampler_cmp.is_empty() {
                 let ty = self.m.named_struct("struct.SamplerState", vec![self.t.i32]);
@@ -1151,15 +968,8 @@ impl Shader {
             bindings.sort_by_key(|b| match b.kind {
                 2 => 0,
                 1 => 1,
-<<<<<<< HEAD
                 7 => 3,
                 _ => 2,
-||||||| merged common ancestors
-                _ => 2,
-=======
-                4 => 2,
-                _ => 3,
->>>>>>> belobug/main
             });
         }
         if let Some(r) = resources {
@@ -1201,19 +1011,11 @@ impl Shader {
                     });
                 }
             }
-<<<<<<< HEAD
             // A geometry shader lists four streams: the other three have
             // no outputs.
-            if self.geometry.is_some() {
-                view.extend([0, 0, 0]);
-            }
-||||||| merged common ancestors
-=======
-            // Geometry shaders list four streams; ours use the first.
-            if self.rectangles {
+            if self.geometry.is_some() || self.rectangles {
                 view.extend([0; 3]);
             }
->>>>>>> belobug/main
             let arr = self.m.array(view.len() as u32, self.t.i32);
             let elems: Vec<V> = view.iter().map(|&v| self.m.i32(v)).collect();
             let arr = self.m.aggregate(arr, &elems);
@@ -1306,12 +1108,7 @@ impl Shader {
         // Program kinds: 0 pixel, 1 vertex, 2 geometry, 5 compute, 13 mesh.
         let (name, kind) = match (self.threads, self.pixel) {
             _ if self.mesh.is_some() => ("ms", 13u32),
-<<<<<<< HEAD
-            _ if self.geometry.is_some() => ("gs", 2),
-||||||| merged common ancestors
-=======
-            _ if self.rectangles => ("gs", 2),
->>>>>>> belobug/main
+            _ if self.geometry.is_some() || self.rectangles => ("gs", 2),
             (Some(_), _) => ("cs", 5u32),
             (None, true) => ("ps", 0),
             (None, false) => ("vs", 1),
@@ -1333,22 +1130,15 @@ impl Shader {
         dxil.extend(&bitcode);
 
         let mut features = 0u64;
-<<<<<<< HEAD
-        if self.flags & flags::DOUBLES != 0 {
-            features |= 0x1;
-        }
-        if self.flags & flags::UAVS_EVERY_STAGE != 0 {
-            features |= 0x4;
-        }
-||||||| merged common ancestors
-=======
         if self.flags & flags::DOUBLES != 0 {
             features |= 0x1;
         }
         if self.flags & flags::DOUBLE_EXT != 0 {
             features |= 0x20;
         }
->>>>>>> belobug/main
+        if self.flags & flags::UAVS_EVERY_STAGE != 0 {
+            features |= 0x4;
+        }
         if self.flags & flags::STENCIL_REF != 0 {
             features |= 0x200;
         }
@@ -1373,15 +1163,6 @@ impl Shader {
         if self.flags & flags::SAMPLER_HEAP != 0 {
             features |= 0x400_0000;
         }
-<<<<<<< HEAD
-        if self.flags & flags::ATOMIC_TYPED64 != 0 {
-            features |= 0x40_0000;
-        }
-        if self.flags & flags::ATOMIC_HEAP64 != 0 {
-            features |= 0x1000_0000;
-        }
-||||||| merged common ancestors
-=======
         if self.flags & flags::ATOMIC_TYPED64 != 0 {
             features |= 0x40_0000;
         }
@@ -1391,7 +1172,6 @@ impl Shader {
         if self.flags & flags::ATOMIC_HEAP64 != 0 {
             features |= 0x1000_0000;
         }
->>>>>>> belobug/main
         let sfi0 = features.to_le_bytes();
         let isg1 = container::signature(&self.inputs, true);
         let osg1 = container::signature(&self.outputs, false);
@@ -1407,12 +1187,8 @@ impl Shader {
             outputs: &self.outputs,
             prims: &self.prims,
             mesh: self.mesh.map(|m| (m, self.lds_dwords * 4)),
-<<<<<<< HEAD
             geometry: self.geometry.map(|g| g.max_vertices),
-||||||| merged common ancestors
-=======
             rectangles: self.rectangles,
->>>>>>> belobug/main
             bindings: &bindings,
             threads: self.threads.unwrap_or_default(),
             wave_size: self.wave_size,
