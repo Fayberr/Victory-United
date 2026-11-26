@@ -193,7 +193,6 @@ pub extern "system" fn CreateWindowExA(
     hwnd
 }
 
-<<<<<<< HEAD
 /// `VICTORY_HIDDEN_WINDOW=1`: the title's top-level window is made off the
 /// screens (right of the virtual desktop), out of the taskbar and never
 /// activated by a click, for unattended runs on a machine in use. The swap
@@ -215,13 +214,6 @@ fn hide(parent: HWND, ex_style: u32, x: i32, y: i32) -> (u32, i32, i32) {
 
 /// A console title sizes its window to its render target (
 /// the title: 3840x2160 on a Series X), which can exceed the host's screen.
-||||||| a66ac212
-/// A console title sizes its window to its render target (Grand Theft
-/// Auto VI: 3840x2160 on a Series X), which can exceed the host's screen.
-=======
-/// A console title sizes its window to its render target (
-/// the title: 3840x2160 on a Series X), which can exceed the host's screen.
->>>>>>> klbf/beta-2
 /// A top-level window larger than the work area is shrunk to fit, keeping
 /// its proportions, and centred; what it shows is scaled to it (the swap
 /// chain stretches). `VICTORY_WINDOW_MAX=WIDTHxHEIGHT` applies a smaller
