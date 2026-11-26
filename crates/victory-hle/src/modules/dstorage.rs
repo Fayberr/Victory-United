@@ -1108,23 +1108,13 @@ impl Lane {
 }
 
 /// Staging bytes a request holds while it runs: what it buffers between
-<<<<<<< HEAD
 /// the source and the destination. File reads (compressed or raw bounce
 /// buffers) reserve source size; combined zlib and BCPack decoding also
-/// allocates an intermediate buffer.
-||||||| merged common ancestors
-/// the file and the destination. Raw reads go straight to their
-/// destination, memory sources need none (as on the console).
-=======
-/// the file and the destination. Raw reads go straight to their
-/// destination, memory sources need none (as on the console). Also counted:
-/// the zlib output a BCPack decode reads, and the whole destination of a
-/// physical-page request, which are buffered here too (each worker holds
-/// all three at once, so leaving them out let loading hold far more than
-/// [`STAGING`]).
->>>>>>> belobug/main
+/// allocates an intermediate buffer, and a physical-page request whose
+/// pages cannot be written in place buffers its whole destination. All of
+/// them are held at once, so leaving any out lets loading hold far more
+/// than [`STAGING`].
 fn staging_bytes(request: &Request) -> u64 {
-<<<<<<< HEAD
     let source = if request.options & MEMORY_SOURCE == 0 {
         u64::from(request.source_size)
     } else {
@@ -1135,29 +1125,13 @@ fn staging_bytes(request: &Request) -> u64 {
     } else {
         0
     };
-    // The input stays alive while zlib writes to the intermediate.
-    source + intermediate
-||||||| merged common ancestors
-    let buffered = request.options & (ZLIB | BCPACK | PAGE_DESTINATION) != 0;
-    if buffered && request.options & MEMORY_SOURCE == 0 {
-        u64::from(request.source_size)
+    let destination = if request.options & PAGE_DESTINATION != 0 {
+        u64::from(request.destination_size)
     } else {
         0
-    }
-=======
-    let mut bytes = 0;
-    let buffered = request.options & (ZLIB | BCPACK | PAGE_DESTINATION) != 0;
-    if buffered && request.options & MEMORY_SOURCE == 0 {
-        bytes += u64::from(request.source_size);
-    }
-    if request.options & ZLIB != 0 && request.options & BCPACK != 0 {
-        bytes += u64::from(request.intermediate_size);
-    }
-    if request.options & PAGE_DESTINATION != 0 {
-        bytes += u64::from(request.destination_size);
-    }
-    bytes
->>>>>>> belobug/main
+    };
+    // The input stays alive while zlib writes to the intermediate.
+    source + intermediate + destination
 }
 
 /// Ends a queue: what was not started is dropped, and this waits for the
@@ -1998,7 +1972,6 @@ fn into_destination(
         // SAFETY: the title's destination holds `destination_size` bytes, at
         // least `len`, and nothing else writes it until completion.
         let out = unsafe { std::slice::from_raw_parts_mut(request.destination.cast::<u8>(), len) };
-<<<<<<< HEAD
         let filled = fill(out).map(drop);
         drop(writing);
         // Again now that the bytes are there: a texture looked at in between
@@ -2009,13 +1982,6 @@ fn into_destination(
             victory_gpu::title_memory_written(request.destination as usize, len, false);
         }
         return filled;
-||||||| merged common ancestors
-        return fill(out).map(drop);
-=======
-        let filled = fill(out).map(drop);
-        victory_gpu::title_memory_written(request.destination as usize, len);
-        return filled;
->>>>>>> belobug/main
     }
     let offset = (request.page_offset & 0xffff) as usize;
     let late;
@@ -2029,7 +1995,6 @@ fn into_destination(
     };
     // Consecutive pages of one allocation (the usual case): written in
     // place through one view.
-<<<<<<< HEAD
     if let Some(runs) = runs
         && let Some(mut window) = runs.window()
     {
@@ -2042,20 +2007,9 @@ fn into_destination(
         // is there.
         runs.written(len);
         return filled;
-||||||| merged common ancestors
-    if let Some(mut window) = super::xmem::page_window(pages, offset, len) {
-        return fill(window.bytes()).map(drop);
-=======
-    if let Some(mut window) = super::xmem::page_window(pages, offset, len) {
-        let filled = fill(window.bytes()).map(drop);
-        drop(window);
-        super::xmem::physical_written(pages, offset, len);
-        return filled;
->>>>>>> belobug/main
     }
     let mut data = vec![0; len];
     let n = fill(&mut data)?;
-<<<<<<< HEAD
     // A page the title has just made, or a view the host refuses for a
     // moment, comes right a little later: the write is tried again before
     // the request fails (`VICTORY_DSTORAGE_RETRIES`, 12 tries, about 0.9 s
@@ -2093,12 +2047,6 @@ fn into_destination(
         if let Some(runs) = runs {
             runs.written(n);
         }
-||||||| merged common ancestors
-    if super::xmem::write_physical(pages, offset, &data[..n]) {
-=======
-    if super::xmem::write_physical(pages, offset, &data[..n]) {
-        super::xmem::physical_written(pages, offset, n);
->>>>>>> belobug/main
         Ok(())
     } else {
         let given_up = RETRIED[1].fetch_add(1, Ordering::Relaxed) + 1;
