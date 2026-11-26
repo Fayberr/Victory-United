@@ -3579,6 +3579,7 @@ impl<'a> Lower<'a> {
     /// Transfer up to four consecutive dwords in title memory. The directory
     /// maps adjacent guest pages independently, so a DXIL raw access may
     /// only touch the portion of the range in the page it looked up.
+    /// With `store`, a page that is not to be written is the null view.
     fn memory_transfer(
         &mut self,
         lo: V,
@@ -3770,7 +3771,6 @@ impl<'a> Lower<'a> {
         let (lo, hi) = (word(self, 0)?, word(self, 1)?);
         let (lo, hi) = self.address_plus(lo, hi, i32::from(*offset));
         let guard = self.guard(b, i)?;
-        let c = self.cur;
         let (i32t, res) = (self.s.t.i32, self.s.t.res_ret);
         let iu = self.s.m.undef(i32t);
         let align = self.s.m.i32(4);
