@@ -15,8 +15,10 @@ endorsed by the game's developer or publisher, see [LEGAL.md](LEGAL.md).
 
 ## State
 
-Early. It boots, plays the intro and the menus and reaches the first playable room. It is not
-playable yet. Shadows are missing some light, because the game's ray tracing does not run yet.
+Early. It boots, plays the intro and the menus, reaches the first playable room, and the
+character can be moved there by hand (see Input). It is not playable yet: it runs at about 8 to 9
+frames a second in that room, and the aim is 20. Shadows are missing some light, because the game's
+ray tracing does not run yet.
 
 Measured on one machine: Windows 11 Pro (build 26300), NVIDIA GeForce RTX 3080 Ti with 12 GB
 (driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `db89ba3b`, Series S profile, no frame
@@ -27,20 +29,32 @@ project's own upscaler, relay mode 2, late wait 3, 2 GB card buffers, diagnostic
 of settings and how each run is done are in `docs/measurements.md`.
 
 - **Speed:** 4.8 frames per second in the first playable room, standing at the window (median of
-  346 five-second intervals over 31 minutes of play in the room; middle 80 percent between 4.3 and
+  346 five-second intervals over 31 minutes in the room; middle 80 percent between 4.3 and
   5.1, lowest 3.4, highest 5.3). The first 7 minutes were slower, about 4.2, while the game
   settled; after that about 4.8 to 4.9. This is one run of one build, so it is a single data
   point, not a range across machines.
 - **Stability:** one run of 35 minutes without a crash or a GPU hang. It was stopped on purpose
   at its planned 35 minutes, so the true limit is not known yet. The log shows no crash or device
-  removed message, and the game wrote frames until the last second.
-- **Picture:** lit by daylight through the window, with the character and the window glass drawn.
-  Two frames (from the middle and the end of the run) were looked at and showed no bright blocks.
-  Shadows still miss some light.
+  removed message, and the game wrote frames until the last second. A second, longer-lived check
+  on a later build (`3588725d`) is under Input: a 34.7 minute session played by hand, also without
+  a crash.
+- **Picture:** for commit `db89ba3b`: lit by daylight through the window, with the character and
+  the window glass drawn. Two frames (from the middle and the end of the run) were looked at and
+  showed no bright blocks. Shadows still miss some light. The picture of the later builds below
+  has not been compared with that yet, so nothing is claimed for it here.
 - **Input:** controller buttons work in the start screens and menus (A and X take the title from
-  there to the first playable room). Moving the character is not confirmed: a run that held the
-  move keys in the room for about two minutes did not move it (the character only idled at the
-  window), so the figures above are for standing in the room, not for a play session.
+  there to the first playable room). In the room the character moves under player control: a
+  person played build `3588725d` by hand for 34.7 minutes (launch to close, about 33.6 minutes of
+  it in the room after the intro) and moved the character. That is the player's observation, not
+  something the log measures. The session ran with the same settings as above except that the
+  profiler, the census, the card accounting and the frame capture were off; the log still ran at
+  info level. Frame rate in that session, from its own log: median 8.5 fps (118 ms a frame) over
+  361 five-second reports in the room, 8.5 fps (117 ms) after the first 7 minutes, middle 80
+  percent between 8.0 and 9.6 fps, lowest 1.3, highest 11.5. Draws a frame depended on the view
+  (per-minute medians between about 2,100 and 5,500, overall median 4,700). The first 7 minutes
+  were slow while the game settled: counting the intro as minute 0, the per-minute median went
+  0.1, 0.2, 3.5, 4.9, 5.8, 7.3 fps for minutes 1 to 6. The session ended when the window was closed normally; the log shows the title being
+  suspended and ended cleanly, and no crash, panic or device-removed line.
 
 Earlier, on commit `33f3c35` with the diagnostics build, the same room measured 4.9 to 5.2 frames
 per second over two 6 minute runs.

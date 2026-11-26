@@ -79,4 +79,4 @@ contributors) was merged into this tree as a whole branch (`3588725d`, merged to
 not as single picks. Its commits and authors are kept. About 560 conflict hunks were resolved by hand
 where both trees had changed the same lines; VU's own additions that the other branch did not have
 (for example the shader cache `warm` call) were kept. One 15 minute run of the merged build is in
-`docs/measurements.md`.
+`docs/measurements.md`, and so is a 34.7 minute session of the same build played by hand.

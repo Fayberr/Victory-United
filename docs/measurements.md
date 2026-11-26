@@ -64,3 +64,31 @@ built left out; in this run none did).
 - Not measured: a paired run against another build in this session (the 5.0 fps of `ac63840d`
   and the 7.9 fps of VIctory-7900XTX `e2a28ec7` come from earlier runs of 6 minutes and longer),
   more than one run, any other machine, any real save, player control in the room.
+
+## 2026-11-26, avatar merge `3588725d`, played by hand for 34.7 minutes
+
+- Machine, console profile and settings: as in the entries above, with these differences. The
+  profiler, census, card accounting and frame capture were off; the log ran at `info` level. The
+  three shader stubs (`VICTORY_EXPOSURE_STUB`, `VICTORY_AMBIENT_STUB`, `VICTORY_SHADOWMASK_STUB`) were
+  on. The same four scripted keys (`18:Enter,35:Enter,46:X,60:Enter`) took the title from the start
+  screens into the first playable room; after that the owner played by hand. Same game data seed
+  as the earlier runs, own copy of the shader and pipeline cache. Planned length 90 minutes; the
+  window was closed by hand after 34.7 minutes.
+- Build: `3588725d`, SHA-256 `F72F14297C8683682EBF00ADB40124539628AECE7959FEF2632AE4B5E06C7B81`
+  (the same binary as the 15 minute run above, built with diagnostics).
+- Player control: the person playing saw the character move in the room. This is an observation
+  by that person; the log does not record it.
+- Result: 371 five-second reports from launch to close (log length 34.7 minutes, the first 55 s
+  are the 30 fps intro), 361 of them in the room, 352 of those without shader pipelines being
+  built. Median over the 361 reports in the room 8.5 fps (118 ms a frame), 10th percentile 5.7,
+  90th 9.6, lowest 0.0, highest 11.5. After the first 7 minutes (313 reports without pipelines
+  being built): median 8.5 fps (117 ms), 10th percentile 8.0, 90th 9.6, lowest 1.3, highest 11.5.
+  Last 20 reports: 8.4 fps (120 ms) at 4,950 draws a frame. Median draws a frame 4,700; per-minute
+  medians between about 2,100 and 5,500, so the numbers depend on the view.
+- Start-up: counting the intro as minute 0, the per-minute median fps for minutes 1 to 7 was 0.1,
+  0.2, 3.5, 4.9, 5.8, 7.3 and 10.3, so the room needed about 7 minutes to settle.
+- Ending: window closed normally (the log shows "window closed: suspending the title", "title
+  suspended; ending the title" and the pipeline library being saved). No crash, panic, error or
+  device-removed line in the log.
+- Not measured: the picture of this build (not compared with earlier builds, no claim made),
+  any other machine, any real save, any open world area, more than one such session.
