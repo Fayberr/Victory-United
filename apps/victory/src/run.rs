@@ -58,15 +58,33 @@ pub fn run(
         victory_hle::modules::xmem::low_guards::install();
     }
     let cfg = victory_core::Config::load()?;
+    // `VICTORY_FRAMETIME_DUMP=1`: write beside the rest of Victory's cache.
+    if std::env::var_os("VICTORY_FRAMETIME_DUMP").is_some_and(|v| v.to_str() == Some("1")) {
+        victory_gpu::frametime::use_dump_path(cfg.cache_dir.join("frametime.csv"));
+    }
     let original = std::fs::read(exe).with_context(|| format!("reading {}", exe.display()))?;
     let mut prepared = victory_loader::prepare(&original)?;
     let hash = prepared.original_hash.to_hex();
+<<<<<<< HEAD
     let build = victory_game::identify(&hash);
     match build {
         Some(build) => println!("build          {} ({hash})", build.label),
         None => println!("build          unknown ({hash})"),
     }
     apply_title_patches(&mut prepared, build)?;
+||||||| a66ac212
+    match victory_game::identify(&hash) {
+        Some(build) => println!("build          {} ({hash})", build.label),
+        None => println!("build          unknown ({hash})"),
+    }
+=======
+    let label = match victory_game::identify(&hash) {
+        Some(build) => format!("{} ({hash})", build.label),
+        None => format!("unknown ({hash})"),
+    };
+    println!("build          {label}");
+    victory_gpu::frametime::use_build_label(label);
+>>>>>>> klbf/beta-2
 
     let images = cfg.cache_subdir("images")?;
     victory_hle::modules::d3d12x::use_shader_cache(cfg.cache_subdir("shaders")?);
@@ -80,6 +98,7 @@ pub fn run(
     drop(original);
     victory_hle::runtime::set_main_image(image.base());
     victory_hle::runtime::set_image_path(image.base(), exe);
+    victory_hle::runtime::set_image_size(image.base(), image.info().size_of_image as usize);
     println!(
         "mapped at      {:#x} (preferred {:#x})",
         image.base(),
@@ -123,6 +142,7 @@ pub fn run(
         }
         println!("title dll      {name} at {:#x}", dll.base());
         victory_hle::runtime::set_image_path(dll.base(), &title_dir.join(name));
+        victory_hle::runtime::set_image_size(dll.base(), dll.info().size_of_image as usize);
     }
     let imported: Vec<&str> = image
         .info()
@@ -175,6 +195,7 @@ pub fn run(
         show(name, dll.bind_imports(&with_dlls, policy)?);
     }
     let exe_name = exe.file_name().unwrap_or_default().to_string_lossy();
+<<<<<<< HEAD
     // The upscale dispatch is ours (`victory_hle::modules::ffx`); the rest of
     // that DLL is the title's own.
     struct TakeDispatch<'a>(&'a dyn victory_loader::ImportResolver);
@@ -201,6 +222,24 @@ pub fn run(
         // SAFETY: the image stays mapped, and nothing of it has run yet.
         unsafe { victory_loader::write_sites::apply_asked(&image_name, image.base(), size) };
     }
+||||||| a66ac212
+    show(&exe_name, image.bind_imports(&with_dlls, policy)?);
+=======
+    show(&exe_name, image.bind_imports(&with_dlls, policy)?);
+    // Renderer port #2 (VICTORY_PORT_DESCRIPTORS=1): the title's stores of
+    // descriptor records tell the layer their slots.
+    #[cfg(windows)]
+    if execute && victory_hle::port_descriptors::on() {
+        use victory_loader::descriptor_sites::{Hooked, SITES, apply};
+        let size = image.info().size_of_image as usize;
+        // SAFETY: the image stays mapped, nothing of it has run yet, and the
+        // marks are a static.
+        let done = unsafe { apply(image.base(), size, victory_hle::port_descriptors::marks_address(), &SITES) };
+        let patched = done.iter().filter(|d| **d == Hooked::Done).count();
+        println!("renderer port 2: {patched} of {} descriptor record stores of the title patched", SITES.len());
+        victory_hle::port_descriptors::hooked(image.base(), size, patched);
+    }
+>>>>>>> klbf/beta-2
     if !execute {
         println!("not executing (pass --execute to start the title)");
         return Ok(0);
@@ -277,7 +316,13 @@ fn watch(base: usize, size: usize) {
                 // SAFETY: four bytes inside the mapped image, checked above.
                 let value = unsafe { ((base + rva) as *const u32).read_volatile() };
                 if *seen != Some(value) {
+<<<<<<< HEAD
                     eprintln!("VItoriaBr: title+{rva:#x} = {value:#x}");
+||||||| a66ac212
+                    eprintln!("VIctory: title+{rva:#x} = {value:#x}");
+=======
+                    eprintln!("KLBF Lab: title+{rva:#x} = {value:#x}");
+>>>>>>> klbf/beta-2
                     *seen = Some(value);
                 }
             }
@@ -395,6 +440,7 @@ impl LateDlls {
                     );
                     show(name, dll.bind_imports(&resolver, self.policy)?);
                     set_image_path(dll.base(), &self.title_dir.join(name));
+                    victory_hle::runtime::set_image_size(dll.base(), dll.info().size_of_image as usize);
                 }
                 // Visible before their `DllMain`s run, which may load more.
                 mapped.extend(new.iter().cloned());

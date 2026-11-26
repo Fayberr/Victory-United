@@ -81,6 +81,7 @@ impl HostPolicy {
         if !self.allows(dll) {
             return None;
         }
+<<<<<<< HEAD
         let address = imp::resolve(dll, symbol)?;
         // The title's copies of memory look where they write.
         #[cfg(windows)]
@@ -96,6 +97,17 @@ impl HostPolicy {
             return Some(victory_gpu::timeline::import(name, address));
         }
         Some(address)
+||||||| a66ac212
+        imp::resolve(dll, symbol)
+=======
+        let address = imp::resolve(dll, symbol)?;
+        // Renderer port #2: records copied into the view heap are marked.
+        #[cfg(windows)]
+        if let ImportSymbol::Name { name, .. } = symbol {
+            return Some(victory_gpu::port_descriptors::import(name, address));
+        }
+        Some(address)
+>>>>>>> klbf/beta-2
     }
 }
 

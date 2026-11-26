@@ -30,13 +30,20 @@ extern "system" fn create_device(
 #[cfg(windows)]
 fn host_gpu_failed(what: &str) -> ! {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+<<<<<<< HEAD
     victory_loader::log_crash(&format!("VItoriaBr: host GPU failure: {what}"));
+||||||| a66ac212
+    victory_loader::log_crash(&format!("VIctory: host GPU failure: {what}"));
+=======
+    victory_loader::log_crash(&format!("KLBF Lab: host GPU failure: {what}"));
+>>>>>>> klbf/beta-2
     const DXGI_ERROR_DEVICE_REMOVED: u32 = 0x887A_0005;
     // SAFETY: ends our own process.
     unsafe { TerminateProcess(GetCurrentProcess(), DXGI_ERROR_DEVICE_REMOVED) };
     unreachable!("the process has ended")
 }
 
+<<<<<<< HEAD
 #[cfg(windows)]
 pub use victory_gpu::precompile;
 
@@ -67,6 +74,22 @@ pub fn warm_shader(container: &[u8]) -> Result<bool, String> {
     }
 }
 
+||||||| a66ac212
+=======
+/// The offline warm-up: see `victory_gpu::shader_cache::warm`.
+pub fn warm_shader(container: &[u8]) -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        victory_gpu::shader_cache::warm(container)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = container;
+        Err("no shader cache on this host".into())
+    }
+}
+
+>>>>>>> klbf/beta-2
 /// Keeps the host's translations of the title's shaders in `dir` (a
 /// folder of the cache) across runs, and its compiled pipelines beside it
 /// (`pipelines`).
@@ -79,6 +102,9 @@ pub fn use_shader_cache(dir: std::path::PathBuf) {
     #[cfg(not(windows))]
     let _ = dir;
 }
+
+#[cfg(windows)]
+pub use victory_gpu::pipeline::{save_pipeline_cache, warm};
 
 pub(crate) fn module() -> HleModule {
     HleModule {

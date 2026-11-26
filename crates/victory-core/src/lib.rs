@@ -7,7 +7,12 @@
 
 pub mod batch;
 pub mod config;
+<<<<<<< HEAD
 pub mod kbm;
+||||||| a66ac212
+=======
+pub mod heapcount;
+>>>>>>> klbf/beta-2
 pub mod logging;
 pub mod policy;
 

@@ -526,7 +526,16 @@ pub extern "C" fn _wfsopen(path: *const u16, mode: *const u16, share: i32) -> Fi
 // fail there instead of faulting into its handler; the title's
 // synchronous reads (title+0x313fc0) read straight into 4 KiB-aligned
 // destinations and retry a failed `ReadFile` forever. So the destination
+<<<<<<< HEAD
 // is opened first, and not guarded again before the call is done.
+||||||| a66ac212
+// is opened first.
+=======
+// is opened first. A block guarded again before the kernel writes it (the
+// guard over all the views of a page protects other views from other
+// threads) fails that `ReadFile`, and the title's retry opens it again;
+// `fread` has no such retry and reads beside instead (see there).
+>>>>>>> klbf/beta-2
 
 pub extern "system" fn ReadFile(
     file: *mut c_void,
@@ -570,10 +579,42 @@ pub extern "system" fn ReadFile(
 /// own writes. Returns the items read, as the CRT does; the bytes of a
 /// partial last item are copied too, as the CRT leaves them.
 pub extern "C" fn fread(buffer: *mut u8, size: usize, count: usize, stream: File) -> usize {
+<<<<<<< HEAD
     let _writing = victory_gpu::kernel_writing(buffer as usize, size.saturating_mul(count));
     host!("ucrtbase.dll", "fread": extern "C" fn(*mut u8, usize, usize, File) -> usize)(
         buffer, size, count, stream,
     )
+||||||| a66ac212
+    victory_gpu::kernel_will_write(buffer as usize, size.saturating_mul(count));
+    host!("ucrtbase.dll", "fread": extern "C" fn(*mut u8, usize, usize, File) -> usize)(
+        buffer, size, count, stream,
+    )
+=======
+    let read = host!("ucrtbase.dll", "fread": extern "C" fn(*mut u8, usize, usize, File) -> usize);
+    let total = size.saturating_mul(count);
+    if buffer.is_null() || total == 0 {
+        // The CRT's own checks and answer (EINVAL, or nothing to read).
+        return read(buffer, size, count, stream);
+    }
+    const CHUNK: usize = 1 << 20;
+    let mut beside = vec![0u8; total.min(CHUNK)];
+    let mut done = 0;
+    while done < total {
+        let want = (total - done).min(CHUNK);
+        let n = read(beside.as_mut_ptr(), 1, want, stream);
+        if n > 0 {
+            victory_gpu::kernel_will_write(buffer as usize + done, n);
+            // SAFETY: the caller's buffer holds `size * count` bytes, and
+            // `done + n` is at most that.
+            unsafe { std::ptr::copy_nonoverlapping(beside.as_ptr(), buffer.add(done), n) };
+            done += n;
+        }
+        if n < want {
+            break;
+        }
+    }
+    done / size
+>>>>>>> klbf/beta-2
 }
 
 pub extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> File {

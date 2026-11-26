@@ -3,8 +3,14 @@
 //! offsets or byte-pattern signatures). What may and may not be stored here
 //! is defined in docs/asset-policy.md.
 
+<<<<<<< HEAD
 mod cityhash;
 pub mod pipelines;
+||||||| a66ac212
+=======
+pub mod cityhash;
+pub mod pipelines;
+>>>>>>> klbf/beta-2
 pub mod sgd5;
 pub mod shaderpack;
 

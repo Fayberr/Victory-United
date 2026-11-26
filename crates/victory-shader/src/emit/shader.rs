@@ -34,6 +34,23 @@ pub const VIEW_INTEGER: u32 = 1 << 31;
 pub const VIEW_SIGNED: u32 = 1 << 30;
 /// Dwords of the [`SLOT_STRIDES`] buffer: heap indices are clamped to it.
 pub const SLOT_STRIDES_COUNT: u32 = 1 << 21;
+/// The [`SLOT_STRIDES`] entry of a slot that holds a constant buffer view.
+/// A program reads a slot it picks as a constant buffer only where this
+/// mark is; a slot whose entry is 0 holds neither a buffer nor a constant
+/// buffer, and the read gives zeros. Read as a constant buffer, a texture's
+/// descriptor is taken as a buffer's: on AMD that is the image's base
+/// shifted down by 8, an address near zero, and the card page-faults (the
+/// meshlet culling `_Prev` passes when work is sent ahead).
+/// `VICTORY_CONSTANT_MARKS=0` goes back to reading every non-buffer slot as
+/// a constant buffer.
+pub const SLOT_STRIDE_CONSTANT: u32 = u32::MAX;
+
+/// Whether [`SLOT_STRIDE_CONSTANT`] is in use: read once, by the host and
+/// the translator alike.
+pub fn constant_marks() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_CONSTANT_MARKS").is_none_or(|v| v != "0"))
+}
 
 /// Title addresses of the buffer views of the view heap by slot, for
 /// console code that reads a descriptor's address out of a table at an
@@ -97,6 +114,7 @@ pub const USER_VIEW_ADDRESS: u32 = 0x101;
 /// 4 and c). The shader adds the dword to every byte offset through that
 /// view. Asked for every root UAV.
 pub const USER_VIEW_BIAS: u32 = 0x103;
+<<<<<<< HEAD
 /// `RootType::Other` code of a user-data dword the host sets: the number of
 /// the first thread group in x. The console dispatches any number of groups
 /// in one dimension; the host at most 65,535, so a larger dispatch runs in
@@ -123,18 +141,37 @@ pub const USER_DISPATCH_THREADS_X: u32 = 0x106;
 /// `DispatchX` call with `USE_THREAD_DIMENSIONS` (`flags & 0x20`), or 0
 /// for a normal thread-group dispatch (all threads in every group active).
 pub const USER_DISPATCH_THREADS: u32 = 0x105;
+||||||| a66ac212
+=======
+/// `RootType::Other` code of a user-data dword the host sets: the number of
+/// the first thread group in x. The console dispatches any number of groups
+/// in one dimension; the host at most 65,535, so a larger dispatch runs in
+/// parts, each with the groups before it here. Asked for by compute programs
+/// that are told the x number alone (the one-dimensional ones).
+pub const USER_GROUP_BASE: u32 = 0x104;
+>>>>>>> klbf/beta-2
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {
+<<<<<<< HEAD
     /// ForceEarlyDepthStencil (`[earlydepthstencil]`; no `SFI0` bit).
     pub const EARLY_DEPTH: u64 = 1 << 3;
     pub const DOUBLES: u64 = 1 << 2;
+||||||| a66ac212
+=======
+    pub const DOUBLES: u64 = 1 << 2;
+>>>>>>> klbf/beta-2
     pub const RAW_BUFFERS: u64 = 1 << 4;
     pub const STENCIL_REF: u64 = 1 << 11;
     pub const TYPED_UAV_LOADS: u64 = 1 << 13;
+<<<<<<< HEAD
     /// Unordered views in a vertex, geometry or mesh program.
     pub const UAVS_EVERY_STAGE: u64 = 1 << 16;
     pub const ROVS: u64 = 1 << 18;
+||||||| a66ac212
+=======
+    pub const ROVS: u64 = 1 << 18;
+>>>>>>> klbf/beta-2
     pub const WAVE_OPS: u64 = 1 << 19;
     pub const BARYCENTRICS: u64 = 1 << 22;
     pub const INT64: u64 = 1 << 20;
@@ -184,6 +221,7 @@ pub fn set_view_heap_limit(null_slot: u32) {
     VIEW_LIMIT.store(null_slot, std::sync::atomic::Ordering::Relaxed);
 }
 
+<<<<<<< HEAD
 /// See [`VIEW_LIMIT`]: the null slot shaders translated now clamp view indices to (0: none).
 pub fn view_heap_limit() -> u32 {
     VIEW_LIMIT.load(std::sync::atomic::Ordering::Relaxed)
@@ -224,6 +262,14 @@ pub fn raw_views() -> u32 {
     RAW_VIEWS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+||||||| a66ac212
+=======
+/// See [`VIEW_LIMIT`]: the null slot shaders translated now clamp view indices to (0: none).
+pub fn view_heap_limit() -> u32 {
+    VIEW_LIMIT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+>>>>>>> klbf/beta-2
 pub(crate) struct Shader {
     pub m: Module,
     pub t: Types,
@@ -252,11 +298,18 @@ pub(crate) struct Shader {
     /// A translated store or atomic can write through the guest page directory.
     pub writes_guest_memory: bool,
     pub flags: u64,
+<<<<<<< HEAD
     /// A pixel shader whose writes to views the console orders by primitive (POPS): its
     /// heap views written or read as UAVs are rasterizer-ordered views.
     pub ordered: bool,
     /// Every UAV the shader opens is rasterizer ordered ([`Self::annotate`]).
     pub rov: bool,
+||||||| a66ac212
+=======
+    /// A pixel shader whose writes to views the console orders by primitive (POPS): its
+    /// heap views written or read as UAVs are rasterizer-ordered views.
+    pub ordered: bool,
+>>>>>>> klbf/beta-2
     /// Heap handles made with a non-uniform index.
     pub nonuniform_handles: u32,
     /// A compute shader with this thread-group size.
@@ -315,8 +368,13 @@ impl Shader {
             written_root_uavs: Vec::new(),
             writes_guest_memory: false,
             flags: 0,
+<<<<<<< HEAD
             ordered: false,
             rov: false,
+||||||| a66ac212
+=======
+            ordered: false,
+>>>>>>> klbf/beta-2
             nonuniform_handles: 0,
             threads: None,
             wave_size: None,
@@ -576,6 +634,7 @@ impl Shader {
         nonuniform: bool,
         props: (u32, u32),
     ) -> V {
+<<<<<<< HEAD
         self.heap_handle_at(block, index, sampler, nonuniform, props, false)
     }
 
@@ -590,6 +649,29 @@ impl Shader {
         props: (u32, u32),
         bounded: bool,
     ) -> V {
+||||||| a66ac212
+=======
+        self.nonuniform_handles += u32::from(nonuniform);
+        self.marked_heap_handle(block, index, sampler, nonuniform, props)
+    }
+
+    /// The handle a buffer's size is asked through (`descriptor_data`):
+    /// marked non-uniform for AMD's compiler, which reads a null pointer
+    /// compiling the query through a uniform one, and not counted in
+    /// `nonuniform_handles`, its index being the same in every lane.
+    pub fn size_handle(&mut self, block: usize, index: V, props: (u32, u32)) -> V {
+        self.marked_heap_handle(block, index, false, true, props)
+    }
+
+    fn marked_heap_handle(
+        &mut self,
+        block: usize,
+        index: V,
+        sampler: bool,
+        nonuniform: bool,
+        props: (u32, u32),
+    ) -> V {
+>>>>>>> klbf/beta-2
         // a view index past the host heap (`set_view_heap_limit`) reads its null slot instead
         // (the raw twins of buffer views lie past it: such an index comes bounded)
         let limit = if bounded { 0 } else { VIEW_LIMIT.load(std::sync::atomic::Ordering::Relaxed) };
@@ -619,6 +701,7 @@ impl Shader {
         } else {
             flags::RESOURCE_HEAP
         };
+<<<<<<< HEAD
         // (bit 12 of the kind field: a UAV; bit 13: rasterizer-ordered)
         let props = if self.ordered && !sampler && props.0 & 0x1000 != 0 {
             self.flags |= flags::ROVS;
@@ -627,6 +710,17 @@ impl Shader {
             props
         };
         self.nonuniform_handles += u32::from(nonuniform);
+||||||| a66ac212
+        self.nonuniform_handles += u32::from(nonuniform);
+=======
+        // (bit 12 of the kind field: a UAV; bit 13: rasterizer-ordered)
+        let props = if self.ordered && !sampler && props.0 & 0x1000 != 0 {
+            self.flags |= flags::ROVS;
+            (props.0 | 0x2000, props.1)
+        } else {
+            props
+        };
+>>>>>>> klbf/beta-2
         let (s, n) = (self.m.bool(sampler), self.m.bool(nonuniform));
         let h = self.op(
             block,
@@ -664,6 +758,7 @@ impl Shader {
         }
         let ud_size = (self.user_data * 4).next_multiple_of(16);
         self.fix_user_data_size(ud_size);
+<<<<<<< HEAD
         // The clean-up, before anything is declared about the code: a
         // feature whose last use it removed must not be declared (the
         // validator compares the flags with what the code uses).
@@ -694,6 +789,31 @@ impl Shader {
         if !self.root_uavs.is_empty() && !self.pixel && !compute {
             self.flags |= flags::UAVS_EVERY_STAGE;
         }
+||||||| a66ac212
+=======
+        // The clean-up, before anything is declared about the code: a
+        // feature whose last use it removed must not be declared (the
+        // validator compares the flags with what the code uses).
+        let passes = super::shader_opt() & super::bitcode::opt::MODULE;
+        if passes != 0 {
+            self.m.optimise(passes);
+            let used = self.m.usage();
+            for (flag, used) in [
+                (flags::WAVE_OPS, used.wave_ops),
+                (flags::INT64, used.int64),
+                (flags::DOUBLES, used.doubles),
+                (flags::TYPED_UAV_LOADS, used.typed_uav_loads),
+                (flags::ROVS, used.rovs),
+                (flags::RESOURCE_HEAP, used.heap_views),
+                (flags::SAMPLER_HEAP, used.heap_samplers),
+                (flags::ATOMIC_TYPED64 | flags::ATOMIC_HEAP64, used.atomic64),
+            ] {
+                if !used {
+                    self.flags &= !flag;
+                }
+            }
+        }
+>>>>>>> klbf/beta-2
         let mut resources = None;
         let mut bindings = Vec::new();
         let i32c = |s: &mut Self, v: u32| {
@@ -1017,12 +1137,19 @@ impl Shader {
         dxil.extend(&bitcode);
 
         let mut features = 0u64;
+<<<<<<< HEAD
         if self.flags & flags::DOUBLES != 0 {
             features |= 0x1;
         }
         if self.flags & flags::UAVS_EVERY_STAGE != 0 {
             features |= 0x4;
         }
+||||||| a66ac212
+=======
+        if self.flags & flags::DOUBLES != 0 {
+            features |= 0x1;
+        }
+>>>>>>> klbf/beta-2
         if self.flags & flags::STENCIL_REF != 0 {
             features |= 0x200;
         }

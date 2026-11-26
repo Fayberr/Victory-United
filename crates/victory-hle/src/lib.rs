@@ -23,11 +23,18 @@ pub mod runtime;
 pub use host::HostPolicy;
 pub use registry::{HleExport, HleModule, registry};
 pub use victory_gpu::console;
+<<<<<<< HEAD
 #[cfg(all(windows, feature = "diagnostics"))]
 pub use victory_gpu::replay;
 
 #[cfg(windows)]
 pub use victory_gpu::pipeline::known as known_pipelines;
+||||||| a66ac212
+=======
+/// Renderer port #2's switch and marks, for the launcher.
+#[cfg(windows)]
+pub use victory_gpu::port_descriptors;
+>>>>>>> klbf/beta-2
 
 use victory_loader::{ImportResolver, Provenance, Resolution};
 use victory_pe::ImportSymbol;
@@ -145,6 +152,7 @@ mod tests {
                 &name("GetModuleHandleW")
             ),
             Some(Provenance::Hle)
+<<<<<<< HEAD
         );
     }
 
@@ -194,4 +202,10 @@ mod tests {
         // A call we do not implement is not passed to the host either.
         assert_eq!(r.classify("rpcrt4.dll", &name("RpcServerRegisterIf")), None);
     }
+||||||| a66ac212
+        );
+    }
+=======
+        );    }
+>>>>>>> klbf/beta-2
 }

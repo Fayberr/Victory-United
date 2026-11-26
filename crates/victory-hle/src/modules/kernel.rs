@@ -359,6 +359,17 @@ fn find_module(path: &str, load: bool) -> Option<*mut c_void> {
         None if file.contains('.') => file.to_owned(),
         None => format!("{file}.dll"),
     };
+    // The title's FidelityFX loader, redirected to the PC DLL
+    // (`VICTORY_FSR_DLL`), is never mapped from the title's folder.
+    #[cfg(windows)]
+    if super::fidelityfx::replaces(&file)
+        && let Some(m) = registry().iter().find(|m| m.serves(&file))
+    {
+        if load {
+            tracing::info!(dll = file, "redirected to the PC FidelityFX DLL");
+        }
+        return Some(handle(m));
+    }
     // Loads go through the title DLL loader first: it waits for a DLL that
     // another thread is still initialising, as the Windows loader lock does.
     if load {
@@ -745,6 +756,7 @@ mod host {
 mod tests {
     use super::*;
 
+<<<<<<< HEAD
     /// A title-chosen exit's line names the call, the code and the caller,
     /// and the code the host exits with. The text is the one the harness
     /// matches, so it is fixed.
@@ -836,6 +848,78 @@ mod tests {
         .unwrap();
     }
 
+||||||| a66ac212
+=======
+    /// A title-chosen exit's line names the call, the code and the caller,
+    /// and the code the host exits with. The text is the one the harness
+    /// matches, so it is fixed.
+    #[test]
+    fn a_title_exit_line_names_the_call_code_and_caller() {
+        assert_eq!(
+            title_exit("exit", 127, "game.exe+0x1234"),
+            (
+                "title ended the process: call exit, code 127, from game.exe+0x1234".to_owned(),
+                127
+            )
+        );
+        // An exit code that arrives as a negative i32 keeps its bits.
+        assert_eq!(title_exit("exit", (-1i32) as u32, "").1, -1);
+    }
+
+    /// The title's `ExitProcess` ends the process as Windows does: the
+    /// CRT's exit table does not run on the calling thread while the
+    /// title's other threads live, and the process ends with the title's
+    /// code. Through the CRT's `exit` instead, an exit function that wants
+    /// a lock the caller holds hung the process before anything else ran
+    /// (Sol, integration review). A child process of this test binary
+    /// makes that call; the test waits for it at most 30 seconds.
+    #[cfg(windows)]
+    #[test]
+    fn a_title_exit_process_ends_as_windows_does_with_its_code() {
+        const CHILD: &str = "VICTORY_TEST_EXIT_PROCESS_CHILD";
+        const CODE: u32 = 0x8765_4321;
+        if std::env::var_os(CHILD).is_some() {
+            static HELD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            extern "C" fn wants_the_lock() {
+                drop(HELD.lock());
+            }
+            unsafe extern "C" {
+                fn atexit(f: extern "C" fn()) -> i32;
+            }
+            let _held = HELD.lock().unwrap();
+            // SAFETY: registers a function with the CRT's exit table.
+            assert_eq!(unsafe { atexit(wants_the_lock) }, 0);
+            // Another thread alive, as the title's are.
+            drop(std::thread::spawn(|| {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+            }));
+            ExitProcess(CODE);
+        }
+        let exe = std::env::current_exe().unwrap();
+        let mut child = std::process::Command::new(exe)
+            .args(["--exact", "modules::kernel::tests::a_title_exit_process_ends_as_windows_does_with_its_code", "--nocapture"])
+            .env(CHILD, "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let started = std::time::Instant::now();
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if started.elapsed() > std::time::Duration::from_secs(30) {
+                let _ = child.kill();
+                panic!("the title's ExitProcess did not end the process in 30 s");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        assert_eq!(status.code().map(|c| c as u32), Some(CODE), "the title's code");
+    }
+
+>>>>>>> klbf/beta-2
     #[test]
     fn title_images_report_their_original_path() {
         let base = 0x7000_0000_0000;

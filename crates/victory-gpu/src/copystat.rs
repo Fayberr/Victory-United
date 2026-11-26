@@ -129,6 +129,7 @@ pub(crate) enum C {
     WaitsForGroups,
     WaitsForBuffers,
     IndirectBounded,
+<<<<<<< HEAD
     /// The guards of view memory (`crate::watch`): askings; of them the
     /// ones whose range was known as a view with no question to Windows,
     /// and the ones found all clean; blocks walked by the others;
@@ -184,6 +185,15 @@ fn bank() -> usize {
         mine.get()
     })
     .unwrap_or(0)
+||||||| a66ac212
+=======
+    /// `watch::writes` kernel askings that failed (the range is not
+    /// write-watched: view memory or not watchable).
+    WatchFailed,
+    /// `watch::writes` askings not made because the range's first block is
+    /// already known to be guarded view memory (no kernel call).
+    WatchKnownView,
+>>>>>>> klbf/beta-2
 }
 
 pub(crate) fn add(c: C, n: u64) {
@@ -364,11 +374,29 @@ fn own(size: usize, made: bool) {
     let class = block_class(size);
     let own = &OWN[bank()].0;
     if made {
+<<<<<<< HEAD
         own[class].fetch_add(size as u64, Relaxed);
         own[4 + class].fetch_add(1, Relaxed);
+||||||| a66ac212
+        OWN[class].fetch_add(size as u64, Relaxed);
+        OWN[4 + class].fetch_add(1, Relaxed);
+=======
+        OWN[class].fetch_add(size as u64, Relaxed);
+        OWN[4 + class].fetch_add(1, Relaxed);
+        victory_core::heapcount::grow(size);
+>>>>>>> klbf/beta-2
     } else {
+<<<<<<< HEAD
         own[class].fetch_sub(size as u64, Relaxed);
         own[4 + class].fetch_sub(1, Relaxed);
+||||||| a66ac212
+        OWN[class].fetch_sub(size as u64, Relaxed);
+        OWN[4 + class].fetch_sub(1, Relaxed);
+=======
+        OWN[class].fetch_sub(size as u64, Relaxed);
+        OWN[4 + class].fetch_sub(1, Relaxed);
+        victory_core::heapcount::shrink(size);
+>>>>>>> klbf/beta-2
     }
 }
 
@@ -764,11 +792,33 @@ fn log_memory() {
     let card = crate::host::host()
         .and_then(|h| h.video_memory())
         .unwrap_or_default();
+<<<<<<< HEAD
     // Everything the system says of the two memory groups, beside the
     // budget and use the lines below print.
     if let Some(h) = crate::host::host() {
         h.log_video_memory("with the memory line");
     }
+||||||| a66ac212
+=======
+    // Everything the system says of the two memory groups, beside the
+    // budget and use the lines below print.
+    if let Some(h) = crate::host::host() {
+        h.log_video_memory("with the memory line");
+    }
+    let [capped_textures, mip_saved_live_bytes, mip_saved_total_bytes] =
+        crate::resource::MIP_SAVINGS.each_ref().map(|v| v.load(Relaxed));
+    let [local_budget_bytes, local_used_bytes, nonlocal_budget_bytes, nonlocal_used_bytes] = card;
+    tracing::info!(
+        local_used_bytes,
+        local_budget_bytes,
+        nonlocal_used_bytes,
+        nonlocal_budget_bytes,
+        capped_textures,
+        mip_saved_live_bytes,
+        mip_saved_total_bytes,
+        "VRAM usage and texture cap"
+    );
+>>>>>>> klbf/beta-2
     // What else holds memory: the map, on a thread of its own, with every
     // sixth line; and what the shader table and the pipeline library keep.
     static LINES: AtomicU64 = AtomicU64::new(0);
@@ -817,6 +867,7 @@ fn log_memory() {
         mb(card[0]),
         mb(card[3]),
     );
+<<<<<<< HEAD
     {
         let [textures, staging] = crate::pool::memory();
         tracing::info!("memory in blocks (VICTORY_TEXTURE_POOL=0 turns them off): {textures} MB of textures, {staging} MB of their staging buffers");
@@ -837,6 +888,25 @@ fn log_memory() {
         targets[8],
         mb(targets[9]),
     );
+||||||| a66ac212
+=======
+    let targets = crate::resource::targets_census();
+    tracing::info!(
+        "host copies the sweep never lets go: {} the host renders to or writes {:.0} MB ({} of them placed {:.0} MB);          of them {} have title memory that is not mapped now {:.0} MB, {} were not used for 30 s and are held by no          list and no slot {:.0} MB, {} are both {:.0} MB; and {} copies of textures the title fills that the host          copied into {:.0} MB",
+        targets[0],
+        mb(targets[1]),
+        targets[10],
+        mb(targets[11]),
+        targets[2],
+        mb(targets[3]),
+        targets[4],
+        mb(targets[5]),
+        targets[6],
+        mb(targets[7]),
+        targets[8],
+        mb(targets[9]),
+    );
+>>>>>>> klbf/beta-2
     tracing::info!(
         "memory let go since the start: {} windows outside buffers {:.0} MB, {} staging buffers \
          {:.0} MB; of the windows alive, {:.0} MB lie between the lowest and highest address \
@@ -1242,6 +1312,7 @@ pub(crate) fn log(frames: f64) {
         c[C::GpuWritesLeftOut as usize],
         mb(c[C::GpuWritesLeftOutBytes as usize]),
     );
+<<<<<<< HEAD
     crate::draw::tables_line(frames);
     let [together, written, mapped] =
         [0, 1, 2].map(|n| crate::watch::ALIASES[n].load(std::sync::atomic::Ordering::Relaxed));
@@ -1263,6 +1334,15 @@ pub(crate) fn log(frames: f64) {
          the busiest stores (left out/changed): {}",
         crate::titlewrite::busiest()
     );
+||||||| a66ac212
+=======
+    let [together, written, mapped] =
+        [0, 1, 2].map(|n| crate::watch::ALIASES[n].load(std::sync::atomic::Ordering::Relaxed));
+    tracing::info!(
+        "guards over several views of a page, since the start: {together} blocks guarded with their other views, \
+         {written} views opened by a write through another, {mapped} ranges opened because a view of them was mapped"
+    );
+>>>>>>> klbf/beta-2
     // Where the wall clock of a frame goes: the phases of a frame, the
     // processor time of the whole process, and what each submitting and
     // recording thread did.
@@ -1385,6 +1465,7 @@ pub(crate) fn log(frames: f64) {
         );
     }
     tracing::info!(
+<<<<<<< HEAD
         "  write-watch askings per frame that failed in the kernel: {:.0}; not made because the range \
          is known guarded view memory: {:.0} (VICTORY_VIEW_ASK=1 asks the kernel anyway); such ranges left \
          out of the submissions' askings ahead: {:.0}",
@@ -1394,6 +1475,15 @@ pub(crate) fn log(frames: f64) {
     );
     crate::draw::window_line(frames);
     tracing::info!(
+||||||| a66ac212
+=======
+        "  write-watch askings per frame that failed in the kernel: {:.0}; not made because the range \
+         is known guarded view memory: {:.0} (VICTORY_VIEW_ASK=1 asks the kernel anyway)",
+        c[C::WatchFailed as usize],
+        c[C::WatchKnownView as usize],
+    );
+    tracing::info!(
+>>>>>>> klbf/beta-2
         "  waits for every earlier shader write, per frame: {:.0} for the title's barrier groups, {:.0} \
          for its barriers on buffers; {:.0} indirect commands bounded (a dispatch of ours between two \
          such waits each); barrier experiment {}",

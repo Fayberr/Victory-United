@@ -50,7 +50,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::core::{HSTRING, Interface, PCWSTR};
@@ -425,12 +425,20 @@ fn same_name(name: &str) -> MutexGuard<'static, ()> {
     LOADING[at % LOADING.len()].lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// With `VICTORY_LIBRARY_LOCK=1`: held by every library call, as before.
+/// With `VICTORY_LIBRARY_LOCK=1` (or by default on AMD adapters): held by every
+/// library call (load, make, store) to prevent multithreaded races in driver
+/// compilers and deserializers (amdxc64.dll).
 fn one_call() -> Option<MutexGuard<'static, ()>> {
     static ON: OnceLock<bool> = OnceLock::new();
     static CALLING: Mutex<()> = Mutex::new(());
-    ON.get_or_init(|| std::env::var_os("VICTORY_LIBRARY_LOCK").is_some_and(|v| v == "1"))
-        .then(|| CALLING.lock().unwrap_or_else(|e| e.into_inner()))
+    ON.get_or_init(|| {
+        if let Some(v) = std::env::var_os("VICTORY_LIBRARY_LOCK") {
+            v == "1"
+        } else {
+            crate::host::is_amd()
+        }
+    })
+    .then(|| CALLING.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 const LIBRARY_FILE: &str = "host-pipelines.bin";
@@ -444,9 +452,12 @@ const EARLY_FILE: &str = "early-pipelines.txt";
 /// Title pipelines listed for an early start, at most.
 const EARLY_MAX: usize = 100_000;
 
-fn library() -> Option<&'static Library> {
-    static LIBRARY: OnceLock<Option<Library>> = OnceLock::new();
+/// The library, opened on first use (`None` inside: not opened yet).
+static LIBRARY: Mutex<Option<Option<Arc<Library>>>> = Mutex::new(None);
+
+fn library() -> Option<Arc<Library>> {
     LIBRARY
+<<<<<<< HEAD
         .get_or_init(|| {
             // With RenderDoc loaded the device is RenderDoc's: the card's
             // library is not for it, and what it would save is not for
@@ -459,12 +470,46 @@ fn library() -> Option<&'static Library> {
             let device = crate::host::host()?.device.cast::<ID3D12Device1>().ok()?;
             let blob = DIR.get().map_or(Blob::None, |d| Blob::of(d));
             let library = open(&device, blob);
+||||||| a66ac212
+        .get_or_init(|| {
+            let device = crate::host::host()?.device.cast::<ID3D12Device1>().ok()?;
+            let blob = DIR.get().map_or(Blob::None, |d| Blob::of(d));
+            let library = open(&device, blob);
+=======
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(|| {
+            let library = open_from_disk();
+>>>>>>> klbf/beta-2
             if library.is_none() {
                 tracing::warn!("no host pipeline library: pipelines are not kept");
             }
             library
         })
-        .as_ref()
+        .clone()
+}
+
+fn open_from_disk() -> Option<Arc<Library>> {
+    let device = crate::host::host()?.device.cast::<ID3D12Device1>().ok()?;
+    let blob = DIR.get().map_or(Blob::None, |d| Blob::of(d));
+    open(&device, blob).map(Arc::new)
+}
+
+/// Saves the library, then opens it again from the file just written: the
+/// pipelines stored into it are let go (a library holds every pipeline
+/// stored into it until it is released: the pre-build's thousands). Only
+/// with no library call under way that stores into it (the pre-build
+/// pauses its workers).
+pub(crate) fn save_and_reopen() {
+    save(true);
+    let mut library = LIBRARY.lock().unwrap_or_else(|e| e.into_inner());
+    if matches!(&*library, Some(Some(_))) {
+        // The old one first: its file mapping goes with it (and `trim`'s
+        // view of it until the new one is mapped).
+        VIEW[0].store(0, Ordering::Relaxed);
+        *library = None;
+        *library = Some(open_from_disk());
+    }
 }
 
 /// The library in `blob`, or an empty one if the host rejects the blob (an
@@ -557,7 +602,14 @@ pub(crate) fn pipeline_with_status(
     let wide = HSTRING::from(name);
     let Some(library) = library() else {
         MADE.fetch_add(1, Ordering::Relaxed);
+<<<<<<< HEAD
         return create().map(|pso| (pso, false));
+||||||| a66ac212
+        return create();
+=======
+        let _all = one_call();
+        return create();
+>>>>>>> klbf/beta-2
     };
     let began = std::time::Instant::now();
     let loaded = {
@@ -580,9 +632,11 @@ pub(crate) fn pipeline_with_status(
         }
         Err(e) => e,
     };
-    // Compiled outside any lock: compiles take up to seconds.
+    // Compiled outside library lock, but serialized across workers on AMD (or with
+    // VICTORY_LIBRARY_LOCK=1) to prevent multithreaded races in amdxc64.dll.
     let pso = {
         let _call = call("make", name);
+        let _all = one_call();
         create()?
     };
     MADE.fetch_add(1, Ordering::Relaxed);
@@ -764,6 +818,17 @@ fn write_out(dir: &std::path::Path, library: &Library) {
     } else {
         Ok(())
     };
+<<<<<<< HEAD
+||||||| a66ac212
+    let used: Vec<String> = USED.lock().unwrap_or_else(|e| e.into_inner()).iter().flatten().cloned().collect();
+    let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
+=======
+    // With what earlier runs listed: a run that asks for no title pipeline
+    // (`victory warm`) wrote an empty list over theirs, and the next world
+    // began with every pipeline still to be asked for.
+    let used: Vec<String> = used().iter().flatten().cloned().collect();
+    let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
+>>>>>>> klbf/beta-2
     if bytes > 0 && library_written.is_ok() {
         // In place unless the system refused and the new one waits beside it.
         let in_place = !dir.join(NEXT_FILE).exists();
@@ -880,6 +945,7 @@ fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>
     })
 }
 
+<<<<<<< HEAD
 /// How long each title pipeline that took long to make took, in ms (beside
 /// the early list; a key may be there more than once).
 const SLOW_FILE: &str = "slow-pipelines.txt";
@@ -923,6 +989,11 @@ pub(crate) fn note_time(key: &str, ms: u64) {
 }
 
 /// Title pipeline keys requested by draws or dispatches (this run and the last).
+||||||| a66ac212
+/// Title pipeline keys drawn or dispatched with (this run and the last).
+=======
+/// Title pipeline keys requested by draws or dispatches (this run and the last).
+>>>>>>> klbf/beta-2
 static USED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 static USED_CHANGED: AtomicBool = AtomicBool::new(false);
 
@@ -940,6 +1011,7 @@ fn used() -> std::sync::MutexGuard<'static, Option<HashSet<String>>> {
     used
 }
 
+<<<<<<< HEAD
 /// Open the early list before a cache save that has no title draws.
 pub(crate) fn keep_early_list() {
     drop(used());
@@ -950,6 +1022,31 @@ pub(crate) fn keep_early_list() {
 /// `VICTORY_EARLY_ALL=1`: every title pipeline is started at creation,
 /// requested before or not, so that the driver's own cache holds it for
 /// later runs.
+||||||| a66ac212
+/// Whether the title pipeline with `key` was drawn with in an earlier run.
+=======
+/// Whether the host driver died making the title pipeline with `key` in
+/// a pre-build (`translate --cache --pipelines` lists it in
+/// `prebuild-crashed.txt`): a run skips it as `VICTORY_SKIP_PIPELINES` does
+/// (it crashed in amdxc64.dll at its first bind on RX 9070 XT).
+pub(crate) fn crashed(key: &str) -> bool {
+    static CRASHED: OnceLock<HashSet<String>> = OnceLock::new();
+    CRASHED
+        .get_or_init(|| {
+            let listed = DIR
+                .get()
+                .and_then(|d| std::fs::read_to_string(d.join("prebuild-crashed.txt")).ok())
+                .unwrap_or_default();
+            let set: HashSet<String> =
+                listed.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect();
+            tracing::info!(pipelines = set.len(), "pipelines skipped: the host driver died on them in a pre-build");
+            set
+        })
+        .contains(key)
+}
+
+/// Whether the title pipeline with `key` was requested in this or an earlier run.
+>>>>>>> klbf/beta-2
 pub(crate) fn wanted_early(key: &str) -> bool {
     static ALL: OnceLock<bool> = OnceLock::new();
     if *ALL.get_or_init(|| std::env::var_os("VICTORY_EARLY_ALL").is_some_and(|v| v == "1")) {
