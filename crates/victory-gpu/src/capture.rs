@@ -806,25 +806,11 @@ fn small_float(bits: u32, man: u32) -> f32 {
     }
 }
 
-<<<<<<< HEAD
-/// Rows of a host format as 8-bit RGBA: 8-bit color as is, everything else
-/// as channel values scaled so the largest finite one is white (single
-/// channels: lowest black, highest white, as grey). `None` for formats not
-/// handled.
-pub(crate) fn to_rgba(format: u32, w: usize, h: usize, pitch: usize, rows: &[u8]) -> Option<Vec<u8>> {
-||||||| 85d564167
-/// Rows of a host format as 8-bit RGBA: 8-bit color as is, everything else
-/// as channel values scaled so the largest finite one is white (single
-/// channels: lowest black, highest white, as grey). `None` for formats not
-/// handled.
-fn to_rgba(format: u32, w: usize, h: usize, pitch: usize, rows: &[u8]) -> Option<Vec<u8>> {
-=======
 /// Converts host-format rows to opaque 8-bit RGBA for the RGB dump. Byte
 /// colors and packed 16-bit BGR use their full channel range. Other formats
 /// scale to the highest finite value, with single channels shown in grey
 /// from their lowest to highest value. Returns `None` for unhandled formats.
-fn to_rgba(format: u32, w: usize, h: usize, pitch: usize, rows: &[u8]) -> Option<Vec<u8>> {
->>>>>>> avatar/main
+pub(crate) fn to_rgba(format: u32, w: usize, h: usize, pitch: usize, rows: &[u8]) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(w * h * 4);
     let px = |x: usize, y: usize, n: usize| &rows[y * pitch + x * n..][..n];
     let u16_at = |b: &[u8], i: usize| u16::from_le_bytes([b[2 * i], b[2 * i + 1]]);

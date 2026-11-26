@@ -237,7 +237,6 @@ pub(crate) extern "system" fn wait(
     hr
 }
 
-<<<<<<< HEAD
 /// Called before each present to the host. A present with no flip wait
 /// since the last one (a frame begun early, on an origin time-out: the
 /// movie player catching up) waits for the next flip tick and takes it, as
@@ -253,8 +252,6 @@ pub(crate) fn before_present() {
     last(FLIP).fetch_max(tick, Ordering::Relaxed);
 }
 
-||||||| 85d564167
-=======
 /// How even the frames are (`VICTORY_TIMER_LOG=1`): the times between frame
 /// beginnings, logged every 5 s by bands, with the pairs of a short frame
 /// next to a long one (a 16/33 alternation shows as many of them).
@@ -329,8 +326,6 @@ mod pace {
         }
     }
 }
-
->>>>>>> avatar/main
 /// Device method: no statistics are kept, so none are returned.
 pub(crate) extern "system" fn statistics(
     _: This,
