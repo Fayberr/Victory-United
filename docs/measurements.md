@@ -23,3 +23,26 @@ built left out; in this run none did).
   device-removed line in the log.
 - Not measured: any other machine, any real save, any open world area, any comparison against
   an earlier commit under identical settings.
+
+## 2026-11-26, paired run: `cf5d6000` against `ac63840d` (14 performance changes)
+
+- Machine, console profile, scripted keys and environment switches: as in the entry above.
+  Both runs used the same game data seed and the same starting shader and pipeline cache (each
+  run got its own fresh copy of the cache), one after the other, 6 minutes each.
+- Base: `cf5d6000` (same code as `db89ba3b`), release build with diagnostics logging, SHA-256
+  `D33A22056D5C61EC238AB271FC66BB89423C036C759EE3DAF2418B7960E40A04`.
+- Candidate: `ac63840d` (base plus 14 performance changes taken from other projects, listed in
+  `PROVENANCE.md`), same build type, SHA-256
+  `E212CF09B85F7E254CAF0CB46DB9829CE5B0DB4C55F4AE8D67DCEADFEAC3F18D`.
+- Result, last 20 five-second reports of each run with 4,300 to 4,700 draws a frame (the room
+  was settled in both): base median 250 ms a frame (4.0 fps) at 4,443 draws; candidate median
+  199 ms a frame (5.0 fps) at 4,488 draws. Frame time 21 percent lower.
+  Heap buffers pass 106 ms against 72 ms; preparing 83 against 80 ms (copies 48 against 45 ms);
+  copying back 40 against 38 ms.
+- Both runs: no crash, panic or device-removed line in the log. The script closed the game at
+  the 6 minute deadline; it had to end the process after its 5 second close wait (exit code 0).
+- The last real captured frame of each run was looked at: the room is drawn cleanly, with no
+  bright blocks. The two frames show different moments of the room's camera animation, because
+  the slower run had played less game time.
+- Not measured: more than one run per build, any other machine, a long run of the candidate,
+  and the picture compared pixel for pixel.

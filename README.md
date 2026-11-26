@@ -40,8 +40,14 @@ profile), and a few shader stubs (exposure, ambient, shadow mask). Full list in
   Shadows still miss some light.
 
 Earlier, on commit `33f3c35` with the diagnostics build, the same room measured 4.9 to 5.2 frames
-per second over two 6 minute runs, so the two figures are close, and this repository has no
-paired measurement that shows the newer commits to be faster.
+per second over two 6 minute runs.
+
+Paired run on the same machine, same settings and same starting data: `cf5d6000` against
+`ac63840d` (14 performance changes taken from other projects, listed in `PROVENANCE.md`), 6
+minutes each. Once the room had settled, the first measured 250 ms a frame (4.0 fps) and the
+second 199 ms a frame (5.0 fps), at about 4,450 draws a frame in both. The part that shrank most
+was the heap buffers pass (106 ms to 72 ms). One run per build, no crash in either; details in
+`docs/measurements.md`.
 
 ## Build
 
