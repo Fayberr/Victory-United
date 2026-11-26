@@ -850,16 +850,9 @@ pub(crate) fn upload_from(list: &HostList, resource: This, first: u32) {
     // The host texture has the staging buffer's contents: only the check
     // at submission is left, and what it finds changed the next list that
     // samples the texture uploads (a frame late where every list of the
-<<<<<<< HEAD
     // frame was recorded before that check). During a one-shot bake we
     // always record the copy so any change found at submission lands in
     // VRAM before the bake draw executes.
-    if !baking && staging.uploaded.load(Relaxed) && !staging.dirty.load(Relaxed) {
-||||||| 0a4356653
-    // frame was recorded before that check).
-    if staging.uploaded.load(Relaxed) && !staging.dirty.load(Relaxed) {
-=======
-    // frame was recorded before that check).
     // LOCAL: not for a video's picture planes (`guard_view` false). Their
     // check at submission finds the frame the decoder wrote since, but the
     // copy came only with the next list that samples the plane: three
@@ -868,8 +861,11 @@ pub(crate) fn upload_from(list: &HostList, resource: This, first: u32) {
     // ghosts and pictures from earlier (r_avm23, the user's recording).
     // With the copy recorded here, it takes what that check puts in the
     // staging buffer at this list's submission.
-    if staging.guard_view && staging.uploaded.load(Relaxed) && !staging.dirty.load(Relaxed) {
->>>>>>> nvidia/main
+    if !baking
+        && staging.guard_view
+        && staging.uploaded.load(Relaxed)
+        && !staging.dirty.load(Relaxed)
+    {
         #[cfg(feature = "diagnostics")]
         crate::copystat::add(crate::copystat::C::TexSkipped, 1);
         list.defer_texture(staging);
