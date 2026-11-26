@@ -13,6 +13,7 @@ pub mod apu;
 pub mod audio;
 pub mod controls;
 pub mod d3d12x;
+pub mod ffx;
 pub mod display;
 pub mod dsp;
 /// Portable partitioned convolution for the Windows/Xbox audio DSP.
@@ -73,6 +74,10 @@ pub(crate) fn all() -> Vec<HleModule> {
     all.push(rpcrt4::module());
     #[cfg(windows)]
     all.push(xmem::module());
+    #[cfg(windows)]
+    if victory_gpu::title_pages_told() {
+        all.push(xmem::host_memory_module());
+    }
     #[cfg(windows)]
     all.push(xsystem::module());
     all

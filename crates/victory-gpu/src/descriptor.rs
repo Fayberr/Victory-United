@@ -127,7 +127,8 @@ const SHADER_VISIBLE: u32 = 1;
 /// start, end, heap.
 ///
 /// Read by every lookup and by [`sync_heaps`], written only when a heap is
-/// made or dropped. It was a mutex, and [`sync_heaps`] holds it for its
+/// made or dropped (and held alone by the sync where it is to be exact,
+/// [`sync_exact`]). It was a mutex, and [`sync_heaps`] holds it for its
 /// whole pass (15 ms a frame on the submitting thread): the profile of run
 /// 225 has the title's six recording threads waiting 48.5 ms a frame in
 /// [`shader_slot`] for it, each lookup itself a few nanoseconds. Readers no
@@ -254,10 +255,18 @@ pub(crate) fn sync_heaps() {
     }
     let started = std::time::Instant::now();
     let (mut pages, mut looked, mut mirrored) = (0u64, 0u64, 0u64);
+    let mut due: Vec<host::Due> = Vec::new();
     let mut page_bytes: Vec<u8> = Vec::new();
     let mut straddle = [0u8; 32];
     let _one = SYNCING.lock().unwrap_or_else(|e| e.into_inner());
-    let heaps = SHADER_HEAPS.read().unwrap_or_else(|e| e.into_inner());
+    // Alone where it is to be exact: a look-up of a recording thread that
+    // mirrors a record (under the list's shared side) never comes between
+    // this pass's read of a page and what it makes of it, or the older bytes
+    // would be made last.
+    let exact = sync_exact();
+    let alone = exact.then(|| SHADER_HEAPS.write().unwrap_or_else(|e| e.into_inner()));
+    let shared = (!exact).then(|| SHADER_HEAPS.read().unwrap_or_else(|e| e.into_inner()));
+    let heaps = alone.as_deref().or(shared.as_deref()).map_or(&[][..], |h| &h[..]);
     for &(start, end, at) in heaps.iter() {
         // SAFETY: registered heaps are live (removed when dropped).
         let heap = unsafe { &*(at as *const Heap) };
@@ -282,6 +291,7 @@ pub(crate) fn sync_heaps() {
                 page_bytes.resize(to - from, 0);
                 if crate::host::read_into(from as *const u8, &mut page_bytes) {
                     pages += 1;
+<<<<<<< HEAD
                     // Skip pages whose bytes did not change, and walk only
                     // slots touched by changed bytes (plus slots whose cache
                     // fingerprint is 0: `HostHeap::needs_mirror`).
@@ -325,18 +335,39 @@ pub(crate) fn sync_heaps() {
                     }
                     let step_len = step as usize;
                     // The page's records in one go, under one lock
+||||||| 465b94f5
+                    let slots = changed_slots(from, to, start as usize, step, mirrored_count);
+                    // The page's records in one go, under one lock
+=======
+                    let slots = changed_slots(from, to, start as usize, step, mirrored_count);
+                    let straddling = |handle: u64, into: &mut [u8; 32]| {
+                        handle + step <= end && crate::host::read_into(handle as *const u8, &mut into[..step as usize])
+                    };
+                    // The page's records in one go
+>>>>>>> vertex/main
                     // (`HostHeap::mirror_copied_page`); one by one below
                     // with `VICTORY_HEAP_SYNC_PAGE=0`.
                     let slots = if page_at_once() {
+<<<<<<< HEAD
                         let (seen, made) = host.mirror_copied_page(slots, (start, step), from, &page_bytes);
                         looked += seen;
                         mirrored += made;
                         Vec::new()
+||||||| 465b94f5
+                        let (seen, made) = host.mirror_copied_page(slots, (start, step), from, &page_bytes);
+                        looked += seen;
+                        mirrored += made;
+                        0..0
+=======
+                        looked += host.mirror_copied_page(slots, (start, step), from, &page_bytes, straddling, &mut due);
+                        0..0
+>>>>>>> vertex/main
                     } else {
                         slots
                     };
                     for index in slots {
                         let handle = start + index * step;
+<<<<<<< HEAD
                         let record = match (handle as usize)
                             .checked_sub(from)
                             .and_then(|at| page_bytes.get(at..at + step_len))
@@ -356,6 +387,23 @@ pub(crate) fn sync_heaps() {
                                 }
                                 &straddle[..step_len]
                             }
+||||||| 465b94f5
+                        // A record that straddles the range's ends is left
+                        // to the range that holds its first byte.
+                        let Some(at) = (handle as usize).checked_sub(from) else {
+                            continue;
+                        };
+                        let Some(record) = page_bytes.get(at..at + step as usize) else {
+                            continue;
+=======
+                        let mut whole = [0u8; 32];
+                        let at = (handle as usize).checked_sub(from);
+                        let record = match at.and_then(|at| page_bytes.get(at..at + step as usize)) {
+                            Some(record) => record,
+                            // A record over the page's ends is read whole.
+                            None if step as usize <= whole.len() && straddling(handle, &mut whole) => &whole[..step as usize],
+                            None => continue,
+>>>>>>> vertex/main
                         };
                         looked += 1;
                         // Only a record that is not the one last seen there
@@ -368,8 +416,12 @@ pub(crate) fn sync_heaps() {
                 page += crate::watch::PAGE;
             }
         }
+        // The heap's changed slots, in slot order within a page.
+        mirrored += due.len() as u64;
+        host.mirror_all(&due, exact);
+        due.clear();
     }
-    drop(heaps);
+    drop((alone, shared));
     for (count, n) in SYNCED.iter().zip([pages, looked, mirrored, started.elapsed().as_micros() as u64]) {
         count.fetch_add(n, Relaxed);
     }
@@ -398,6 +450,43 @@ pub(crate) fn sync_line(frames: f64) {
         host::COPIED_TABLED.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / frames,
         micros as f64 / 1000.0 / frames
     );
+    let left = host::BUFFERS_TABLED.swap(0, std::sync::atomic::Ordering::Relaxed);
+    if left > 0 {
+        tracing::info!(
+            "buffer and constant records left to the draws' tables (VICTORY_TABLE_BUFFERS=1), per frame: {:.0}",
+            left as f64 / frames
+        );
+    }
+    let skipped = host::NULLS_SKIPPED.swap(0, std::sync::atomic::Ordering::Relaxed);
+    if skipped > 0 {
+        tracing::info!(
+            "null views not made again because the slot held that kind already (VICTORY_SYNC_NULL_SKIP=0: made again), per frame: {:.0}",
+            skipped as f64 / frames
+        );
+    }
+    #[cfg(feature = "diagnostics")]
+    {
+        let c: Vec<u64> = host::COPIED_WHAT
+            .iter()
+            .map(|c| (c.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / frames) as u64)
+            .collect();
+        tracing::info!(
+            "records mirrored from bytes, per frame: covered by a table never {}, lately {}, 241-960 frames ago {}, longer {};              not ours {}, constants {}, placed buffers {}, placed textures {}, buffers {}, texture objects {}; by 64th of the heap {:?}",
+            c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], &c[10..]
+        );
+    }
+}
+
+/// Whether [`sync_heaps`] makes exactly what the bytes it read say, alone with
+/// the heaps meanwhile (`VICTORY_SYNC_EXACT=1`, and with
+/// `VICTORY_HEAP_SYNC_PAGE=0`; off by default). Otherwise a record another
+/// thread wrote since it was read is made as it is then and looked at again
+/// by the next pass, and no recording thread waits for the pass
+/// (`HostHeap::mirror_due`).
+#[cfg(windows)]
+fn sync_exact() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| !page_at_once() || std::env::var_os("VICTORY_SYNC_EXACT").is_some_and(|v| v == "1"))
 }
 
 /// Whether [`sync_heaps`] hands a changed page's records to the host heap
@@ -1115,6 +1204,21 @@ pub(crate) fn view(handle: u64) -> Option<View> {
     view_at(i, generation)
 }
 
+/// The view recorded at `handle`, and what says which record that is
+/// (`host::HostHeap::publish`).
+#[cfg(windows)]
+pub(crate) fn view_and_key(handle: u64) -> Option<(View, u64)> {
+    if handle == 0 {
+        return None;
+    }
+    // SAFETY: as in `view`.
+    let [tag, i, generation] = unsafe { (handle as *const [u32; 3]).read_unaligned() };
+    if tag != VIEW_TAG {
+        return None;
+    }
+    Some((view_at(i, generation)?, u64::from(generation) << 32 | u64::from(i)))
+}
+
 /// A description of `N` words, if the title passes one.
 fn words<const N: usize>(desc: *const [u32; N]) -> Option<[u32; N]> {
     // SAFETY: the title passes a description or null.
@@ -1405,6 +1509,74 @@ mod tests {
         );
     }
 
+    /// A table made afresh for a draw holds the descriptors its shader
+    /// moves halves through (`HostShader::half_views`), also past the range
+    /// starts its used-resource entries give: with one entry for a range
+    /// from dword 0 and a 16-bit float buffer view at dword 8, the table
+    /// takes two dynamic slots, so the next allocation does not land on the
+    /// view's. (The case avt0m4t48 found in review on #927.)
+    #[cfg(windows)]
+    #[test]
+    fn a_fresh_table_holds_the_half_views_past_its_range_starts() {
+        use victory_shader::{ResourceType, RootType, UsedResource};
+        let Some(device) = crate::host::host() else {
+            return; // no host GPU
+        };
+        let list = device.new_list().expect("a host list");
+        let desc = HeapDesc {
+            kind: VIEWS_KIND,
+            count: 2,
+            flags: SHADER_VISIBLE,
+            nodes: 1,
+        };
+        let none = Placement {
+            address: 0,
+            size: 0,
+        };
+        let mut h: This = std::ptr::null();
+        assert_eq!(create(desc, none, &mut h), S_OK);
+        let title = heap(h);
+        let host_heap = title.host().expect("a host view heap");
+        let (first, second) = (title.handle(0).unwrap(), title.handle(1).unwrap());
+        // An R16G16B16A16_FLOAT buffer view of memory in the second slot.
+        let memory = [0u64; 64];
+        let address = memory.as_ptr() as u64;
+        let resource = [1, 0, 0, 0, 512, 0, 1, 0x1_0001, 0, 1, 0, 1, 0, 0];
+        let mut words = [0u32; 16];
+        words[..10].copy_from_slice(&[10, 1, 5768, 0, 0, 0, 64, 0, 0, 0]);
+        words[10] = address as u32;
+        words[11] = (address >> 32) as u32;
+        create_placed_srv(std::ptr::null(), &resource, &words, second);
+        assert!(view(second).as_ref().and_then(host::half_view).is_some());
+        let mut state = crate::draw::State::default();
+        state.set_heaps(&[h]);
+        state.set_table(true, 1, first);
+        let range = UsedResource {
+            kind: ResourceType::Srv,
+            root: RootType::Table,
+            table_offset_dwords: 0,
+            lower_bound: 0,
+            stride: 8,
+            dwords: 4,
+            user_data: 4,
+            slot: 1,
+        };
+        let made = state.tables(&list, &[range], &[], &[(1, 8)], true);
+        let [(1, offset)] = made[..] else {
+            panic!("one fresh table for root parameter 1, not {made:?}");
+        };
+        assert_ne!(offset, u32::MAX, "the table found no dynamic slots");
+        let next = host_heap.dynamic(1).expect("a dynamic slot");
+        host_heap.release(next, 1);
+        drop(state);
+        slot::<extern "system" fn(This) -> u32>(h, 0x10)(h);
+        assert_eq!(
+            next,
+            offset / 32 + 2,
+            "the next allocation took the table's second slot"
+        );
+    }
+
     #[test]
     fn heaps_hold_count_descriptors_from_their_start() {
         let null = std::ptr::null();
@@ -1483,6 +1655,7 @@ mod tests {
         unsafe { VirtualFree(memory, 0, MEM_RELEASE) };
     }
 
+<<<<<<< HEAD
     /// A descriptor record straddling a 64 KiB page boundary in an unaligned
     /// placed heap must be mirrored instead of skipped by both pages.
     #[cfg(windows)]
@@ -1703,6 +1876,229 @@ mod tests {
         unsafe { VirtualFree(memory, 0, MEM_RELEASE) };
     }
 
+||||||| 465b94f5
+=======
+    /// Verifies `HostHeap::copied` cache invalidation across API writes,
+    /// `texture_slot_gone()` unmakes, raw zeroing of API-made slots, and that
+    /// `mirror_copied` decodes from the kernel-read `record` slice without
+    /// dereferencing raw `handle`.
+    #[cfg(windows)]
+    #[test]
+    fn copied_fingerprint_invalidates_across_api_writes_unmake_and_zeroing() {
+        use windows_sys::Win32::System::Memory::{
+            MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
+        };
+        const MEM_WRITE_WATCH: u32 = 0x20_0000;
+        let memory = unsafe {
+            VirtualAlloc(
+                std::ptr::null(),
+                crate::watch::PAGE,
+                MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH,
+                PAGE_READWRITE,
+            )
+        };
+        assert!(!memory.is_null());
+        let desc = HeapDesc {
+            kind: SAMPLERS,
+            count: 64,
+            flags: SHADER_VISIBLE,
+            nodes: 1,
+        };
+        let placement = Placement {
+            address: memory as u64,
+            size: 64 * 16,
+        };
+        let mut h: This = std::ptr::null();
+        assert_eq!(create(desc, placement, &mut h), S_OK);
+        if let Some(host) = heap(h).host() {
+            let mut scratch_a = [0u8; 16];
+            let mut scratch_b = [0u8; 16];
+            let sampler_a = [21, 3, 3, 3, 0, 1, 0, 0, 0, 0, 0, 0x7f7f_ffff, 0];
+            let sampler_b = [0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0x7f7f_ffff, 0];
+            create_sampler(std::ptr::null(), &sampler_a, scratch_a.as_mut_ptr() as u64);
+            create_sampler(std::ptr::null(), &sampler_b, scratch_b.as_mut_ptr() as u64);
+
+            // Scenario A: Raw A -> API B -> Raw A must update back to A (not stay stuck on B).
+            let slot5 = memory as u64 + 5 * 16;
+            unsafe { std::ptr::copy_nonoverlapping(scratch_a.as_ptr(), slot5 as *mut u8, 16) };
+            sync_heaps();
+            let key_a = host.made_key(5);
+            assert_ne!(key_a, 0);
+
+            create_sampler(std::ptr::null(), &sampler_b, slot5);
+            let key_b = host.made_key(5);
+            assert_ne!(key_b, 0);
+            assert_ne!(key_b, key_a);
+
+            unsafe { std::ptr::copy_nonoverlapping(scratch_a.as_ptr(), slot5 as *mut u8, 16) };
+            sync_heaps();
+            assert_eq!(
+                host.made_key(5),
+                key_a,
+                "raw-copying A back over API-written B must not be skipped by stale copied cache"
+            );
+
+            // Scenario B: API A -> raw zeroing must clear host slot (not skip via `*last == 0 && all_zero`).
+            let slot6 = memory as u64 + 6 * 16;
+            create_sampler(std::ptr::null(), &sampler_a, slot6);
+            assert_eq!(host.made_key(6), key_a);
+            unsafe { std::ptr::write_bytes(slot6 as *mut u8, 0, 16) };
+            sync_heaps();
+            assert!(
+                !host.made(6),
+                "raw-zeroing an API-created slot must clear its host descriptor"
+            );
+
+            // Scenario C: Raw A -> unmake (texture_slot_gone) -> Raw A must re-make A.
+            let slot7 = memory as u64 + 7 * 16;
+            unsafe { std::ptr::copy_nonoverlapping(scratch_a.as_ptr(), slot7 as *mut u8, 16) };
+            sync_heaps();
+            assert_eq!(host.made_key(7), key_a);
+            assert!(host.texture_slot_gone(7));
+            assert!(!host.made(7));
+            unsafe { std::ptr::copy_nonoverlapping(scratch_a.as_ptr(), slot7 as *mut u8, 16) };
+            sync_heaps();
+            assert_eq!(
+                host.made_key(7),
+                key_a,
+                "raw-copying A back after unmake must not be skipped by stale copied cache"
+            );
+        }
+        slot::<extern "system" fn(This) -> u32>(h, 0x10)(h);
+        // SAFETY: this allocation belongs to the test.
+        unsafe { VirtualFree(memory, 0, MEM_RELEASE) };
+    }
+
+    /// A descriptor record straddling a 64 KiB page boundary in an unaligned
+    /// placed heap must be mirrored instead of skipped by both pages.
+    #[cfg(windows)]
+    #[test]
+    fn straddling_record_across_page_boundary_is_mirrored_on_sync() {
+        use windows_sys::Win32::System::Memory::{
+            MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
+        };
+        const MEM_WRITE_WATCH: u32 = 0x20_0000;
+        let memory = unsafe {
+            VirtualAlloc(
+                std::ptr::null(),
+                2 * crate::watch::PAGE,
+                MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH,
+                PAGE_READWRITE,
+            )
+        };
+        assert!(!memory.is_null());
+        // Place 4096 16-byte sampler slots starting 8 bytes into page 0 so slot
+        // 4095 spans [memory + PAGE - 8, memory + PAGE + 8).
+        let start = memory as u64 + 8;
+        let desc = HeapDesc {
+            kind: SAMPLERS,
+            count: 4096,
+            flags: SHADER_VISIBLE,
+            nodes: 1,
+        };
+        let placement = Placement {
+            address: start,
+            size: 4096 * 16,
+        };
+        let mut h: This = std::ptr::null();
+        assert_eq!(create(desc, placement, &mut h), S_OK);
+        if let Some(host) = heap(h).host() {
+            let mut elsewhere = [0u64; 2];
+            let source = elsewhere.as_mut_ptr() as u64;
+            let sampler = [21, 3, 3, 3, 0, 1, 0, 0, 0, 0, 0, 0x7f7f_ffff, 0];
+            create_sampler(std::ptr::null(), &sampler, source);
+            let slot_addr = (start + 4095 * 16) as *mut u8;
+            // SAFETY: slot 4095 lies inside our 2-page allocation.
+            unsafe { std::ptr::copy_nonoverlapping(source as *const u8, slot_addr, 16) };
+            assert!(!host.made(4095));
+            sync_heaps();
+            assert!(
+                host.made(4095),
+                "straddling record across 64 KiB page boundary must be mirrored"
+            );
+        }
+        slot::<extern "system" fn(This) -> u32>(h, 0x10)(h);
+        // SAFETY: this allocation belongs to the test.
+        unsafe { VirtualFree(memory, 0, MEM_RELEASE) };
+    }
+
+    /// Raw-byte-copied buffer views are queued into `buffer_changes()` by
+    /// `sync_heaps()` and must be materialized before submission (as
+    /// `State::heap_buffers` does after syncing).
+    #[cfg(windows)]
+    #[test]
+    fn raw_copied_buffer_view_is_queued_by_sync_heaps_and_made_for_draw() {
+        use windows_sys::Win32::System::Memory::{
+            MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
+        };
+        const MEM_WRITE_WATCH: u32 = 0x20_0000;
+        let memory = unsafe {
+            VirtualAlloc(
+                std::ptr::null(),
+                crate::watch::PAGE,
+                MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH,
+                PAGE_READWRITE,
+            )
+        };
+        assert!(!memory.is_null());
+        let mut buf_data = vec![0u8; 256];
+        let buf_addr = buf_data.as_mut_ptr() as u64;
+        let desc = HeapDesc {
+            kind: 0, // CBV/SRV/UAV
+            count: 64,
+            flags: SHADER_VISIBLE,
+            nodes: 1,
+        };
+        let placement = Placement {
+            address: memory as u64,
+            size: 64 * 32,
+        };
+        let mut h: This = std::ptr::null();
+        assert_eq!(create(desc, placement, &mut h), S_OK);
+        if let Some(host) = heap(h).host() {
+            // Build a valid placed raw buffer SRV in scratch memory, then raw-copy its bytes.
+            let mut resource = [0u32; 14];
+            resource[0] = 1; // BUFFER
+            resource[4] = 256; // width low
+            resource[8] = 1; // depth_or_array = 1, mips = 1 (packed in [8]/[9])
+            let mut srv_desc = [0u32; 16];
+            srv_desc[0] = 39; // DXGI_FORMAT_R32_TYPELESS
+            srv_desc[1] = 1; // D3D12_SRV_DIMENSION_BUFFER
+            srv_desc[2] = 5768; // D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING
+            srv_desc[6] = 64; // NumElements (64 dwords = 256 bytes)
+            srv_desc[8] = 1; // D3D12_BUFFER_SRV_FLAG_RAW
+            srv_desc[10] = buf_addr as u32;
+            srv_desc[11] = (buf_addr >> 32) as u32;
+            let mut elsewhere = [0u64; 4];
+            let source = elsewhere.as_mut_ptr() as u64;
+            create_placed_srv(std::ptr::null(), &resource, &srv_desc, source);
+            // SAFETY: slot 5 and source both hold 32 descriptor bytes.
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    source as *const u8,
+                    memory.cast::<u8>().add(5 * 32),
+                    32,
+                );
+            }
+            sync_heaps();
+            assert!(
+                host.buffer_changes().contains(&5),
+                "sync_heaps must queue raw-copied buffer view for heap_buffers"
+            );
+            assert!(
+                !host.made(5),
+                "sync_heaps leaves buffer view deferred until for_draw=true"
+            );
+            let handle = heap(h).handle(5).unwrap();
+            assert!(host.mirror(5, handle, true).is_some());
+            assert!(host.made(5));
+        }
+        slot::<extern "system" fn(This) -> u32>(h, 0x10)(h);
+        // SAFETY: this allocation belongs to the test.
+        unsafe { VirtualFree(memory, 0, MEM_RELEASE) };
+    }
+
+>>>>>>> vertex/main
     #[test]
     fn views_survive_copies() {
         let null = std::ptr::null();

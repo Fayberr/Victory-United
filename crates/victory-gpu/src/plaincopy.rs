@@ -18,6 +18,12 @@
 //! is gone and fills in zeros). A write that faults is not ours to take:
 //! the destination is host memory, which is always there; such a fault
 //! goes on to the handlers after this one.
+//!
+//! [`write`] is the same the other way, for what shaders wrote going back
+//! into title memory (`VICTORY_WRITE_PLAIN=1`; off by default; after
+//! reddxd-byte/ShakiraRED-dt c2271e5): there it is the write that may fault
+//! (a page that is not there, or not the title's to write), and the
+//! caller's way through the kernel then says which page it is.
 
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
@@ -48,6 +54,7 @@ core::arch::global_asm!(
     "    mov rdi, r10",
     "    xor eax, eax",
     "    ret",
+<<<<<<< HEAD
     "victory_write_guarded:",
     "    mov r9, rsi",
     "    mov r10, rdi",
@@ -65,6 +72,31 @@ core::arch::global_asm!(
     "    mov rdi, r10",
     "    xor eax, eax",
     "    ret",
+||||||| 465b94f5
+=======
+    // The same again, so that a fault says by its place which side of the
+    // copy is title memory.
+    ".globl victory_write_guarded",
+    ".globl victory_write_guarded_at",
+    ".globl victory_write_guarded_fault",
+    "victory_write_guarded:",
+    "    mov r9, rsi",
+    "    mov r10, rdi",
+    "    mov rdi, rcx",
+    "    mov rsi, rdx",
+    "    mov rcx, r8",
+    "victory_write_guarded_at:",
+    "    rep movsb",
+    "    mov rsi, r9",
+    "    mov rdi, r10",
+    "    mov eax, 1",
+    "    ret",
+    "victory_write_guarded_fault:",
+    "    mov rsi, r9",
+    "    mov rdi, r10",
+    "    xor eax, eax",
+    "    ret",
+>>>>>>> vertex/main
 );
 
 #[cfg(target_arch = "x86_64")]
@@ -72,9 +104,17 @@ unsafe extern "C" {
     fn victory_copy_guarded(to: *mut u8, from: *const u8, len: usize) -> u32;
     static victory_copy_guarded_at: u8;
     static victory_copy_guarded_fault: u8;
+<<<<<<< HEAD
     fn victory_write_guarded(to: *mut u8, from: *const u8, len: usize) -> u32;
     static victory_write_guarded_at: u8;
     static victory_write_guarded_fault: u8;
+||||||| 465b94f5
+=======
+
+    fn victory_write_guarded(to: *mut u8, from: *const u8, len: usize) -> u32;
+    static victory_write_guarded_at: u8;
+    static victory_write_guarded_fault: u8;
+>>>>>>> vertex/main
 }
 
 /// Whether copies of title memory into host memory are made in place
@@ -93,6 +133,27 @@ pub(crate) fn on() -> bool {
         on
     })
 }
+
+/// Whether copies of host memory into title memory are made in place
+/// (`VICTORY_WRITE_PLAIN=1`, with or without [`on`]).
+fn write_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        let on = cfg!(target_arch = "x86_64") && std::env::var_os("VICTORY_WRITE_PLAIN").is_some_and(|v| v == "1");
+        if on {
+            install();
+            tracing::info!(
+                "what shaders wrote goes into title memory in place, with the kernel's copy behind it for a page that is \
+                 not there (VICTORY_WRITE_PLAIN=1)"
+            );
+        }
+        on
+    })
+}
+
+/// Writes made in place, their bytes, and those that met a page that could
+/// not be written (and went to the kernel's copy), since the last line.
+static WROTE: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
 /// Copies made in place, their bytes, the copies that met a page that was
 /// not there (and went to the kernel's copy), and the copies not tried in
@@ -163,6 +224,7 @@ fn install() {
         // SAFETY: the system passes the exception being dispatched and the
         // context it will continue with.
         let (r, context) = unsafe { (&*(*info).ExceptionRecord, &mut *(*info).ContextRecord) };
+<<<<<<< HEAD
         // Only at our own copy/write instructions.
         if context.Rip == (&raw const victory_copy_guarded_at) as u64 {
             const READ: usize = 0;
@@ -182,6 +244,35 @@ fn install() {
                 context.Rip = (&raw const victory_write_guarded_fault) as u64;
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
+||||||| 465b94f5
+        // Only at the copy's own instruction.
+        if context.Rip != (&raw const victory_copy_guarded_at) as u64 {
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+        const READ: usize = 0;
+        let read = r.NumberParameters >= 1 && r.ExceptionInformation[0] == READ;
+        let gone = (r.ExceptionCode == EXCEPTION_ACCESS_VIOLATION || r.ExceptionCode == EXCEPTION_IN_PAGE_ERROR) && read;
+        if gone || r.ExceptionCode == EXCEPTION_GUARD_PAGE {
+            context.Rip = (&raw const victory_copy_guarded_fault) as u64;
+            return EXCEPTION_CONTINUE_EXECUTION;
+=======
+        // Only at the copies' own instructions, and only an access to the
+        // side that is title memory.
+        const READ: usize = 0;
+        const WRITE: usize = 1;
+        let (access, out) = if context.Rip == (&raw const victory_copy_guarded_at) as u64 {
+            (READ, (&raw const victory_copy_guarded_fault) as u64)
+        } else if context.Rip == (&raw const victory_write_guarded_at) as u64 {
+            (WRITE, (&raw const victory_write_guarded_fault) as u64)
+        } else {
+            return EXCEPTION_CONTINUE_SEARCH;
+        };
+        let ours = r.NumberParameters >= 1 && r.ExceptionInformation[0] == access;
+        let gone = (r.ExceptionCode == EXCEPTION_ACCESS_VIOLATION || r.ExceptionCode == EXCEPTION_IN_PAGE_ERROR) && ours;
+        if gone || r.ExceptionCode == EXCEPTION_GUARD_PAGE {
+            context.Rip = out;
+            return EXCEPTION_CONTINUE_EXECUTION;
+>>>>>>> vertex/main
         }
         EXCEPTION_CONTINUE_SEARCH
     }
@@ -213,6 +304,7 @@ fn guarded(_: *mut u8, _: *const u8, _: usize) -> bool {
     false
 }
 
+<<<<<<< HEAD
 /// Copies `len` bytes from host memory `from` into title memory `to` in place;
 /// false if a destination page is not mapped or not writable.
 #[cfg(target_arch = "x86_64")]
@@ -254,6 +346,39 @@ pub(crate) fn write(to: *mut u8, from: *const u8, len: usize) -> bool {
     whole
 }
 
+||||||| 465b94f5
+=======
+/// [`guarded`] the other way: `from` is memory of `len` bytes that is ours,
+/// `to` may be anything.
+#[cfg(target_arch = "x86_64")]
+fn guarded_write(to: *mut u8, from: *const u8, len: usize) -> bool {
+    install();
+    // SAFETY: the source is the caller's; a destination page that cannot be
+    // written ends the copy with 0 instead of a fault ([`install`]).
+    unsafe { victory_write_guarded(to, from, len) != 0 }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+fn guarded_write(_: *mut u8, _: *const u8, _: usize) -> bool {
+    false
+}
+
+/// With [`write_on`]: copies host memory at `from` into title memory at
+/// `to`; false if it is off or a page could not be written (the caller then
+/// writes through the kernel, all of it again).
+pub(crate) fn write(to: *mut u8, from: *const u8, len: usize) -> bool {
+    if !write_on() {
+        return false;
+    }
+    let whole = guarded_write(to, from, len);
+    WROTE[if whole { 0 } else { 2 }].fetch_add(1, Relaxed);
+    if whole {
+        WROTE[1].fetch_add(len as u64, Relaxed);
+    }
+    whole
+}
+
+>>>>>>> vertex/main
 /// With [`on`]: copies title memory at `from` into host memory at `to`;
 /// false if it is off or a source page was not there (the caller then
 /// copies through the kernel, as before).
@@ -282,6 +407,14 @@ pub(crate) fn copy(to: *mut u8, from: *const u8, len: usize) -> bool {
 
 /// With the frame line: what [`copy`] did per frame over `frames`.
 pub(crate) fn line(frames: f64) {
+    if write_on() {
+        let [writes, bytes, gone] = [0, 1, 2].map(|i| WROTE[i].swap(0, Relaxed) as f64 / frames);
+        tracing::info!(
+            "what shaders wrote, put into title memory in place per frame (VICTORY_WRITE_PLAIN=1): {writes:.0} stretches, \
+             {:.1} MB; {gone:.1} met a page that could not be written and went through the kernel's copy",
+            bytes / 1e6
+        );
+    }
     if !on() {
         return;
     }
@@ -364,6 +497,32 @@ mod tests {
         assert!(!faulted_lately(at + 0x10000, 4096));
         assert!(!faulted_lately(at - 0x10000, 4096));
         assert_eq!(blocks(0, 0), (1 << 63, 1 << 63));
+    }
+
+    /// Writes into title memory in place: one that is there is whole, one
+    /// into a page that is not there or read-only ends with false, and the
+    /// thread goes on.
+    #[test]
+    fn a_page_that_cannot_be_written_ends_the_write_without_a_fault() {
+        use windows_sys::Win32::System::Memory::PAGE_READONLY;
+        // SAFETY: memory of the test's own: a writable page, one that is not
+        // there, a read-only one.
+        let base = unsafe { VirtualAlloc(std::ptr::null(), 3 * PAGE, MEM_RESERVE, PAGE_NOACCESS) } as *mut u8;
+        assert!(!base.is_null());
+        // SAFETY: pages of that reservation.
+        unsafe {
+            assert!(!VirtualAlloc(base.cast(), PAGE, MEM_COMMIT, PAGE_READWRITE).is_null());
+            assert!(!VirtualAlloc(base.wrapping_add(2 * PAGE).cast(), PAGE, MEM_COMMIT, PAGE_READONLY).is_null());
+        }
+        let from = vec![0x5Au8; PAGE];
+        assert!(guarded_write(base, from.as_ptr(), PAGE));
+        // SAFETY: committed and readable.
+        assert!(unsafe { std::slice::from_raw_parts(base, PAGE) } == from);
+        assert!(!guarded_write(base.wrapping_add(PAGE), from.as_ptr(), PAGE));
+        assert!(!guarded_write(base.wrapping_add(2 * PAGE), from.as_ptr(), PAGE));
+        assert!(guarded_write(base, from.as_ptr(), PAGE));
+        // SAFETY: the test's reservation.
+        unsafe { VirtualFree(base.cast(), 0, MEM_RELEASE) };
     }
 
     /// Many threads at once, half of them faulting: each gets its own answer.

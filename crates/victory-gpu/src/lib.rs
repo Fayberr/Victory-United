@@ -41,6 +41,10 @@ mod draw;
 pub mod dxgi;
 pub mod fence;
 pub mod frame;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod heap_pass;
+#[cfg(windows)]
+mod ambient;
 #[cfg(windows)]
 mod fx;
 #[cfg(windows)]
@@ -48,7 +52,11 @@ pub mod framelog;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod heap_pass;
 #[cfg(windows)]
+mod heap_worker;
+#[cfg(windows)]
 mod host;
+#[cfg(windows)]
+mod over;
 #[cfg(windows)]
 mod indirect;
 #[cfg(windows)]
@@ -68,9 +76,13 @@ pub mod precompile;
 mod plaincopy;
 #[cfg(windows)]
 mod primitive;
+#[cfg(windows)]
+mod ranges;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod profile;
 pub mod query;
+#[cfg(windows)]
+mod present_trace;
 pub mod queue;
 #[cfg(windows)]
 mod queue2;
@@ -91,6 +103,8 @@ pub mod shader_cache;
 #[cfg(windows)]
 mod shadow;
 #[cfg(windows)]
+mod stamp;
+#[cfg(windows)]
 mod tiles;
 pub mod signature;
 #[cfg(windows)]
@@ -108,6 +122,14 @@ pub use census::title_memory_reserved;
 pub use inplace::{title_memory_freeing, title_memory_section, title_memory_view};
 #[cfg(windows)]
 pub use watch::{
+<<<<<<< HEAD
     title_memory_committed, title_memory_reading, title_memory_remapped, title_memory_remapping,
     title_memory_written, writing as kernel_will_write,
+||||||| 465b94f5
+    title_memory_reading, title_memory_remapped, title_memory_remapping, title_memory_written,
+    writing as kernel_will_write,
+=======
+    title_memory_reading, title_memory_remapped, title_memory_remapping, title_memory_written,
+    title_pages_changed, title_pages_told, writing as kernel_will_write,
+>>>>>>> vertex/main
 };

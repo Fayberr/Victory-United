@@ -12,6 +12,7 @@ victory-core.workspace = true
 victory-pe.workspace = true
 victory-loader.workspace = true
 victory-hle.workspace = true
+victory-gpu.workspace = true
 victory-shader = { workspace = true, features = ["host"] }
 victory-game.workspace = true
 anyhow.workspace = true
@@ -19,6 +20,16 @@ blake3.workspace = true
 memchr.workspace = true
 clap.workspace = true
 walkdir.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_SystemInformation",
+] }
 
 [features]
 # Debug-level logs and the debugging switches (frame capture, stack dumps,

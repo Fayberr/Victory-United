@@ -59,12 +59,14 @@ pub fn run(
     }
     let cfg = victory_core::Config::load()?;
     let original = std::fs::read(exe).with_context(|| format!("reading {}", exe.display()))?;
-    let prepared = victory_loader::prepare(&original)?;
+    let mut prepared = victory_loader::prepare(&original)?;
     let hash = prepared.original_hash.to_hex();
-    match victory_game::identify(&hash) {
+    let build = victory_game::identify(&hash);
+    match build {
         Some(build) => println!("build          {} ({hash})", build.label),
         None => println!("build          unknown ({hash})"),
     }
+    apply_title_patches(&mut prepared, build)?;
 
     let images = cfg.cache_subdir("images")?;
     victory_hle::modules::d3d12x::use_shader_cache(cfg.cache_subdir("shaders")?);
@@ -103,6 +105,7 @@ pub fn run(
     // The console's fixed drives: the package as `G:`, temporary files `T:`.
     victory_hle::modules::files::mount_at('G', title_dir);
     let temp = cfg.data_subdir(&format!("{:08X}/temp", title.id))?;
+    victory_hle::modules::gameinput::binds::use_file(cfg.data_dir.join("keys.txt"));
     victory_hle::modules::files::mount_at('T', &temp);
     victory_hle::runtime::set_title(victory_hle::runtime::Title { storage, ..title });
     victory_hle::console::set(match console {
@@ -112,6 +115,11 @@ pub fn run(
     println!("console        {}", victory_hle::console::current().name());
     let dlls = victory_loader::load_title_dlls(image.info(), title_dir, &images, &wanted)?;
     for (name, dll) in &dlls {
+        if name.eq_ignore_ascii_case(victory_hle::modules::ffx::LOADER)
+            && let Some(real) = dll.export("ffxDispatch")
+        {
+            victory_hle::modules::ffx::set_real_dispatch(real);
+        }
         println!("title dll      {name} at {:#x}", dll.base());
         victory_hle::runtime::set_image_path(dll.base(), &title_dir.join(name));
     }
@@ -166,7 +174,27 @@ pub fn run(
         show(name, dll.bind_imports(&with_dlls, policy)?);
     }
     let exe_name = exe.file_name().unwrap_or_default().to_string_lossy();
-    show(&exe_name, image.bind_imports(&with_dlls, policy)?);
+    // The upscale dispatch is ours (`victory_hle::modules::ffx`); the rest of
+    // that DLL is the title's own.
+    struct TakeDispatch<'a>(&'a dyn victory_loader::ImportResolver);
+    impl victory_loader::ImportResolver for TakeDispatch<'_> {
+        fn resolve(
+            &self,
+            dll: &str,
+            symbol: &victory_pe::ImportSymbol,
+        ) -> victory_loader::Resolution {
+            let ours = dll.eq_ignore_ascii_case(victory_hle::modules::ffx::LOADER)
+                && matches!(symbol, victory_pe::ImportSymbol::Name { name, .. } if name == "ffxDispatch");
+            if ours {
+                return victory_loader::Resolution::Found {
+                    address: victory_hle::modules::ffx::dispatch_address(),
+                    provenance: victory_loader::Provenance::Hle,
+                };
+            }
+            self.0.resolve(dll, symbol)
+        }
+    }
+    show(&exe_name, image.bind_imports(&TakeDispatch(&with_dlls), policy)?);
     if !execute {
         println!("not executing (pass --execute to start the title)");
         return Ok(0);
@@ -500,4 +528,63 @@ mod cpu_check_tests {
 #[cfg(not(windows))]
 pub fn run(_: &Path, _: Unimplemented, _: bool, _: bool, _: Console) -> Result<u32> {
     anyhow::bail!("running titles requires Windows")
+}
+
+/// Bytes as lower-case hex.
+#[cfg(windows)]
+fn hex_str(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The known build's code patches (`VICTORY_TITLE_PATCHES=0`: none), then
+/// any from `VICTORY_TITLE_PATCH=<rva>:<old hex>:<new hex>,...`. The old
+/// bytes must be there (another build of the title is refused), and the
+/// patched copy has a file name of its own.
+#[cfg(windows)]
+fn apply_title_patches(
+    prepared: &mut victory_loader::PreparedImage,
+    build: Option<&victory_game::KnownBuild>,
+) -> Result<()> {
+    let mut patches = Vec::new();
+    let mut names = Vec::new();
+    if std::env::var("VICTORY_TITLE_PATCHES").as_deref() != Ok("0") {
+        for p in build.map_or(&[][..], |b| b.patches) {
+            patches.push((p.rva, p.expect.to_vec(), p.write.to_vec()));
+            names.push(p.name.to_owned());
+        }
+    }
+    let spec = std::env::var("VICTORY_TITLE_PATCH").unwrap_or_default();
+    for one in spec.split(',').filter(|p| !p.trim().is_empty()) {
+        let parts: Vec<&str> = one.split(':').collect();
+        anyhow::ensure!(
+            parts.len() == 3,
+            "VICTORY_TITLE_PATCH entry is not <rva>:<old>:<new>: {one}"
+        );
+        let rva = u32::from_str_radix(parts[0].trim().trim_start_matches("0x"), 16)?;
+        patches.push((rva, from_hex(parts[1])?, from_hex(parts[2])?));
+        names.push("VICTORY_TITLE_PATCH".to_owned());
+    }
+    if patches.is_empty() {
+        return Ok(());
+    }
+    prepared.patch(&patches)?;
+    for ((rva, old, new), name) in patches.iter().zip(names) {
+        println!(
+            "title patch    +{rva:#x} {name}: {} -> {}",
+            hex_str(old),
+            hex_str(new)
+        );
+    }
+    Ok(())
+}
+
+/// Bytes from hex digits.
+#[cfg(windows)]
+fn from_hex(s: &str) -> Result<Vec<u8>> {
+    let s = s.trim();
+    anyhow::ensure!(s.len().is_multiple_of(2), "odd hex length: {s}");
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(anyhow::Error::from))
+        .collect()
 }

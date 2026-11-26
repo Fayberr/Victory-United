@@ -70,8 +70,22 @@ impl Fields {
             } else {
                 1
             },
+<<<<<<< HEAD
             ComparisonFunc: if reduction == 1 {
                 D3D12_COMPARISON_FUNC(self.compare as i32)
+||||||| 465b94f5
+            ComparisonFunc: D3D12_COMPARISON_FUNC(self.compare.max(1) as i32),
+            BorderColor: self.border,
+            MinLOD: self.min_lod,
+            // Without a mip filter the console samples mip 0 only.
+            MaxLOD: if self.mip == 0 {
+                self.min_lod
+=======
+            // (kept beside a minimum or maximum filter too: the comparison
+            // sampler made of this one, [`comparison`], has it)
+            ComparisonFunc: if reduction == 1 || compares {
+                D3D12_COMPARISON_FUNC(self.compare as i32)
+>>>>>>> vertex/main
             } else {
                 D3D12_COMPARISON_FUNC_NEVER
             },
@@ -121,6 +135,19 @@ pub(crate) fn console(words: &[u32; 27]) -> D3D12_SAMPLER_DESC {
     .host()
 }
 
+/// The comparison sampler that filters as `desc` does, with its function
+/// (never, if it has none).
+pub(crate) fn comparison(desc: D3D12_SAMPLER_DESC) -> D3D12_SAMPLER_DESC {
+    // The reduction is in bits 7 and 8: none, comparison, minimum, maximum.
+    const REDUCTION: i32 = 3 << 7;
+    const COMPARISON: i32 = 1 << 7;
+    D3D12_SAMPLER_DESC {
+        Filter: D3D12_FILTER(desc.Filter.0 & !REDUCTION | COMPARISON),
+        ComparisonFunc: D3D12_COMPARISON_FUNC(desc.ComparisonFunc.0.max(1)),
+        ..desc
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,6 +170,94 @@ mod tests {
         assert_eq!(console(&w).ComparisonFunc, D3D12_COMPARISON_FUNC_LESS_EQUAL);
         w[16] = 1;
         assert_eq!(console(&w).Filter.0, 0x5);
+        // Its comparison sampler filters alike, whatever the reduction was.
+        assert_eq!(comparison(console(&w)).Filter.0, 0x85);
+        w[16] = 4;
+        w[5] = 2;
+        let c = comparison(console(&w));
+        assert_eq!((c.Filter.0, c.ComparisonFunc), (0x85, D3D12_COMPARISON_FUNC_LESS_EQUAL));
+    }
+
+    #[test]
+    fn mip_none_clamps_to_min_lod_and_inverted_lod_range_clamps() {
+        let mut w = [0u32; 27];
+        w[3] = 0; // mip none
+        w[9] = 3.0f32.to_bits();
+        w[10] = 8.0f32.to_bits();
+        let d = console(&w);
+        assert_eq!((d.MinLOD, d.MaxLOD), (3.0, 3.0));
+
+        w[9] = f32::NAN.to_bits();
+        w[10] = 8.0f32.to_bits();
+        let d = console(&w);
+        assert_eq!((d.MinLOD, d.MaxLOD), (0.0, 0.0));
+
+        w[9] = f32::INFINITY.to_bits();
+        w[10] = 8.0f32.to_bits();
+        let d = console(&w);
+        assert_eq!((d.MinLOD, d.MaxLOD), (D3D12_FLOAT32_MAX, D3D12_FLOAT32_MAX));
+
+        w[3] = 2; // linear mips
+        w[9] = 4.0f32.to_bits();
+        w[10] = 1.0f32.to_bits();
+        let d = console(&w);
+        assert_eq!((d.MinLOD, d.MaxLOD), (4.0, 4.0));
+
+        w[9] = f32::NAN.to_bits();
+        w[10] = f32::INFINITY.to_bits();
+        let d = console(&w);
+        assert_eq!((d.MinLOD, d.MaxLOD), (0.0, D3D12_FLOAT32_MAX));
+
+        w[9] = 2.5f32.to_bits();
+        w[10] = f32::NAN.to_bits();
+        let d = console(&w);
+        assert_eq!((d.MinLOD, d.MaxLOD), (2.5, 2.5));
+
+        w[9] = f32::NEG_INFINITY.to_bits();
+        w[10] = f32::NEG_INFINITY.to_bits();
+        let d = console(&w);
+        assert_eq!(
+            (d.MinLOD, d.MaxLOD),
+            (-D3D12_FLOAT32_MAX, -D3D12_FLOAT32_MAX)
+        );
+    }
+
+    #[test]
+    fn bias_address_and_comparison_stay_in_host_bounds() {
+        let mut w = [0u32; 27];
+        w[6..9].copy_from_slice(&[0, 6, 3]);
+        w[11] = 24.0f32.to_bits();
+        w[16] = 99;
+        let d = console(&w);
+        assert_eq!(d.MipLODBias, D3D12_MIP_LOD_BIAS_MAX);
+        assert_eq!(
+            [d.AddressU, d.AddressV, d.AddressW],
+            [D3D12_TEXTURE_ADDRESS_MODE_CLAMP; 3]
+        );
+        assert_eq!(d.ComparisonFunc, D3D12_COMPARISON_FUNC_NEVER);
+
+        w[11] = (-24.0f32).to_bits();
+        w[5] = 1; // minimum reduction
+        w[16] = 4; // less-or-equal: the host ignores it here, `comparison` takes it
+        let d = console(&w);
+        assert_eq!(d.MipLODBias, D3D12_MIP_LOD_BIAS_MIN);
+        assert_eq!(d.ComparisonFunc, D3D12_COMPARISON_FUNC_LESS_EQUAL);
+
+        w[11] = f32::NAN.to_bits();
+        w[5] = 0; // plain mode, reduction == 1 from compare == 4
+        w[6..9].copy_from_slice(&[1, 4, 5]);
+        w[16] = 4;
+        let d = console(&w);
+        assert_eq!(d.MipLODBias, 0.0);
+        assert_eq!(
+            [d.AddressU, d.AddressV, d.AddressW],
+            [
+                D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+                D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+                D3D12_TEXTURE_ADDRESS_MODE_MIRROR_ONCE,
+            ]
+        );
+        assert_eq!(d.ComparisonFunc, D3D12_COMPARISON_FUNC_LESS_EQUAL);
     }
 
     #[test]

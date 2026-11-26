@@ -37,7 +37,6 @@
 
 use std::collections::BTreeMap;
 use std::ffi::c_void;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use windows::Win32::Foundation::HANDLE;
@@ -345,31 +344,48 @@ struct Views {
     /// page in every view that shows it. A write through one view of a
     /// page is a write of the bytes every other view shows
     /// (`crate::watch` guards them all).
+<<<<<<< HEAD
     pages: BTreeMap<(usize, u64), PageSet>,
     /// Sections by handle: bytes, and whether made committed.
     sections: Vec<(usize, u64, bool)>,
+||||||| 465b94f5
+    pages: BTreeMap<(usize, u64), Vec<usize>>,
+    /// Sections by handle: bytes, and whether made committed.
+    sections: Vec<(usize, u64, bool)>,
+=======
+    pages: BTreeMap<(usize, u64), Vec<usize>>,
+    /// Sections by handle: bytes, and whether made committed (thousands of
+    /// them with `VICTORY_SECTION_MB`, and looked up by every store through a
+    /// view of ours).
+    sections: BTreeMap<usize, (u64, bool)>,
+>>>>>>> vertex/main
 }
 
-static VIEWS: Mutex<Views> =
-    Mutex::new(Views { views: BTreeMap::new(), pages: BTreeMap::new(), sections: Vec::new() });
+/// Looked at far more often than changed: by every stretch the copy-back
+/// stores ([`write_own`]), by the guards (after reddxd-byte/ShakiraRED-dt
+/// c2271e5).
+static VIEWS: std::sync::RwLock<Views> =
+    std::sync::RwLock::new(Views { views: BTreeMap::new(), pages: BTreeMap::new(), sections: BTreeMap::new() });
 
-fn views() -> std::sync::MutexGuard<'static, Views> {
-    VIEWS.lock().unwrap_or_else(|e| e.into_inner())
+fn views() -> std::sync::RwLockWriteGuard<'static, Views> {
+    VIEWS.write().unwrap_or_else(|e| e.into_inner())
+}
+
+fn views_shared() -> std::sync::RwLockReadGuard<'static, Views> {
+    VIEWS.read().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The runtime made a section of `bytes` for physical pages; `committed`
 /// if with `SEC_COMMIT` (only such a section can be opened as a heap).
 pub fn title_memory_section(section: usize, bytes: u64, committed: bool) {
     {
-        let mut v = views();
-        v.sections.retain(|s| s.0 != section);
-        v.sections.push((section, bytes, committed));
+        views().sections.insert(section, (bytes, committed));
     }
     // A view of our own made on an earlier section that had this handle's
     // number shows that section's pages, not this one's: it is forgotten
     // (left mapped: nothing reads it any more) and the next store through
     // a view of ours maps this section.
-    let gone = OWN.lock().unwrap_or_else(|e| e.into_inner()).as_mut().and_then(|own| own.remove(&section)).flatten();
+    let gone = OWN.write().unwrap_or_else(|e| e.into_inner()).as_mut().and_then(|own| own.remove(&section)).flatten();
     if gone.is_some() {
         tracing::info!(section, "a section handle's number came round again: our own view of the earlier section is forgotten");
     }
@@ -439,6 +455,30 @@ pub(crate) fn view_census(at: usize, len: usize) -> (usize, usize) {
     (in_views, multi)
 }
 
+/// For the census (`crate::census`): how many bytes of `[at, at + len)` are
+/// physical-page views, and how many of those show a page that has more
+/// than one address. Logging only.
+pub(crate) fn view_census(at: usize, len: usize) -> (usize, usize) {
+    let v = views_shared();
+    let end = at.saturating_add(len);
+    let (mut in_views, mut multi) = (0, 0);
+    for (&base, &(vlen, section, offset)) in v.views.range(..end) {
+        let (lo, hi) = (base.max(at), (base + vlen).min(end));
+        if lo >= hi {
+            continue;
+        }
+        in_views += hi - lo;
+        let first = (lo - base) / K64;
+        let last = (hi - base).div_ceil(K64);
+        for k in first..last {
+            if v.pages.get(&(section, offset + (k * K64) as u64)).is_some_and(|l| l.len() > 1) {
+                multi += (base + (k + 1) * K64).min(hi) - (base + k * K64).max(lo);
+            }
+        }
+    }
+    (in_views, multi)
+}
+
 /// What `[at, at + len)` showed is gone ([`crate::title_memory_remapped`]):
 /// the views that touch it are forgotten (the runtime tells again those it
 /// maps anew). Returns any remaining views of physical pages whose view count
@@ -473,6 +513,7 @@ pub(crate) fn views_gone(at: usize, len: usize) -> Vec<(usize, usize)> {
     if was_many.is_empty() {
         return Vec::new();
     }
+<<<<<<< HEAD
     let mut reopen = Vec::new();
     for key in was_many {
         if let Some(shown) = v.pages.get(&key)
@@ -501,6 +542,21 @@ pub(crate) fn alias_blocks_in(
     let v = views();
     if v.views.is_empty() {
         return (Vec::new(), Vec::new(), 0);
+||||||| 465b94f5
+    let v = views();
+    let mut out = Vec::new();
+    if let Some((&base, &(bytes, _, _))) = v.views.range(..=start).next_back()
+        && base + bytes > start
+    {
+        out.push((base, bytes));
+=======
+    let v = views_shared();
+    let mut out = Vec::new();
+    if let Some((&base, &(bytes, _, _))) = v.views.range(..=start).next_back()
+        && base + bytes > start
+    {
+        out.push((base, bytes));
+>>>>>>> vertex/main
     }
     let mut all_aliased = Vec::new();
     let mut others = Vec::new();
@@ -546,7 +602,7 @@ pub(crate) fn alias_blocks_in(
 /// The address of the 64 KiB page shown at `page` in every title view that
 /// shows it, `page`'s own address included; empty if `page` is not a view.
 pub(crate) fn pages_of(page: usize) -> Vec<usize> {
-    let v = views();
+    let v = views_shared();
     let Some((&base, &(bytes, section, offset))) = v.views.range(..=page).next_back() else {
         return Vec::new();
     };
@@ -560,8 +616,56 @@ pub(crate) fn pages_of(page: usize) -> Vec<usize> {
         .unwrap_or_default()
 }
 
+<<<<<<< HEAD
 /// Coalesces 64 KiB page addresses into contiguous `(address, bytes)` runs.
 fn page_runs(mut pages: Vec<usize>) -> Vec<(usize, usize)> {
+||||||| 465b94f5
+/// The title views that show any of the physical bytes `[offset, offset +
+/// len)` of `section`, as `(address, bytes)` ranges in address order; not
+/// those of a page shown in very many views (`MANY_VIEWS`).
+pub(crate) fn views_of_section(section: usize, offset: u64, len: usize) -> Vec<(usize, usize)> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let v = views();
+    let end = offset.saturating_add(len as u64);
+    let mut pages: Vec<usize> = Vec::new();
+    let mut at = offset - offset % K64 as u64;
+    while at < end {
+        if let Some(shown) = v.pages.get(&(section, at))
+            && shown.len() <= crate::watch::MANY_VIEWS
+        {
+            pages.extend(shown.iter().copied());
+        }
+        match at.checked_add(K64 as u64) {
+            Some(next) => at = next,
+            None => break,
+        }
+    }
+=======
+/// The title views that show any of the physical bytes `[offset, offset +
+/// len)` of `section`, as `(address, bytes)` ranges in address order; not
+/// those of a page shown in very many views (`MANY_VIEWS`).
+pub(crate) fn views_of_section(section: usize, offset: u64, len: usize) -> Vec<(usize, usize)> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let v = views_shared();
+    let end = offset.saturating_add(len as u64);
+    let mut pages: Vec<usize> = Vec::new();
+    let mut at = offset - offset % K64 as u64;
+    while at < end {
+        if let Some(shown) = v.pages.get(&(section, at))
+            && shown.len() <= crate::watch::MANY_VIEWS
+        {
+            pages.extend(shown.iter().copied());
+        }
+        match at.checked_add(K64 as u64) {
+            Some(next) => at = next,
+            None => break,
+        }
+    }
+>>>>>>> vertex/main
     pages.sort_unstable();
     pages.dedup();
     let mut runs: Vec<(usize, usize)> = Vec::with_capacity(pages.len());
@@ -625,12 +729,12 @@ pub(crate) fn back_own() -> bool {
 struct Own {
     base: usize,
     bytes: u64,
-    committed: Vec<u64>,
+    committed: Vec<AtomicU64>,
 }
 
 /// Our own views by section handle; `None` in a section's place if the
-/// host refused the view (not asked again).
-static OWN: Mutex<Option<std::collections::HashMap<usize, Option<Own>>>> = Mutex::new(None);
+/// host refused the view (not asked again). Shared by the stores into them.
+static OWN: std::sync::RwLock<Option<std::collections::HashMap<usize, Option<Own>>>> = std::sync::RwLock::new(None);
 
 /// Stores `bytes` at title address `at` through a view of our own
 /// ([`back_own`]), if `[at, at + bytes.len())` lies in one 64 KiB page of
@@ -644,9 +748,9 @@ pub(crate) fn write_own(at: usize, bytes: &[u8]) -> Option<Vec<usize>> {
     }
     // No mapping changes until the bytes are in: the view found below
     // shows these pages for as long as this is held.
-    let _still = crate::watch::title_memory_reading_now()?;
+    let _still = crate::watch::title_memory_reading_now(at, bytes.len())?;
     let (section, offset, shown, section_bytes) = {
-        let v = views();
+        let v = views_shared();
         let (&base, &(len, section, offset)) = v.views.range(..=at).next_back()?;
         if at + bytes.len() > base + len {
             return None;
@@ -656,45 +760,40 @@ pub(crate) fn write_own(at: usize, bytes: &[u8]) -> Option<Vec<usize>> {
         if shown.len() > crate::watch::MANY_VIEWS {
             return None;
         }
-        let section_bytes = v.sections.iter().find(|s| s.0 == section)?.1;
+        let section_bytes = v.sections.get(&section)?.0;
         (section, offset, shown, section_bytes)
     };
     if offset + bytes.len() as u64 > section_bytes {
         return None;
     }
-    let mut own = OWN.lock().unwrap_or_else(|e| e.into_inner());
-    let view = own
-        .get_or_insert_with(Default::default)
-        .entry(section)
-        .or_insert_with(|| {
-            // SAFETY: a section handle the runtime gave us, alive as long
-            // as the title's views of it are; the view is ours and stays.
-            let at = unsafe { mem::MapViewOfFile(section as *mut c_void, mem::FILE_MAP_WRITE, 0, 0, 0) };
-            if at.Value.is_null() {
-                tracing::warn!(
-                    section,
-                    error = %std::io::Error::last_os_error(),
-                    "no view of our own on a section of title pages: what shaders wrote goes back the old way there"
-                );
-                return None;
-            }
-            tracing::info!(
-                section,
-                mb = section_bytes >> 20,
-                "a view of our own on a section of title pages, for what shaders wrote (VICTORY_BACK_OWN_VIEW=1)"
-            );
-            Some(Own {
-                base: at.Value as usize,
-                bytes: section_bytes,
-                committed: vec![0; (section_bytes as usize).div_ceil(K64).div_ceil(64)],
-            })
-        })
-        .as_mut()?;
+    let stored = store_own(section, offset, bytes).or_else(|| {
+        // The first store into this section: its view is made.
+        OWN.write()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_or_insert_with(Default::default)
+            .entry(section)
+            .or_insert_with(|| own_view(section, section_bytes));
+        store_own(section, offset, bytes)
+    });
+    (stored == Some(true)).then_some(shown)
+}
+
+/// Stores `bytes` (inside one 64 KiB page) at `offset` of `section` through
+/// our own view of it: whether it did, `None` if no view was made yet. The
+/// views are held shared meanwhile, so that stores from several threads run
+/// beside one another and none is forgotten under one
+/// ([`title_memory_section`]).
+fn store_own(section: usize, offset: u64, bytes: &[u8]) -> Option<bool> {
+    let own = OWN.read().unwrap_or_else(|e| e.into_inner());
+    let Some(view) = own.as_ref()?.get(&section)? else {
+        return Some(false);
+    };
     if offset + bytes.len() as u64 > view.bytes {
-        return None;
+        return Some(false);
     }
     let block = offset as usize / K64;
-    if (view.committed[block / 64] & (1u64 << (block % 64))) == 0 {
+    let (word, bit) = (&view.committed[block / 64], 1u64 << (block % 64));
+    if word.load(Ordering::Acquire) & bit == 0 {
         // The title's view committed these pages of the section; asked
         // once more through ours, which changes nothing if they are.
         // SAFETY: a block inside our own view.
@@ -702,14 +801,45 @@ pub(crate) fn write_own(at: usize, bytes: &[u8]) -> Option<Vec<usize>> {
             mem::VirtualAlloc((view.base + block * K64) as *const c_void, K64, mem::MEM_COMMIT, mem::PAGE_READWRITE)
         };
         if there.is_null() {
-            return None;
+            return Some(false);
         }
-        view.committed[block / 64] |= 1u64 << (block % 64);
+        word.fetch_or(bit, Ordering::Release);
     }
     // SAFETY: committed bytes inside our own view; the source is the
     // caller's slice.
     unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), (view.base + offset as usize) as *mut u8, bytes.len()) };
-    Some(shown)
+    Some(true)
+}
+
+/// A view of our own on all of `section`; `None` if the host refuses it.
+fn own_view(section: usize, section_bytes: u64) -> Option<Own> {
+    // SAFETY: a section handle the runtime gave us, alive as long as the
+    // title's views of it are; the view is ours and stays.
+    let at = unsafe { mem::MapViewOfFile(section as *mut c_void, mem::FILE_MAP_WRITE, 0, 0, 0) };
+    if at.Value.is_null() {
+        tracing::warn!(
+            section,
+            error = %std::io::Error::last_os_error(),
+            "no view of our own on a section of title pages: what shaders wrote goes back the old way there"
+        );
+        return None;
+    }
+    // The first few, then now and then: there may be thousands.
+    static SEEN: AtomicU64 = AtomicU64::new(0);
+    let so_far = SEEN.fetch_add(1, Ordering::Relaxed) + 1;
+    if so_far <= 4 || so_far.is_power_of_two() {
+        tracing::info!(
+            section,
+            mb = section_bytes >> 20,
+            so_far,
+            "a view of our own on a section of title pages, for what shaders wrote (VICTORY_BACK_OWN_VIEW=1)"
+        );
+    }
+    Some(Own {
+        base: at.Value as usize,
+        bytes: section_bytes,
+        committed: (0..(section_bytes as usize).div_ceil(K64).div_ceil(64)).map(|_| AtomicU64::new(0)).collect(),
+    })
 }
 
 /// How the views cover `[at, at + len)`.
@@ -745,7 +875,7 @@ fn cover_in(views: &BTreeMap<usize, (usize, usize, u64)>, at: usize, len: usize)
 
 /// [`Cover`] of `[at, at + len)` by the title's views as they are now.
 pub(crate) fn cover(at: usize, len: usize) -> Cover {
-    cover_in(&views().views, at, len)
+    cover_in(&views_shared().views, at, len)
 }
 
 /// Whether `[at, at + len)` is private memory, all committed and
@@ -1291,7 +1421,7 @@ fn census_of(spans: &[(u64, u64, bool)]) -> Vec<String> {
             }
         }
     }
-    let v = views();
+    let v = views_shared();
     let (count, bytes) = (v.views.len(), v.views.values().map(|view| view.0 as u64).sum::<u64>());
     let pages = v.views.values().filter(|view| view.0 == K64).count();
     let big = v.views.values().map(|view| view.0).max().unwrap_or(0);
@@ -1300,11 +1430,12 @@ fn census_of(spans: &[(u64, u64, bool)]) -> Vec<String> {
         bytes >> 20,
         big >> 20
     ));
-    for &(_, bytes, committed) in &v.sections {
+    for &(bytes, committed) in v.sections.values().take(16) {
         lines.push(format!(
-            "census, a section of {} MB, {}",
+            "census, a section of {} MB, {} (of {} sections)",
             bytes >> 20,
-            if committed { "committed: it can be opened as one heap" } else { "reserved: refused as a heap until it is made with SEC_COMMIT" }
+            if committed { "committed: it can be opened as one heap" } else { "reserved: refused as a heap until it is made with SEC_COMMIT" },
+            v.sections.len()
         ));
     }
     lines

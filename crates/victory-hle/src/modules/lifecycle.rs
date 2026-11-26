@@ -229,6 +229,7 @@ fn fit_into(area: &RECT, width: i32, height: i32) -> (i32, i32) {
     )
 }
 
+<<<<<<< HEAD
 /// Shows a stand-in for the top-level title window `title` (see
 /// [`STAND_IN`]); `ShowWindow` on `title` then shows or hides the stand-in.
 fn stand_in(title: HWND, ex_style: u32, style: u32, x: i32, y: i32, width: i32, height: i32) {
@@ -372,6 +373,15 @@ pub extern "system" fn ShowWindow(hwnd: HWND, command: i32) -> i32 {
     unsafe { wm::ShowWindow(target, command) }
 }
 
+||||||| 465b94f5
+=======
+/// A window the title made.
+pub(crate) fn is_title_window(hwnd: HWND) -> bool {
+    // SAFETY: a plain query; a null window has no properties.
+    !hwnd.is_null() && unsafe { !wm::GetPropW(hwnd, TITLE_PROC).is_null() }
+}
+
+>>>>>>> vertex/main
 /// Puts our procedure in front of the title's.
 fn hook(hwnd: HWND) {
     if hwnd.is_null() {
@@ -386,15 +396,23 @@ fn hook(hwnd: HWND) {
     }
 }
 
+/// Whether a window message asks for the window to be closed.
+fn closes(message: u32, wparam: WPARAM) -> bool {
+    message == wm::WM_CLOSE || message == wm::WM_SYSCOMMAND && wparam & 0xFFF0 == wm::SC_CLOSE as usize
+}
+
 extern "system" fn window_proc(
     hwnd: HWND,
     message: u32,
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    // A user close (close button, Alt+F4, window or taskbar menu); a
-    // console title never sees one, nor a WM_CLOSE from it.
-    if message == wm::WM_SYSCOMMAND && wparam & 0xFFF0 == wm::SC_CLOSE as usize {
+    // A user close (close button, Alt+F4, window or taskbar menu), or
+    // another program's (Task Manager's "end task", a script): a console
+    // title never sees either. A WM_CLOSE that reached the title's procedure
+    // destroyed its window, and the title waited for frames until it aborted
+    // itself or hung.
+    if closes(message, wparam) {
         end_title("window closed", Box::new(|| {}));
         return 0;
     }
@@ -407,6 +425,7 @@ extern "system" fn window_proc(
     if message == wm::WM_SYSCOMMAND && wparam & 0xFFF0 == wm::SC_KEYMENU as usize {
         return 0;
     }
+<<<<<<< HEAD
     // The mouse cursor for keyboard and mouse play (`gameinput::cursor`):
     // hidden over the window while captured, captured by a click, freed when
     // the window loses focus. The title still sees every message.
@@ -442,6 +461,40 @@ extern "system" fn window_proc(
         wm::WM_CAPTURECHANGED => tracing::debug!("WM_CAPTURECHANGED"),
         _ => {}
     }
+||||||| 465b94f5
+=======
+    // While the mouse turns the view there is no cursor over the picture.
+    if message == wm::WM_SETCURSOR
+        && lparam as u32 & 0xFFFF == wm::HTCLIENT
+        && super::gameinput::mouse::taken()
+    {
+        // SAFETY: no cursor, until the next of these messages.
+        unsafe { wm::SetCursor(std::ptr::null_mut()) };
+        return 1;
+    }
+    // The window shows the system's white (the title's class brush) from
+    // its creation until our first present, a second or more at start.
+    // It is black instead, as a console's screen is before its first frame.
+    if message == wm::WM_ERASEBKGND {
+        use windows_sys::Win32::Graphics::Gdi;
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        // SAFETY: the device context the message hands over, for our window.
+        unsafe {
+            wm::GetClientRect(hwnd, &mut rect);
+            Gdi::FillRect(
+                wparam as Gdi::HDC,
+                &rect,
+                Gdi::GetStockObject(Gdi::BLACK_BRUSH) as Gdi::HBRUSH,
+            );
+        }
+        return 1;
+    }
+>>>>>>> vertex/main
     // SAFETY: the procedure `hook` stored, called the way the system would.
     unsafe {
         let title = wm::GetPropW(hwnd, TITLE_PROC);
@@ -626,6 +679,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn constrained_registrations_come_and_go() {
         let (mut a, mut b) = (0, 0);
         assert_eq!(
@@ -660,6 +714,19 @@ mod tests {
     }
 
     #[test]
+||||||| 465b94f5
+=======
+    fn closes_by_the_user_and_by_other_programs_are_closes() {
+        assert!(closes(wm::WM_SYSCOMMAND, wm::SC_CLOSE as usize));
+        // The low four bits are the system's own.
+        assert!(closes(wm::WM_SYSCOMMAND, wm::SC_CLOSE as usize | 3));
+        assert!(closes(wm::WM_CLOSE, 0));
+        assert!(!closes(wm::WM_SYSCOMMAND, wm::SC_MINIMIZE as usize));
+        assert!(!closes(wm::WM_DESTROY, 0));
+    }
+
+    #[test]
+>>>>>>> vertex/main
     fn oversized_windows_shrink_to_the_screen() {
         let area = RECT {
             left: 0,
@@ -700,6 +767,15 @@ mod tests {
             let n = wm::GetWindowTextW(hwnd, text.as_mut_ptr(), 16);
             assert_eq!(String::from_utf16_lossy(&text[..n as usize]), "after");
             assert!(!wm::GetPropW(hwnd, TITLE_PROC).is_null());
+            assert!(is_title_window(hwnd) && !is_title_window(null));
+            // No cursor over the picture while the mouse turns the view.
+            let taken = &crate::modules::gameinput::mouse::TAKEN;
+            let cursor =
+                |at: u32| wm::SendMessageW(hwnd, wm::WM_SETCURSOR, hwnd as usize, at as LPARAM);
+            taken.store(true, Ordering::Relaxed);
+            let (over, border) = (cursor(wm::HTCLIENT), cursor(wm::HTCAPTION));
+            taken.store(false, Ordering::Relaxed);
+            assert_eq!((over, border, cursor(wm::HTCLIENT)), (1, 0, 0));
             wm::DestroyWindow(hwnd);
         }
     }

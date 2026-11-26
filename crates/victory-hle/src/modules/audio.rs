@@ -591,9 +591,57 @@ fn decode(context: Context, voice: &mut Voice) -> bool {
     let channels = context.channels();
     let mut current = context.field(4, 31, 1);
     let valid = context.field(0, 20, 2);
+<<<<<<< HEAD
     if valid == 0 {
         if voice.drained {
             return false;
+||||||| 465b94f5
+    if valid & (1 << current) == 0 {
+        if valid & (1 << (1 - current)) == 0 {
+            // Out of input: the overlap tail, then nothing.
+            if let Some(decoder) = &mut voice.decoder {
+                let mut tail = Vec::new();
+                decoder.flush(&mut tail);
+                voice.pcm.extend(tail);
+            }
+            voice.ended = true;
+            voice.trace.ended_ms = Some(voice.trace.since.elapsed().as_millis());
+            context.set_field(2, 26, 5, INPUT_INVALID);
+            context.set_field(2, 31, 1, 1);
+            return !voice.pcm.is_empty();
+=======
+    if voice.ended {
+        if valid == 0 {
+            return false;
+        }
+        // The input ran out and the title has marked more as valid since: a
+        // stream it could not feed for a while (a long frame). It goes on;
+        // it stayed silent until the title enabled the voice anew.
+        // shortcut: taken from what a stream needs; whether the hardware
+        // goes on by itself is not known.
+        voice.ended = false;
+        context.set_field(2, 26, 5, 0);
+        context.set_field(2, 31, 1, 0);
+        static RESUMED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = RESUMED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        if n.is_power_of_two() {
+            tracing::info!(n, "an XMA voice whose input had run out has input again: it goes on");
+        }
+    }
+    if valid & (1 << current) == 0 {
+        if valid & (1 << (1 - current)) == 0 {
+            // Out of input: the overlap tail, then nothing.
+            if let Some(decoder) = &mut voice.decoder {
+                let mut tail = Vec::new();
+                decoder.flush(&mut tail);
+                voice.pcm.extend(tail);
+            }
+            voice.ended = true;
+            voice.trace.ended_ms = Some(voice.trace.since.elapsed().as_millis());
+            context.set_field(2, 26, 5, INPUT_INVALID);
+            context.set_field(2, 31, 1, 1);
+            return !voice.pcm.is_empty();
+>>>>>>> vertex/main
         }
         // Out of input: the overlap tail, then nothing until the title
         // gives more (a streaming title that refilled late, or a sound
@@ -847,6 +895,12 @@ impl State {
         if self.messages.len() >= self.capacity {
             self.dropped = self.dropped.saturating_add(1);
             tracing::debug!(kind, dropped = self.dropped, "coprocessor message dropped");
+            // A title that waits for an acknowledgement waits for good.
+            static LOST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = LOST.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if n.is_power_of_two() {
+                tracing::warn!(n, kind, capacity = self.capacity, "audio coprocessor messages are lost: the title does not take them");
+            }
             return;
         }
         let mut message = Message {
@@ -1250,6 +1304,7 @@ mod tests {
         assert_eq!(context.field(0, 20, 2), 0, "input used up");
         assert_eq!(context.field(2, 26, 5), INPUT_INVALID);
 
+<<<<<<< HEAD
         // New input after running out resumes the voice from its start,
         // with the error cleared until it runs out again.
         let before = produced(&xma()).unwrap();
@@ -1272,6 +1327,23 @@ mod tests {
             26 * SAMPLES_PER_BLOCK
         );
 
+||||||| 465b94f5
+=======
+        // Given the same input once more, the voice goes on by itself, and
+        // runs out again; it stayed silent for good before.
+        context.set_field(2, 0, 26, 32);
+        context.set_field(0, 20, 1, 1);
+        for _ in 0..40 {
+            submit(ADVANCE_XMA_READ, &[1, 4]);
+            xma().pump();
+            if context.field(0, 20, 2) == 0 && context.field(2, 31, 1) == 1 && context.field(1, 31, 1) == 1 {
+                break;
+            }
+        }
+        assert!(produced(&xma()).is_some_and(|n| n >= 48 * SAMPLES_PER_BLOCK), "{:?}", produced(&xma()));
+        assert_eq!(context.field(2, 26, 5), INPUT_INVALID, "out of input again");
+
+>>>>>>> vertex/main
         // A count near `u32::MAX` wraps the read block like any other
         // (3 + 0xffff_ffff blocks on a ring of four is block 2); the sum
         // used to overflow.

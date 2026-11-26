@@ -37,6 +37,17 @@
 //! is the extent of the title's allocation around an address, which the
 //! memory module of the layer knows and this one does not ask yet.
 //!
+//! **While the structure builder is off** (`pipeline::builder_live`) the
+//! structures are not built, and what lies at their addresses is whatever
+//! the title's memory held before. The programs that walk them get
+//! [`empty`] then: a directory without entries, so every read by address
+//! gives 0 and every store is dropped. A structure of zeros is the empty
+//! scene (its root is a triangle of three equal points, which no ray
+//! hits), so every ray misses: nothing is occluded, the title shades as it
+//! does while its structures are still streaming in. Nothing is copied
+//! for it either (no copy is numbered, brought up to date or compared).
+//! `VICTORY_RT_WALK_UNBUILT=1` has them read title memory as before.
+//!
 //! shortcut: a copy that is numbered is kept for the rest of the run, and
 //! there are at most [`COPIES`] of them (4 MiB windows mostly: 4 GiB at
 //! most). Every dispatch of such a shader brings all numbered copies up to
@@ -75,11 +86,26 @@ struct Memory {
     frame: u64,
     /// Pages asked for this frame that are not the title's memory.
     refused: std::collections::HashSet<u64>,
+    /// For [`empty`]: a directory without entries and the fault notes
+    /// nothing reads, made at its first use.
+    unbuilt: Option<[(ID3D12Resource, *mut u32, u64); 2]>,
 }
 
 // SAFETY: the mappings are of buffers the struct owns; all access is under
 // the mutex.
 unsafe impl Send for Memory {}
+
+/// A buffer of `dwords` zero dwords the CPU and the card share: the
+/// buffer, its mapping, its GPU address.
+fn zeroed(dwords: u64, what: &str) -> Option<(ID3D12Resource, *mut u32, u64)> {
+    let (buffer, data) = host()?.shared_buffer(dwords * 4)?;
+    crate::host::name(&buffer, || format!("title memory by address: {what}"));
+    // SAFETY: a fresh mapping of at least that many bytes.
+    unsafe { std::ptr::write_bytes(data, 0, (dwords * 4) as usize) };
+    // SAFETY: a live buffer.
+    let gpu = unsafe { buffer.GetGPUVirtualAddress() };
+    Some((buffer, data.cast::<u32>(), gpu))
+}
 
 static MEMORY: Mutex<Option<Memory>> = Mutex::new(None);
 
@@ -93,25 +119,30 @@ pub(crate) struct Ready {
 
 impl Memory {
     fn new() -> Option<Memory> {
-        let host = host()?;
-        let make = |dwords: u64, what: &str| {
-            let (buffer, data) = host.shared_buffer(dwords * 4)?;
-            crate::host::name(&buffer, || format!("title memory by address: {what}"));
-            // SAFETY: a fresh mapping of at least that many bytes.
-            unsafe { std::ptr::write_bytes(data, 0, (dwords * 4) as usize) };
-            // SAFETY: a live buffer.
-            let gpu = unsafe { buffer.GetGPUVirtualAddress() };
-            Some((buffer, data.cast::<u32>(), gpu))
-        };
         tracing::info!("title memory by address: a shader reads or writes through raw addresses");
         Some(Memory {
-            directory: make(u64::from(MEMORY_PAGES) * 2, "directory")?,
-            faults: make(u64::from(MEMORY_FAULTS), "faults")?,
+            directory: zeroed(u64::from(MEMORY_PAGES) * 2, "directory")?,
+            faults: zeroed(u64::from(MEMORY_FAULTS), "faults")?,
             copies: Vec::new(),
             heaps: HashMap::new(),
             frame: u64::MAX,
             refused: Default::default(),
+            unbuilt: None,
         })
+    }
+
+    /// `heap`'s run of slots for the copies' views (its first slot and how
+    /// many copies have their view there), taken at its first use.
+    fn run(&mut self, heap: &HostHeap) -> Option<(u32, u32)> {
+        let key = std::ptr::from_ref(heap) as usize;
+        if let Some(&run) = self.heaps.get(&key) {
+            return Some(run);
+        }
+        // Held for the heap's life: not given back with a list's slots.
+        let base = heap.dynamic(COPIES + 1)?;
+        heap.null_raw_uav_at(base);
+        self.heaps.insert(key, (base, 0));
+        Some((base, 0))
     }
 
     /// Gives the page of `address` its copy, if it has none and the memory
@@ -245,6 +276,7 @@ pub(crate) fn ready(
     addresses: &[u64],
     constants: &[u32],
     writes: bool,
+    builder: bool,
 ) -> Option<Ready> {
     let mut guard = MEMORY.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
@@ -257,7 +289,6 @@ pub(crate) fn ready(
         m.refused.clear();
         m.take_faults();
     }
-    let numbered = m.copies.len();
     for &address in addresses {
         m.name(address);
     }
@@ -276,38 +307,32 @@ pub(crate) fn ready(
         }
     }
     let key = std::ptr::from_ref(heap) as usize;
-    let (base, made) = match m.heaps.get(&key) {
-        Some(&run) => run,
-        None => {
-            // Held for the heap's life: not given back with a list's slots.
-            let base = heap.dynamic(COPIES + 1)?;
-            heap.null_raw_uav_at(base);
-            (base, 0)
-        }
-    };
+    let (base, made) = m.run(heap)?;
     for (n, shadow) in m.copies.iter().enumerate().skip(made as usize) {
         let (_, len) = shadow.span();
         heap.raw_uav_at(base + 1 + n as u32, &shadow.buffer, 0, len);
     }
     m.heaps.insert(key, (base, m.copies.len() as u32));
-    // Once per list, and for copies numbered since: the builder alone
-    // dispatches hundreds of times a frame.
-    // shortcut: a copy another list numbers meanwhile is brought up to date
-    // by that list's submission, which may run after this one's.
-    const READ: usize = usize::MAX - 0x6d;
-    const WRITE: usize = usize::MAX - 0x6e;
-    let first_read = list.first_use(READ);
-    let first_write = writes && list.first_use(WRITE);
-    for (n, shadow) in m.copies.iter().enumerate() {
+    // Bring up to date (and, with `writes`, declare for write-back) every
+    // numbered copy this list has not covered yet, including copies numbered
+    // by another command list since this list's previous dispatch.
+    const KEEP: usize = usize::MAX - 0x6d;
+    let (read_from, write_from) = list.memory_sync_range(m.copies.len(), writes);
+    for shadow in &m.copies[read_from..] {
         let (start, len) = shadow.span();
-        if first_read || n >= numbered {
-            shadow.refresh(list, start, len);
-        }
-        if writes && (first_write || n >= numbered) {
-            shadow.gpu_writes(list, start, len);
+        shadow.refresh(list, start, len);
+    }
+    if writes {
+        for shadow in &m.copies[write_from..] {
+            let (start, len) = shadow.span();
+            // Bounded for the structure builder (`crate::pipeline::bvh_bound`).
+            // shortcut: a list's copies are declared once, by whichever
+            // program that can store comes first; a list mixing the builder
+            // with another such program follows the first.
+            crate::pipeline::builder_writes(list, shadow, start, len, builder);
         }
     }
-    if first_read {
+    if list.first_use(KEEP) {
         list.keep(&m.directory.0);
         list.keep(&m.faults.0);
     }
@@ -317,6 +342,7 @@ pub(crate) fn ready(
         base,
     })
 }
+<<<<<<< HEAD
 
 /// Evicts cached descriptor-run state for `heap` when its owning `Heap` is
 /// dropped so a later `Heap` allocated at the same address cannot reuse stale
@@ -376,3 +402,149 @@ mod tests {
         );
     }
 }
+||||||| 465b94f5
+=======
+
+/// Evicts cached descriptor-run state for `heap` when its owning `Heap` is
+/// dropped so a later `Heap` allocated at the same address cannot reuse stale
+/// `(base, made)` slot offsets.
+pub(crate) fn forget_heap(heap: &HostHeap) {
+    let key = std::ptr::from_ref(heap) as usize;
+    if let Some(m) = MEMORY.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        m.heaps.remove(&key);
+    }
+}
+
+/// `VICTORY_RT_WALK_UNBUILT=1`: the programs that walk the ray-tracing
+/// structures read title memory while the structure builder is off too
+/// (what they did before [`empty`]; for comparing runs).
+pub(crate) fn walks_unbuilt() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_RT_WALK_UNBUILT").is_some_and(|v| v == "1"))
+}
+
+/// Dispatches and draws given [`empty`] so far.
+static EMPTY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// For a draw whose shader walks ray-tracing structures while the
+/// structure builder is off (see the module): title memory by address
+/// with no page in it. Every read gives 0 and every store is dropped;
+/// nothing is copied, and the pages the shader asks for are not noted.
+/// None if the host cannot hold it; the draw is then dropped.
+pub(crate) fn empty(list: &HostList, heap: &HostHeap) -> Option<Ready> {
+    let mut guard = MEMORY.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        *guard = Memory::new();
+    }
+    let m = guard.as_mut()?;
+    // The run's first slot is the null view, which is all a directory
+    // without entries leads to.
+    let (base, _) = m.run(heap)?;
+    if m.unbuilt.is_none() {
+        m.unbuilt = Some([
+            zeroed(u64::from(MEMORY_PAGES) * 2, "directory of unbuilt structures")?,
+            zeroed(u64::from(MEMORY_FAULTS), "faults of unbuilt structures")?,
+        ]);
+    }
+    let [directory, faults] = m.unbuilt.as_ref()?;
+    const UNBUILT: usize = usize::MAX - 0x6f;
+    if list.first_use(UNBUILT) {
+        list.keep(&directory.0);
+        list.keep(&faults.0);
+    }
+    let n = EMPTY.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    if n == 1 || n.is_multiple_of(4096) {
+        tracing::info!(
+            so_far = n,
+            frame = crate::frame::current(),
+            "ray tracing: the structure builder is off, so the programs that walk its structures are given empty ones (every ray misses) and no title memory is copied for them"
+        );
+    }
+    Some(Ready {
+        directory: directory.2,
+        faults: faults.2,
+        base,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::descriptor::{HeapDesc, create_heap, heap};
+    use crate::object::{S_OK, This, guid};
+
+    #[test]
+    fn dropping_a_view_heap_evicts_its_memory_heaps_entry() {
+        let Some(host) = crate::host::host() else {
+            return;
+        };
+        let iid = guid(
+            0x8efb471d,
+            0x616c,
+            0x4f49,
+            [0x90, 0xf7, 0x12, 0x7b, 0xb7, 0x63, 0xfa, 0x51],
+        );
+        let desc = HeapDesc {
+            kind: 0,
+            count: 64,
+            flags: 1,
+            nodes: 1,
+        };
+        let mut h: This = std::ptr::null();
+        assert_eq!(create_heap(std::ptr::null(), &desc, &iid, &mut h), S_OK);
+        let list = host.new_list().unwrap();
+        let host_heap = heap(h).host().expect("host view heap");
+        let key = std::ptr::from_ref(host_heap) as usize;
+
+        assert!(ready(&list, host_heap, &[], &[], false, false).is_some());
+        {
+            let guard = MEMORY.lock().unwrap();
+            assert!(guard.as_ref().unwrap().heaps.contains_key(&key));
+        }
+
+        // Release the title heap (COM vtable slot 2): `Heap::drop` must evict `key`.
+        // SAFETY: `h` is a live COM object from `create_heap`.
+        let release: extern "system" fn(This) -> u32 =
+            unsafe { std::mem::transmute(*(*(h as *const *const *const ())).add(2)) };
+        assert_eq!(release(h), 0);
+
+        let guard = MEMORY.lock().unwrap();
+        assert!(
+            !guard.as_ref().unwrap().heaps.contains_key(&key),
+            "MEMORY.heaps retained dropped HostHeap key {key:#x}"
+        );
+    }
+
+    use victory_shader::bvh::{MISS, NONE, Ray, intersect};
+
+    /// What [`super::empty`] rests on: in memory that reads as zeros no
+    /// ray hits anything, and no pointer leads anywhere but back to the
+    /// node of zeros.
+    #[test]
+    fn a_structure_of_zeros_is_missed_by_every_ray() {
+        let zeros = [0u32; 28];
+        let rays = [
+            Ray::new([0.0; 3], [0.0, 0.0, 1.0], 100.0),
+            Ray::new([1.0, 2.0, 3.0], [-1.0, -2.0, -3.0], 1e30),
+            Ray::new([-5.0, 0.0, 0.0], [1.0, 0.0, 0.0], 10.0),
+            Ray::new([3.0, -4.0, 0.5], [0.3, 0.9, -0.1], f32::MAX),
+        ];
+        for ray in &rays {
+            for sort in [false, true] {
+                // A triangle of three equal points (the node a zero
+                // pointer names), an instance or a procedural node.
+                for kind in [0, 1, 2, 3, 6, 7] {
+                    assert_eq!(intersect(&zeros, kind, ray, sort), MISS.map(f32::to_bits), "kind {kind}");
+                }
+                // A box node of zeros: its children are the zero pointer,
+                // that triangle again.
+                for kind in [4, 5] {
+                    for child in intersect(&zeros, kind, ray, sort) {
+                        assert!(child == NONE || child == 0, "kind {kind}: {child:#x}");
+                    }
+                }
+            }
+        }
+    }
+}
+>>>>>>> vertex/main

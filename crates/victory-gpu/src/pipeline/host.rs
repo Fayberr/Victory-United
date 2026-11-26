@@ -19,6 +19,35 @@ use windows::core::PCSTR;
 use super::{Shader, Translated};
 use crate::host::host;
 
+/// A `UINT` or `SINT` render target format: the host does not blend into
+/// those ([`GraphicsState::host_blend`]).
+fn integer_format(format: DXGI_FORMAT) -> bool {
+    matches!(
+        format,
+        DXGI_FORMAT_R32G32B32A32_UINT
+            | DXGI_FORMAT_R32G32B32A32_SINT
+            | DXGI_FORMAT_R32G32B32_UINT
+            | DXGI_FORMAT_R32G32B32_SINT
+            | DXGI_FORMAT_R16G16B16A16_UINT
+            | DXGI_FORMAT_R16G16B16A16_SINT
+            | DXGI_FORMAT_R32G32_UINT
+            | DXGI_FORMAT_R32G32_SINT
+            | DXGI_FORMAT_R10G10B10A2_UINT
+            | DXGI_FORMAT_R8G8B8A8_UINT
+            | DXGI_FORMAT_R8G8B8A8_SINT
+            | DXGI_FORMAT_R16G16_UINT
+            | DXGI_FORMAT_R16G16_SINT
+            | DXGI_FORMAT_R32_UINT
+            | DXGI_FORMAT_R32_SINT
+            | DXGI_FORMAT_R8G8_UINT
+            | DXGI_FORMAT_R8G8_SINT
+            | DXGI_FORMAT_R16_UINT
+            | DXGI_FORMAT_R16_SINT
+            | DXGI_FORMAT_R8_UINT
+            | DXGI_FORMAT_R8_SINT
+    )
+}
+
 /// A stream's graphics state, owned (the title's stream lives only for the
 /// creation call). Subobjects the stream leaves out keep D3D12's defaults.
 pub(crate) struct GraphicsState {
@@ -144,6 +173,36 @@ impl GraphicsState {
 }
 
 impl GraphicsState {
+    /// The blend state the host can make for these render targets. D3D12
+    /// refuses a pipeline that blends into a target of an integer format
+    /// (`UINT` or `SINT`): the title does, and the console's GPU lets it
+    /// (the blend is a no-op there). Blending is switched off for those
+    /// targets and kept for the others; with no integer target that blends
+    /// the state is returned as it is (so a logic op on an integer target,
+    /// which D3D12 refuses together with independent blending, stays valid).
+    pub(crate) fn host_blend(&self) -> D3D12_BLEND_DESC {
+        let mut blend = self.blend;
+        let n = (self.targets.NumRenderTargets as usize).min(8);
+        let independent = blend.IndependentBlendEnable.as_bool();
+        // Without independent blending, target 0's state stands for all.
+        let integer = |i: usize| {
+            integer_format(self.targets.RTFormats[i])
+                && self.blend.RenderTarget[if independent { i } else { 0 }].BlendEnable.as_bool()
+        };
+        if !(0..n).any(integer) {
+            return blend;
+        }
+        if !independent {
+            let first = blend.RenderTarget[0];
+            blend.RenderTarget = [first; 8];
+            blend.IndependentBlendEnable = true.into();
+        }
+        for i in (0..n).filter(|&i| integer(i)) {
+            blend.RenderTarget[i].BlendEnable = false.into();
+        }
+        blend
+    }
+
     /// Takes in one subobject of a stream: its type, then its data at +4
     /// (+8 for those holding pointers).
     ///
@@ -366,6 +425,19 @@ impl GraphicsState {
             })
             .collect()
     }
+}
+
+fn integer_rtv(format: DXGI_FORMAT) -> bool {
+    matches!(format,
+        DXGI_FORMAT_R32G32B32A32_UINT | DXGI_FORMAT_R32G32B32A32_SINT
+            | DXGI_FORMAT_R32G32B32_UINT | DXGI_FORMAT_R32G32B32_SINT
+            | DXGI_FORMAT_R16G16B16A16_UINT | DXGI_FORMAT_R16G16B16A16_SINT
+            | DXGI_FORMAT_R32G32_UINT | DXGI_FORMAT_R32G32_SINT | DXGI_FORMAT_R10G10B10A2_UINT
+            | DXGI_FORMAT_R8G8B8A8_UINT | DXGI_FORMAT_R8G8B8A8_SINT
+            | DXGI_FORMAT_R16G16_UINT | DXGI_FORMAT_R16G16_SINT | DXGI_FORMAT_R32_UINT | DXGI_FORMAT_R32_SINT
+            | DXGI_FORMAT_R8G8_UINT | DXGI_FORMAT_R8G8_SINT | DXGI_FORMAT_R16_UINT | DXGI_FORMAT_R16_SINT
+            | DXGI_FORMAT_R8_UINT | DXGI_FORMAT_R8_SINT
+    )
 }
 
 /// One input element: vertex buffer slot, byte offset, format.
@@ -738,6 +810,19 @@ impl HostPipeline {
         }
         let host = host()?;
 
+        let mut options = D3D12_FEATURE_DATA_D3D12_OPTIONS19::default();
+        // SAFETY: the feature query writes the structure of the given size.
+        // Older runtimes may not recognize OPTIONS19; that means no support.
+        let aniso_point_mip_supported = unsafe {
+            host.device.CheckFeatureSupport(
+                D3D12_FEATURE_D3D12_OPTIONS19,
+                (&raw mut options).cast(),
+                size_of_val(&options) as u32,
+            )
+        }
+        .is_ok()
+            && options.AnisoFilterWithPointMipSupported.as_bool();
+
         // The root signature the translated shaders' bindings define.
         let mut params: Vec<D3D12_ROOT_PARAMETER1> = Vec::new();
         // The ranges table parameters point at, alive until the root
@@ -752,12 +837,240 @@ impl HostPipeline {
                 collect_stage_bindings(t, visibility, &mut params, &mut ranges, &mut samplers);
             bound.push(Stage {
                 shader: shader.clone(),
+<<<<<<< HEAD
                 tables: TableLayout::build(&translated.used, &t.root_indexed_views),
                 user_data,
                 root_cbvs,
                 root_srvs,
                 root_uavs,
             });
+||||||| 465b94f5
+                user_data: None,
+                root_cbvs: Vec::new(),
+                root_srvs: Vec::new(),
+                root_uavs: Vec::new(),
+            };
+            let dwords = t.user_data_dwords();
+            if dwords > 0 {
+                stage.user_data = Some((params.len() as u32, dwords));
+                params.push(D3D12_ROOT_PARAMETER1 {
+                    ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+                    Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                        Constants: D3D12_ROOT_CONSTANTS {
+                            ShaderRegister: 0,
+                            RegisterSpace: USER_DATA_SPACE,
+                            Num32BitValues: dwords,
+                        },
+                    },
+                    ShaderVisibility: visibility,
+                });
+            }
+            for (slots, kind, out) in [
+                (
+                    &t.root_cbvs,
+                    D3D12_ROOT_PARAMETER_TYPE_CBV,
+                    &mut stage.root_cbvs,
+                ),
+                (
+                    &t.root_srvs,
+                    D3D12_ROOT_PARAMETER_TYPE_SRV,
+                    &mut stage.root_srvs,
+                ),
+                (
+                    &t.root_uavs,
+                    D3D12_ROOT_PARAMETER_TYPE_UAV,
+                    &mut stage.root_uavs,
+                ),
+            ] {
+                for &slot in slots {
+                    let uav = kind == D3D12_ROOT_PARAMETER_TYPE_UAV;
+                    // Ours, not the title's, stay root descriptors: the
+                    // table of strides, the directory of title memory by
+                    // address and its fault notes.
+                    let ours = if uav {
+                        slot == victory_shader::emit::SLOT_FAULTS
+                    } else {
+                        slot == victory_shader::emit::SLOT_STRIDES
+                            || slot == victory_shader::emit::SLOT_MEMORY
+                    };
+                    if (uav || kind == D3D12_ROOT_PARAMETER_TYPE_SRV) && !ours && bounded_root_srvs() {
+                        // A one-view table: the view's size bounds the
+                        // reads (and a root UAV's writes), which a root
+                        // descriptor leaves unbounded.
+                        // (Our own table of strides stays a descriptor.)
+                        ranges.push(Box::new(D3D12_DESCRIPTOR_RANGE1 {
+                            RangeType: if uav {
+                                D3D12_DESCRIPTOR_RANGE_TYPE_UAV
+                            } else {
+                                D3D12_DESCRIPTOR_RANGE_TYPE_SRV
+                            },
+                            NumDescriptors: 1,
+                            BaseShaderRegister: u32::from(slot),
+                            RegisterSpace: ROOT_CBV_SPACE,
+                            Flags: D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE
+                                | D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE,
+                            OffsetInDescriptorsFromTableStart: 0,
+                        }));
+                        let range: *const D3D12_DESCRIPTOR_RANGE1 = &**ranges.last()?;
+                        out.push((slot, params.len() as u32));
+                        params.push(D3D12_ROOT_PARAMETER1 {
+                            ParameterType: D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+                            Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                                DescriptorTable: D3D12_ROOT_DESCRIPTOR_TABLE1 {
+                                    NumDescriptorRanges: 1,
+                                    pDescriptorRanges: range,
+                                },
+                            },
+                            ShaderVisibility: visibility,
+                        });
+                        continue;
+                    }
+                    out.push((slot, params.len() as u32));
+                    params.push(D3D12_ROOT_PARAMETER1 {
+                        ParameterType: kind,
+                        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                            Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                                ShaderRegister: u32::from(slot),
+                                RegisterSpace: ROOT_CBV_SPACE,
+                                Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+                            },
+                        },
+                        ShaderVisibility: visibility,
+                    });
+                }
+            }
+            for (n, s) in t.static_samplers.iter().enumerate() {
+                samplers.push(D3D12_STATIC_SAMPLER_DESC {
+                    Filter: D3D12_FILTER(s.filter as i32),
+                    AddressU: D3D12_TEXTURE_ADDRESS_MODE(s.address[0] as i32),
+                    AddressV: D3D12_TEXTURE_ADDRESS_MODE(s.address[1] as i32),
+                    AddressW: D3D12_TEXTURE_ADDRESS_MODE(s.address[2] as i32),
+                    MipLODBias: s.mip_lod_bias,
+                    MaxAnisotropy: s.max_anisotropy,
+                    ComparisonFunc: D3D12_COMPARISON_FUNC(s.comparison as i32),
+                    BorderColor: D3D12_STATIC_BORDER_COLOR(s.border as i32),
+                    MinLOD: s.min_lod,
+                    MaxLOD: s.max_lod,
+                    ShaderRegister: n as u32,
+                    RegisterSpace: SAMPLER_SPACE,
+                    ShaderVisibility: visibility,
+                });
+            }
+            bound.push(stage);
+=======
+                user_data: None,
+                root_cbvs: Vec::new(),
+                root_srvs: Vec::new(),
+                root_uavs: Vec::new(),
+            };
+            let dwords = t.user_data_dwords();
+            if dwords > 0 {
+                stage.user_data = Some((params.len() as u32, dwords));
+                params.push(D3D12_ROOT_PARAMETER1 {
+                    ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+                    Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                        Constants: D3D12_ROOT_CONSTANTS {
+                            ShaderRegister: 0,
+                            RegisterSpace: USER_DATA_SPACE,
+                            Num32BitValues: dwords,
+                        },
+                    },
+                    ShaderVisibility: visibility,
+                });
+            }
+            for (slots, kind, out) in [
+                (
+                    &t.root_cbvs,
+                    D3D12_ROOT_PARAMETER_TYPE_CBV,
+                    &mut stage.root_cbvs,
+                ),
+                (
+                    &t.root_srvs,
+                    D3D12_ROOT_PARAMETER_TYPE_SRV,
+                    &mut stage.root_srvs,
+                ),
+                (
+                    &t.root_uavs,
+                    D3D12_ROOT_PARAMETER_TYPE_UAV,
+                    &mut stage.root_uavs,
+                ),
+            ] {
+                for &slot in slots {
+                    let uav = kind == D3D12_ROOT_PARAMETER_TYPE_UAV;
+                    // Ours, not the title's, stay root descriptors: the
+                    // table of strides, the directory of title memory by
+                    // address and its fault notes.
+                    let ours = if uav {
+                        slot == victory_shader::emit::SLOT_FAULTS
+                    } else {
+                        slot == victory_shader::emit::SLOT_STRIDES
+                            || slot == victory_shader::emit::SLOT_MEMORY
+                    };
+                    if (uav || kind == D3D12_ROOT_PARAMETER_TYPE_SRV) && !ours && bounded_root_srvs() {
+                        // A one-view table: the view's size bounds the
+                        // reads (and a root UAV's writes), which a root
+                        // descriptor leaves unbounded.
+                        // (Our own table of strides stays a descriptor.)
+                        ranges.push(Box::new(D3D12_DESCRIPTOR_RANGE1 {
+                            RangeType: if uav {
+                                D3D12_DESCRIPTOR_RANGE_TYPE_UAV
+                            } else {
+                                D3D12_DESCRIPTOR_RANGE_TYPE_SRV
+                            },
+                            NumDescriptors: 1,
+                            BaseShaderRegister: u32::from(slot),
+                            RegisterSpace: ROOT_CBV_SPACE,
+                            Flags: D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE
+                                | D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE,
+                            OffsetInDescriptorsFromTableStart: 0,
+                        }));
+                        let range: *const D3D12_DESCRIPTOR_RANGE1 = &**ranges.last()?;
+                        out.push((slot, params.len() as u32));
+                        params.push(D3D12_ROOT_PARAMETER1 {
+                            ParameterType: D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+                            Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                                DescriptorTable: D3D12_ROOT_DESCRIPTOR_TABLE1 {
+                                    NumDescriptorRanges: 1,
+                                    pDescriptorRanges: range,
+                                },
+                            },
+                            ShaderVisibility: visibility,
+                        });
+                        continue;
+                    }
+                    out.push((slot, params.len() as u32));
+                    params.push(D3D12_ROOT_PARAMETER1 {
+                        ParameterType: kind,
+                        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                            Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                                ShaderRegister: u32::from(slot),
+                                RegisterSpace: ROOT_CBV_SPACE,
+                                Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+                            },
+                        },
+                        ShaderVisibility: visibility,
+                    });
+                }
+            }
+            for (n, s) in t.static_samplers.iter().enumerate() {
+                samplers.push(D3D12_STATIC_SAMPLER_DESC {
+                    Filter: D3D12_FILTER(s.filter_for_host(aniso_point_mip_supported) as i32),
+                    AddressU: D3D12_TEXTURE_ADDRESS_MODE(s.address[0] as i32),
+                    AddressV: D3D12_TEXTURE_ADDRESS_MODE(s.address[1] as i32),
+                    AddressW: D3D12_TEXTURE_ADDRESS_MODE(s.address[2] as i32),
+                    MipLODBias: s.mip_lod_bias,
+                    MaxAnisotropy: s.max_anisotropy,
+                    ComparisonFunc: D3D12_COMPARISON_FUNC(s.comparison as i32),
+                    BorderColor: D3D12_STATIC_BORDER_COLOR(s.border as i32),
+                    MinLOD: s.min_lod,
+                    MaxLOD: s.max_lod,
+                    ShaderRegister: n as u32,
+                    RegisterSpace: SAMPLER_SPACE,
+                    ShaderVisibility: visibility,
+                });
+            }
+            bound.push(stage);
+>>>>>>> vertex/main
         }
         let (root, root_blob) = match root_signature(&host.device, &params, &samplers, compute.is_some()) {
             Ok(root) => root,
@@ -831,6 +1144,7 @@ impl HostPipeline {
         } else {
             false
         };
+<<<<<<< HEAD
         if let Some(ms) = mesh {
             let state = g.describe();
             // A mesh program whose outputs pass D3D12's 32 KiB is linked with this pixel
@@ -845,6 +1159,25 @@ impl HostPipeline {
                 Some(pair) => (bytecode(&pair.0.dxil), bytecode(&pair.1.dxil)),
                 None => (code(0), code(1)),
             };
+||||||| 465b94f5
+        let state = g.describe();
+        if mesh.is_some() {
+=======
+        let state = g.describe();
+        if let Some(ms) = mesh {
+            // A mesh program whose outputs pass D3D12's 32 KiB is linked with this pixel
+            // program ([`linked`]): the pipeline gets the two made for each other, which bind
+            // as the shared translations do.
+            let pair = stages.get(1).and_then(|(ps, _)| linked(ms, ps));
+            let bytecode = |dxil: &[u8]| D3D12_SHADER_BYTECODE {
+                pShaderBytecode: dxil.as_ptr().cast(),
+                BytecodeLength: dxil.len(),
+            };
+            let (ms_code, ps_code) = match &pair {
+                Some(pair) => (bytecode(&pair.0.dxil), bytecode(&pair.1.dxil)),
+                None => (code(0), code(1)),
+            };
+>>>>>>> vertex/main
             // "triangles": the stream names its topology since it did not
             // load from the library without one (see `mesh_pipeline`); a
             // new name keeps such entries, stored before, from being
@@ -892,6 +1225,7 @@ impl HostPipeline {
                 Err(e) => tracing::warn!(error = %e, ?shaders, "no rectangle geometry stage"),
             }
         }
+        let blend = g.host_blend();
         let mut desc = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
             // SAFETY: a borrowed pointer the description never releases.
             pRootSignature: unsafe { std::mem::transmute_copy(&root) },
@@ -998,7 +1332,7 @@ impl HostPipeline {
             depth_bounds,
             dsv = g.depth_format.0,
             targets = ?&g.targets.RTFormats[..g.targets.NumRenderTargets.min(8) as usize],
-            blend = ?g.blend.RenderTarget[0],
+            blend = ?blend.RenderTarget[0],
             cull = g.rasterizer.CullMode.0,
             "host graphics state"
         );
@@ -1013,7 +1347,7 @@ impl HostPipeline {
             inputs: g.elements(),
             rects: rect_gs.is_some(),
             state: {
-                let (d, r, b) = (&g.depth, &g.rasterizer, &g.blend.RenderTarget[0]);
+                let (d, r, b) = (&g.depth, &g.rasterizer, &blend.RenderTarget[0]);
                 let face = |f: &D3D12_DEPTH_STENCILOP_DESC| {
                     format!(
                         "fail {} depth-fail {} pass {} func {}",
@@ -1355,6 +1689,50 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn integer_rtv_blend_bypasses_only_integer_targets_with_independent_blend() {
+        let mut g = GraphicsState::default();
+        g.targets.NumRenderTargets = 3;
+        g.targets.RTFormats[..4].copy_from_slice(&[
+            DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R11G11B10_FLOAT, DXGI_FORMAT_R8_UINT,
+            DXGI_FORMAT_R16G16_UINT,
+        ]);
+        g.blend.IndependentBlendEnable = true.into();
+        for target in &mut g.blend.RenderTarget[..4] {
+            target.BlendEnable = true.into();
+            target.DestBlend = D3D12_BLEND_ONE;
+            target.BlendOp = D3D12_BLEND_OP_MAX;
+        }
+        g.blend.RenderTarget[1].DestBlendAlpha = D3D12_BLEND_ONE;
+        g.blend.RenderTarget[1].BlendOpAlpha = D3D12_BLEND_OP_MAX;
+        g.blend.RenderTarget[2].RenderTargetWriteMask = 1;
+
+        let mut expected = g.blend;
+        expected.RenderTarget[2].BlendEnable = false.into();
+        assert_eq!(g.host_blend(), expected);
+
+        let before = g.describe();
+        g.blend = expected;
+        assert_eq!(before, g.describe());
+    }
+
+    #[test]
+    fn integer_rtv_blend_keeps_blend_on_normalized_formats() {
+        let mut g = GraphicsState::default();
+        g.targets.NumRenderTargets = 3;
+        g.targets.RTFormats[..4].copy_from_slice(&[
+            DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R8G8B8A8_SNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+            DXGI_FORMAT_R8_UINT,
+        ]);
+        for target in &mut g.blend.RenderTarget[..4] {
+            target.BlendEnable = true.into();
+        }
+        assert_eq!(g.host_blend(), g.blend);
+
+        g.blend.IndependentBlendEnable = true.into();
+        assert_eq!(g.host_blend(), g.blend);
+    }
+
     /// A triangle mesh shader of our own and a pixel shader for it.
     const MS: &str = "struct V { float4 p : SV_Position; };
         [outputtopology(\"triangle\")] [numthreads(1, 1, 1)]
@@ -1426,6 +1804,7 @@ mod tests {
         g.targets.RTFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
         let name = super::super::library::name("mesh test", &root_blob, &[&ms, &ps], &g.describe());
         mesh_pipeline(&host.device, &root, code(&ms), code(&ps), &g, false, &name).expect("made");
+        super::super::library::store_waiting();
         let loaded = super::super::library::LOADED.load(Ordering::Relaxed);
         mesh_pipeline(&host.device, &root, code(&ms), code(&ps), &g, false, &name).expect("made again");
         assert!(
@@ -1438,6 +1817,107 @@ mod tests {
         float2 p = float2((i << 1) & 2, i & 2);
         return float4(p * 2.0 - 1.0, 0.5, 1.0);
     }";
+
+    #[test]
+    fn blending_into_integer_targets_is_switched_off_and_kept_elsewhere() {
+        let mut g = GraphicsState::default();
+        g.targets.NumRenderTargets = 3;
+        g.targets.RTFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        g.targets.RTFormats[1] = DXGI_FORMAT_R32_UINT;
+        g.targets.RTFormats[2] = DXGI_FORMAT_R16_SINT;
+        g.blend.RenderTarget[0].BlendEnable = true.into();
+        g.blend.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+        // Not independent: target 0's state stands for all three.
+        let b = g.host_blend();
+        assert!(b.IndependentBlendEnable.as_bool());
+        assert!(b.RenderTarget[0].BlendEnable.as_bool(), "the unorm target keeps it");
+        assert!(!b.RenderTarget[1].BlendEnable.as_bool());
+        assert!(!b.RenderTarget[2].BlendEnable.as_bool());
+        assert_eq!(b.RenderTarget[1].SrcBlend, D3D12_BLEND_SRC_ALPHA, "the rest of the state is copied");
+
+        // Independent: each target's own state, only the integer ones cleared.
+        g.blend.IndependentBlendEnable = true.into();
+        g.blend.RenderTarget[1].BlendEnable = true.into();
+        g.blend.RenderTarget[2].BlendEnable = false.into();
+        let b = g.host_blend();
+        assert!(b.RenderTarget[0].BlendEnable.as_bool());
+        assert!(!b.RenderTarget[1].BlendEnable.as_bool());
+        assert!(!b.RenderTarget[2].BlendEnable.as_bool());
+
+        // A logic op on an integer target, no blending: D3D12 refuses a logic
+        // op together with independent blending, so nothing is changed.
+        let mut g = GraphicsState::default();
+        g.targets.NumRenderTargets = 1;
+        g.targets.RTFormats[0] = DXGI_FORMAT_R32_UINT;
+        g.blend.RenderTarget[0].LogicOpEnable = true.into();
+        g.blend.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_XOR;
+        let b = g.host_blend();
+        assert!(!b.IndependentBlendEnable.as_bool());
+        assert!(b.RenderTarget[0].LogicOpEnable.as_bool());
+
+        // No integer target among those in use (target 3 is past the count):
+        // the state is returned as it is.
+        let mut g = GraphicsState::default();
+        g.targets.NumRenderTargets = 1;
+        g.targets.RTFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        g.targets.RTFormats[3] = DXGI_FORMAT_R32_UINT;
+        g.blend.RenderTarget[0].BlendEnable = true.into();
+        let b = g.host_blend();
+        assert!(!b.IndependentBlendEnable.as_bool());
+        assert!(b.RenderTarget[0].BlendEnable.as_bool());
+    }
+
+    /// The host refuses a pipeline that blends into an integer target; with
+    /// the blending switched off (`host_blend`) it makes it.
+    #[test]
+    fn a_pipeline_blending_into_an_integer_target_is_made_without_the_blending() {
+        let Some(host) = host() else {
+            return;
+        };
+        let Some(dxc) = dxc() else {
+            eprintln!("no PC dxc.exe; skipped");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let vs = compile(&dxc, dir.path(), VS, "vs_6_5");
+        let ps = compile(&dxc, dir.path(), "uint main() : SV_Target { return 1; }", "ps_6_5");
+        let (root, _) = root_signature(&host.device, &[], &[], false).unwrap();
+        let mut g = GraphicsState::default();
+        g.rasterizer.CullMode = D3D12_CULL_MODE_NONE;
+        g.depth.DepthEnable = false.into();
+        g.targets.NumRenderTargets = 1;
+        g.targets.RTFormats[0] = DXGI_FORMAT_R32_UINT;
+        g.blend.RenderTarget[0].BlendEnable = true.into();
+        let make = |blend: D3D12_BLEND_DESC| {
+            let desc = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
+                // SAFETY: borrowed pointer, never released by the descriptor.
+                pRootSignature: unsafe { std::mem::transmute_copy(&root) },
+                VS: code(&vs),
+                PS: code(&ps),
+                BlendState: blend,
+                SampleMask: g.sample_mask,
+                RasterizerState: g.rasterizer,
+                DepthStencilState: g.depth,
+                PrimitiveTopologyType: D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+                NumRenderTargets: 1,
+                RTVFormats: g.targets.RTFormats,
+                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                ..Default::default()
+            };
+            // SAFETY: a plain creation call on the host device.
+            unsafe { host.device.CreateGraphicsPipelineState::<ID3D12PipelineState>(&desc) }
+        };
+        assert!(make(g.blend).is_err(), "this host makes a pipeline that blends into R32_UINT");
+        assert!(make(g.host_blend()).is_ok(), "the host makes it without the blending");
+
+        // A logic op on the integer target, with no blending, is valid as it
+        // is; `host_blend` must not turn it into a state the host refuses.
+        g.blend.RenderTarget[0].BlendEnable = false.into();
+        g.blend.RenderTarget[0].LogicOpEnable = true.into();
+        g.blend.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_XOR;
+        assert!(make(g.blend).is_ok(), "the host makes a logic op on R32_UINT");
+        assert!(make(g.host_blend()).is_ok(), "and still does through host_blend");
+    }
 
     /// A graphics pipeline with `DepthBoundsTestEnable` loads back from the
     /// pipeline library and culls or passes fragments according to
@@ -1509,6 +1989,7 @@ mod tests {
         );
         let pso = graphics_stream_pipeline(&host.device, &root, &desc, g.depth1(), &[], &name)
             .expect("depth-bounds PSO made");
+        super::super::library::store_waiting();
         let loaded = super::super::library::LOADED.load(Ordering::Relaxed);
         graphics_stream_pipeline(&host.device, &root, &desc, g.depth1(), &[], &name)
             .expect("depth-bounds PSO made again");

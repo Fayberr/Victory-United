@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --quiet --package xtask --"
+
+# The C runtime is linked in: a Windows without the Visual C++ runtime still
+# starts victory.exe, which then can say what is missing.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
