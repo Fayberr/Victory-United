@@ -345,84 +345,49 @@ struct Views {
     /// page is a write of the bytes every other view shows
     /// (`crate::watch` guards them all).
     pages: BTreeMap<(usize, u64), PageSet>,
-<<<<<<< HEAD
     /// Of those, how many are shown more than once.
     pages_twice: usize,
-    /// Sections by handle: bytes, and whether made committed.
-    sections: Vec<(usize, u64, bool)>,
-    /// Our own view of a whole section, by its handle (0: the host gave
-    /// none), made when first asked for ([`beside`]) and kept.
-    whole: Vec<(usize, usize)>,
-||||||| c7daeea5
-    /// Sections by handle: bytes, and whether made committed.
-    sections: Vec<(usize, u64, bool)>,
-=======
     /// Sections by handle: bytes, and whether made committed (thousands of
     /// them with `VICTORY_SECTION_MB`, and looked up by every store through a
     /// view of ours).
     sections: BTreeMap<usize, (u64, bool)>,
->>>>>>> integ/vertex
+    /// Our own view of a whole section, by its handle (0: the host gave
+    /// none), made when first asked for ([`beside`]) and kept.
+    whole: Vec<(usize, usize)>,
 }
 
-<<<<<<< HEAD
 /// Read by many threads at once (write faults, landings), changed when the
 /// runtime maps or unmaps.
 static VIEWS: std::sync::RwLock<Views> = std::sync::RwLock::new(Views {
     views: BTreeMap::new(),
     pages: BTreeMap::new(),
     pages_twice: 0,
-    sections: Vec::new(),
+    sections: BTreeMap::new(),
     whole: Vec::new(),
 });
-||||||| c7daeea5
-static VIEWS: Mutex<Views> =
-    Mutex::new(Views { views: BTreeMap::new(), pages: BTreeMap::new(), sections: Vec::new() });
-=======
-/// Looked at far more often than changed: by every stretch the copy-back
-/// stores ([`write_own`]), by the guards (after reddxd-byte/ShakiraRED-dt
-/// c2271e5).
-static VIEWS: std::sync::RwLock<Views> =
-    std::sync::RwLock::new(Views { views: BTreeMap::new(), pages: BTreeMap::new(), sections: BTreeMap::new() });
->>>>>>> integ/vertex
 
-<<<<<<< HEAD
 fn views() -> std::sync::RwLockReadGuard<'static, Views> {
     VIEWS.read().unwrap_or_else(|e| e.into_inner())
 }
 
-fn views_mut() -> std::sync::RwLockWriteGuard<'static, Views> {
-    VIEWS.write().unwrap_or_else(|e| e.into_inner())
-||||||| c7daeea5
-fn views() -> std::sync::MutexGuard<'static, Views> {
-    VIEWS.lock().unwrap_or_else(|e| e.into_inner())
-=======
-fn views() -> std::sync::RwLockWriteGuard<'static, Views> {
-    VIEWS.write().unwrap_or_else(|e| e.into_inner())
+/// The read guard under the name the Vertex side's callers use.
+fn views_shared() -> std::sync::RwLockReadGuard<'static, Views> {
+    views()
 }
 
-fn views_shared() -> std::sync::RwLockReadGuard<'static, Views> {
-    VIEWS.read().unwrap_or_else(|e| e.into_inner())
->>>>>>> integ/vertex
+fn views_mut() -> std::sync::RwLockWriteGuard<'static, Views> {
+    VIEWS.write().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The runtime made a section of `bytes` for physical pages; `committed`
 /// if with `SEC_COMMIT` (only such a section can be opened as a heap).
 pub fn title_memory_section(section: usize, bytes: u64, committed: bool) {
     {
-<<<<<<< HEAD
         let mut v = views_mut();
-        v.sections.retain(|s| s.0 != section);
         // A handle's number given out again: the view was of the section that
         // had it before (it stays mapped: someone may be writing through it).
         v.whole.retain(|w| w.0 != section);
-        v.sections.push((section, bytes, committed));
-||||||| c7daeea5
-        let mut v = views();
-        v.sections.retain(|s| s.0 != section);
-        v.sections.push((section, bytes, committed));
-=======
-        views().sections.insert(section, (bytes, committed));
->>>>>>> integ/vertex
+        v.sections.insert(section, (bytes, committed));
     }
     // A view of our own made on an earlier section that had this handle's
     // number shows that section's pages, not this one's: it is forgotten
@@ -758,16 +723,8 @@ struct Own {
 }
 
 /// Our own views by section handle; `None` in a section's place if the
-<<<<<<< HEAD
-/// host refused the view (not asked again).
-static OWN: std::sync::Mutex<Option<std::collections::HashMap<usize, Option<Own>>>> = std::sync::Mutex::new(None);
-||||||| c7daeea5
-/// host refused the view (not asked again).
-static OWN: Mutex<Option<std::collections::HashMap<usize, Option<Own>>>> = Mutex::new(None);
-=======
 /// host refused the view (not asked again). Shared by the stores into them.
 static OWN: std::sync::RwLock<Option<std::collections::HashMap<usize, Option<Own>>>> = std::sync::RwLock::new(None);
->>>>>>> integ/vertex
 
 /// Stores `bytes` at title address `at` through a view of our own
 /// ([`back_own`]), if `[at, at + bytes.len())` lies in one 64 KiB page of
@@ -979,7 +936,7 @@ pub(crate) fn beside(at: usize, len: usize) -> Option<usize> {
     let base = match v.whole.iter().find(|w| w.0 == section) {
         Some(w) => w.1,
         None => {
-            let &(_, bytes, _) = v.sections.iter().find(|s| s.0 == section)?;
+            let &(bytes, _) = v.sections.get(&section)?;
             // SAFETY: the whole of a section the runtime made; a view the
             // title sees is of it, so its handle is open.
             let base = unsafe { mem::MapViewOfFile(section as _, mem::FILE_MAP_WRITE, 0, 0, bytes as usize) }.Value as usize;
