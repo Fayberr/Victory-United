@@ -1037,9 +1037,9 @@ mod tests {
         // More draws ask while it waits.
         also_once.asked.fetch_add(5, Ordering::Relaxed);
         for p in [&often, &also_once, &once, &unasked] {
-            assert!(Arc::ptr_eq(&queue.pop().unwrap(), p));
+            assert!(Arc::ptr_eq(&queue.pop(false, 1).unwrap(), p));
         }
-        assert!(queue.pop().is_none());
+        assert!(queue.pop(false, 1).is_none());
     }
 
     #[test]
