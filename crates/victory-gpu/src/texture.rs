@@ -55,9 +55,8 @@ pub(crate) struct Staging {
     read: usize,
     /// First mip to read from `layout` for host mip zero.
     first_mip: u32,
-    /// Full title extent for the indexed upload budget and residency checks.
-    title_bytes: usize,
-    /// The bytes of the source after `staging_layout`.
+    /// The bytes the staging buffer is filled from: `read` cut by
+    /// `staging_layout` to the levels the host copy holds.
     size: usize,
     /// Which host copy it uploads into, and what that is told to hold.
     serial: u64,
@@ -1229,7 +1228,7 @@ pub(crate) fn upload_from(list: &HostList, resource: This, first: u32) {
     if no_wait() && fill_unlocked() {
         let there = match picking {
             Some(there) if there != u64::MAX => there,
-            _ => mapped_bytes(staging.memory, staging.read),
+            _ => mapped_bytes(staging.memory, staging.size),
         };
         staging.expected.store(there, Relaxed);
     }
@@ -1593,7 +1592,7 @@ impl Staging {
 
     /// The title memory the texture is read from: address and bytes.
     pub(crate) fn memory(&self) -> (usize, usize) {
-        (self.memory as usize, self.read)
+        (self.memory as usize, self.size)
     }
 
     /// The title's level and the array slice of the staging buffer's part
@@ -1646,7 +1645,7 @@ impl Staging {
     }
 
     fn refresh_timed(&self) -> usize {
-        let size = self.read;
+        let size = self.size;
         let start = self.memory as usize;
         let mut last = waited(0, || self.last.lock().unwrap_or_else(|e| e.into_inner()));
         let last = &mut *last;
@@ -1874,7 +1873,7 @@ impl Staging {
             if !crate::host::read_into(self.memory, read) {
                 return false;
             }
-            last.hash = Some(blake3::hash(read));
+            last.hash = Some(digest(read));
             self.detile(read);
             last.asked = now;
             last.ahead = Some(crate::frame::current());
@@ -1996,7 +1995,7 @@ impl Staging {
                 last.asked = 0;
                 return 0;
             }
-            last.hash = Some(blake3::hash(read));
+            last.hash = Some(digest(read));
             last.partial = Some(crate::frame::current());
             self.detile(read);
             size
@@ -2470,7 +2469,6 @@ fn staging(resource: This, copy: &crate::resource::HostTexture, first: u32) -> O
     // Levels the host copy leaves out (`VICTORY_TEXTURE_DROP_MIPS`), for
     // `staging_layout` and the detiling that follows it.
     let dropped = crate::resource::drop_levels(&desc);
-    let title_bytes = layout.bytes_from(first) as usize;
     let count = if d.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D {
         mips - first
     } else {
@@ -2521,7 +2519,6 @@ fn staging(resource: This, copy: &crate::resource::HostTexture, first: u32) -> O
         level0,
         read,
         first_mip,
-        title_bytes,
         size,
         serial: copy.serial,
         holds: copy.holds.clone(),
@@ -2993,7 +2990,7 @@ mod title_memory_tests {
             layout,
             mips: u32::from(d.MipLevels),
             first_mip: 0,
-            title_bytes: size as usize,
+            size: size as usize,
             first: 0,
             level0: 0,
             read: size as usize,
