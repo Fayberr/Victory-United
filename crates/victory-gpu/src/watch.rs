@@ -2643,7 +2643,9 @@ fn protect_here(g: &mut Guards, from: usize, to: usize) {
             block += 1;
             continue;
         }
-        // (Asked here, before the questions below: it is this block's.)
+        // (Asked here, before the questions below: it is this block's. The
+        // answer is kept for the frame: the world's refreshes ask again for
+        // the same unmapped runs at every copy over them.)
         #[cfg(feature = "diagnostics")]
         let error = std::io::Error::last_os_error();
         let end = g.uncommitted.end(block).min(to);
