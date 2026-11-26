@@ -36,15 +36,10 @@ struct Fence {
     value: AtomicU64,
     flags: u32,
     /// Events to set once the value reaches theirs (handles as integers).
-<<<<<<< HEAD
-    waiters: Mutex<Vec<(u64, usize)>>,
+    waiters: Mutex<Vec<(u64, usize, std::time::Instant)>>,
     /// For [`pace`]: when each wait above was asked for.
     #[cfg(all(windows, feature = "diagnostics"))]
     asked: Mutex<Vec<pace::Asked>>,
-||||||| a66ac212
-    waiters: Mutex<Vec<(u64, usize)>>,
-=======
-    waiters: Mutex<Vec<(u64, usize, std::time::Instant)>>,
 }
 
 /// (Neptune) Since they were last taken: events asked for a value the fence had reached
@@ -54,7 +49,6 @@ static ASKED: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 /// [`ASKED`], taken.
 pub(crate) fn asked_taken() -> [u64; 3] {
     std::array::from_fn(|i| ASKED[i].swap(0, Ordering::Relaxed))
->>>>>>> klbf/beta-2
 }
 
 fn fence<'a>(this: This) -> &'a Fence {
@@ -119,13 +113,9 @@ extern "system" fn set_event_on_completion(this: This, value: u64, event: *mut c
         if !event.is_null() {
             set_event(event as usize);
         }
-<<<<<<< HEAD
         #[cfg(all(windows, feature = "diagnostics"))]
         pace::ready();
-||||||| a66ac212
-=======
         ASKED[0].fetch_add(1, Ordering::Relaxed);
->>>>>>> klbf/beta-2
         return S_OK;
     }
     #[cfg(all(windows, feature = "diagnostics"))]
@@ -163,15 +153,9 @@ pub(crate) fn set(this: This, value: u64) {
     crate::timeline::told("a fence set", this as usize, value);
     let mut waiters = fence.waiters.lock().unwrap_or_else(|e| e.into_inner());
     fence.value.store(value, Ordering::Release);
-<<<<<<< HEAD
     #[cfg(all(windows, feature = "diagnostics"))]
     pace::reached(this, &fence.asked, value);
-    waiters.retain(|&(wanted, event)| {
-||||||| a66ac212
-    waiters.retain(|&(wanted, event)| {
-=======
     waiters.retain(|&(wanted, event, since)| {
->>>>>>> klbf/beta-2
         let reached = wanted <= value;
         if reached {
             set_event(event);
