@@ -18,20 +18,10 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-<<<<<<< HEAD
 use victory_pipeline::{Cache, CacheKey};
 use victory_shader::emit::{HostShader, StaticSampler, UserData};
 use victory_shader::resource::RootIndexedView;
 use victory_shader::{HwStage, RootType, ShaderError};
-||||||| merged common ancestors
-use victory_pipeline::{Cache, Converter};
-use victory_shader::emit::{HostShader, StaticSampler, UserData};
-use victory_shader::{HwStage, RootType};
-=======
-use victory_pipeline::{Cache, Converter};
-use victory_shader::emit::{HostShader, StaticSampler, Target, UserData};
-use victory_shader::{HwStage, RootType};
->>>>>>> belobug/main
 
 static CACHE: OnceLock<Cache> = OnceLock::new();
 static HITS: AtomicU64 = AtomicU64::new(0);
@@ -84,7 +74,6 @@ pub(crate) fn counts() -> (u64, u64) {
     (HITS.load(Ordering::Relaxed), MISSES.load(Ordering::Relaxed))
 }
 
-<<<<<<< HEAD
 /// What identifies a translation beside its container: the translator
 /// (the BLAKE3 of its sources, `build.rs`), the settings it runs with, and
 /// what it was told of the host. Not our executable: a rebuild of anything
@@ -95,32 +84,6 @@ fn build() -> [u8; 32] {
     crate::descriptor::host::probe_view_limit();
     static FIXED: OnceLock<Vec<u8>> = OnceLock::new();
     let fixed = FIXED.get_or_init(|| {
-||||||| merged common ancestors
-/// What identifies this build: the BLAKE3 of our executable file and of
-/// the translation settings it runs with (the loop limit, which a
-/// diagnostics build can change at run time).
-fn build() -> &'static [u8; 32] {
-    static BUILD: OnceLock<[u8; 32]> = OnceLock::new();
-    BUILD.get_or_init(|| {
-        let exe = std::env::current_exe().and_then(std::fs::read);
-=======
-/// What identifies this build: the BLAKE3 of our executable file and of
-/// the translation settings it runs with (the loop limit, which a
-/// diagnostics build can change at run time).
-fn build() -> &'static [u8; 32] {
-    static BUILD: OnceLock<[u8; 32]> = OnceLock::new();
-    BUILD.get_or_init(|| {
-        // Diagnostics (`VICTORY_SHADER_BUILD_OF=<executable>`): the entries
-        // of another build, for a build whose translation is the same (a
-        // change elsewhere), which then need not be made again.
-        let other = std::env::var_os("VICTORY_SHADER_BUILD_OF")
-            .filter(|_| cfg!(feature = "diagnostics"))
-            .map(std::path::PathBuf::from);
-        if let Some(other) = &other {
-            tracing::warn!(of = %other.display(), "shader cache entries of another build are used");
-        }
-        let exe = other.map_or_else(std::env::current_exe, Ok).and_then(std::fs::read);
->>>>>>> belobug/main
         let limit = victory_shader::emit::loop_limit();
         if limit != victory_shader::emit::DEFAULT_LOOP_LIMIT {
             tracing::warn!(
@@ -128,7 +91,6 @@ fn build() -> &'static [u8; 32] {
                 "VICTORY_SHADER_LOOP_LIMIT: translated loops stop sooner"
             );
         }
-<<<<<<< HEAD
         let mut bytes = env!("VICTORY_TRANSLATOR").as_bytes().to_vec();
         bytes.extend_from_slice(&limit.to_le_bytes());
         // Which group barriers wait is part of the translation too.
@@ -155,39 +117,17 @@ fn build() -> &'static [u8; 32] {
             bytes.push(b'=');
             if let Some(value) = std::env::var_os(name) {
                 bytes.extend_from_slice(value.as_encoded_bytes());
-||||||| merged common ancestors
-        match exe {
-            Ok(mut bytes) => {
-                bytes.extend_from_slice(&limit.to_le_bytes());
-                *blake3::hash(&bytes).as_bytes()
-            }
-            Err(e) => {
-                // Without it no entry can be trusted: a fresh key per run.
-                tracing::warn!(error = %e, "cannot read our executable; shader cache unused");
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default();
-                *blake3::hash(&now.as_nanos().to_le_bytes()).as_bytes()
-=======
-        match exe {
-            Ok(mut bytes) => {
-                bytes.extend_from_slice(&limit.to_le_bytes());
-                bytes.push(victory_shader::emit::rays().into());
-                *blake3::hash(&bytes).as_bytes()
-            }
-            Err(e) => {
-                // Without it no entry can be trusted: a fresh key per run.
-                tracing::warn!(error = %e, "cannot read our executable; shader cache unused");
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default();
-                *blake3::hash(&now.as_nanos().to_le_bytes()).as_bytes()
->>>>>>> belobug/main
             }
             bytes.push(0);
         }
         // And which clean-up passes ran over the translated code.
         bytes.extend_from_slice(&victory_shader::emit::shader_opt().to_le_bytes());
+        // Whether programs that reach memory by address translate.
+        bytes.push(victory_shader::emit::rays().into());
+        // And the diagnostic patches, which change a program's code.
+        bytes.extend_from_slice(
+            format!("{:?}", victory_shader::native::diagnostic_patches()).as_bytes(),
+        );
         bytes
     });
     let mut hash = blake3::Hasher::new();
@@ -228,7 +168,6 @@ pub fn precompile(container: &[u8]) -> Result<bool, String> {
     Ok(MISSES.load(Ordering::Relaxed) == misses)
 }
 
-<<<<<<< HEAD
 /// The translation of a console shader container, from the cache when
 /// there is one.
 pub(crate) fn host_shader(container: &[u8]) -> Result<HostShader, String> {
@@ -369,74 +308,14 @@ fn exposure_stub(container: &[u8]) -> Option<HostShader> {
             tracing::warn!(%hash, error = %e, "exposure stand-in does not translate either");
             None
         }
-||||||| merged common ancestors
-/// The translation of a console shader container, from the cache when
-/// there is one.
-pub(crate) fn host_shader(container: &[u8]) -> Result<HostShader, String> {
-    let translate = |c: &[u8]| victory_shader::emit::translate(c).map_err(|e| e.to_string());
-    match CACHE.get() {
-        Some(cache) => cached(cache, build(), container, translate),
-        None => translate(container),
-=======
-/// The translation of a console shader container for a host that runs
-/// `target`'s wave sizes, from the cache when there is one.
-pub(crate) fn host_shader(container: &[u8], target: Target) -> Result<HostShader, String> {
-    let translate =
-        |c: &[u8]| victory_shader::emit::translate_for(c, target).map_err(|e| e.to_string());
-    match CACHE.get() {
-        Some(cache) => {
-            let mut key = key(build(), target);
-            // A container a diagnostic patch may apply to has entries of its
-            // own, by the patches.
-            let patches = victory_shader::native::diagnostic_patches();
-            if patches.iter().any(|p| p.0 == container.len()) {
-                let mut h = blake3::Hasher::new();
-                h.update(&key);
-                h.update(format!("{patches:?}").as_bytes());
-                key = *h.finalize().as_bytes();
-            }
-            cached(cache, &key, container, translate)
-        }
-        None => translate(container),
->>>>>>> belobug/main
     }
 }
 
-<<<<<<< HEAD
 fn target() -> [u32; 2] {
     [
         victory_shader::emit::host_max_wave(),
         victory_shader::emit::view_heap_limit(),
     ]
-||||||| merged common ancestors
-/// The cache entry's converter: the build and the container in, the
-/// encoded translation out. `ran` tells a miss from a hit.
-struct Translate<F> {
-    translate: F,
-    ran: AtomicBool,
-=======
-/// The part of an entry's key before the container: the build, and the
-/// host's wave sizes (a translation for one host's waves is not another's).
-fn key(build: &[u8; 32], target: Target) -> [u8; 32] {
-    let mut h = blake3::Hasher::new();
-    h.update(build);
-    h.update(&target.key());
-    // The clean-up passes are part of the translation; none leaves the key
-    // as it was before there were any.
-    let passes = victory_shader::emit::shader_opt();
-    if passes != 0 {
-        h.update(b"clean-up passes");
-        h.update(&passes.to_le_bytes());
-    }
-    *h.finalize().as_bytes()
-}
-
-/// The cache entry's converter: the build and the container in, the
-/// encoded translation out. `ran` tells a miss from a hit.
-struct Translate<F> {
-    translate: F,
-    ran: AtomicBool,
->>>>>>> belobug/main
 }
 
 /// DXBC's declared size excludes trailing allocation padding. Keep the title's
@@ -535,7 +414,6 @@ fn cached(
     (result, status)
 }
 
-<<<<<<< HEAD
 const REFUSED: &[u8; 4] = b"VSHE";
 
 fn encode_record(result: &Translation) -> Vec<u8> {
@@ -561,12 +439,7 @@ fn decode_record(bytes: &[u8]) -> Option<Translation> {
     decode(payload).map(Ok)
 }
 
-const MAGIC: &[u8; 4] = b"VSH3";
-||||||| merged common ancestors
-const MAGIC: &[u8; 4] = b"VSH1";
-=======
-const MAGIC: &[u8; 4] = b"VSH2";
->>>>>>> belobug/main
+const MAGIC: &[u8; 4] = b"VSH4";
 const STAGES: [HwStage; 8] = [
     HwStage::Ls,
     HwStage::Hs,
@@ -641,17 +514,10 @@ fn encode(s: &HostShader) -> Vec<u8> {
             word(&mut out, v);
         }
     }
-<<<<<<< HEAD
     for slots in [&s.root_cbvs, &s.root_srvs, &s.root_uavs, &s.written_root_uavs] {
-||||||| merged common ancestors
-    for slots in [&s.root_cbvs, &s.root_srvs] {
-=======
-    for slots in [&s.root_cbvs, &s.root_srvs, &s.root_uavs] {
->>>>>>> belobug/main
         word(&mut out, slots.len() as u32);
         out.extend(slots);
     }
-<<<<<<< HEAD
     word(&mut out, u32::from(s.writes_guest_memory));
     word(&mut out, s.root_indexed_views.len() as u32);
     for view in &s.root_indexed_views {
@@ -670,10 +536,7 @@ fn encode(s: &HostShader) -> Vec<u8> {
         word(&mut out, u32::from(slot));
         word(&mut out, dword);
     }
-||||||| merged common ancestors
-=======
     word(&mut out, u32::from(s.stride_table));
->>>>>>> belobug/main
     out
 }
 
@@ -730,7 +593,6 @@ fn decode(bytes: &[u8]) -> Option<HostShader> {
     }
     let root_cbvs = r.list()?;
     let root_srvs = r.list()?;
-<<<<<<< HEAD
     let root_uavs = r.list()?;
     let written_root_uavs = r.list()?;
     let writes_guest_memory = match r.word()? {
@@ -754,11 +616,7 @@ fn decode(bytes: &[u8]) -> Option<HostShader> {
     for _ in 0..n {
         half_views.push((u8::try_from(r.word()?).ok()?, r.word()?));
     }
-||||||| merged common ancestors
-=======
-    let root_uavs = r.list()?;
     let stride_table = r.word()? != 0;
->>>>>>> belobug/main
     r.0.is_empty().then_some(HostShader {
         stage,
         dxil,
@@ -767,17 +625,12 @@ fn decode(bytes: &[u8]) -> Option<HostShader> {
         static_samplers,
         root_cbvs,
         root_srvs,
-<<<<<<< HEAD
         root_uavs,
         written_root_uavs,
         writes_guest_memory,
         root_indexed_views,
         half_views,
-||||||| merged common ancestors
-=======
-        root_uavs,
         stride_table,
->>>>>>> belobug/main
     })
 }
 
@@ -804,7 +657,6 @@ mod tests {
             ])],
             root_cbvs: vec![2],
             root_srvs: vec![0, 3],
-<<<<<<< HEAD
             root_uavs: vec![1, 2],
             written_root_uavs: vec![2],
             writes_guest_memory: true,
@@ -816,11 +668,7 @@ mod tests {
                 shift: 5,
             }],
             half_views: vec![(0, 8), (4, 0)],
-||||||| merged common ancestors
-=======
-            root_uavs: vec![4],
             stride_table: true,
->>>>>>> belobug/main
         }
     }
 
@@ -854,7 +702,6 @@ mod tests {
         assert_eq!(entry(), (Ok(shader()), CacheStatus::Hit));
     }
 
-<<<<<<< HEAD
     #[test]
     fn keeps_unsupported_results_but_not_invalid_inputs() {
         let dir = tempfile::tempdir().unwrap();
@@ -921,45 +768,6 @@ mod tests {
         assert_eq!(canonical_container(&bytes), &bytes[..32]);
         bytes[0x18..0x1c].copy_from_slice(&41u32.to_le_bytes());
         assert_eq!(canonical_container(&bytes), &bytes);
-||||||| merged common ancestors
-    fn walk(dir: &std::path::Path) -> Vec<PathBuf> {
-        let mut files = Vec::new();
-        for e in std::fs::read_dir(dir).unwrap().flatten() {
-            if e.path().is_dir() {
-                files.extend(walk(&e.path()));
-            } else {
-                files.push(e.path());
-            }
-        }
-        files
-=======
-    #[test]
-    fn keys_tell_hosts_wave_sizes_apart() {
-        let build = [7u8; 32];
-        let nvidia = Target {
-            lanes_min: 32,
-            lanes_max: 32,
-        };
-        let rdna = Target {
-            lanes_min: 32,
-            lanes_max: 64,
-        };
-        assert_eq!(key(&build, nvidia), key(&build, nvidia));
-        assert_ne!(key(&build, nvidia), key(&build, rdna));
-        assert_ne!(key(&build, nvidia), key(&[8; 32], nvidia));
-    }
-
-    fn walk(dir: &std::path::Path) -> Vec<PathBuf> {
-        let mut files = Vec::new();
-        for e in std::fs::read_dir(dir).unwrap().flatten() {
-            if e.path().is_dir() {
-                files.extend(walk(&e.path()));
-            } else {
-                files.push(e.path());
-            }
-        }
-        files
->>>>>>> belobug/main
     }
 
     #[test]
