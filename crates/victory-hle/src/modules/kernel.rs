@@ -745,7 +745,6 @@ mod host {
 mod tests {
     use super::*;
 
-<<<<<<< HEAD
     /// A title-chosen exit's line names the call, the code and the caller,
     /// and the code the host exits with. The text is the one the harness
     /// matches, so it is fixed.
@@ -819,8 +818,6 @@ mod tests {
         assert_eq!(status.code().map(|c| c as u32), Some(CODE), "the title's code");
     }
 
-||||||| a26859fc
-=======
     /// The title's idle and lowest threads run below normal; the others as
     /// it sets them.
     #[test]
@@ -839,7 +836,6 @@ mod tests {
         .unwrap();
     }
 
->>>>>>> avatar/main
     #[test]
     fn title_images_report_their_original_path() {
         let base = 0x7000_0000_0000;
@@ -859,7 +855,6 @@ mod tests {
         assert_eq!(&small, &[b'C', b':', b'\\', 0]);
     }
 
-<<<<<<< HEAD
     /// The host clears the last error when the name fits (titles tell a
     /// truncated name from a whole one by it, also after a call that
     /// filled the buffer exactly); a title image's name does the same.
@@ -904,8 +899,6 @@ mod tests {
         assert_eq!(last_error(), ERROR_INSUFFICIENT_BUFFER);
     }
 
-||||||| a26859fc
-=======
     /// The title's arguments come right after the program, and the list ends
     /// in a null pointer; without any there is only the program.
     #[test]
@@ -929,7 +922,6 @@ mod tests {
         unsafe { assert_eq!((*__p___argc(), (**__p___argv()).is_null()), (1, false)) };
     }
 
->>>>>>> avatar/main
     fn w(text: &str) -> Vec<u16> {
         text.encode_utf16().chain(Some(0)).collect()
     }
@@ -1002,7 +994,6 @@ mod tests {
         assert!(!runtime.is_null());
         assert_eq!(GetModuleHandleW(w("XGameRuntime.dll").as_ptr()), runtime);
     }
-<<<<<<< HEAD
 
     /// A trailing dot means the name has no extension: no `.dll` is added.
     #[test]
@@ -1034,23 +1025,4 @@ mod tests {
             assert_eq!(last, ERROR_INSUFFICIENT_BUFFER);
         }
     }
-||||||| a26859fc
-=======
-
-    /// No buffer: nothing written, the error says it was too small.
-    #[test]
-    fn a_title_image_name_into_no_buffer() {
-        let base = 0x7300_0000_0000;
-        runtime::set_image_path(base, std::path::Path::new(r"C:\title\game.exe"));
-        let module = base as *mut c_void;
-        assert_eq!(GetModuleFileNameW(module, std::ptr::null_mut(), 0), 0);
-        assert_eq!(GetModuleFileNameA(module, std::ptr::null_mut(), 0), 0);
-        #[cfg(windows)]
-        {
-            // SAFETY: reads this thread's last error.
-            let last = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-            assert_eq!(last, ERROR_INSUFFICIENT_BUFFER);
-        }
-    }
->>>>>>> avatar/main
 }
