@@ -2110,7 +2110,36 @@ fn pooled(n: usize) -> Vec<u8> {
     v
 }
 
-<<<<<<< HEAD
+/// Snapshot memory of one tile each, kept for reuse: a world frame takes
+/// thousands, and the pool above keeps 8 (the rest was allocated and freed
+/// each time, a tenth of the submitting thread's time).
+static TILE_POOL: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
+
+/// Tile snapshots kept at most (512 MiB).
+const TILE_POOL_MOST: usize = 8192;
+
+/// `n` empty buffers with room for a tile, under one lock of the pool.
+fn pooled_tiles(n: usize) -> Vec<Vec<u8>> {
+    let mut pool = TILE_POOL.lock().unwrap_or_else(|e| e.into_inner());
+    (0..n)
+        .map(|_| {
+            let mut v = pool.pop().unwrap_or_else(|| Vec::with_capacity(PAGE));
+            v.clear();
+            v
+        })
+        .collect()
+}
+
+/// Returns tile snapshots to their pool.
+fn give_back_tiles(all: impl Iterator<Item = Vec<u8>>) {
+    let mut pool = TILE_POOL.lock().unwrap_or_else(|e| e.into_inner());
+    for v in all {
+        if pool.len() < TILE_POOL_MOST && v.capacity() >= PAGE {
+            pool.push(v);
+        }
+    }
+}
+
 /// How many snapshot buffers are kept (`VICTORY_SNAPSHOT_POOL`; `8`: as
 /// before).
 ///
@@ -2140,43 +2169,6 @@ fn give_back(v: Vec<u8>) {
             break;
         }
         kept += 1;
-||||||| merged common ancestors
-/// Returns a snapshot buffer to the pool (at most 8 kept, the largest).
-fn give_back(v: Vec<u8>) {
-    let mut pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
-    pool.push(v);
-    if pool.len() > 8 {
-        pool.sort_by_key(|v| std::cmp::Reverse(v.capacity()));
-        pool.truncate(8);
-=======
-/// Snapshot memory of one tile each, kept for reuse: a world frame takes
-/// thousands, and the pool above keeps 8 (the rest was allocated and freed
-/// each time, a tenth of the submitting thread's time).
-static TILE_POOL: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
-
-/// Tile snapshots kept at most (512 MiB).
-const TILE_POOL_MOST: usize = 8192;
-
-/// `n` empty buffers with room for a tile, under one lock of the pool.
-fn pooled_tiles(n: usize) -> Vec<Vec<u8>> {
-    let mut pool = TILE_POOL.lock().unwrap_or_else(|e| e.into_inner());
-    (0..n)
-        .map(|_| {
-            let mut v = pool.pop().unwrap_or_else(|| Vec::with_capacity(PAGE));
-            v.clear();
-            v
-        })
-        .collect()
-}
-
-/// Returns tile snapshots to their pool.
-fn give_back_tiles(all: impl Iterator<Item = Vec<u8>>) {
-    let mut pool = TILE_POOL.lock().unwrap_or_else(|e| e.into_inner());
-    for v in all {
-        if pool.len() < TILE_POOL_MOST && v.capacity() >= PAGE {
-            pool.push(v);
-        }
->>>>>>> belobug/main
     }
     // (Given back to the kernel without the lock: milliseconds.)
     let gone = pool.split_off(kept);
@@ -2204,26 +2196,7 @@ pub(crate) fn pool_bytes() -> u64 {
     pool.iter().map(|v| v.capacity() as u64).sum()
 }
 
-/// Bytes the pool keeps at most: snapshots of the world's 174 MB heap
-/// would otherwise keep 8 of that size (1.4 GB of host memory) for good.
-const POOL_BYTES: usize = 512 << 20;
-
-/// Returns a snapshot buffer to the pool (at most 8 kept, the largest,
-/// and no more than [`POOL_BYTES`] in all).
-fn give_back(v: Vec<u8>) {
-    let mut pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
-    pool.push(v);
-    pool.sort_by_key(|v| std::cmp::Reverse(v.capacity()));
-    pool.truncate(8);
-    let mut total = 0;
-    pool.retain(|v| {
-        total += v.capacity();
-        total <= POOL_BYTES
-    });
-}
-
 const NOT_WATCHED: u8 = 2;
-<<<<<<< HEAD
 /// Physical-page view memory tracked by `watch::writes_guarded` (skips the
 /// failing `GetWriteWatch` kernel syscall on every refresh).
 const VIEW_GUARDED: u8 = 3;
@@ -4727,10 +4700,8 @@ pub(crate) fn memory() -> [u64; 6] {
         kept_bytes,
     ]
 }
-||||||| merged common ancestors
-=======
+
 const WATCHED_GUARDED: u8 = 3;
->>>>>>> belobug/main
 
 // SAFETY: D3D12 resources are free-threaded; `data` is a persistent mapping
 // written only on the submitting thread.
