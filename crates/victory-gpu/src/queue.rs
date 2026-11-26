@@ -1604,18 +1604,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         const COPY_SOURCE: u32 = 0x800;
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
-<<<<<<< HEAD
-        // A second plane (the title's interface over its game image, in
-        // its Series S mode) is drawn over the first: `crate::over`. Each
-        // plane's description is 0x48 bytes and starts as the first does.
-        const READABLE: u32 = 0x80;
-        // SAFETY: the title passes `planes` plane descriptions.
-        let second = unsafe { second_plane(planes, plane_parameters, resource) }
-            .and_then(|r| Some((r, crate::resource::host_resource(r)?)));
-        let over = second.map(|(r, t)| {
-            let was = crate::resource::host_transition(r, READABLE).map_or(READABLE, |(_, before)| before);
-            (r, t, was)
-        });
         if crate::present_trace::on() {
             // SAFETY: the plane lists `count` resources.
             let all = unsafe { std::slice::from_raw_parts(plane.resources, plane.count as usize) };
@@ -1625,17 +1613,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
                 crate::descriptor::host::REFUSED.load(Ordering::Relaxed)
             ));
         }
-        let shown = host.present(texture, state, frame, over.map(|(_, t, was)| (t, was)));
-        if let Some((r, _, was)) = over {
-            crate::resource::host_transition(r, was);
-        }
-        #[cfg(feature = "diagnostics")]
-        blinks(frame, resource, state, shown);
-        #[cfg(not(feature = "diagnostics"))]
-        let _ = shown;
-||||||| 85d564167
-        show(texture, state, Shown { frame, resource: resource as usize });
-=======
         let overlay = (planes > 1 && planes_seen(planes, plane_parameters))
             .then(|| overlay_resource(plane_parameters))
             .flatten()
@@ -1653,7 +1630,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
             overlay.as_ref().map(|(_, tex, st)| (*tex, *st)),
             Shown { frame, resource: resource as usize },
         );
->>>>>>> avatar/main
         crate::resource::host_transition(resource, state);
         if let Some((over_res, _, over_state)) = overlay {
             crate::resource::host_transition(over_res, over_state);
@@ -1736,13 +1712,7 @@ fn show_planes(
     let Some(host) = crate::host::host() else {
         return;
     };
-<<<<<<< HEAD
-    let shown = host.present(texture, state, what.frame, None);
-||||||| 85d564167
-    let shown = host.present(texture, state, what.frame);
-=======
     let shown = host.present_planes(texture, state, overlay, what.frame);
->>>>>>> avatar/main
     #[cfg(feature = "diagnostics")]
     blinks(what.frame, what.resource as This, state, shown);
     #[cfg(not(feature = "diagnostics"))]

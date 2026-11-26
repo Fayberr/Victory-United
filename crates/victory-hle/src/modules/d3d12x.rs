@@ -30,14 +30,8 @@ extern "system" fn create_device(
 #[cfg(windows)]
 fn host_gpu_failed(what: &str) -> ! {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
-<<<<<<< HEAD
-    victory_loader::log_crash(&format!("VItoriaBr: host GPU failure: {what}"));
-||||||| 85d564167
-    victory_loader::log_crash(&format!("VIctory: host GPU failure: {what}"));
-=======
     victory_loader::log_crash(&format!("VIctory: host GPU failure: {what}"));
     victory_gpu::pipeline::known::flush_on_gpu_failure();
->>>>>>> avatar/main
     const DXGI_ERROR_DEVICE_REMOVED: u32 = 0x887A_0005;
     // SAFETY: ends our own process.
     unsafe { TerminateProcess(GetCurrentProcess(), DXGI_ERROR_DEVICE_REMOVED) };
@@ -61,12 +55,6 @@ pub fn precompile(container: &[u8]) -> Result<bool, String> {
     }
 }
 
-<<<<<<< HEAD
-/// The offline warm-up: see `victory_gpu::shader_cache::warm`.
-||||||| 85d564167
-/// The fork's offline warm-up (`victory translate --warm`), by
-/// [`precompile`]: whether it was translated now.
-=======
 /// Of the cached translations met since the start: those an earlier build
 /// of the translator made, those translated again, and those that came out
 /// different (`victory_gpu::shader_cache`).
@@ -83,7 +71,6 @@ pub fn stale_shaders() -> (u64, u64, u64) {
 
 /// The fork's offline warm-up (`victory translate --warm`), by
 /// [`precompile`]: whether it was translated now.
->>>>>>> avatar/main
 pub fn warm_shader(container: &[u8]) -> Result<bool, String> {
     #[cfg(windows)]
     {
