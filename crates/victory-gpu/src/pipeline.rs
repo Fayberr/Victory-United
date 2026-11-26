@@ -148,7 +148,8 @@ pub(crate) struct Translated {
     pub(crate) host: victory_shader::emit::HostShader,
     /// A compute program's threads in a group.
     pub(crate) threads: Option<[u32; 3]>,
-    /// The same group size under the name the merged dispatch path reads.
+    /// The same group size under the name the present-side dispatch path
+    /// reads (`Translated::compute_threads` in `draw.rs`).
     pub(crate) compute_threads: Option<[u32; 3]>,
     pub(crate) used: Vec<victory_shader::UsedResource>,
     pub(crate) tables: crate::draw::TablePlan,
@@ -238,8 +239,7 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         victory_shader::native::StageIo::Cs(cs) if cs.threads.iter().all(|&n| n > 0) => Some(cs.threads),
         _ => None,
     });
-    // (`compute_threads` is the name the dispatch path reads; both carry the
-    // same group size.)
+    // (`draw.rs` reads the group size under the other side's name.)
     let compute_threads = threads;
     let stores_by_address = programs.is_empty() || programs.iter().any(stores_by_address);
     let chosen = programs.iter().find(|p| {

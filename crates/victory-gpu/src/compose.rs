@@ -18,6 +18,11 @@
 //! is scaled down). shortcut: the planes' placement and source rectangles
 //! are not read; both cover the screen. The interface's alpha is taken as
 //! straight (`VICTORY_PLANE_PREMULTIPLIED=1`: premultiplied).
+//!
+//! [`record`] is kept whole for the present paths that have no [`Composer`]
+//! (the caller in `host.rs` decides); parts of it are unused in a build that
+//! only takes the [`Composer`] route.
+#![allow(dead_code)]
 
 use std::sync::Mutex;
 
