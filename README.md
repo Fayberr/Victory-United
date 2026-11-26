@@ -38,8 +38,9 @@ of settings and how each run is done are in `docs/measurements.md`.
   Two frames (from the middle and the end of the run) were looked at and showed no bright blocks.
   Shadows still miss some light.
 - **Input:** controller buttons work in the start screens and menus (A and X take the title from
-  there to the first playable room). Moving the character with the stick has not been tested
-  yet, so the figures above are for standing in the room, not for a play session.
+  there to the first playable room). Moving the character is not confirmed: a run that held the
+  move keys in the room for about two minutes did not move it (the character only idled at the
+  window), so the figures above are for standing in the room, not for a play session.
 
 Earlier, on commit `33f3c35` with the diagnostics build, the same room measured 4.9 to 5.2 frames
 per second over two 6 minute runs.
