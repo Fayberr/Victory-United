@@ -1769,7 +1769,7 @@ fn show(base: usize, len: usize, slice: &Slice, own: bool, commitment: PageCommi
                     section: slice.section.clone(),
                     index: slice.index + k,
                 };
-                if !map(physical, base + k * PAGE, PAGE, page_slice, commitment) {
+                if !show(base + k * PAGE, PAGE, &page_slice, false, commitment) {
                     return false;
                 }
             }

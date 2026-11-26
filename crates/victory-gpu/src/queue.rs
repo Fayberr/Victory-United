@@ -782,7 +782,7 @@ fn release_held_now(all: bool) {
                     // without a wait for the card. A wait that stays is
                     // looked at again when the parts have been sent.
                     Some(Held::Value(wait)) if !all && !joined.is_empty() => {
-                        if !wait.met() && !crate::host::late_met_known(wait) {
+                        if !wait.met() && crate::host::late_met_known(wait) != Some(true) {
                             if !joined.meets(wait) {
                                 break;
                             }

@@ -2556,6 +2556,7 @@ mod title_memory_tests {
             motion_copy: std::sync::atomic::AtomicBool::new(false),
             is_view: std::sync::atomic::AtomicBool::new(false),
             used: std::sync::atomic::AtomicU64::new(0),
+            expected: std::sync::atomic::AtomicU64::new(0),
             on_demand: true,
             has_detiled: std::sync::atomic::AtomicBool::new(false),
             detiled: std::sync::atomic::AtomicU32::new(0),

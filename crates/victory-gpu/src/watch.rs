@@ -1929,7 +1929,7 @@ fn unpark_committed(g: &mut Guards) {
             VIEW_STATS[5].fetch_add(1, Relaxed);
             g.parked_ordinary.remove(&block);
             g.parked.remove(&block);
-            g.absent.remove(&block);
+            g.absent.remove(block);
             g.unclean.insert(block);
         }
     }
@@ -1938,7 +1938,7 @@ fn unpark_committed(g: &mut Guards) {
 /// Whether the block `page` is read-only by our hand and unwritten since a
 /// copy took it (diagnostics of `VICTORY_BACK_OWN_CHECK`).
 pub(crate) fn clean(page: usize) -> bool {
-    guards().clean.contains(&page)
+    guards().clean.contains(page)
 }
 
 /// For view memory: the pages of `[start, end)`'s blocks written since
@@ -2066,7 +2066,7 @@ fn guard_unclean(g: &mut Guards, first: usize, last: usize) -> Vec<usize> {
     unpark_committed(g);
     if !covered(&g.views, first, last) {
         let fresh: Vec<usize> = (first..last)
-            .filter(|b| !g.clean.contains(b) && !covered(&g.views, *b, *b + 1))
+            .filter(|b| !g.clean.contains(*b) && !covered(&g.views, *b, *b + 1))
             .collect();
         g.unclean.extend(fresh);
         add_range(&mut g.views, first, last);
@@ -2086,7 +2086,7 @@ fn guard_unclean(g: &mut Guards, first: usize, last: usize) -> Vec<usize> {
         }
     };
     for block in unclean {
-        if g.absent.contains(&block) {
+        if g.absent.contains(block) {
             // Found uncommitted before and still in the set (`protect`
             // parks the blocks it finds so): parked while it stays so.
             VIEW_STATS[4].fetch_add(1, Relaxed);
@@ -2095,10 +2095,10 @@ fn guard_unclean(g: &mut Guards, first: usize, last: usize) -> Vec<usize> {
                 flush(g, &mut run);
                 continue;
             }
-            g.absent.remove(&block);
+            g.absent.remove(block);
         }
         written.extend(block * BLOCK / PAGE..(block + 1) * BLOCK / PAGE);
-        if g.protected.contains(&block) {
+        if g.protected.contains(block) {
             // Written through the runtime, or guarded with another view of
             // its page: still read-only. That view may be one no copy checks:
             // guarded again here, with the others.
@@ -3017,24 +3017,24 @@ fn title_memory_changed(at: usize, len: usize) -> std::sync::MutexGuard<'static,
             PUBLISHED.clear(block);
         }
     }
-    let blocks: Vec<usize> = g.protected.range(range.clone()).copied().collect();
+    let blocks: Vec<usize> = g.protected.range(range.clone()).collect();
     for block in blocks {
-        g.protected.remove(&block);
-        g.clean.remove(&block);
+        g.protected.remove(block);
+        g.clean.remove(block);
     }
     let foreign: Vec<usize> = g.foreign.range(range.clone()).copied().collect();
     for block in foreign {
         g.foreign.remove(&block);
     }
-    let aliased: Vec<usize> = g.aliased.range(range).collect();
+    let aliased: Vec<usize> = g.aliased.range(range.clone()).collect();
     for block in aliased {
         g.aliased.remove(block);
     }
     for (addr, n) in reopen {
         let end = addr.saturating_add(n);
-        let stale: Vec<usize> = g.aliased.range(addr / BLOCK..end.div_ceil(BLOCK)).copied().collect();
+        let stale: Vec<usize> = g.aliased.range(addr / BLOCK..end.div_ceil(BLOCK)).collect();
         for block in stale {
-            g.aliased.remove(&block);
+            g.aliased.remove(block);
         }
         open(&mut g, addr, end);
     }
@@ -3069,9 +3069,9 @@ pub fn title_memory_committed(at: usize, len: usize) {
         g.parked_ordinary.remove(&block);
         g.unclean.insert(block);
     }
-    let absent: Vec<usize> = g.absent.range(range).copied().collect();
+    let absent: Vec<usize> = g.absent.range(range).collect();
     for block in absent {
-        g.absent.remove(&block);
+        g.absent.remove(block);
     }
 }
 
@@ -4542,7 +4542,7 @@ mod tests {
         assert_eq!(guard(one, one + BLOCK), Some(vec![one / PAGE]));
         assert_eq!(guard(one, one + BLOCK), Some(Vec::new()));
         assert!(!writable(two), "two is guarded alongside one at MANY_VIEWS");
-        assert!(guards().aliased.contains(&(one / BLOCK)));
+        assert!(guards().aliased.contains(one / BLOCK));
 
         // Adding the (MANY_VIEWS + 1)-th view crosses the threshold: existing
         // guarded aliases must be opened and removed from g.aliased so `two`
@@ -4550,8 +4550,8 @@ mod tests {
         let extra = filler + (MANY_VIEWS - 2) * BLOCK;
         crate::inplace::title_memory_view(extra, BLOCK, section, 0);
         assert!(writable(two), "sibling alias must be released when crossing MANY_VIEWS");
-        assert!(!guards().aliased.contains(&(one / BLOCK)));
-        assert!(!guards().aliased.contains(&(two / BLOCK)));
+        assert!(!guards().aliased.contains(one / BLOCK));
+        assert!(!guards().aliased.contains(two / BLOCK));
         assert_eq!(guard(one, one + BLOCK), Some(vec![one / PAGE]));
 
         title_memory_remapped(filler, (MANY_VIEWS - 1) * BLOCK);
@@ -4614,7 +4614,7 @@ mod tests {
         assert!(!reserved.is_null());
         let addr = reserved as usize;
         assert!(writes(addr, addr + PAGE, true).is_some());
-        assert!(guards().absent.contains(&(addr / BLOCK)));
+        assert!(guards().absent.contains(addr / BLOCK));
         assert_ne!(unsafe { VirtualFree(reserved, 0, MEM_RELEASE) }, 0);
 
         // 2. Reallocate the exact same virtual address as MEM_WRITE_WATCH private memory.
@@ -4632,14 +4632,14 @@ mod tests {
             writable(addr),
             "MEM_WRITE_WATCH private memory at a formerly absent address must remain writable"
         );
-        assert!(!guards().protected.contains(&(addr / BLOCK)));
+        assert!(!guards().protected.contains(addr / BLOCK));
         assert_ne!(unsafe { VirtualFree(watched, 0, MEM_RELEASE) }, 0);
 
         // 3. Re-mark `addr` absent while free, then commit ordinary MEM_PRIVATE memory there.
         let reserved2 = unsafe { VirtualAlloc(reserved, PAGE, MEM_RESERVE, PAGE_NOACCESS) };
         assert_eq!(reserved2, reserved);
         assert!(writes(addr, addr + PAGE, true).is_some());
-        assert!(guards().absent.contains(&(addr / BLOCK)));
+        assert!(guards().absent.contains(addr / BLOCK));
         assert_ne!(unsafe { VirtualFree(reserved2, 0, MEM_RELEASE) }, 0);
 
         let plain = unsafe { VirtualAlloc(reserved, PAGE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) };
@@ -4649,10 +4649,10 @@ mod tests {
             "ordinary MEM_PRIVATE memory at a formerly absent address must not be treated as a view"
         );
         assert!(writable(addr));
-        assert!(!guards().protected.contains(&(addr / BLOCK)));
+        assert!(!guards().protected.contains(addr / BLOCK));
         assert_ne!(unsafe { VirtualFree(plain, 0, MEM_RELEASE) }, 0);
         // Clean up the test's absent entry.
-        guards().absent.remove(&(addr / BLOCK));
+        guards().absent.remove(addr / BLOCK);
     }
 }
 

@@ -695,7 +695,7 @@ pub(crate) fn removal_context() -> String {
 
 /// Says [`removal_context`] in the log, once: called by whoever finds the
 /// host device removed.
-fn log_removal_context() {
+pub(crate) fn log_removal_context() {
     static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if !(trail_on() || dred_any()) || SAID.swap(true, Ordering::Relaxed) {
         return;
@@ -870,8 +870,8 @@ pub(crate) static PREPARING: [std::sync::atomic::AtomicU64; 4] = [
 fn timed(step: &Step) -> bool {
     match step {
         Step::Copy(..) | Step::Fill(..) => true,
-        Step::Run(..) | Step::Host(_) => cfg!(feature = "diagnostics"),
-        Step::Refresh(..) | Step::GpuWrite(..) | Step::Texture { .. } | Step::Tiles(_) => false,
+        Step::Run(..) | Step::Host(..) => cfg!(feature = "diagnostics"),
+        Step::Refresh(..) | Step::GpuWrite(..) | Step::Texture { .. } | Step::Tiles(_) | Step::Placed(_) => false,
     }
 }
 
@@ -2696,9 +2696,6 @@ struct CardPlan {
     /// The `CardInflight::landed` its [`CARD_FETCH`] was told: which of its
     /// tickets got a slot ([`inflight_gets_slot`]).
     inflight_landed: u32,
-    /// With [`relay`]: the number of the send to copies in the card's memory
-    /// that the submission ran behind ([`QUEUE_ORDER`]).
-    sent_as: u64,
     /// With [`upcheck`]: the look at what it sent up.
     looks: Option<upcheck::Looks>,
     /// With [`send`]: the memory its sends come from.
@@ -2721,8 +2718,9 @@ enum Step {
     /// it reads and writes: (destination, source, bytes)
     /// ([`crate::memcopy::known_writes`]).
     Run(Box<dyn Fn() + Send>, Option<(usize, usize, usize)>),
-    /// Work that writes host memory only.
-    Host(Box<dyn Fn() + Send>),
+    /// Work that writes host memory only, and the title memory it reads
+    /// (from, to; empty for none).
+    Host(Box<dyn Fn() + Send>, (usize, usize)),
     /// Queue-timeline tile mappings (`UpdateTileMappings`), ordered right
     /// before this list executes on the command queue.
     Tiles(Box<dyn Fn() + Send>),
@@ -3322,8 +3320,6 @@ struct Sent {
     texture_back_ranges: Vec<(usize, usize)>,
     /// What was taken off it to be done on the card.
     own: Option<card_steps::Taken>,
-    /// Title-memory ranges written when its shader textures are copied back.
-    texture_back_ranges: Vec<(usize, usize)>,
     /// Its bottom-of-pipe writes.
     writes: Vec<(usize, crate::queue::Written, usize)>,
 }
@@ -4278,7 +4274,7 @@ fn joins_asked() -> (usize, usize) {
 /// those give their shaders, write back or write when they are done, and it
 /// changes no title memory that they read ([`Step::Copy`], [`Step::Run`]).
 pub(crate) fn joinable<'a>(ahead: impl Iterator<Item = &'a HostList>, next: &[&HostList]) -> bool {
-    if next.iter().any(|l| l.deferred().copies.iter().any(|s| matches!(s, Step::Copy(..) | Step::Run(_)))) {
+    if next.iter().any(|l| l.deferred().copies.iter().any(|s| matches!(s, Step::Copy(..) | Step::Run(..)))) {
         return false;
     }
     let ahead: Vec<&HostList> = ahead.collect();
@@ -5899,9 +5895,10 @@ impl Host {
                     list.SetPipelineState(&work.pso);
                     list.SetComputeRootUnorderedAccessView(3, work.differs.0.GetGPUVirtualAddress());
                     for (shadow, ranges) in &dirty {
-                        let (Some((_, Some(before), _)), size) = (shadow.card_sides(), shadow.card_hash_size()) else {
+                        let Some((_, Some(before), _)) = shadow.card_sides() else {
                             continue;
                         };
+                        let size = shadow.card_hash_size();
                         // No twin (it cost the card the copy's size again,
                         // 399 MB in run 75): `before` holds a 128-bit hash
                         // of each 64 KiB piece. The pieces just sent up are
@@ -5939,7 +5936,7 @@ impl Host {
                             if run.pieces == 0 {
                                 continue;
                             }
-                            let constants = [run.first, run.skew, shadow.card_hashed().unwrap_or(size) as u32, run.pieces, 0, 0, 0];
+                            let constants = [run.first, run.skew, size as u32, run.pieces, 0, 0, 0];
                             list.SetComputeRoot32BitConstants(0, 7, constants.as_ptr().cast(), 0);
                             list.Dispatch(run.pieces, 1, 1);
                         }
@@ -6061,10 +6058,11 @@ impl Host {
                         if r.span.pieces == 0 {
                             continue;
                         }
-                        let Some((_, Some(before), size)) = r.shadow.card_sides() else {
+                        let Some((_, Some(before), _)) = r.shadow.card_sides() else {
                             continue;
                         };
-                        let hashed = r.shadow.card_hashed().unwrap_or(size) as u32;
+                        let size = r.shadow.card_hash_size();
+                        let hashed = size as u32;
                         // (What is only looked at keeps its hashes: what
                         // changed there is the next declared range's to land.)
                         let m = if r.picked { 1 } else { mode };
@@ -6222,11 +6220,25 @@ impl Host {
     /// whatever was sent meanwhile, so it may bring a later flight's
     /// bytes, which that flight's landing then finds merged already; and
     /// nothing is sent back up. `plans` come with the value signalled behind
-    /// their flight. `meanwhile` is called while the fetch is on its way, if
-    /// there is one.
-    fn relay_card_back(&self, plans: &[(&CardPlan, u64)], fetch: &mut Option<RelayFetch>, meanwhile: &mut dyn FnMut()) {
+    /// their flight and the flight's number among the submissions started.
+    /// `meanwhile` is called while the fetch is on its way, if there is one.
+    fn relay_card_back(&self, plans: &[(&CardPlan, u64, u64)], fetch: &mut Option<RelayFetch>, meanwhile: &mut dyn FnMut()) {
         use crate::land;
         let gathering = std::time::Instant::now();
+        // With fetches on the copy queue (`crate::queue2`, bit 1), a fetch
+        // runs beside whatever was sent after the flights being landed
+        // (`BESIDE`).
+        let lane = crate::queue2::second().filter(|s| s.fetches());
+        let beside = lane.is_some() && refetch();
+        let noted: std::collections::HashMap<(usize, u32), u64> = if beside {
+            BESIDE.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default()
+        } else {
+            Default::default()
+        };
+        let mut again = 0u64;
+        // Every piece fetched now: (copy, piece number).
+        let mut numbers: Vec<(usize, u32)> = Vec::new();
+        let last_flight = plans.iter().map(|p| p.2).max().unwrap_or(0);
         let differs = {
             let work = CARD_WORK.lock().unwrap_or_else(|e| e.into_inner());
             work.as_ref().map(|work| (work.differs.1, (work.differs.2 / 4) as usize))
@@ -6244,9 +6256,9 @@ impl Host {
             // Pieces caught while a later flight was at them (`torn`).
             let suspects = fetch.as_ref().map(|f| &f.suspects);
             let mut seen = std::collections::HashSet::new();
-            for &(plan, behind) in plans {
+            for &(plan, behind, number) in plans {
                 plan.picked_found(differs);
-                let flags: Vec<(usize, u32, bool)> = plan
+                let mut flags: Vec<(usize, u32, bool)> = plan
                     .ranges
                     .iter()
                     .filter(|r| !r.picked)
@@ -6267,6 +6279,7 @@ impl Host {
                     }
                 }
                 let fetched = flagged_pieces(&flags);
+                numbers.extend(fetched.iter().copied());
                 for r in plan.ranges.iter().filter(|r| !r.picked) {
                     let copy = std::sync::Arc::as_ptr(&r.shadow) as usize;
                     if upcheck::on() {
@@ -6316,6 +6329,7 @@ impl Host {
                 .collect();
         }
         land::spent(land::stat::GATHER, gathering);
+        BESIDE_STATS[0].fetch_add(again, Ordering::Relaxed);
         if fetch.is_none() {
             *fetch = self.make_relay_fetch();
         }
@@ -6341,6 +6355,11 @@ impl Host {
                 false => *QUEUE_ORDER.lock().unwrap_or_else(|e| e.into_inner()),
             };
             crate::shadow::relay_fetched(after);
+            if beside {
+                // Notes whose flights have all landed are done with.
+                let mut all = BESIDE.lock().unwrap_or_else(|e| e.into_inner());
+                note_beside(all.get_or_insert_with(Default::default), &[], last_flight, last_flight);
+            }
             return;
         }
         let Some(f) = fetch.as_mut() else {
@@ -6388,7 +6407,7 @@ impl Host {
                         // queue, `Host::submit`: nothing later ran yet).
                         let started = STARTED.load(Ordering::Acquire);
                         let mut all = BESIDE.lock().unwrap_or_else(|e| e.into_inner());
-                        let noted = note_beside(all.get_or_insert_with(Default::default), &numbers, landed, started);
+                        let noted = note_beside(all.get_or_insert_with(Default::default), &numbers, last_flight, started);
                         BESIDE_STATS[1].fetch_add(noted, Ordering::Relaxed);
                     }
                     second.down.stats.waited_us.fetch_add(waiting.elapsed().as_micros() as u64, Ordering::Relaxed);
@@ -6437,7 +6456,7 @@ impl Host {
         // (`relay_card_inflight`). Sends up to `after` are numbered, and the
         // submission numbered `after` may not have its lists on the queue
         // yet; every one before it has (the submission lock).
-        let landed = plans.iter().map(|p| p.1.sent_as).max();
+        let landed = plans.iter().map(|p| p.0.sent_as).max();
         if inflight_fetch()
             && should_record_brought(after, landed)
             && let Some(inflight) = CARD_WORK.lock().unwrap_or_else(|e| e.into_inner()).as_mut().and_then(|w| w.inflight.as_mut())
@@ -6448,7 +6467,7 @@ impl Host {
         RELAY_STATS[3].fetch_add(us, Ordering::Relaxed);
         {
             use crate::shadow::CARD_STATS;
-            CARD_STATS[3].fetch_add(piece_count, Ordering::Relaxed);
+            CARD_STATS[3].fetch_add(pieces.len() as u64, Ordering::Relaxed);
             CARD_STATS[4].fetch_add(total, Ordering::Relaxed);
             CARD_STATS[5].fetch_add(1, Ordering::Relaxed);
             CARD_STATS[6].fetch_add(us, Ordering::Relaxed);
@@ -6549,7 +6568,9 @@ impl Host {
                         last_notes(&runs)
                     ));
                 }
-                let plans: Vec<(&CardPlan, u64)> = flights.iter().filter_map(|f| Some((f.card.as_ref()?, f.fence))).collect();
+                fill_ahead::landing(flights.iter().map(|f| f.number).min().unwrap_or(0));
+                let plans: Vec<(&CardPlan, u64, u64)> =
+                    flights.iter().filter_map(|f| Some((f.card.as_ref()?, f.fence, f.number))).collect();
                 // (Each byte once: the ranges are joined.)
                 let mut back: Vec<Declared> = Vec::new();
                 for flight in &flights {
@@ -7441,7 +7462,7 @@ impl Host {
             shadow.writing(*at, *len);
         }
         let declared = declared_writes(runs);
-        let card = self.card_before(&declared, &picked, flown, *submitted, late);
+        let card = self.card_before(runs, &picked, flown, *submitted, late);
         // The sends are taken: from here on the references hold what the
         // copies in the lists put.
         for (shadow, at, bytes) in batch.placed.drain(..) {
@@ -8258,27 +8279,6 @@ impl HostList {
                 (before != wanted).then_some((texture, before))
             }
         }
-        let before = {
-            let mut states = self.states.lock().unwrap_or_else(|e| e.into_inner());
-            match states.entry(std::sync::Arc::as_ptr(&copy) as usize) {
-                std::collections::hash_map::Entry::Vacant(v) => {
-                    v.insert((wanted, wanted, copy.clone()));
-                    None
-                }
-                std::collections::hash_map::Entry::Occupied(mut o) => Some(std::mem::replace(&mut o.get_mut().1, wanted)),
-            }
-        }?;
-        if before == wanted {
-            return None;
-        }
-        // A frame shot copies a texture where it leaves a state shaders
-        // write in, and leaves it in that state: the caller's move is the
-        // same as in any other frame.
-        #[cfg(feature = "diagnostics")]
-        if crate::shot::recording() {
-            crate::shot::leaves(&self.list, std::ptr::from_ref(self) as usize, Some(self), None, &copy, before, wanted);
-        }
-        Some((texture, before))
     }
 
     /// Moves host texture `copy` to `wanted` (a host state) in this list,
@@ -8890,21 +8890,6 @@ impl HostList {
         self.deferred().copies.push(Step::Fill(dst as usize, src as usize, len, to));
     }
 
-    /// The host GPU address of `len` bytes of upload memory holding the title
-    /// memory at `src` as of the list's submission: one copy for every ask
-    /// until a title copy intervenes.
-    pub(crate) fn fill_scratch(&self, src: *const u8, len: u64) -> Option<u64> {
-        let key = (src as usize, len as usize);
-        let known = self.deferred().filled.get(&key).copied();
-        if known.is_some() {
-            return known;
-        }
-        let (gpu, to) = self.scratch(len)?;
-        self.defer_fill(to, src, len as usize);
-        self.deferred().filled.insert(key, gpu);
-        Some(gpu)
-    }
-
     /// Brings `[address, address + len)` of a buffer's host copy up to date
     /// when the list is submitted (once per range until a title copy
     /// intervenes), keeping the copy alive until the list is reset.
@@ -9447,6 +9432,7 @@ impl HostList {
                 Step::Fill(..) => {
                     // The run of fills this one starts, done at once
                     // (`VICTORY_FILL_WORKERS`).
+                    let started = std::time::Instant::now();
                     let run = fill_run(&steps[next - 1..]);
                     next += run.len() - 1;
                     let bytes = run.iter().map(|f| f.len).sum::<usize>();
@@ -9456,7 +9442,7 @@ impl HostList {
                         add(C::CopyBytes, bytes as u64);
                     }
                     run_fills(&run, workers);
-                    bytes
+                    (started, bytes)
                 }
                 Step::Refresh(shadow, address, len) => {
                     #[cfg(feature = "diagnostics")]
@@ -9468,6 +9454,9 @@ impl HostList {
                     continue;
                 }
                 Step::Run(work, _) | Step::Host(work, _) => {
+                    // Its work reads title memory, and the fills noted read
+                    // it too: they are done first.
+                    batch.fill();
                     if matches!(step, Step::Run(..)) {
                         batch.title_written();
                     }
@@ -13728,13 +13717,13 @@ void main() {
         const LEFT: u32 = 0x600D_0002;
         // Flight A, and the card has run it.
         let a = record(20, HALF_WAY, LEFT, 16);
-        let (submitted, mut sent_a) = host.submit(&[&a], true).expect("flight A sent ahead");
+        let (submitted, mut sent_a) = host.submit(&[&a], &[], true).expect("flight A sent ahead");
         let fence_a = *submitted;
         drop(submitted);
         wait_for(fence_a);
         // Flight B: the same piece, through the half-way value, for seconds.
         let b = record(20, HALF_WAY, LEFT, spin);
-        let (submitted, mut sent_b) = host.submit(&[&b], true).expect("flight B sent ahead");
+        let (submitted, mut sent_b) = host.submit(&[&b], &[], true).expect("flight B sent ahead");
         let fence_b = *submitted;
         drop(submitted);
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -13746,7 +13735,7 @@ void main() {
         let mut fetch = None;
         {
             let plan = sent_a.card.as_ref().expect("flight A has a plan for the card's copies");
-            host.relay_card_back(&[(sent_a.number, plan)], &mut fetch, fence_a, sent_a.number);
+            host.relay_card_back(&[(plan, fence_a, sent_a.number)], &mut fetch, &mut || {});
         }
         for (copy, ranges) in &sent_a.back {
             copy.copy_back_done(ranges);
@@ -13766,7 +13755,7 @@ void main() {
         wait_for(fence_b);
         {
             let plan = sent_b.card.as_ref().expect("flight B has a plan for the card's copies");
-            host.relay_card_back(&[(sent_b.number, plan)], &mut fetch, fence_b, sent_b.number);
+            host.relay_card_back(&[(plan, fence_b, sent_b.number)], &mut fetch, &mut || {});
         }
         for (copy, ranges) in &sent_b.back {
             copy.copy_back_done(ranges);

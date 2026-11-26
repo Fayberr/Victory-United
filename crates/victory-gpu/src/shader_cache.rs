@@ -101,6 +101,15 @@ pub(crate) fn translation() -> [u8; 32] {
     build()
 }
 
+/// The offline warm-up (`victory translate --warm`): `container` is
+/// translated into the cache unless it is there already. `Ok(true)`: it
+/// was translated now. Needs [`use_shader_cache`] and the same host facts
+/// the run will have (`victory_shader::emit::translation_fingerprint`).
+pub fn warm(container: &[u8]) -> Result<bool, String> {
+    let cache = CACHE.get().ok_or("no shader cache")?;
+    cached(cache, &build(), container, Persistence::Required, translate).map(|(_, fresh)| fresh)
+}
+
 /// Puts the translation of `container` into the cache before any title asks
 /// for it (`victory shaders`): whether it was there already, or why it does
 /// not translate. The host is opened first, as a run does: what the card

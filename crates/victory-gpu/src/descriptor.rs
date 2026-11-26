@@ -1464,7 +1464,7 @@ fn view_at(i: u32, generation: u32) -> Option<View> {
 }
 
 /// The words of the record at `handle`, if they are a view's.
-pub(crate) fn record_at(handle: u64) -> Option<[u32; 3]> {
+pub(crate) fn record_view_at(handle: u64) -> Option<[u32; 3]> {
     if handle == 0 {
         return None;
     }

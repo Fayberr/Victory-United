@@ -4323,10 +4323,6 @@ void main(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID) {
 #[cfg(test)]
 mod bench;
 
-/// The benchmark of the clamp and its barriers (ignored by default).
-#[cfg(test)]
-mod bench;
-
 /// What one small draw costs this card, bare and with one thing changed
 /// between every two draws: a measurement, not a check (it asserts only
 /// that the card answered). The timing run of the lit scene (run 187) has

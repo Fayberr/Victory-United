@@ -1505,7 +1505,9 @@ fn queue(this: QueueRef, command: Command) {
         }
         // Full with reads held for a Submit the title cannot make while it
         // waits here: they go now, page lists as they are.
-        if !lane.held.is_empty() {
+        let (held, unsubmitted) = (!lane.held.is_empty(), lane.unsubmitted.len());
+        let nothing_running = lane.reads.is_empty() && lane.running.is_empty();
+        if held {
             static WARNED: AtomicBool = AtomicBool::new(false);
             if !WARNED.swap(true, Ordering::Relaxed) {
                 tracing::warn!("dstorage: a full queue's reads into physical pages start before the title's Submit");
@@ -1514,10 +1516,10 @@ fn queue(this: QueueRef, command: Command) {
             lanes.submit(id, false);
             scheduler.work.notify_all();
         }
-        if !lane.unsubmitted.is_empty() && lane.reads.is_empty() && lane.running.is_empty() {
+        if unsubmitted != 0 && nothing_running {
             tracing::warn!(
                 queue = id,
-                commands = lane.unsubmitted.len(),
+                commands = unsubmitted,
                 "dstorage: a queue full of commands that are not submitted submits itself"
             );
             lanes.submit(id, true);
@@ -1778,7 +1780,7 @@ fn read_into(request: &Request, out: &mut [u8]) -> Result<(), HRESULT> {
         return Ok(());
     }
     // SAFETY: a file object we created; the title keeps it open.
-    let file = unsafe { &*request.source.cast::<Instance<File>>() }.state;
+    let file = &unsafe { &*request.source.cast::<Instance<File>>() }.state;
     let started = std::time::Instant::now();
     let unbuffered = unbuffered(file);
     let (mut done, mut tries) = (0, 0);
@@ -2398,7 +2400,7 @@ mod tests {
             protect(PAGE_READWRITE)
         });
         let r = request(0, at as *mut c_void, plain.len(), file, 0, plain.len());
-        assert_eq!(execute(&r), Ok(()));
+        assert_eq!(execute(&QueuedRead::new(r)), Ok(()));
         assert_ne!(opener.join().unwrap(), 0);
         // SAFETY: as above, all of it readable.
         assert_eq!(unsafe { std::slice::from_raw_parts(at as *const u8, plain.len()) }, plain);
@@ -2777,7 +2779,7 @@ mod tests {
         read(&mut l, 0, PAGE_DESTINATION, 16);
         read(&mut l, 0, 0, 16);
         add_ref_instance(array);
-        l.lanes.get_mut(&0).unwrap().unsubmitted.push(Command::Status(Status { array, index: 0 }));
+        l.lanes.get_mut(&0).unwrap().unsubmitted.push(Command::Status(Status { array, index: 0, enqueued: 0 }));
         l.submit(0, true);
         // Only the plain read starts; the status waits behind the held one.
         let plain = l.start().unwrap();

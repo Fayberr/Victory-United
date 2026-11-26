@@ -689,10 +689,9 @@ pub(crate) struct State {
     /// Graphics, compute.
     host_roots: [usize; 2],
     host_heaps: [usize; 2],
-    /// Tables made afresh in this list, keyed by their address and record hash.
-    fresh_tables: std::collections::HashMap<u64, Fresh, std::hash::BuildHasherDefault<Plain>>,
-    /// The record words of cached tables.
-    fresh_records: Vec<[u32; 3]>,
+    /// Tables made afresh in this list, keyed by their address, entry count
+    /// and record hash.
+    fresh_tables: std::collections::HashMap<(u64, u32, u64), FreshTable, std::hash::BuildHasherDefault<crate::host::AddressHash>>,
     /// The dynamic slots the list holds: title heap, first, count; given
     /// back when the list has run, is reset or released.
     dynamic: Vec<(usize, u32, u32)>,
@@ -738,7 +737,6 @@ impl State {
             crate::descriptor::release_dynamic(heap, first, n);
         }
         self.fresh_tables.clear();
-        self.fresh_records.clear();
         self.recording = 0;
         self.root_srv_slots.clear();
         self.root_uav_slots.clear();
@@ -1143,33 +1141,6 @@ static DISPATCHED: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn dispatched() -> u64 {
     DISPATCHED.load(Ordering::Relaxed)
-}
-
-/// A table made afresh: what it was made from (the `n` records at `at` in
-/// [`State::fresh_records`]) and its first dynamic slot.
-struct Fresh {
-    table: u64,
-    n: u32,
-    at: usize,
-    first: u32,
-}
-
-/// A hash that is mixed already, used as it is.
-#[derive(Default)]
-struct Plain(u64);
-
-impl std::hash::Hasher for Plain {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 = self.0 << 8 | u64::from(b);
-        }
-    }
-    fn write_u64(&mut self, x: u64) {
-        self.0 = x;
-    }
 }
 
 /// A quick hash of `table` and its `n` records. It only finds the table
@@ -2000,7 +1971,7 @@ impl State {
             unsafe { l.SetPipelineState(&p.pso) };
             self.host_pipeline = p.pso.as_raw() as usize;
             // The title may release the pipeline before it submits the list.
-            list.bind_pipeline(p);
+            list.bind_pipeline(&p.name, &p.pso, &p.root);
         }
         for stage in &p.stages {
             let t = stage.translated();
@@ -4084,7 +4055,7 @@ impl State {
                 // A view this list has made before: its descriptor copied,
                 // and nothing more if nothing changed in the list since.
                 if list_views
-                    && let Some(words) = crate::descriptor::record_at(table + u64::from(k) * 32)
+                    && let Some(words) = crate::descriptor::record_view_at(table + u64::from(k) * 32)
                     && let Some(mut listed) = host.make_listed(recording, words, index)
                 {
                     let kind = layout.entries.iter()

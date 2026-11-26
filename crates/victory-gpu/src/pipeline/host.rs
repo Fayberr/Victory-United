@@ -35,7 +35,7 @@ pub(crate) struct GraphicsState {
     pub(crate) targets: D3D12_RT_FORMAT_ARRAY,
     pub(super) depth_format: DXGI_FORMAT,
     pub(super) samples: DXGI_SAMPLE_DESC,
-    views: Vec<D3D12_VIEW_INSTANCE_LOCATION>,
+    pub(super) views: Vec<D3D12_VIEW_INSTANCE_LOCATION>,
 }
 
 struct GraphicsStreamState<'a> {

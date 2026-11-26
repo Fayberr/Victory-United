@@ -432,7 +432,7 @@ fn does_of(written: &[(usize, usize)], runs: &[&HostList]) -> (Vec<Does>, Vec<(u
                     asked: read_blocked(written, *src, *len),
                     to: to.is_some(),
                 },
-                Step::Texture(staging) => {
+                Step::Texture { staging, .. } => {
                     let (at, len) = staging.memory();
                     Does::Read {
                         from: at,
@@ -446,9 +446,9 @@ fn does_of(written: &[(usize, usize)], runs: &[&HostList]) -> (Vec<Does>, Vec<(u
                     from: *at,
                     to: *at + *len,
                 },
-                Step::Run(_) => Does::Run,
+                Step::Run(..) => Does::Run,
                 Step::Placed(p) => Does::Placed { dst: p.dst, src: p.src, len: p.len },
-                Step::GpuWrite(..) | Step::Host(..) => continue,
+                Step::GpuWrite(..) | Step::Host(..) | Step::Tiles(_) => continue,
             });
             steps.push((std::ptr::from_ref::<HostList>(list) as usize, i));
         }
