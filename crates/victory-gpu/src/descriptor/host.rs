@@ -898,6 +898,35 @@ pub(crate) fn probe_view_limit() {
 /// table past them is made afresh in these slots like any other.
 pub(crate) const DYNAMIC: u32 = 1 << 18;
 
+/// Dynamic slots for a capped view heap: `VICTORY_DYNAMIC_SLOTS`, default
+/// [`DYNAMIC`], never more than half of `null` (the heap's last slot). A
+/// host without a cap keeps the default.
+fn dynamic_slots_on(null: u32, asked: Option<u32>) -> u32 {
+    if null == 0 {
+        return DYNAMIC;
+    }
+    let most = (null / 2).max(DYNAMIC);
+    asked.unwrap_or(DYNAMIC).clamp(DYNAMIC, most)
+}
+
+fn dynamic_slots(null: u32) -> u32 {
+    static SLOTS: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *SLOTS.get_or_init(|| {
+        let asked = std::env::var("VICTORY_DYNAMIC_SLOTS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok());
+        let slots = dynamic_slots_on(null, asked);
+        if slots != DYNAMIC {
+            tracing::warn!(
+                slots,
+                title_in_place = null.saturating_sub(slots),
+                "dynamic descriptor slots on a capped view heap (VICTORY_DYNAMIC_SLOTS)"
+            );
+        }
+        slots
+    })
+}
+
 impl HostHeap {
     pub(crate) fn new(sampler: bool, count: u32) -> Option<Self> {
         let host = host()?;
@@ -918,7 +947,6 @@ impl HostHeap {
                     })
             }
         };
-        let extra = if sampler { 0 } else { DYNAMIC };
         // A view heap ends at the null slot shaders clamp view indices to
         // (`probe_view_limit`), whatever the title's own count: the title's
         // slots, then the dynamic ones, then null up to and with that slot.
@@ -930,6 +958,7 @@ impl HostHeap {
         } else {
             victory_shader::emit::view_heap_limit()
         };
+        let extra = if sampler { 0 } else { dynamic_slots(null) };
         let (heap, count, size) = if null == 0 {
             match make(count + extra) {
                 Ok(heap) => (heap, count, count + extra),
@@ -1009,8 +1038,8 @@ impl HostHeap {
             made: Mutex::new(vec![0; count as usize]),
             copied: Mutex::new(Vec::new()),
             kept: Mutex::new(vec![None; (count + extra) as usize]),
-            next: Mutex::new((0, vec![false; DYNAMIC as usize])),
-            free: std::sync::atomic::AtomicU32::new(DYNAMIC),
+            next: Mutex::new((0, vec![false; extra as usize])),
+            free: std::sync::atomic::AtomicU32::new(extra),
             too_long: std::sync::atomic::AtomicU32::new(u32::MAX),
             strides,
             views,
@@ -3804,6 +3833,15 @@ mod tests {
         // SAFETY: a plain query of the live device after the allocations.
         assert!(unsafe { host.device.GetDeviceRemovedReason() }.is_ok());
         eprintln!("heap clamp checked on hardware: {} slots, {DYNAMIC} dynamic slots; small, exact-fit and overflowing title heaps leave slot {null} null", null + 1);
+    }
+
+    #[test]
+    fn dynamic_slots_stay_within_half_a_capped_heap() {
+        assert_eq!(dynamic_slots_on(0, Some(524_288)), DYNAMIC);
+        assert_eq!(dynamic_slots_on(2_000_000, None), DYNAMIC);
+        assert_eq!(dynamic_slots_on(2_000_000, Some(524_288)), 524_288);
+        assert_eq!(dynamic_slots_on(800_000, Some(524_288)), 400_000);
+        assert_eq!(dynamic_slots_on(2_000_000, Some(1)), DYNAMIC);
     }
 
     #[test]
