@@ -6322,7 +6322,7 @@ impl Host {
                         list.ResourceBarrier(&sent);
                     }
                     list.SetComputeRootSignature(&work.root);
-                    list.SetPipelineState(&work.pso);
+                    list.SetPipelineState(&compare_pso);
                     list.SetComputeRootUnorderedAccessView(3, work.differs.0.GetGPUVirtualAddress());
                     for (shadow, ranges) in &dirty {
                         let (Some((staging, Some(before), _)), size) = (shadow.card_sides(), shadow.card_hash_size()) else {
@@ -6374,7 +6374,7 @@ impl Host {
                             )]);
                         }
                         list.SetComputeRootSignature(&work.root);
-                        list.SetPipelineState(&work.pso);
+                        list.SetPipelineState(&compare_pso);
                         list.SetComputeRootShaderResourceView(1, shadow.buffer.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(2, before.GetGPUVirtualAddress());
                         let joins = rehash_runs() || own.is_some();
@@ -8601,6 +8601,12 @@ impl HostList {
         let coming = aside::begin(work);
         *self.coming.lock().unwrap_or_else(|e| e.into_inner()) = Some((at, coming));
     }
+
+    /// The list's buffers for `crate::indirect::window_check`.
+    pub(crate) fn window_check(&self) -> Option<&crate::indirect::WindowCheck> {
+        self.window_check.get_or_init(crate::indirect::WindowCheck::new).as_ref()
+    }
+
 
     /// The refreshes that were still to come are put among the steps.
     fn take_coming(&self) {

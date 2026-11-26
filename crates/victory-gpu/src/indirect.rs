@@ -1432,6 +1432,101 @@ pub(crate) fn batch_for(device: &ID3D12Device) -> windows::core::Result<(ID3D12R
     make_from(device, batch::SOURCE).map(|c| (c.root, c.pso))
 }
 
+/// Checks and differing records seen by [`window_check`] so far.
+static CHECKED: [std::sync::atomic::AtomicU64; 2] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 2];
+
+/// [`window_check`] for a draw served from a window: the record of `kind`
+/// at `src`, `step` bytes long, which the window clamped into `scratch` at
+/// `at`, is clamped again into the list's check buffer and compared. Runs
+/// compute work of ours, so the caller binds its pipeline again after it.
+/// False if nothing was recorded.
+pub(crate) fn check_hit(
+    list: &HostList,
+    src: (&ID3D12Resource, u64),
+    (kind, step): (u32, u32),
+    scratch: &ID3D12Resource,
+    at: u64,
+) -> bool {
+    const CHECK_USE: usize = usize::MAX - 0x79;
+    let (Some(c), Some(cmp), Some(check)) = (clamp(), compare(), list.window_check()) else {
+        return false;
+    };
+    if list.first_use(CHECK_USE) {
+        // At this recording's submission: what the list's last run found.
+        let data = check.data;
+        let words = WindowCheck {
+            args: check.args.clone(),
+            budget: check.budget.clone(),
+            results: check.results.clone(),
+            data,
+        };
+        list.defer_host(move || {
+            let (checked, differed, window, fresh) = words.take();
+            if checked == 0 {
+                return;
+            }
+            use std::sync::atomic::Ordering::Relaxed;
+            let total = CHECKED[0].fetch_add(u64::from(checked), Relaxed) + u64::from(checked);
+            let bad = CHECKED[1].fetch_add(u64::from(differed), Relaxed) + u64::from(differed);
+            if differed > 0 {
+                tracing::warn!(
+                    differed,
+                    checked,
+                    ?window,
+                    ?fresh,
+                    "window check: a draw served from a window read a record that \
+                     differs from a fresh clamp of it"
+                );
+            }
+            if total / 10_000 != (total - u64::from(checked)) / 10_000 {
+                tracing::info!(checked = total, differed = bad, "window check");
+            }
+        });
+    }
+    // SAFETY: live buffers.
+    let (budget, results, fresh, window) = unsafe {
+        (
+            check.budget.GetGPUVirtualAddress(),
+            check.results.GetGPUVirtualAddress(),
+            check.args.GetGPUVirtualAddress(),
+            scratch.GetGPUVirtualAddress() + at,
+        )
+    };
+    // The record again, by the window's rules, into the check's buffer
+    // (common before and after every check).
+    let common = D3D12_RESOURCE_STATE_COMMON;
+    let spec = (kind, step, 1);
+    if !record_clamp_as(c, &list.list, (&check.args, common), budget, src, None, spec, true) {
+        return false;
+    }
+    let args = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+    let read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    let words = step / 4;
+    // SAFETY: an open list; the compare's own root signature and pipeline;
+    // the scratch buffer is readable as arguments (and stays so), the
+    // check's buffer was left so by the clamp above.
+    unsafe {
+        list.list.ResourceBarrier(&[
+            transition(scratch, args, D3D12_RESOURCE_STATES(args.0 | read.0)),
+            transition(&check.args, args, read),
+        ]);
+        list.list.SetComputeRootSignature(&cmp.root);
+        list.list.SetPipelineState(&cmp.pso);
+        list.list.SetComputeRoot32BitConstants(0, 1, (&raw const words).cast(), 0);
+        list.list.SetComputeRootShaderResourceView(1, window);
+        list.list.SetComputeRootShaderResourceView(2, fresh);
+        list.list.SetComputeRootUnorderedAccessView(3, results);
+        list.list.SetComputeRootUnorderedAccessView(4, budget);
+        list.list.Dispatch(1, 1, 1);
+        list.list.ResourceBarrier(&[
+            transition(scratch, D3D12_RESOURCE_STATES(args.0 | read.0), args),
+            transition(&check.args, read, common),
+        ]);
+    }
+    true
+}
+
 fn uav_barrier() -> D3D12_RESOURCE_BARRIER {
     D3D12_RESOURCE_BARRIER {
         Type: D3D12_RESOURCE_BARRIER_TYPE_UAV,

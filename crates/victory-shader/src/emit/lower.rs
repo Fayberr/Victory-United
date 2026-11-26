@@ -3160,7 +3160,7 @@ impl<'a> Lower<'a> {
     fn run(mut self, counted: bool) -> Result<Lowered, Stop> {
         let p = self.x.p;
         self.halves_only = self.places_read_as_halves();
-        if counted && !crate::spill::is_spilled(self.x.native) {
+        if counted {
             // Before anything else, so that wave counts, reads of the first
             // lane and stores know only the lanes that run.
             let original = self.s.entry;
@@ -3234,7 +3234,7 @@ impl<'a> Lower<'a> {
         if let Some(mesh) = self.s.mesh {
             self.mesh_prologue(mesh).map_err(|w| unsupported(0, w))?;
             self.block[order[0]] = Some(self.cur);
-        } else if self.x.native.stage == HwStage::Cs && crate::spill::is_spilled(self.x.native) {
+        } else if !counted && self.x.native.stage == HwStage::Cs && crate::spill::is_spilled(self.x.native) {
             // The structure builder's stages: a DispatchX may name threads,
             // not groups (`USER_DISPATCH_THREADS`; fork pull request #646).
             // They never take the spread prologue above (`user_first`).

@@ -461,6 +461,35 @@ struct Window {
 /// The most records clamped in one pass ([`windows`]).
 const WINDOW_MOST: u64 = 64;
 
+/// Whether eligible indirect records join their list's gather prelude.
+fn gathers() -> bool {
+    /// 0 off, 1 on, 2 in turn.
+    static MODE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    match *MODE.get_or_init(|| match std::env::var("VICTORY_INDIRECT_GATHER").as_deref() {
+        Ok("1") => 1,
+        Ok("alt") => 2,
+        _ => 0,
+    }) {
+        0 => false,
+        1 => true,
+        _ => {
+            static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+            let on = (EPOCH.get_or_init(std::time::Instant::now).elapsed().as_secs() / 20) % 2 == 1;
+            static LAST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+            if LAST.swap(u8::from(on), std::sync::atomic::Ordering::Relaxed) != u8::from(on) {
+                tracing::info!(
+                    "single indirect records are gathered for their list's prelude from now (VICTORY_INDIRECT_GATHER=alt): {}",
+                    if on { "ON" } else { "off, as usual" }
+                );
+            }
+            on
+        }
+    }
+}
+
+#[cfg(feature = "diagnostics")]
+static WINDOW_WHY: [AtomicU64; 14] = [const { AtomicU64::new(0) }; 14];
+
 /// Whether indirect draws that read record after record of one argument
 /// buffer are clamped a window at a time (`VICTORY_INDIRECT_WINDOW=1`; off
 /// by default).
@@ -1989,7 +2018,7 @@ impl State {
         }
         // All of every group, unless the dispatch says otherwise.
         if kind == victory_shader::emit::USER_DISPATCH_THREADS_X {
-            return 0;
+            return self.dispatch_threads[0];
         }
         if kind == USER_ROOT_ADDRESS || kind == USER_ROOT_ADDRESS + 1 {
             return match self.roots_ref(compute).get(usize::from(slot)) {
@@ -4347,7 +4376,7 @@ impl State {
         // taken as groups, the structure builder's box stages ran up to 64
         // times the threads asked and wrote past their structures).
         let translated = p.stages[0].translated();
-        let Some(([x, y, z], partial)) = dispatch_dimensions([x, y, z], translated.threads.unwrap_or([0; 3]), flags) else {
+        let Some(([x, y, z], partial)) = dispatch_dimensions([x, y, z], translated.threads.unwrap_or([0; 3]), if thread_dimensions() { flags } else { flags & !THREAD_DIMENSIONS }) else {
             return;
         };
         if partial != [0; 3]
@@ -4355,7 +4384,7 @@ impl State {
                 .host
                 .user_data
                 .iter()
-                .any(|u| u.root == RootType::Other(victory_shader::emit::USER_DISPATCH_THREADS))
+                .any(|u| matches!(u.root, RootType::Other(victory_shader::emit::USER_DISPATCH_THREADS | victory_shader::emit::USER_DISPATCH_THREADS_X)))
         {
             once!(
                 pipeline = %p.name,
@@ -5906,6 +5935,7 @@ impl State {
             .filter(|w| same(w) && offset >= w.base)
             .filter(|w| (offset - w.base) % u64::from(w.step) == 0 && (offset - w.base) / u64::from(w.step) < u64::from(w.records))
             .map(|w| (w.scratch.clone(), offset - w.base, w.step));
+        let batched = batch.is_some();
         let hit = batch.map(|(scratch, at)| (scratch, at, stride)).or(hit);
         // A record that misses its window: a slot the list's prelude fills,
         // if the list still gathers ([`gathers`]).
@@ -5925,7 +5955,7 @@ impl State {
             (Some((scratch, at, step)), _) => {
                 // Diagnostics of windows: the record clamped again and
                 // compared (`crate::indirect::window_check`).
-                if crate::indirect::window_check()
+                if !batched && crate::indirect::window_check()
                     && crate::indirect::check_hit(
                         list,
                         (&args.buffer, offset),
@@ -6796,7 +6826,7 @@ mod tests {
 
 #[cfg(test)]
 mod record_hash_tests {
-    use super::{Few, RecordHash};
+    use super::{Few, RecordHash, dispatch_dimensions};
 
     #[test]
     fn a_few_things_are_kept_in_order_however_many() {

@@ -259,8 +259,6 @@ pub(crate) struct HostHeap {
     /// another's view made stale stays, which says only "may"): a write of
     /// any other view needs nothing of `placed` ([`spans_quick`]).
     spanned: Slots,
-    /// Identity of the heap that owns dynamic allocations.
-    id: u64,
 }
 
 /// Whether a slot's write of no placed texture view leaves `placed` alone
@@ -3572,11 +3570,6 @@ impl HostHeap {
         }
     }
 
-    /// The identity to store with a range this heap allocated.
-    pub(crate) fn id(&self) -> u64 {
-        self.id
-    }
-
     /// Gives back `n` slots from `first` (an index [`dynamic`] returned)
     /// when they came from this heap.
     ///
@@ -6563,39 +6556,7 @@ fn null_view(at: D3D12_CPU_DESCRIPTOR_HANDLE) {
 mod tests {
     use super::*;
 
-    /// A range of dynamic slots is given back only to the heap that took it:
-    /// the title can release a heap while a list still holds slots of it,
-    /// and a later heap can be made at the same address before that list is
-    /// reset.
-    #[cfg(windows)]
-    #[test]
-    fn dynamic_slots_are_given_back_only_to_the_heap_that_took_them() {
-        use std::sync::atomic::Ordering::Relaxed;
-        let Some(a) = HostHeap::new(false, 4) else {
-            return; // no host GPU
-        };
-        let Some(b) = HostHeap::new(false, 4) else {
-            return;
-        };
-        assert_ne!(a.id(), b.id());
-        let first = a.dynamic(2).expect("two dynamic slots");
-        let free = a.free.load(Relaxed);
-        a.release(b.id(), first, 2);
-        assert_eq!(
-            a.free.load(Relaxed),
-            free,
-            "another heap's identity gave the range back"
-        );
-        a.release(a.id(), first, 2);
-        assert_eq!(
-            a.free.load(Relaxed),
-            free + 2,
-            "their own heap did not get the range back"
-        );
-    }
-
-    /// A constant view is made in 256-byte steps and at most 64 KiB, the
-    /// most the host takes (a larger size removes the device on NVIDIA).
+    /// Slots allocated by a new heap cannot be returned with an old identity.
     #[test]
     fn dynamic_slots_are_given_back_only_to_the_heap_that_took_them() {
         let Some(old) = HostHeap::new(false, 4) else { return };
@@ -8391,7 +8352,7 @@ mod bake_flip_tests {
         };
         assert!(make(&srv_placed, heap.cpu(2)).flatten().is_some());
         assert_eq!(
-            crate::resource::alias_of(srv_obj as crate::object::This),
+            crate::resource::alias_of(srv_obj as crate::object::This).as_ref().map(crate::resource::Held::get),
             Some(uav_obj as crate::object::This),
             "placed SRV must find the placed UAV texture in TARGETS_AT"
         );

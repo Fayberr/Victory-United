@@ -552,10 +552,12 @@ thread_local! {
 /// Felix2180: the water's transmission volumetrics, particle visibility and
 /// the reflection pass's tiling come out of it with 32-lane waves.)
 pub fn with_wave_wide<R>(on: bool, f: impl FnOnce() -> R) -> R {
-    let before = WAVE_WIDE_HERE.replace(on);
-    let out = f();
-    WAVE_WIDE_HERE.set(before);
-    out
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) { WAVE_WIDE_HERE.set(self.0); }
+    }
+    let _reset = Reset(WAVE_WIDE_HERE.replace(on));
+    f()
 }
 
 /// Emits a program whose earlier stages already ran.

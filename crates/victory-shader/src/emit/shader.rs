@@ -157,9 +157,9 @@ pub const USER_DISPATCH_SPREAD: u32 = 0x108;
 /// it is not a whole number of groups, else 0 (every thread runs). The
 /// threads at or past the count do nothing, as the console leaves them out
 /// of EXEC. (After fork pull request #646, mynzjerko, which numbers it
-/// 0x104; that is [`USER_DISPATCH_SPREAD`] here, and 0x105 is fork #994's
-/// `USER_THREAD_LIMIT`.)
-pub const USER_DISPATCH_THREADS: u32 = 0x106;
+/// 0x104; this tree also reserves 0x104..0x109 for root addresses,
+/// the legacy X count, and dispatch spread words.)
+pub const USER_DISPATCH_THREADS: u32 = 0x10A;
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {

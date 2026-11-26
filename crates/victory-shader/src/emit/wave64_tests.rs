@@ -1934,13 +1934,7 @@ fn an_automatic_barrier_inside_a_lane_branch_runs_on_narrow_hardware() {
     eprintln!("ran automatic divergent barriers on hardware (max wave {}): 1, 10, 32, 33 and 64 active lanes", waves.WaveLaneCountMax);
 }
 
-/// Fork pull request #646 (mynzjerko): a spilled 64-thread wave64 compute program, as the
-/// structure builder's, dispatched by a `DispatchX` that counts threads
-/// (`USER_DISPATCH_THREADS`). It stores `(bit count of EXEC on entry, wave OR of
-/// 1 << (lane >> 1))` at `uav[lane * 2..]` from every lane. The threads at or past the count
-/// must store nothing and count in neither; 0 is no count (all 64). On a host of 64-lane
-/// waves they leave at entry; on one of 32 (both halves exchange) they stay, left out of the
-/// ballot, the reduction and the store, and no barrier hangs with an empty upper half.
+/// Fork #646: partial groups leave inactive lanes out of stores and wave operations.
 #[test]
 fn threads_past_a_dispatch_x_count_do_nothing() {
     let mut words = vec![
@@ -2005,7 +1999,7 @@ fn threads_past_a_dispatch_x_count_do_nothing() {
     let counts = RootType::Other(super::USER_DISPATCH_THREADS);
     for host_wave in [64u32, 32] {
         let was = lower::TEST_HOST_WAVE.replace(Some(host_wave));
-        let lowered = lower::lower(&lower::Parts {
+        let lowered = lower::lower_counted(&lower::Parts {
             native: &native,
             p: &p,
             st: &st,
@@ -2015,7 +2009,7 @@ fn threads_past_a_dispatch_x_count_do_nothing() {
             outputs: Vec::new(),
             prims: Vec::new(),
             mesh_stride: 0,
-        });
+        }, false);
         lower::TEST_HOST_WAVE.set(was);
         let lowered = lowered.unwrap_or_else(|e| panic!("lower (waves of {host_wave}): {e}"));
         assert!(
@@ -2031,6 +2025,8 @@ fn threads_past_a_dispatch_x_count_do_nothing() {
             root_cbvs: lowered.root_cbvs,
             root_srvs: lowered.root_srvs,
             root_uavs: lowered.root_uavs,
+            written_root_uavs: lowered.written_root_uavs,
+            writes_guest_memory: lowered.writes_guest_memory,
             root_indexed_views: res.root_indexed_views.clone(),
             half_views: lowered.half_views,
         };
@@ -2070,34 +2066,3 @@ fn threads_past_a_dispatch_x_count_do_nothing() {
         eprintln!("ran on the hardware device (waves of {host_wave}): counts 45, 1 and none exact");
     }
 }
-
-/// A wave64 program of 128 threads (two console waves) that leaves early when no lane of its
-/// wave is below s0, as the console's compiler does when the end of the program is too far for
-/// a branch: `s_cbranch_execnz` over a far jump to the end. `extra` are words that go into the
-/// far jump's block before it, and `work_at_end` puts an instruction between the jump's target
-/// and the end of the program. Then the gate: every thread stores 1, or 2 when some lane of its
-/// console wave that is still running has the thread number s1 (the lanes that fail a test).
-
-
-
-
-/// What the gate of [`far_early_out`] stores in each of 128 threads.
-
-
-
-
-
-
-/// `if (t < s0) { park s[20:21]; if (s1 == 0) {..} else {..}; take it back }` and a read of
-/// s[20:21] after the join, as the console's compiler leaves a parked scalar across an inner
-/// branch. `then` is the inner branch's first arm; the second one leaves the parked scalar alone.
-
-
-
-
-
-
-/// `v_writelane_b32 vN, sX, K`.
-
-
-/// `v_readlane_b32 sX, vN, K`.
