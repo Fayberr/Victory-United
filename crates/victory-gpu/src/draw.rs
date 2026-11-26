@@ -3423,160 +3423,6 @@ impl State {
             BAKED_MS.store(0, Ordering::Relaxed);
         }
         let left = bake_ms.saturating_sub(BAKED_MS.load(Ordering::Relaxed));
-        let budget = if bake && left > 0 {
-            // What a bake may read must be there now: up to 2 GiB.
-            (left, 2 << 30)
-        } else if first && early_ms > 0 {
-            (early_ms, 64 << 20)
-        } else {
-            return;
-        };
-        let Some(heap) = self
-            .heaps
-            .iter()
-            .filter(|&&h| h != 0)
-            .map(|&h| crate::descriptor::heap(h as This))
-            .find(|h| !h.samplers())
-        else {
-            return;
-        };
-        let Some(host) = heap.host() else {
-            return;
-        };
-        let bake = bake && left > 0;
-        if bake && !first && bake_exact() {
-            let (writes, noted) = host.texture_news();
-            if !noted && BAKE_SERVED.load(Ordering::Relaxed) == writes + 1 {
-                return;
-            }
-        }
-        // What can wait for a later list is the worker's.
-        if !bake && crate::heap_worker::kick(heap) {
-            return;
-        }
-        let _pass = crate::heap_worker::on().then(crate::heap_worker::urgent);
-        let n = EARLY_TEXTURE_PASSES[usize::from(bake)].fetch_add(1, Ordering::Relaxed) + 1;
-        if bake && n.is_power_of_two() {
-            let [slots, due, ..] = HEAP_TEXTURES_QUEUE.each_ref().map(|c| c.load(Ordering::Relaxed));
-            tracing::info!(
-                frame,
-                bakes = n,
-                queued_at_the_last_pass = slots,
-                due_at_the_last_pass = due,
-                uploaded_so_far = HEAP_TEXTURES.load(Ordering::Relaxed),
-                "a draw of the title's decoration bake: textures picked by index are uploaded first (VICTORY_BAKE_TEXTURES_MS=0: not)"
-            );
-        }
-        let began = std::time::Instant::now();
-        crate::descriptor::sync_heaps();
-        PASS_BUDGET.set(Some(budget));
-        crate::texture::BAKING.set(bake && bake_exact());
-        Self::heap_textures(Into::List(list), heap, host);
-        crate::texture::BAKING.set(false);
-        PASS_BUDGET.set(None);
-        if bake {
-            BAKED_MS.fetch_add(began.elapsed().as_millis() as u64, Ordering::Relaxed);
-        }
-    }
-
-    /// The queue's side of the card accounting line
-    /// (`crate::resource::card_accounting`, which says what the line
-    /// holds): the slots that are due, by what their texture has on the
-    /// card. Off unless `VICTORY_CARD_ACCOUNTING=1`; then at the first pass
-    /// that finds the card without room, and every five seconds after it.
-    /// Nothing is made, uploaded or counted as used here. For 18,000 due
-    /// slots: 18,000 looks at a title slot and at the texture it views, a
-    /// lock each, some milliseconds of the thread that records the frame.
-    fn card_accounting(
-        heap: &crate::descriptor::Heap,
-        host: &crate::descriptor::host::HostHeap,
-        frame: u64,
-        room: bool,
-    ) {
-        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if !*ON.get_or_init(|| std::env::var_os("VICTORY_CARD_ACCOUNTING").is_some_and(|v| v == "1")) {
-            return;
-        }
-        // When the next line is due (0: none yet, the card has had room).
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let now = crate::host::now_ms().max(1);
-        let next = NEXT.load(Ordering::Relaxed);
-        // (With levels on demand the card may never be without room: the
-        // lines then start with the first texture made that way.)
-        let by_level = crate::tiles::STATS[4].load(Ordering::Relaxed) > 0;
-        let due_now = if next == 0 { !room || by_level } else { now >= next };
-        if !due_now || NEXT.compare_exchange(next, now + 5000, Ordering::Relaxed, Ordering::Relaxed).is_err() {
-            return;
-        }
-        // Due slots; of them uploaded before; of them viewing nothing the
-        // title fills; and the textures (each once) whose host copy is
-        // alive, with their bytes on the card.
-        let mut due = [0u64; 5];
-        // Textures (each once) that never had a host copy, and ones whose
-        // host copy was let go: where their memory is, and its bytes.
-        let (mut never, mut gone) = (Vec::new(), Vec::new());
-        let mut seen = std::collections::BTreeSet::new();
-        for (index, uploaded) in host.texture_slots_all_due(frame) {
-            due[0] += 1;
-            due[1] += u64::from(uploaded);
-            let state = match heap.handle(index).and_then(crate::descriptor::view) {
-                Some(View::Placed(false, resource, desc)) if resource[0] != 1 => {
-                    let address = u64::from(desc[10]) | u64::from(desc[11]) << 32;
-                    match crate::resource::placed_known(address, &resource) {
-                        Some(texture) => crate::resource::copy_state(texture),
-                        // No title texture was made for it: the pass never
-                        // got as far as making one.
-                        None => Some((0, crate::resource::placed_bytes(&resource).unwrap_or(0), address)),
-                    }
-                }
-                Some(View::Shader(object, _)) if crate::resource::title_fills(object as This) => {
-                    crate::resource::copy_state(object as This)
-                }
-                _ => None,
-            };
-            let Some((state, bytes, memory)) = state else {
-                due[2] += 1;
-                continue;
-            };
-            if !seen.insert(memory) {
-                continue;
-            }
-            match state {
-                2 => {
-                    due[3] += 1;
-                    due[4] += bytes;
-                }
-                1 => gone.push((memory, bytes)),
-                _ => never.push((memory, bytes)),
-            }
-        }
-        crate::resource::card_accounting(room, due, never, gone);
-    }
-
-    /// Runs the pass that uploads textures picked by index
-    /// ([`State::heap_textures`]) where nothing has asked for it yet
-    /// ([`early_budgets`]): once a frame for a few milliseconds, at the
-    /// frame's first draw with a view heap set, and with a larger budget
-    /// of its own before every draw whose pixel shader is one of the
-    /// title's bake programs. The uploads are recorded into `list` ahead
-    /// of the draw being bound, as the world's pass records them.
-    fn early_textures(&self, list: &HostList, p: &HostPipeline, compute: bool) {
-        let (early_ms, bake_ms) = early_budgets();
-        if compute || (early_ms == 0 && bake_ms == 0) {
-            return;
-        }
-        let bake = bake_ms > 0
-            && p.stages.iter().any(|s| BAKE_PIXEL_SHADERS.contains(&s.shader.hash.as_str()));
-        static FRAME: AtomicU64 = AtomicU64::new(u64::MAX);
-        // The milliseconds this frame's bake draws have taken so far: a
-        // frame has several, and together they get `bake_ms`.
-        static BAKED_MS: AtomicU64 = AtomicU64::new(0);
-        let frame = crate::frame::current();
-        let first = FRAME.swap(frame, Ordering::Relaxed) != frame;
-        if first {
-            BAKED_MS.store(0, Ordering::Relaxed);
-        }
-        let left = bake_ms.saturating_sub(BAKED_MS.load(Ordering::Relaxed));
         // (Neptune) When a pass last began, in milliseconds, and whether one is catching up.
         static LAST_MS: AtomicU64 = AtomicU64::new(0);
         static CATCHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -3643,6 +3489,18 @@ impl State {
             return;
         };
         let bake = bake && left > 0;
+        if bake && !first && bake_exact() {
+            let (writes, noted) = host.texture_news();
+            if !noted && BAKE_SERVED.load(Ordering::Relaxed) == writes + 1 {
+                return;
+            }
+        }
+        // What can wait for a later list is the worker's (a pass that
+        // catches up within a frame must run in this one).
+        if !bake && !catching && crate::heap_worker::kick(heap) {
+            return;
+        }
+        let _pass = crate::heap_worker::on().then(crate::heap_worker::urgent);
         let n = EARLY_TEXTURE_PASSES[usize::from(bake)].fetch_add(1, Ordering::Relaxed) + 1;
         if bake && n.is_power_of_two() {
             let [slots, due, ..] = HEAP_TEXTURES_QUEUE.each_ref().map(|c| c.load(Ordering::Relaxed));
@@ -3656,9 +3514,12 @@ impl State {
             );
         }
         let began = std::time::Instant::now();
+        crate::descriptor::sync_heaps();
         PASS_BUDGET.set(Some(budget));
         PASS_LIGHT.set(catching);
-        self.heap_textures(list, heap, host);
+        crate::texture::BAKING.set(bake && bake_exact());
+        Self::heap_textures(Into::List(list), heap, host);
+        crate::texture::BAKING.set(false);
         PASS_LIGHT.set(false);
         PASS_BUDGET.set(None);
         if catching {
@@ -3742,6 +3603,8 @@ impl State {
         }
         crate::resource::card_accounting(room, due, never, gone);
     }
+
+
 
     /// The texture side of [`State::heap_buffers`]: textures the title fills
     /// itself (streamed pages, layout-library copies) whose views sit in the
