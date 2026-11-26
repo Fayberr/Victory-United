@@ -7,16 +7,9 @@
 //! `ResourceDescriptorHeap[]` draw or dispatch materializes and refreshes
 //! deferred buffer, constant-buffer, and placed-texture slots.
 
-<<<<<<< HEAD
-use std::sync::Mutex;
-use std::sync::atomic::Ordering;
-||||||| merged common ancestors
-use std::sync::Mutex;
-=======
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
->>>>>>> belobug/main
 
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
@@ -140,21 +133,11 @@ pub(crate) struct HostHeap {
     step: u32,
     /// Slots mirroring the title's; `spare` more follow them.
     count: u32,
-<<<<<<< HEAD
     /// Dynamic slots past `count`: [`DYNAMIC`] in view heaps (more on an
     /// uncapped host heap: `dynamic_uncapped`), none in
     /// sampler heaps. (Upstream falls back to 2^16 on a capped host heap;
     /// ours keeps 2^18 there: 2^16 and 2^17 both ran out in this title.)
-    dynamic: u32,
-||||||| merged common ancestors
-    /// Dynamic slots past `count` (none in sampler heaps): [`DYNAMIC`]
-    /// where the host takes them, else [`MIN_DYNAMIC`].
-    dynamic: u32,
-=======
-    /// Dynamic slots past the title's: [`DYNAMIC`] in a view heap,
-    /// [`SAMPLER_DYNAMIC`] in a capped sampler heap, none in another.
     spare: u32,
->>>>>>> belobug/main
     sampler: bool,
     /// Where the raw twins of the title's slots start
     /// (`victory_shader::emit::raw_views`; 0: there are none), and which of
@@ -199,25 +182,14 @@ pub(crate) struct HostHeap {
     /// index heaps directly, so a slot the title has not rewritten since it
     /// released the resource may still be read, and a freed host resource
     /// read there is a GPU page fault (the console reads stale memory).
-<<<<<<< HEAD
-    ///
-    /// A lock for each slot: one for the heap was what the recording threads
-    /// waited for most (5.6 % of their time, profile waits-1: each descriptor
-    /// made for a draw takes it, and lets go of what the slot held under it).
-    kept: Box<[Mutex<Option<ID3D12Resource>>]>,
-||||||| merged common ancestors
-    kept: Mutex<Vec<Option<ID3D12Resource>>>,
-=======
     kept: Mutex<Vec<Option<ID3D12Resource>>>,
     /// Owning `HostTexture` (and its `texpool::Slot` / `ID3D12Heap`) for any
     /// slot viewing a pooled texture, so the backing heap cannot be freed while
     /// a shader-visible descriptor slot still points into it.
     kept_textures: Mutex<HashMap<u32, Arc<crate::resource::HostTexture>>>,
->>>>>>> belobug/main
     /// Where the search for free dynamic slots starts, and which are taken
     /// (by lists not yet reset).
-<<<<<<< HEAD
-    next: Mutex<(u32, Vec<bool>)>,
+    next: Mutex<(u32, Vec<bool>, usize)>,
     /// How many dynamic slots are free (changed under `next`'s lock): with
     /// fewer than a table needs, the search is not made. Once the world
     /// had taken them all, every later table of the frame searched every
@@ -292,6 +264,429 @@ pub(crate) struct HostHeap {
     /// another's view made stale stays, which says only "may"): a write of
     /// any other view needs nothing of `placed` ([`spans_quick`]).
     spanned: Slots,
+    /// Populated buffer, constant-buffer, and placed-texture slots (`< count`)
+    /// tracked for bindless `ResourceDescriptorHeap[]` materialization.
+    bindless: Mutex<Bindless>,
+    /// A recording thread is preparing the placed-texture slots (others
+    /// skip it rather than wait).
+    recording: std::sync::atomic::AtomicBool,
+    /// Placed-texture slots are waiting to be prepared at recording.
+    record_hint: std::sync::atomic::AtomicBool,
+    /// The placed-texture epoch, and the frame (plus one), recording last
+    /// looked for evicted textures at.
+    record_looked: [AtomicU64; 2],
+    /// The frame the oldest uploaded texture is due a look again in.
+    recheck_at: AtomicU64,
+    /// The rewritten textures ([`crate::resource::rewrites`]) seen.
+    rewrites_seen: AtomicU64,
+    /// The views of memory by address made ([`crate::memory::fill`]).
+    memory_seen: Mutex<u64>,
+}
+
+/// The dword of the stride table the element counts start at.
+const COUNTS_AT: u32 = victory_shader::emit::OWN_SLOTS;
+
+struct StrideTable {
+    _resource: ID3D12Resource,
+    ptr: usize,
+    gpu: u64,
+    len: u32,
+}
+
+impl StrideTable {
+    /// The element counts follow the strides, from [`COUNTS_AT`] dwords on
+    /// (where shaders, which know no heap's size, look for them).
+    fn new(device: &ID3D12Device, len: u32) -> Option<Self> {
+        let bytes = ((u64::from(COUNTS_AT) + u64::from(len)) * 4).max(4);
+        let desc = D3D12_RESOURCE_DESC {
+            Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
+            Width: bytes,
+            Height: 1,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            ..Default::default()
+        };
+        let mut resource: Option<ID3D12Resource> = None;
+        let mut p = std::ptr::null_mut();
+        // SAFETY: plain committed upload buffer creation and persistent CPU map.
+        let gpu = unsafe {
+            device
+                .CreateCommittedResource(
+                    &D3D12_HEAP_PROPERTIES {
+                        Type: D3D12_HEAP_TYPE_UPLOAD,
+                        ..Default::default()
+                    },
+                    D3D12_HEAP_FLAG_NONE,
+                    &desc,
+                    D3D12_RESOURCE_STATE_GENERIC_READ,
+                    None,
+                    &mut resource,
+                )
+                .ok()?;
+            let res = resource.as_ref()?;
+            res.Map(0, None, Some(&mut p)).ok()?;
+            std::ptr::write_bytes(p.cast::<u8>(), 0, bytes as usize);
+            res.GetGPUVirtualAddress()
+        };
+        Some(Self {
+            _resource: resource?,
+            ptr: p as usize,
+            gpu,
+            len,
+        })
+    }
+}
+
+impl Drop for HostHeap {
+    fn drop(&mut self) {
+        if let Ok(mut kept) = self.kept.lock() {
+            for res in kept.drain(..).flatten() {
+                crate::host::retire(res);
+            }
+        }
+        if let Ok(mut texs) = self.kept_textures.lock() {
+            for (_, tex) in texs.drain() {
+                crate::host::retire(tex);
+            }
+        }
+    }
+}
+
+// SAFETY: D3D12 descriptor heaps and resources are free-threaded; mutable
+// slot tracking is synchronized behind mutexes and atomics.
+unsafe impl Send for HostHeap {}
+// SAFETY: as above.
+unsafe impl Sync for HostHeap {}
+
+const BOUNCE_CHUNK: u64 = 256 << 10;
+
+/// Persistent 256-byte-aligned bounce slice for a misaligned bindless CBV.
+struct BounceSlot {
+    gpu: u64,
+    cpu: usize,
+    cap: u32,
+    resource: ID3D12Resource,
+    active: bool,
+}
+
+#[derive(Default)]
+struct Bindless {
+    /// Active `View::is_buffer()` slots: `slot_index -> (view_index, generation)`.
+    slots: BTreeMap<u32, (u32, u32)>,
+    /// Of them, those viewing placed textures.
+    placed_set: BTreeMap<u32, (u32, u32)>,
+    /// Placed-texture slots changed since draws last prepared them.
+    record_pending: BTreeSet<u32>,
+    /// Persistent 256-byte-aligned bounce slices by `slot_index`.
+    cbv_bounce: HashMap<u32, BounceSlot>,
+    /// Backing 256 KiB shared buffers `(resource, cpu_ptr, gpu_va, used_bytes)`.
+    bounce_chunks: Vec<(ID3D12Resource, usize, u64, u64)>,
+    /// Slots written since the plan was made: only they are made again.
+    dirty: BTreeSet<u32>,
+    /// Slots of `dirty` in the order the title wrote them (some may be made
+    /// since): the last ones are the tables of the work being submitted.
+    recent: Vec<u32>,
+    /// What each slot made for bindless access needs at submission.
+    uses: BTreeMap<u32, SlotUse>,
+    /// Of them, those with work at each submission.
+    busy: BTreeSet<u32>,
+    /// Subset of `uses` currently marked unmapped (checked on memory remap).
+    unmapped_slots: std::collections::HashSet<u32>,
+    /// Subset of `uses` holding a direct-memory window (checked for `is_dead`).
+    direct_slots: std::collections::HashSet<u32>,
+    /// The count of windows that died ([`crate::shadow::died`]) the direct
+    /// slots were last looked at with.
+    died_seen: u64,
+    /// Slots came out otherwise since the whole plan was last built, with
+    /// nothing the plan lacks ([`LOOSE_FRAMES`]).
+    loose: bool,
+    /// The host resources those slots view, held by the plans until then.
+    extra: Vec<ID3D12Resource>,
+    /// The released-view, placed-texture, and memory-remap epochs `uses` was checked at.
+    checked: (u64, u64, u64),
+    /// What submissions do for the slots, until they or what they view change.
+    plan: Option<Arc<BindlessPlan>>,
+    /// Placed-texture slots as last prepared at recording: view key,
+    /// texture.
+    recorded: HashMap<u32, (u64, usize)>,
+    /// Placed textures reached through slots, by resource object: the host
+    /// texture (held, so its address names it alone) and the frame last
+    /// uploaded.
+    uploaded: HashMap<usize, (ID3D12Resource, u64)>,
+    /// Uploaded textures by frame, oldest first, to look at again.
+    recheck: VecDeque<(u64, usize)>,
+    /// A frame and the uploads of known textures done in it.
+    rechecks: (u64, u32),
+    /// When the slot-making budget was last refilled, and the microseconds
+    /// left: plans at submission, placed textures at recording.
+    budget: Option<(std::time::Instant, [u64; 2])>,
+    /// The frame (plus one) released views and evicted textures were last
+    /// looked for in: at submission, at recording. Once per frame: the title
+    /// releases and evicts all the time, and each look is over all slots.
+    looked: [u64; 2],
+    /// The ranges of [`MAPPED`] seen.
+    mapped_seen: u64,
+    /// The frame (plus one) the plan's lists of everything were last made in,
+    /// and whether slots changed since.
+    full: (u64, bool),
+}
+
+/// Time for making changed slots, at submission and at recording: an eighth
+/// of the time passing (4 ms of a 30 fps frame), banked up to this many
+/// microseconds; what is left over waits.
+///
+/// shortcut: while the title streams thousands of slots in at once, the
+/// slots not made yet read nothing (null views) for a few frames, as
+/// streaming pops in; making all of them at once stalled frames for
+/// seconds.
+const SLOT_BUDGET_US: u64 = 20_000;
+/// Slots taken to make at once (the rest wait without being looked at).
+const SLOT_CHUNK: usize = 512;
+/// Slots made at each submission whatever time they take.
+const URGENT: usize = 2048;
+
+impl Bindless {
+    /// The slot-making budget, refilled for the time passed since.
+    fn budget(&mut self) -> &mut [u64; 2] {
+        let now = std::time::Instant::now();
+        let (at, left) = self
+            .budget
+            .get_or_insert((now, [SLOT_BUDGET_US; 2]));
+        let add = now.duration_since(*at).as_micros() as u64 / 8;
+        if add > 0 {
+            *at = now;
+            for l in left.iter_mut() {
+                *l = (*l + add).min(SLOT_BUDGET_US);
+            }
+        }
+        left
+    }
+}
+
+/// Slots waiting to be made: at submission, at recording (for the log).
+pub(crate) static BACKLOG: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+
+/// What one bindless slot needs at submission.
+#[derive(Default)]
+struct SlotUse {
+    /// Title memory it reads (host copy, address, bytes).
+    read: Option<(Arc<crate::shadow::Shadow>, usize, usize)>,
+    /// What shaders may write through it.
+    write: Option<(Arc<crate::shadow::Shadow>, usize, usize)>,
+    /// A misaligned constant buffer: bounce slice, title address, bytes.
+    bounce: Option<(usize, u64, u32)>,
+    /// The host resource it views.
+    retained: Option<ID3D12Resource>,
+    /// The title memory it views in place.
+    direct: Option<Arc<crate::shadow::Shadow>>,
+    /// It views a placed texture: the texture's object (0 for none), made
+    /// again when the texture is evicted.
+    placed: Option<usize>,
+    /// It views unmapped memory (looked at again when memory is remapped),
+    /// this of it.
+    unmapped: bool,
+    at: (u64, u64),
+}
+/// ... and at most this many of them per frame.
+const RECHECKS: u32 = 32;
+/// Bumped when views go stale (a resource was released): their views'
+/// generations are checked, all at once, at the next submission.
+static VIEWED: AtomicU64 = AtomicU64::new(0);
+
+/// Bumped when title memory is mapped or unmapped: only unmapped and direct
+/// bindless slots need checking (no full `stale_views` scan over all slots).
+static MEMORY_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// Title memory mapped or unmapped lately (start, end), and how many were.
+static MAPPED: Mutex<(VecDeque<(u64, u64)>, u64)> = Mutex::new((VecDeque::new(), 0));
+/// Of them, those kept; a heap that missed some looks at all its slots.
+const MAPPED_KEPT: usize = 1 << 16;
+
+/// Title memory `[start, end)` was mapped or unmapped.
+pub(crate) fn bindless_memory_changed(start: u64, end: u64) {
+    {
+        let mut m = MAPPED.lock().unwrap_or_else(|e| e.into_inner());
+        if m.0.len() == MAPPED_KEPT {
+            m.0.pop_front();
+        }
+        m.0.push_back((start, end));
+        m.1 += 1;
+    }
+    MEMORY_EPOCH.fetch_add(1, Ordering::Release);
+}
+
+/// The ranges mapped or unmapped since the first `seen`, sorted and merged
+/// (`None` if they are not all known), and how many there were.
+fn mapped_since(seen: u64) -> (Option<Vec<(u64, u64)>>, u64) {
+    let m = MAPPED.lock().unwrap_or_else(|e| e.into_inner());
+    let n = (m.1 - seen) as usize;
+    if n > m.0.len() {
+        return (None, m.1);
+    }
+    let mut ranges: Vec<(u64, u64)> = m.0.iter().skip(m.0.len() - n).copied().collect();
+    let count = m.1;
+    drop(m);
+    ranges.sort_unstable();
+    let mut out: Vec<(u64, u64)> = Vec::new();
+    for (a, b) in ranges {
+        match out.last_mut() {
+            Some(l) if a <= l.1 => l.1 = l.1.max(b),
+            _ => out.push((a, b)),
+        }
+    }
+    (Some(out), count)
+}
+
+/// Whether `[start, end)` meets one of `ranges` (sorted, merged).
+fn meets(ranges: &[(u64, u64)], (start, end): (u64, u64)) -> bool {
+    let i = ranges.partition_point(|r| r.1 <= start);
+    ranges.get(i).is_some_and(|r| r.0 < end)
+}
+
+/// Bindless slots must be checked again: a resource their views name was
+/// released, or title memory was mapped or unmapped.
+pub(crate) fn bindless_viewed_changed() {
+    VIEWED.fetch_add(1, Ordering::Release);
+}
+
+/// Bindless unordered access ranges larger than this are not copied back.
+///
+/// shortcut: copy-back finds what shaders wrote by keeping a range's bytes
+/// before each submission; a bindless slot viewing a title's big shared heap
+/// would cost a copy and a compare of all of it per submission whether or
+/// not a shader writes there. Such ranges stay on the GPU's side.
+const WRITE_CAP: usize = 8 << 20;
+
+/// Gap below which two ranges of one host copy are refreshed as one: the
+/// write-watch answers by 64 KiB page, and fewer, larger askings cost less.
+const READ_GAP: usize = 64 << 10;
+
+/// What a submission does for a heap's bindless slots, made again only when
+/// the slots or what they view change ([`HostHeap::bindless_plan`]).
+pub(crate) struct BindlessPlan {
+    /// Title memory the slots read, merged per host copy (address, bytes):
+    /// refreshed at each submission using the heap.
+    pub(crate) reads: Arc<Vec<(Arc<crate::shadow::Shadow>, usize, usize)>>,
+    /// The unordered access slots' ranges (up to [`WRITE_CAP`] each), merged:
+    /// copied back after a submission whose shaders may write memory.
+    pub(crate) writes: Arc<Vec<(Arc<crate::shadow::Shadow>, usize, usize)>>,
+    /// Misaligned constant buffers: bounce slice, title address, bytes.
+    bounces: Arc<Vec<(usize, u64, u32)>>,
+    /// Of them, those new in this plan.
+    fresh: Vec<(usize, u64, u32)>,
+    fresh_reads: Vec<(Arc<crate::shadow::Shadow>, usize, usize)>,
+    /// The frame (plus one) the bounces were last copied in.
+    copied_in: AtomicU64,
+    /// The host resources the slots view, held while a submission runs.
+    _retained: Arc<Vec<ID3D12Resource>>,
+    /// Those of slots made since `_retained` was listed.
+    _extra: Vec<ID3D12Resource>,
+}
+
+// SAFETY: D3D12 resources are free-threaded; the rest is plain data.
+unsafe impl Send for BindlessPlan {}
+// SAFETY: as above.
+unsafe impl Sync for BindlessPlan {}
+
+impl BindlessPlan {
+    /// Copies the misaligned constant buffers into their bounce slices.
+    ///
+    /// shortcut: all of them once a frame, else only for a plan not copied
+    /// yet: the title writes constants before it points a slot at them.
+    /// Returns the title memory to bring up to date, by the same rule.
+    /// And whether it is all of it (and may be looked at less often where it
+    /// does not change) rather than what is new.
+    pub(crate) fn copy_constants(&self) -> (&[(Arc<crate::shadow::Shadow>, usize, usize)], bool) {
+        let frame = crate::queue::presented() + 1;
+        // Counted for all plans: each is the one before with a few changes.
+        static FRAME: AtomicU64 = AtomicU64::new(0);
+        let all = FRAME.swap(frame, Ordering::AcqRel) != frame;
+        let fresh = self.copied_in.swap(frame, Ordering::AcqRel) == 0;
+        let (bounces, reads) = match (all || cfg!(test), fresh) {
+            (true, _) => (&*self.bounces, &*self.reads),
+            (_, true) => (&self.fresh, &self.fresh_reads),
+            _ => return (&[], false),
+        };
+        if !bounces.is_empty() {
+            let started = std::time::Instant::now();
+            let bytes: u64 = bounces.iter().map(|b| u64::from(b.2)).sum();
+            #[cfg(feature = "diagnostics")]
+            {
+                use crate::copystat::{C, add};
+                add(C::Copies, bounces.len() as u64);
+                add(C::CopyBytes, bytes);
+            }
+            crate::host::in_parallel(bounces, 1024, copy_bounces);
+            let us = started.elapsed().as_micros() as u64;
+            crate::host::PREPARING[0].fetch_add(us, Ordering::Relaxed);
+            crate::host::PREPARING[1].fetch_add(bytes, Ordering::Relaxed);
+        }
+        (reads, all)
+    }
+}
+
+/// Copies constant buffers (destination, title address, bytes), those near
+/// each other in title memory (as sorted lists have them) read at once.
+fn copy_bounces(list: &[(usize, u64, u32)]) {
+    const GAP: u64 = 4 << 10;
+    const RUN: u64 = 128 << 10;
+    let mut scratch = vec![0u8; RUN as usize];
+    let mut rest = list;
+    while let Some(&(_, first, len)) = rest.first() {
+        let mut end = first + u64::from(len);
+        let mut n = 1;
+        for &(_, a, l) in &rest[1..] {
+            let to = end.max(a + u64::from(l));
+            if a < first || a > end + GAP || to - first > RUN {
+                break;
+            }
+            end = to;
+            n += 1;
+        }
+        let (run, after) = rest.split_at(n);
+        rest = after;
+        let whole = (end - first) as usize;
+        let read = n > 1
+            && whole <= scratch.len()
+            && crate::host::read_into(first as *const u8, &mut scratch[..whole]);
+        for &(cpu, a, l) in run {
+            if read {
+                let from = &scratch[(a - first) as usize..][..l as usize];
+                // SAFETY: a bounce slice of at least `l` bytes, ours.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(from.as_ptr(), cpu as *mut u8, l as usize);
+                }
+            } else {
+                crate::host::copy_mapped(cpu as *mut u8, a as *const u8, l as usize, false);
+            }
+        }
+    }
+}
+
+/// `ranges` (host copy, address, bytes) sorted and merged per host copy
+/// where they overlap or lie within `gap` of each other.
+fn merged(
+    mut ranges: Vec<(Arc<crate::shadow::Shadow>, usize, usize)>,
+    gap: usize,
+) -> Vec<(Arc<crate::shadow::Shadow>, usize, usize)> {
+    ranges.sort_unstable_by_key(|(s, a, _)| (Arc::as_ptr(s) as usize, *a));
+    let mut out: Vec<(Arc<crate::shadow::Shadow>, usize, usize)> = Vec::new();
+    for (shadow, address, len) in ranges {
+        if let Some((s, a, l)) = out.last_mut()
+            && Arc::ptr_eq(s, &shadow)
+            && address <= *a + *l + gap
+        {
+            *l = (*l).max(address + len - *a);
+            continue;
+        }
+        out.push((shadow, address, len));
+    }
+    out
 }
 
 struct TiledSlot<T> {
@@ -1887,450 +2282,6 @@ pub(crate) fn slot_story(slot: u32) -> String {
         text
     })
     .unwrap_or_default()
-||||||| merged common ancestors
-    next: Mutex<(u32, Vec<bool>)>,
-=======
-    /// Where the next search starts, the slots taken, and the smallest run
-    /// known not to be free since the last release (`usize::MAX`: none).
-    next: Mutex<(u32, Vec<bool>, usize)>,
-    /// Per-slot element byte stride (`u32`) for structured buffers whose
-    /// stride shader analysis could not recover statically.
-    strides: Option<StrideTable>,
-    /// Populated buffer, constant-buffer, and placed-texture slots (`< count`)
-    /// tracked for bindless `ResourceDescriptorHeap[]` materialization.
-    bindless: Mutex<Bindless>,
-    /// A recording thread is preparing the placed-texture slots (others
-    /// skip it rather than wait).
-    recording: std::sync::atomic::AtomicBool,
-    /// Placed-texture slots are waiting to be prepared at recording.
-    record_hint: std::sync::atomic::AtomicBool,
-    /// The placed-texture epoch, and the frame (plus one), recording last
-    /// looked for evicted textures at.
-    record_looked: [AtomicU64; 2],
-    /// The frame the oldest uploaded texture is due a look again in.
-    recheck_at: AtomicU64,
-    /// The rewritten textures ([`crate::resource::rewrites`]) seen.
-    rewrites_seen: AtomicU64,
-    /// The views of memory by address made ([`crate::memory::fill`]).
-    memory_seen: Mutex<u64>,
-}
-
-/// The dword of the stride table the element counts start at.
-const COUNTS_AT: u32 = victory_shader::emit::OWN_SLOTS;
-
-struct StrideTable {
-    _resource: ID3D12Resource,
-    ptr: usize,
-    gpu: u64,
-    len: u32,
-}
-
-impl StrideTable {
-    /// The element counts follow the strides, from [`COUNTS_AT`] dwords on
-    /// (where shaders, which know no heap's size, look for them).
-    fn new(device: &ID3D12Device, len: u32) -> Option<Self> {
-        let bytes = ((u64::from(COUNTS_AT) + u64::from(len)) * 4).max(4);
-        let desc = D3D12_RESOURCE_DESC {
-            Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
-            Width: bytes,
-            Height: 1,
-            DepthOrArraySize: 1,
-            MipLevels: 1,
-            SampleDesc: DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-            ..Default::default()
-        };
-        let mut resource: Option<ID3D12Resource> = None;
-        let mut p = std::ptr::null_mut();
-        // SAFETY: plain committed upload buffer creation and persistent CPU map.
-        let gpu = unsafe {
-            device
-                .CreateCommittedResource(
-                    &D3D12_HEAP_PROPERTIES {
-                        Type: D3D12_HEAP_TYPE_UPLOAD,
-                        ..Default::default()
-                    },
-                    D3D12_HEAP_FLAG_NONE,
-                    &desc,
-                    D3D12_RESOURCE_STATE_GENERIC_READ,
-                    None,
-                    &mut resource,
-                )
-                .ok()?;
-            let res = resource.as_ref()?;
-            res.Map(0, None, Some(&mut p)).ok()?;
-            std::ptr::write_bytes(p.cast::<u8>(), 0, bytes as usize);
-            res.GetGPUVirtualAddress()
-        };
-        Some(Self {
-            _resource: resource?,
-            ptr: p as usize,
-            gpu,
-            len,
-        })
-    }
-}
-
-impl Drop for HostHeap {
-    fn drop(&mut self) {
-        if let Ok(mut kept) = self.kept.lock() {
-            for res in kept.drain(..).flatten() {
-                crate::host::retire(res);
-            }
-        }
-        if let Ok(mut texs) = self.kept_textures.lock() {
-            for (_, tex) in texs.drain() {
-                crate::host::retire(tex);
-            }
-        }
-    }
-}
-
-// SAFETY: D3D12 descriptor heaps and resources are free-threaded; mutable
-// slot tracking is synchronized behind mutexes and atomics.
-unsafe impl Send for HostHeap {}
-// SAFETY: as above.
-unsafe impl Sync for HostHeap {}
-
-const BOUNCE_CHUNK: u64 = 256 << 10;
-
-/// Persistent 256-byte-aligned bounce slice for a misaligned bindless CBV.
-struct BounceSlot {
-    gpu: u64,
-    cpu: usize,
-    cap: u32,
-    resource: ID3D12Resource,
-    active: bool,
-}
-
-#[derive(Default)]
-struct Bindless {
-    /// Active `View::is_buffer()` slots: `slot_index -> (view_index, generation)`.
-    slots: BTreeMap<u32, (u32, u32)>,
-    /// Of them, those viewing placed textures.
-    placed_set: BTreeMap<u32, (u32, u32)>,
-    /// Placed-texture slots changed since draws last prepared them.
-    record_pending: BTreeSet<u32>,
-    /// Persistent 256-byte-aligned bounce slices by `slot_index`.
-    cbv_bounce: HashMap<u32, BounceSlot>,
-    /// Backing 256 KiB shared buffers `(resource, cpu_ptr, gpu_va, used_bytes)`.
-    bounce_chunks: Vec<(ID3D12Resource, usize, u64, u64)>,
-    /// Slots written since the plan was made: only they are made again.
-    dirty: BTreeSet<u32>,
-    /// Slots of `dirty` in the order the title wrote them (some may be made
-    /// since): the last ones are the tables of the work being submitted.
-    recent: Vec<u32>,
-    /// What each slot made for bindless access needs at submission.
-    uses: BTreeMap<u32, SlotUse>,
-    /// Of them, those with work at each submission.
-    busy: BTreeSet<u32>,
-    /// Subset of `uses` currently marked unmapped (checked on memory remap).
-    unmapped_slots: std::collections::HashSet<u32>,
-    /// Subset of `uses` holding a direct-memory window (checked for `is_dead`).
-    direct_slots: std::collections::HashSet<u32>,
-    /// The count of windows that died ([`crate::shadow::died`]) the direct
-    /// slots were last looked at with.
-    died_seen: u64,
-    /// Slots came out otherwise since the whole plan was last built, with
-    /// nothing the plan lacks ([`LOOSE_FRAMES`]).
-    loose: bool,
-    /// The host resources those slots view, held by the plans until then.
-    extra: Vec<ID3D12Resource>,
-    /// The released-view, placed-texture, and memory-remap epochs `uses` was checked at.
-    checked: (u64, u64, u64),
-    /// What submissions do for the slots, until they or what they view change.
-    plan: Option<Arc<BindlessPlan>>,
-    /// Placed-texture slots as last prepared at recording: view key,
-    /// texture.
-    recorded: HashMap<u32, (u64, usize)>,
-    /// Placed textures reached through slots, by resource object: the host
-    /// texture (held, so its address names it alone) and the frame last
-    /// uploaded.
-    uploaded: HashMap<usize, (ID3D12Resource, u64)>,
-    /// Uploaded textures by frame, oldest first, to look at again.
-    recheck: VecDeque<(u64, usize)>,
-    /// A frame and the uploads of known textures done in it.
-    rechecks: (u64, u32),
-    /// When the slot-making budget was last refilled, and the microseconds
-    /// left: plans at submission, placed textures at recording.
-    budget: Option<(std::time::Instant, [u64; 2])>,
-    /// The frame (plus one) released views and evicted textures were last
-    /// looked for in: at submission, at recording. Once per frame: the title
-    /// releases and evicts all the time, and each look is over all slots.
-    looked: [u64; 2],
-    /// The ranges of [`MAPPED`] seen.
-    mapped_seen: u64,
-    /// The frame (plus one) the plan's lists of everything were last made in,
-    /// and whether slots changed since.
-    full: (u64, bool),
-}
-
-/// Time for making changed slots, at submission and at recording: an eighth
-/// of the time passing (4 ms of a 30 fps frame), banked up to this many
-/// microseconds; what is left over waits.
-///
-/// shortcut: while the title streams thousands of slots in at once, the
-/// slots not made yet read nothing (null views) for a few frames, as
-/// streaming pops in; making all of them at once stalled frames for
-/// seconds.
-const SLOT_BUDGET_US: u64 = 20_000;
-/// Slots taken to make at once (the rest wait without being looked at).
-const SLOT_CHUNK: usize = 512;
-/// Slots made at each submission whatever time they take.
-const URGENT: usize = 2048;
-
-impl Bindless {
-    /// The slot-making budget, refilled for the time passed since.
-    fn budget(&mut self) -> &mut [u64; 2] {
-        let now = std::time::Instant::now();
-        let (at, left) = self
-            .budget
-            .get_or_insert((now, [SLOT_BUDGET_US; 2]));
-        let add = now.duration_since(*at).as_micros() as u64 / 8;
-        if add > 0 {
-            *at = now;
-            for l in left.iter_mut() {
-                *l = (*l + add).min(SLOT_BUDGET_US);
-            }
-        }
-        left
-    }
-}
-
-/// Slots waiting to be made: at submission, at recording (for the log).
-pub(crate) static BACKLOG: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-
-/// What one bindless slot needs at submission.
-#[derive(Default)]
-struct SlotUse {
-    /// Title memory it reads (host copy, address, bytes).
-    read: Option<(Arc<crate::shadow::Shadow>, usize, usize)>,
-    /// What shaders may write through it.
-    write: Option<(Arc<crate::shadow::Shadow>, usize, usize)>,
-    /// A misaligned constant buffer: bounce slice, title address, bytes.
-    bounce: Option<(usize, u64, u32)>,
-    /// The host resource it views.
-    retained: Option<ID3D12Resource>,
-    /// The title memory it views in place.
-    direct: Option<Arc<crate::shadow::Shadow>>,
-    /// It views a placed texture: the texture's object (0 for none), made
-    /// again when the texture is evicted.
-    placed: Option<usize>,
-    /// It views unmapped memory (looked at again when memory is remapped),
-    /// this of it.
-    unmapped: bool,
-    at: (u64, u64),
-}
-
-/// Placed textures reached only through bindless slots are uploaded when a
-/// slot first reaches them, and then looked at again (their memory hashed)
-/// at most this often, in frames, ...
-///
-/// shortcut: a texture the title rewrites in place without writing a slot
-/// shows its new contents up to this many frames late through bindless
-/// access (tables still upload what their draws read). Hashing all of them
-/// at each submission cost seconds per frame while the world streams in.
-const RECHECK_FRAMES: u64 = 15;
-/// ... and at most this many of them per frame.
-const RECHECKS: u32 = 32;
-
-/// Bumped when views go stale (a resource was released): their views'
-/// generations are checked, all at once, at the next submission.
-static VIEWED: AtomicU64 = AtomicU64::new(0);
-
-/// Bumped when title memory is mapped or unmapped: only unmapped and direct
-/// bindless slots need checking (no full `stale_views` scan over all slots).
-static MEMORY_EPOCH: AtomicU64 = AtomicU64::new(0);
-
-/// Title memory mapped or unmapped lately (start, end), and how many were.
-static MAPPED: Mutex<(VecDeque<(u64, u64)>, u64)> = Mutex::new((VecDeque::new(), 0));
-/// Of them, those kept; a heap that missed some looks at all its slots.
-const MAPPED_KEPT: usize = 1 << 16;
-
-/// Title memory `[start, end)` was mapped or unmapped.
-pub(crate) fn bindless_memory_changed(start: u64, end: u64) {
-    {
-        let mut m = MAPPED.lock().unwrap_or_else(|e| e.into_inner());
-        if m.0.len() == MAPPED_KEPT {
-            m.0.pop_front();
-        }
-        m.0.push_back((start, end));
-        m.1 += 1;
-    }
-    MEMORY_EPOCH.fetch_add(1, Ordering::Release);
-}
-
-/// The ranges mapped or unmapped since the first `seen`, sorted and merged
-/// (`None` if they are not all known), and how many there were.
-fn mapped_since(seen: u64) -> (Option<Vec<(u64, u64)>>, u64) {
-    let m = MAPPED.lock().unwrap_or_else(|e| e.into_inner());
-    let n = (m.1 - seen) as usize;
-    if n > m.0.len() {
-        return (None, m.1);
-    }
-    let mut ranges: Vec<(u64, u64)> = m.0.iter().skip(m.0.len() - n).copied().collect();
-    let count = m.1;
-    drop(m);
-    ranges.sort_unstable();
-    let mut out: Vec<(u64, u64)> = Vec::new();
-    for (a, b) in ranges {
-        match out.last_mut() {
-            Some(l) if a <= l.1 => l.1 = l.1.max(b),
-            _ => out.push((a, b)),
-        }
-    }
-    (Some(out), count)
-}
-
-/// Whether `[start, end)` meets one of `ranges` (sorted, merged).
-fn meets(ranges: &[(u64, u64)], (start, end): (u64, u64)) -> bool {
-    let i = ranges.partition_point(|r| r.1 <= start);
-    ranges.get(i).is_some_and(|r| r.0 < end)
-}
-
-/// Bindless slots must be checked again: a resource their views name was
-/// released, or title memory was mapped or unmapped.
-pub(crate) fn bindless_viewed_changed() {
-    VIEWED.fetch_add(1, Ordering::Release);
-}
-
-/// Bindless unordered access ranges larger than this are not copied back.
-///
-/// shortcut: copy-back finds what shaders wrote by keeping a range's bytes
-/// before each submission; a bindless slot viewing a title's big shared heap
-/// would cost a copy and a compare of all of it per submission whether or
-/// not a shader writes there. Such ranges stay on the GPU's side.
-const WRITE_CAP: usize = 8 << 20;
-
-/// Gap below which two ranges of one host copy are refreshed as one: the
-/// write-watch answers by 64 KiB page, and fewer, larger askings cost less.
-const READ_GAP: usize = 64 << 10;
-
-/// What a submission does for a heap's bindless slots, made again only when
-/// the slots or what they view change ([`HostHeap::bindless_plan`]).
-pub(crate) struct BindlessPlan {
-    /// Title memory the slots read, merged per host copy (address, bytes):
-    /// refreshed at each submission using the heap.
-    pub(crate) reads: Arc<Vec<(Arc<crate::shadow::Shadow>, usize, usize)>>,
-    /// The unordered access slots' ranges (up to [`WRITE_CAP`] each), merged:
-    /// copied back after a submission whose shaders may write memory.
-    pub(crate) writes: Arc<Vec<(Arc<crate::shadow::Shadow>, usize, usize)>>,
-    /// Misaligned constant buffers: bounce slice, title address, bytes.
-    bounces: Arc<Vec<(usize, u64, u32)>>,
-    /// Of them, those new in this plan.
-    fresh: Vec<(usize, u64, u32)>,
-    fresh_reads: Vec<(Arc<crate::shadow::Shadow>, usize, usize)>,
-    /// The frame (plus one) the bounces were last copied in.
-    copied_in: AtomicU64,
-    /// The host resources the slots view, held while a submission runs.
-    _retained: Arc<Vec<ID3D12Resource>>,
-    /// Those of slots made since `_retained` was listed.
-    _extra: Vec<ID3D12Resource>,
-}
-
-// SAFETY: D3D12 resources are free-threaded; the rest is plain data.
-unsafe impl Send for BindlessPlan {}
-// SAFETY: as above.
-unsafe impl Sync for BindlessPlan {}
-
-impl BindlessPlan {
-    /// Copies the misaligned constant buffers into their bounce slices.
-    ///
-    /// shortcut: all of them once a frame, else only for a plan not copied
-    /// yet: the title writes constants before it points a slot at them.
-    /// Returns the title memory to bring up to date, by the same rule.
-    /// And whether it is all of it (and may be looked at less often where it
-    /// does not change) rather than what is new.
-    pub(crate) fn copy_constants(&self) -> (&[(Arc<crate::shadow::Shadow>, usize, usize)], bool) {
-        let frame = crate::queue::presented() + 1;
-        // Counted for all plans: each is the one before with a few changes.
-        static FRAME: AtomicU64 = AtomicU64::new(0);
-        let all = FRAME.swap(frame, Ordering::AcqRel) != frame;
-        let fresh = self.copied_in.swap(frame, Ordering::AcqRel) == 0;
-        let (bounces, reads) = match (all || cfg!(test), fresh) {
-            (true, _) => (&*self.bounces, &*self.reads),
-            (_, true) => (&self.fresh, &self.fresh_reads),
-            _ => return (&[], false),
-        };
-        if !bounces.is_empty() {
-            let started = std::time::Instant::now();
-            let bytes: u64 = bounces.iter().map(|b| u64::from(b.2)).sum();
-            #[cfg(feature = "diagnostics")]
-            {
-                use crate::copystat::{C, add};
-                add(C::Copies, bounces.len() as u64);
-                add(C::CopyBytes, bytes);
-            }
-            crate::host::in_parallel(bounces, 1024, copy_bounces);
-            let us = started.elapsed().as_micros() as u64;
-            crate::host::PREPARING[0].fetch_add(us, Ordering::Relaxed);
-            crate::host::PREPARING[1].fetch_add(bytes, Ordering::Relaxed);
-        }
-        (reads, all)
-    }
-}
-
-/// Copies constant buffers (destination, title address, bytes), those near
-/// each other in title memory (as sorted lists have them) read at once.
-fn copy_bounces(list: &[(usize, u64, u32)]) {
-    const GAP: u64 = 4 << 10;
-    const RUN: u64 = 128 << 10;
-    let mut scratch = vec![0u8; RUN as usize];
-    let mut rest = list;
-    while let Some(&(_, first, len)) = rest.first() {
-        let mut end = first + u64::from(len);
-        let mut n = 1;
-        for &(_, a, l) in &rest[1..] {
-            let to = end.max(a + u64::from(l));
-            if a < first || a > end + GAP || to - first > RUN {
-                break;
-            }
-            end = to;
-            n += 1;
-        }
-        let (run, after) = rest.split_at(n);
-        rest = after;
-        let whole = (end - first) as usize;
-        let read = n > 1
-            && whole <= scratch.len()
-            && crate::host::read_into(first as *const u8, &mut scratch[..whole]);
-        for &(cpu, a, l) in run {
-            if read {
-                let from = &scratch[(a - first) as usize..][..l as usize];
-                // SAFETY: a bounce slice of at least `l` bytes, ours.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(from.as_ptr(), cpu as *mut u8, l as usize);
-                }
-            } else {
-                crate::host::copy_mapped(cpu as *mut u8, a as *const u8, l as usize, false);
-            }
-        }
-    }
-}
-
-/// `ranges` (host copy, address, bytes) sorted and merged per host copy
-/// where they overlap or lie within `gap` of each other.
-fn merged(
-    mut ranges: Vec<(Arc<crate::shadow::Shadow>, usize, usize)>,
-    gap: usize,
-) -> Vec<(Arc<crate::shadow::Shadow>, usize, usize)> {
-    ranges.sort_unstable_by_key(|(s, a, _)| (Arc::as_ptr(s) as usize, *a));
-    let mut out: Vec<(Arc<crate::shadow::Shadow>, usize, usize)> = Vec::new();
-    for (shadow, address, len) in ranges {
-        if let Some((s, a, l)) = out.last_mut()
-            && Arc::ptr_eq(s, &shadow)
-            && address <= *a + *l + gap
-        {
-            *l = (*l).max(address + len - *a);
-            continue;
-        }
-        out.push((shadow, address, len));
-    }
-    out
->>>>>>> belobug/main
 }
 
 /// Host heaps' GPU ranges (start, bytes, bytes per slot, sampler), for
@@ -2437,7 +2388,6 @@ pub(crate) fn probe_view_limit() {
 
 /// Slots past the title's in a view heap, for tables a draw needs made
 /// afresh (constant buffers copied per draw). A list holds the slots it
-<<<<<<< HEAD
 /// took until it is reset (its submissions have run) or released.
 /// 2^16 ran out in the world ("no free dynamic descriptor slots", run 11;
 /// upstream PR #336 takes 2^18). On a host heap capped at 1,000,000 views
@@ -2448,24 +2398,10 @@ pub(crate) fn probe_view_limit() {
 /// for it, and the card stopped within frames). 2^18 leaves 737,000; a
 /// table past them is made afresh in these slots like any other.
 pub(crate) const DYNAMIC: u32 = 1 << 18;
-||||||| merged common ancestors
-/// took until it is reset (its submissions have run) or released.
-/// 2^16 ran out seconds into the world (every world run on an RX 9070 XT,
-/// each a device removal shortly after; #59).
-const DYNAMIC: u32 = 1 << 18;
-=======
-/// took until it is reset (its submissions have run) or released. A world
-/// frame of some 7,000 draws held over 400,000 of 2^19, and tables of 150
-/// slots no longer fit: the draws that needed them were dropped (the
-/// subsurface resolve, tree imposters). `victory_shader::emit::VIEW_SLOTS`
-/// is the title's 1,245,184 slots, these and those of [`crate::memory`].
-const DYNAMIC: u32 = 1 << 20;
 /// Smaller dynamic reserve when the host caps the whole view heap at
 /// [`PORTABLE_VIEWS`].
 const DYNAMIC_CAPPED: u32 = 1 << 16;
->>>>>>> belobug/main
 
-<<<<<<< HEAD
 /// [`DYNAMIC`] for a heap of `count` title slots whose null slot is `null`
 /// (0: none): up to four times as many where the host heap has the room (a
 /// host that takes more than [`PORTABLE_VIEWS`]; `VICTORY_DYNAMIC_SLOTS`
@@ -2516,11 +2452,7 @@ fn dynamic_slots_on(null: u32, asked: Option<u32>) -> u32 {
     let most = (null / 2).max(DYNAMIC);
     asked.unwrap_or(DYNAMIC).clamp(DYNAMIC, most)
 }
-||||||| merged common ancestors
-/// The dynamic slots of a heap whose host would not take [`DYNAMIC`] more
-/// (a capped heap, NVIDIA): the title's slots keep their room first.
-const MIN_DYNAMIC: u32 = 1 << 16;
-=======
+
 /// The host's limit for shader-visible sampler heaps, on every binding
 /// tier.
 const SAMPLERS: u32 = D3D12_MAX_SHADER_VISIBLE_SAMPLER_HEAP_SIZE;
@@ -2633,7 +2565,6 @@ fn plan_note(part: usize, started: std::time::Instant, walked: usize, found: usi
         tracing::info!("bindless plan per frame{text}");
     }
 }
->>>>>>> belobug/main
 
 impl HostHeap {
     pub(crate) fn new(sampler: bool, count: u32) -> Option<Self> {
@@ -2655,10 +2586,8 @@ impl HostHeap {
                     })
             }
         };
-<<<<<<< HEAD
         // A view heap ends at the null slot shaders clamp view indices to
-        // (`probe_view_limit`), whatever the title's own count: the title's
-        // slots, then the dynamic ones, then null up to and with that slot.
+        // (`probe_view_limit`), whatever the title's own count.
         if !sampler {
             probe_view_limit();
         }
@@ -2668,70 +2597,25 @@ impl HostHeap {
             victory_shader::emit::view_heap_limit()
         };
         let raw = if sampler { 0 } else { victory_shader::emit::raw_views() };
-        let extra = if sampler { 0 } else { dynamic_slots(count, null) };
-        if !sampler {
-            tracing::info!(count, extra, null, "view heap: the title's slots, dynamic slots, the null slot");
-        }
-        let (heap, count, size) = if null == 0 {
-            match make(count + extra) {
-                Ok(heap) => (heap, count, count + extra),
-                Err(e) => {
-                    tracing::warn!(error = %e, count, sampler, "no host descriptor heap");
-                    return None;
-                }
-||||||| merged common ancestors
-        // The larger dynamic range only where the host takes it on top of
-        // every title slot; else the smaller one, and the cap after that.
-        let (heap, count, extra) = if sampler {
-            match make(count) {
-                Ok(heap) => (heap, count, 0),
-                Err(e) => {
-                    tracing::warn!(error = %e, count, sampler, "no host descriptor heap");
-                    return None;
-                }
-=======
         let make = |count: u32| {
             if sampler {
                 return create(count);
->>>>>>> belobug/main
             }
-<<<<<<< HEAD
-        } else {
-            let size = if raw == 0 { null + 1 } else { 2 * raw };
-            let fitted = if count + extra <= null {
-                count
-            } else {
-                // shortcut: descriptors past the host's limit are left out; a title that reaches
-                // them needs remapping. They read the null slot instead.
-                tracing::warn!(count, "host view heap capped at {size}; views past it read a null slot");
-                null - extra
-            };
-            match make(size) {
-                Ok(heap) => (heap, fitted, size),
-||||||| merged common ancestors
-        } else if let Ok(heap) = make(count + DYNAMIC) {
-            (heap, count, DYNAMIC)
-        } else {
-            match make(count + MIN_DYNAMIC) {
-                Ok(heap) => (heap, count, MIN_DYNAMIC),
-                Err(e) if count + MIN_DYNAMIC > PORTABLE_VIEWS => {
-                    // shortcut: descriptors past the host's limit are left
-                    // out; a title that reaches them needs remapping.
-                    tracing::warn!(error = %e, count, "host view heap capped at {PORTABLE_VIEWS}");
-                    (make(PORTABLE_VIEWS).ok()?, PORTABLE_VIEWS - MIN_DYNAMIC, MIN_DYNAMIC)
-                }
-=======
             // A host with room for fewer slots gets no padding.
-            let slots = view_slots(count);
+            let slots = if raw == 0 {
+                view_slots(count).max(null + 1)
+            } else {
+                2 * raw
+            };
             create(slots).or_else(|_| create(count + crate::memory::SLOTS))
         };
         if sampler && count > SAMPLERS {
             // shortcut: samplers past the host's limit are left out; tables
             // reaching them are made afresh in the dynamic slots.
             tracing::warn!(count, "host sampler heap capped at {SAMPLERS}");
+            let size = SAMPLERS;
             let heap = match make(SAMPLERS) {
                 Ok(heap) => heap,
->>>>>>> belobug/main
                 Err(e) => {
                     tracing::warn!(error = %e, count, size, "no host view heap");
                     return None;
@@ -2790,16 +2674,12 @@ impl HostHeap {
                 host.device.GetDescriptorHandleIncrementSize(kind),
             )
         };
-<<<<<<< HEAD
-        tracing::debug!(count, sampler, "host descriptor heap");
+        tracing::info!(count, extra, sampler, "host descriptor heap");
         // The null slot every index past the heap reads is the heap's last,
         // past the dynamic slots (`probe_view_limit`): all of them are free.
         let taken = vec![false; extra as usize];
-||||||| merged common ancestors
-        tracing::debug!(count, sampler, "host descriptor heap");
-=======
-        tracing::info!(count, extra, sampler, "host descriptor heap");
->>>>>>> belobug/main
+        // SAFETY: a plain query of a live heap.
+        let size = unsafe { heap.GetDesc() }.NumDescriptors;
         // SAFETY: a live shader-visible heap.
         let gpu = unsafe { heap.GetGPUDescriptorHandleForHeapStart().ptr };
         GPU_RANGES.lock().unwrap_or_else(|e| e.into_inner()).push((
@@ -2808,7 +2688,6 @@ impl HostHeap {
             u64::from(step),
             sampler,
         ));
-<<<<<<< HEAD
         let strides = (!sampler)
             .then(|| {
                 let bytes = u64::from(victory_shader::emit::SLOT_STRIDES_COUNT) * 4;
@@ -2837,14 +2716,6 @@ impl HostHeap {
             })
             .flatten();
         let queued = std::sync::Arc::new(Queued::new(if sampler { 0 } else { count }));
-||||||| merged common ancestors
-=======
-        let strides = if sampler {
-            None
-        } else {
-            StrideTable::new(&host.device, count + extra)
-        };
->>>>>>> belobug/main
         let h = HostHeap {
             heap,
             cpu,
@@ -2852,7 +2723,6 @@ impl HostHeap {
             count,
             spare: extra,
             sampler,
-<<<<<<< HEAD
             raw,
             twins: (0..if raw == 0 { 0 } else { count + extra }).map(|_| std::sync::atomic::AtomicBool::new(false)).collect(),
             #[cfg(feature = "diagnostics")]
@@ -2867,8 +2737,8 @@ impl HostHeap {
             waiting: Mutex::default(),
             away: Mutex::default(),
             nulls: (0..if sampler { 0 } else { count }).map(|_| std::sync::atomic::AtomicU8::new(0)).collect(),
-            kept: (0..count + extra).map(|_| Mutex::new(None)).collect(),
-            next: Mutex::new((0, taken)),
+            kept: Mutex::new(vec![None; (count + extra) as usize]),
+            next: Mutex::new((0, taken, usize::MAX)),
             free: std::sync::atomic::AtomicU32::new(extra),
             too_long: std::sync::atomic::AtomicU32::new(u32::MAX),
             strides,
@@ -2896,16 +2766,7 @@ impl HostHeap {
             has_tiled: std::sync::atomic::AtomicBool::new(false),
             tiled_shown: Mutex::default(),
             spanned: Slots::new((count + extra) as usize),
-||||||| merged common ancestors
-            made: Mutex::new(vec![0; count as usize]),
-            kept: Mutex::new(vec![None; (count + extra) as usize]),
-            next: Mutex::new((0, vec![false; extra as usize])),
-=======
-            made: Mutex::new(vec![0; count as usize]),
-            kept: Mutex::new(vec![None; (count + extra) as usize]),
             kept_textures: Mutex::default(),
-            next: Mutex::new((0, vec![false; extra as usize], usize::MAX)),
-            strides,
             bindless: Mutex::default(),
             recording: std::sync::atomic::AtomicBool::new(false),
             record_hint: std::sync::atomic::AtomicBool::new(false),
@@ -2913,25 +2774,18 @@ impl HostHeap {
             recheck_at: AtomicU64::new(u64::MAX),
             rewrites_seen: AtomicU64::new(0),
             memory_seen: Mutex::new(0),
->>>>>>> belobug/main
         };
         // A slot never written is undefined: shaders reading one (a slot
         // the title wrote in a way we do not know, or a table entry no
         // used-resource entry names) read a wild address. Every slot starts
         // null instead.
         let started = std::time::Instant::now();
-<<<<<<< HEAD
-        if let Err(e) = h.fill_null(kind, size) {
-||||||| merged common ancestors
-        if let Err(e) = h.fill_null(kind, count + extra) {
-=======
         // SAFETY: a plain call on a live heap.
         let total = unsafe { h.heap.GetDesc() }.NumDescriptors;
         if !sampler && total < victory_shader::emit::VIEW_SLOTS {
             tracing::warn!(total, "a view heap shorter than shaders keep their indices in");
         }
         if let Err(e) = h.fill_null(kind, total) {
->>>>>>> belobug/main
             tracing::warn!(error = %e, "host descriptor heap not made null");
         }
         tracing::debug!(ms = started.elapsed().as_millis(), "host descriptor heap made null");
@@ -2966,37 +2820,9 @@ impl HostHeap {
             let at = |i: u32| D3D12_CPU_DESCRIPTOR_HANDLE {
                 ptr: start.ptr + (i * self.step) as usize,
             };
-<<<<<<< HEAD
             // (The twins are null buffer views.)
             let ends = if self.raw == 0 { [total, total] } else { [self.raw.min(total), total] };
-||||||| merged common ancestors
-            if self.sampler {
-                null_sampler(start);
-            } else {
-                null_view(start);
-            }
-            let mut filled = 1;
-            while filled < BLOCK {
-                let n = filled.min(BLOCK - filled);
-                host.device.CopyDescriptorsSimple(n, at(filled), start, kind);
-                filled += n;
-            }
-=======
-            if self.sampler {
-                null_sampler(start);
-            } else {
-                null_view(start);
-            }
-            let mut filled = 1;
-            while filled < BLOCK {
-                let n = filled.min(BLOCK - filled);
-                host.device
-                    .CopyDescriptorsSimple(n, at(filled), start, kind);
-                filled += n;
-            }
->>>>>>> belobug/main
             let mut done = 0;
-<<<<<<< HEAD
             for (twin, end) in ends.into_iter().enumerate() {
                 if done == end {
                     continue;
@@ -3019,18 +2845,6 @@ impl HostHeap {
                     host.device.CopyDescriptorsSimple(n, self.cpu(done), start, kind);
                     done += n;
                 }
-||||||| merged common ancestors
-            while done < total {
-                let n = BLOCK.min(total - done);
-                host.device.CopyDescriptorsSimple(n, self.cpu(done), start, kind);
-                done += n;
-=======
-            while done < total {
-                let n = BLOCK.min(total - done);
-                host.device
-                    .CopyDescriptorsSimple(n, self.cpu(done), start, kind);
-                done += n;
->>>>>>> belobug/main
             }
         }
         Ok(())
@@ -3082,22 +2896,6 @@ impl HostHeap {
         if n == 0 || self.spare == 0 {
             return None;
         }
-<<<<<<< HEAD
-        #[cfg(feature = "diagnostics")]
-        let started = std::time::Instant::now();
-        #[cfg(feature = "diagnostics")]
-        crate::copystat::add(crate::copystat::C::DynamicAsked, 1);
-        let mut guard = locked(&self.next, 13);
-        let (next, taken) = &mut *guard;
-        let free = self.free.load(std::sync::atomic::Ordering::Relaxed);
-        #[cfg(feature = "diagnostics")]
-        DYNAMIC_LOW.fetch_min(free, std::sync::atomic::Ordering::Relaxed);
-        let room = free >= n;
-        let enough = room && n < self.too_long.load(std::sync::atomic::Ordering::Relaxed);
-||||||| merged common ancestors
-        let mut guard = self.next.lock().unwrap_or_else(|e| e.into_inner());
-        let (next, taken) = &mut *guard;
-=======
         if n > self.spare {
             static ONCE: std::sync::Once = std::sync::Once::new();
             ONCE.call_once(|| {
@@ -3110,70 +2908,27 @@ impl HostHeap {
             });
             return None;
         }
-        let spare = self.spare as usize;
-        let mut guard = self.next.lock().unwrap_or_else(|e| e.into_inner());
+        #[cfg(feature = "diagnostics")]
+        let started = std::time::Instant::now();
+        #[cfg(feature = "diagnostics")]
+        crate::copystat::add(crate::copystat::C::DynamicAsked, 1);
+        let mut guard = locked(&self.next, 13);
         let (next, taken, no_run) = &mut *guard;
->>>>>>> belobug/main
+        let free = self.free.load(std::sync::atomic::Ordering::Relaxed);
+        #[cfg(feature = "diagnostics")]
+        DYNAMIC_LOW.fetch_min(free, std::sync::atomic::Ordering::Relaxed);
+        let room = free >= n;
+        let enough = room && n < self.too_long.load(std::sync::atomic::Ordering::Relaxed);
         let n = n as usize;
-<<<<<<< HEAD
-        let found = enough
-            .then(|| find_dynamic_run(taken, *next as usize, n))
-            .flatten();
-||||||| merged common ancestors
-        // Search from `next` on, then from the start.
-        let starts = (*next as usize..self.dynamic as usize).chain(0..*next as usize);
-        let mut run = 0;
-        let mut found = None;
-        let mut last = usize::MAX;
-        for at in starts {
-            // A run cannot wrap past the end.
-            if at != last.wrapping_add(1) {
-                run = 0;
-            }
-            last = at;
-            run = if taken[at] { 0 } else { run + 1 };
-            if run == n {
-                found = Some(at + 1 - n);
-                break;
-            }
-        }
-=======
-        // A search that found no run of this size (or of a smaller one)
-        // since the last release finds none now: without this, each table
-        // of a frame that does not fit walked all the slots again, and a
-        // heavy place took 7 to 11 seconds a frame (runs sw1, sw2).
+        // A search that found no run of this size since the last release
+        // finds none now: without this, each table of a frame that does
+        // not fit walked all the slots again (runs sw1, sw2).
         if n >= *no_run {
             return None;
         }
-        // Releases come all the time and each allows a search again: no
-        // more than a few failed walks a frame.
-        static FAILED: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-        const WALKS: u64 = 8;
-        let frame = crate::queue::presented();
-        if FAILED[0].swap(frame, Ordering::Relaxed) != frame {
-            FAILED[1].store(0, Ordering::Relaxed);
-        }
-        if FAILED[1].load(Ordering::Relaxed) >= WALKS {
-            return None;
-        }
-        // Search from `next` on, then from the start.
-        let starts = (*next as usize..spare).chain(0..*next as usize);
-        let mut run = 0;
-        let mut found = None;
-        let mut last = usize::MAX;
-        for at in starts {
-            // A run cannot wrap past the end.
-            if at != last.wrapping_add(1) {
-                run = 0;
-            }
-            last = at;
-            run = if taken[at] { 0 } else { run + 1 };
-            if run == n {
-                found = Some(at + 1 - n);
-                break;
-            }
-        }
->>>>>>> belobug/main
+        let found = enough
+            .then(|| find_dynamic_run(taken, *next as usize, n))
+            .flatten();
         let Some(first) = found else {
             if enough {
                 self.too_long.fetch_min(n as u32, std::sync::atomic::Ordering::Relaxed);
@@ -3188,8 +2943,8 @@ impl HostHeap {
             }]
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             static ONCE: std::sync::Once = std::sync::Once::new();
-<<<<<<< HEAD
-            ONCE.call_once(|| tracing::warn!(n, "no free dynamic descriptor slots: a table is not made"));
+            ONCE.call_once(|| tracing::warn!(n, self.spare, "no free dynamic descriptor slots: a table is not made"));
+            *no_run = n;
             REFUSED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             #[cfg(feature = "diagnostics")]
             {
@@ -3197,35 +2952,13 @@ impl HostHeap {
                 add(C::DynamicRefused, 1);
                 add(C::DynamicNs, started.elapsed().as_nanos() as u64);
             }
-||||||| merged common ancestors
-            ONCE.call_once(|| tracing::warn!(n, "no free dynamic descriptor slots: a table is not made"));
-=======
-            ONCE.call_once(|| tracing::warn!(n, spare, "no free dynamic descriptor slots: a table is not made"));
-            *no_run = n;
-            FAILED[1].fetch_add(1, Ordering::Relaxed);
->>>>>>> belobug/main
             return None;
         };
         #[cfg(feature = "diagnostics")]
         crate::copystat::add(crate::copystat::C::DynamicNs, started.elapsed().as_nanos() as u64);
         taken[first..first + n].fill(true);
-<<<<<<< HEAD
         self.free.fetch_sub(n as u32, std::sync::atomic::Ordering::Relaxed);
-        *next = ((first + n) % self.dynamic as usize) as u32;
-||||||| merged common ancestors
-        *next = ((first + n) % self.dynamic as usize) as u32;
-=======
-        #[cfg(feature = "diagnostics")]
-        if !self.sampler {
-            static MADE: AtomicU64 = AtomicU64::new(0);
-            let before = MADE.fetch_add(n as u64, Ordering::Relaxed);
-            if before >> 20 != (before + n as u64) >> 20 {
-                let used = taken.iter().filter(|t| **t).count();
-                tracing::info!(used, spare, "dynamic descriptor slots");
-            }
-        }
-        *next = ((first + n) % spare) as u32;
->>>>>>> belobug/main
+        *next = ((first + n) % self.spare as usize) as u32;
         Some(self.count + first as u32)
     }
 
@@ -4472,32 +4205,14 @@ impl HostHeap {
     /// Makes slot `index` (a dynamic one) from `view`; a null view if the
     /// host cannot.
     pub(crate) fn make_at(&self, index: u32, view: &View) {
-<<<<<<< HEAD
         let made = make(view, self.cpu(index));
         if made.is_none() {
-            null_for(view, self.cpu(index));
-||||||| merged common ancestors
-        let kept = make(view, self.cpu(index));
-        if kept.is_none() {
-            null_for(view, self.cpu(index));
-=======
-        let kept = make(view, self.cpu(index));
-        let ok = kept.is_some();
-        if !ok {
             if self.sampler {
                 self.null_sampler(index);
             } else {
                 null_for(view, self.cpu(index));
             }
         }
-        self.keep_with_view(index, kept.flatten(), view);
-        if ok {
-            self.set_stride_count(index, view_stride(view), view_count(view));
-        } else {
-            self.set_stride(index, 0);
->>>>>>> belobug/main
-        }
-<<<<<<< HEAD
         self.keep(index, made.and_then(|m| m.kept));
     }
 
@@ -4561,10 +4276,6 @@ impl HostHeap {
         let Some(host) = host() else { return };
         // SAFETY: a slot of our heap, and one of this thread's heap.
         unsafe { host.device.CopyDescriptorsSimple(1, self.cpu(to), from, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) };
-||||||| merged common ancestors
-        self.keep(index, kept.flatten());
-=======
->>>>>>> belobug/main
     }
 
     /// Makes slot `index` read nothing: a null view, or a plain sampler.
@@ -4580,7 +4291,6 @@ impl HostHeap {
         self.set_stride(index, 0);
     }
 
-<<<<<<< HEAD
     /// Evicts any host descriptor slots in `0..self.count` whose kept resource
     /// pointer matches an evicted resource in `victims`: writes a null view,
     /// clears `kept` (retiring the reference), `made`, `placed`, `textures`,
@@ -4594,14 +4304,14 @@ impl HostHeap {
         let mut evicted_slots: Vec<u32> = Vec::new();
         let mut removed_objs: Vec<ID3D12Resource> = Vec::new();
         {
-            let limit = self.kept.len().min(self.count as usize);
+            let mut kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
+            let limit = kept.len().min(self.count as usize);
             for i in 0..limit {
-                let mut slot = self.kept[i].lock().unwrap_or_else(|e| e.into_inner());
-                if slot.as_ref().is_some_and(|r| {
+                if kept[i].as_ref().is_some_and(|r| {
                     victims.contains(&(windows::core::Interface::as_raw(r) as usize))
                 }) {
                     null_view(self.cpu(i as u32));
-                    if let Some(old) = slot.take() {
+                    if let Some(old) = kept[i].take() {
                         removed_objs.push(old);
                     }
                     evicted_slots.push(i as u32);
@@ -4665,35 +4375,10 @@ impl HostHeap {
             self.put(self.raw + index);
         }
     }
-    /// Slot `index` now views `resource` (or nothing of the host's).
-    fn keep(&self, index: u32, resource: Option<ID3D12Resource>) {
-        #[cfg(feature = "diagnostics")]
-        LOCKS[10].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if let Some(null) = self.nulls.get(index as usize) {
-            null.store(0, std::sync::atomic::Ordering::Relaxed);
-        }
-        let Some(slot) = self.kept.get(index as usize) else {
-            return;
-        };
-        let old = {
-            use windows::core::Interface;
-            let mut slot = locked(slot, 11);
-            // The same again: nothing to retire.
-            if slot.as_ref().map(Interface::as_raw) == resource.as_ref().map(Interface::as_raw) {
-                return;
-            }
-            std::mem::replace(&mut *slot, resource)
-        };
-        // A running submission may still read the old resource through
-        // this slot.
-        if let Some(old) = old {
-            crate::host::retire_resource(old);
-        }
-    }
 
     /// What slot `index` views.
     fn kept_in(&self, index: u32) -> Option<ID3D12Resource> {
-        self.kept.get(index as usize)?.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.kept.lock().unwrap_or_else(|e| e.into_inner()).get(index as usize).and_then(Option::clone)
     }
 
     /// Makes slot `index` (a dynamic one) a raw buffer view of `len` bytes
@@ -4805,13 +4490,9 @@ impl HostHeap {
         let start = unsafe { self.heap.GetGPUDescriptorHandleForHeapStart().ptr };
         D3D12_GPU_DESCRIPTOR_HANDLE {
             ptr: start + u64::from(index) * u64::from(self.step),
-||||||| merged common ancestors
-    /// Slot `index` now views `resource` (or nothing of the host's).
-    fn keep(&self, index: u32, resource: Option<ID3D12Resource>) {
-        let mut kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(slot) = kept.get_mut(index as usize) {
-            *slot = resource;
-=======
+        }
+    }
+
     /// Makes slot `index` a null view matching the resource kind a shader
     /// expects there (CBV, buffer SRV/UAV, or 2D texture).
     pub(crate) fn make_null_kind(&self, index: u32, kind: victory_shader::ResourceType, dwords: u8) {
@@ -4819,7 +4500,6 @@ impl HostHeap {
             self.null_sampler(index);
             self.keep(index, None);
             return;
->>>>>>> belobug/main
         }
         self.set_stride(index, 0);
         let at = self.cpu(index);
