@@ -20,23 +20,7 @@ mod ambient;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod capture;
 #[cfg(windows)]
-<<<<<<< HEAD
 mod compose;
-||||||| 085ee7c4c
-mod cardmeter;
-#[cfg(all(windows, feature = "diagnostics"))]
-mod renderdoc;
-#[cfg(all(windows, feature = "diagnostics"))]
-mod shot;
-=======
-mod cardmeter;
-#[cfg(all(windows, feature = "diagnostics"))]
-mod renderdoc;
-#[cfg(all(windows, feature = "diagnostics"))]
-mod shot;
-#[cfg(windows)]
-mod compose;
->>>>>>> origin/exp/vitoriabr-head
 pub mod console;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod copystat;
