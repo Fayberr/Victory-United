@@ -67,7 +67,6 @@ shaders and emulates the one instruction.
    partly working builder wrote garbage bounds into title memory and crashed
    the title.
 
-<<<<<<< HEAD
 ## The structures (from dumps of the arenas, `VICTORY_MEMORY_DUMP`)
 
 - Header, 64 bytes: dword 0 the version 6 in the low half and marks in the high
@@ -109,8 +108,6 @@ after it was given them as an unordered access view.
 Every ten seconds the log has a line "title memory by address: ..." with pages,
 dispatches, faults and what came.
 
-||||||| c7daeea5
-=======
 ## While the builder is off
 
 The builder's dispatches are dropped at once (before any binding), and the
@@ -128,7 +125,6 @@ programs with a ray test get a host pipeline. A diagnostics build says, at
 the builder's first dropped dispatches, how many builder pipelines the title
 has created and how many of them the host has.
 
->>>>>>> integ/vertex
 ## Known gaps
 
 - With `VICTORY_BVH_BUILDER=1` the builder is not usable yet. Until the
