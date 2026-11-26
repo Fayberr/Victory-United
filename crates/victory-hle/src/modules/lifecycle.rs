@@ -124,18 +124,10 @@ pub extern "system" fn CreateWindowExW(
     instance: HINSTANCE,
     param: *const c_void,
 ) -> HWND {
-<<<<<<< HEAD
     let top = parent.is_null();
+    let (ex_style, x, y) = hide(parent, ex_style, x, y);
     // SAFETY: the title's own arguments, forwarded (a top-level window
     // made message-only).
-||||||| 085ee7c4
-    let (x, y, width, height) = fit(parent, x, y, width, height);
-    // SAFETY: the title's own arguments, forwarded (the size fitted).
-=======
-    let (x, y, width, height) = fit(parent, x, y, width, height);
-    let (ex_style, x, y) = hide(parent, ex_style, x, y);
-    // SAFETY: the title's own arguments, forwarded (the size fitted).
->>>>>>> vitoriabr/main
     let hwnd = unsafe {
         wm::CreateWindowExW(
             ex_style,
@@ -174,18 +166,10 @@ pub extern "system" fn CreateWindowExA(
     instance: HINSTANCE,
     param: *const c_void,
 ) -> HWND {
-<<<<<<< HEAD
     let top = parent.is_null();
+    let (ex_style, x, y) = hide(parent, ex_style, x, y);
     // SAFETY: the title's own arguments, forwarded (a top-level window
     // made message-only).
-||||||| 085ee7c4
-    let (x, y, width, height) = fit(parent, x, y, width, height);
-    // SAFETY: the title's own arguments, forwarded (the size fitted).
-=======
-    let (x, y, width, height) = fit(parent, x, y, width, height);
-    let (ex_style, x, y) = hide(parent, ex_style, x, y);
-    // SAFETY: the title's own arguments, forwarded (the size fitted).
->>>>>>> vitoriabr/main
     let hwnd = unsafe {
         wm::CreateWindowExA(
             ex_style,
