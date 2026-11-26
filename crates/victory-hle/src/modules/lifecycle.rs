@@ -145,14 +145,10 @@ pub extern "system" fn CreateWindowExW(
         )
     };
     hook(hwnd);
-<<<<<<< HEAD
     if top {
         stand_in(hwnd, ex_style, style, x, y, width, height);
     }
-||||||| merged common ancestors
-=======
     caption(parent, hwnd);
->>>>>>> vibr/main
     hwnd
 }
 
@@ -192,18 +188,13 @@ pub extern "system" fn CreateWindowExA(
         )
     };
     hook(hwnd);
-<<<<<<< HEAD
     if top {
         stand_in(hwnd, ex_style, style, x, y, width, height);
     }
-||||||| merged common ancestors
-=======
     caption(parent, hwnd);
->>>>>>> vibr/main
     hwnd
 }
 
-<<<<<<< HEAD
 /// `VICTORY_HIDDEN_WINDOW=1`: the title's top-level window is made off the
 /// screens (right of the virtual desktop), out of the taskbar and never
 /// activated by a click, for unattended runs on a machine in use. The swap
@@ -223,8 +214,6 @@ fn hide(parent: HWND, ex_style: u32, x: i32, y: i32) -> (u32, i32, i32) {
     (ex_style | wm::WS_EX_TOOLWINDOW | wm::WS_EX_NOACTIVATE, right + 64, 0)
 }
 
-||||||| merged common ancestors
-=======
 /// A top-level window starts with this fork's caption, not the title's own
 /// (its code name); the frame counter adds its numbers once frames show.
 fn caption(parent: HWND, hwnd: HWND) {
@@ -234,7 +223,6 @@ fn caption(parent: HWND, hwnd: HWND) {
     }
 }
 
->>>>>>> vibr/main
 /// A console title sizes its window to its render target (
 /// the title: 3840x2160 on a Series X), which can exceed the host's screen.
 /// A top-level window larger than the work area is shrunk to fit, keeping
