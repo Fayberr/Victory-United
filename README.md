@@ -31,16 +31,20 @@ mask. The diagnostics build logs every frame and saves every 16th frame.
 - **Speed:** 10.6, 10.8, 11.0 and 11.1 frames per second in minutes 3 to 6 of a 7 minute run,
   measured from the frame counter in the log. Minute 1 ran at 5.2 and minute 2 at 8.4 fps while the
   game settled. The run was the second one with the same cache; a first run on a new build is
-  much slower for the first minutes. This is one run
-  of one build on one machine, a single data point, not a range across machines.
+  much slower for the first minutes. A 10 minute run of the same build, also with the same cache, ran at
+  11.1, 11.0, 10.7, 10.7, 10.7, 10.3 and 10.0 fps in minutes 3 to 9, so it slowly lost speed. These are
+  two runs of one build on one machine, not a range across machines.
 - **Picture:** from minute 3 on every saved frame was a lit frame (79 to 83 per minute); the
   frames that were looked at show the room lit through the window, the fence outside and the
   character, with no white or black blocks. Some detail is missing: the game's ray-traced light is
   not built by default, and [Vice-Tay's list of known problems](https://github.com/TaynanGT/Vice-Tay#known-problems)
   was not checked here.
-- **Stability:** no crash or GPU hang in that 7 minute run. Vice-Tay reports memory growing in long
-  sessions and the frame rate falling with it; a longer run on our machine is in progress and its
-  result is added here when it is done.
+- **Stability:** not shown yet. The 7 and the 10 minute runs ended without a crash or GPU hang. A 25 minute run
+  of the same build (same program, same switches) did not hold: about 100 seconds in the frames became very
+  slow, about 0.1 frames a second for the remaining 24 minutes, with the picture still lit and no crash. The
+  log shows the game waiting for the card to finish filling upload memory. The cause is not known; the two
+  shorter runs did not do it. Vice-Tay also reports memory growing in long sessions and the frame rate falling
+  with it.
 
 ## Build
 
