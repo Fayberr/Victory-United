@@ -142,7 +142,6 @@ pub(crate) mod flags {
     pub const ATOMIC_HEAP64: u64 = 1 << 32;
     pub const RESOURCE_HEAP: u64 = 1 << 30;
     pub const SAMPLER_HEAP: u64 = 1 << 31;
-    pub const ROVS: u64 = 1 << 18;
 }
 
 pub(crate) struct Types {
@@ -539,7 +538,7 @@ impl Shader {
         );
         let mut cmp = 0;
         for n in lo..=hi {
-            if self.cmp_samplers >> n & 1 != 0 {
+            if self.sampler_cmp.get(n as usize).copied().unwrap_or(false) {
                 cmp = 0x8000;
             }
         }
@@ -675,7 +674,6 @@ impl Shader {
             for (flag, used) in [
                 (flags::ROVS, used.rovs),
                 (flags::WAVE_OPS, used.wave_ops),
-                (flags::ROVS, used.rov),
                 (flags::INT64, used.int64),
                 (flags::DOUBLES, used.doubles),
                 (flags::TYPED_UAV_LOADS, used.typed_uav_loads),
@@ -1220,6 +1218,7 @@ mod tests {
         );
         s.m.terminate(block, Term::Ret);
         let shader = HostShader {
+            half_views: Vec::new(),
             stage: HwStage::Cs,
             root_srvs: vec![SLOT_VIEWS],
             dxil: s.finish(),

@@ -306,6 +306,8 @@ fn some_lane_of_a_mask_is_a_number_the_whole_wave_agrees_on() {
 
 /// `native` for a host of 64-lane waves.
 fn on_64_lanes(native: &NativeProgram, p: &ir::Program) -> HostShader {
+    written_root_uavs: Vec::new(),
+    writes_guest_memory: false,
     let st = structure::structure(p).expect("structure");
     let res = resource::track(p, &native.layout, native.stage, Some(&st)).expect("resource::track");
     let io = io::raise(p, native).expect("io::raise");
@@ -325,6 +327,8 @@ fn on_64_lanes(native: &NativeProgram, p: &ir::Program) -> HostShader {
     let lowered = lowered.expect("lower");
     assert_eq!(lowered.wave_size, Some(64));
     let shader = HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: HwStage::Cs,
         dxil: lowered.dxil,
         user_data: lowered.user_data,
@@ -1126,6 +1130,9 @@ fn stores(regs: [u32; 4]) -> Vec<u32> {
 /// present. Where no other form gives the host the program (each still asks for 64-lane
 /// waves, or fails), it is also what [`super::emit`] gives it.
 fn paired(native: &NativeProgram) -> HostShader {
+    written_root_uavs: Vec::new(),
+    writes_guest_memory: false,
+    half_views: Vec::new(),
     let p = ir::build(&native.code, native.wave64, native.vgprs).expect("ir::build");
     let st = structure::structure(&p).expect("structure");
     let res = resource::track(&p, &native.layout, native.stage, Some(&st)).expect("resource::track");
@@ -1931,6 +1938,8 @@ fn spilled_compute_masks_partial_dispatch_threads_on_wave64_and_wave32() {
             "host_wave={host_wave}: missing USER_DISPATCH_THREADS(0)"
         );
         let shader = HostShader {
+            written_root_uavs: Vec::new(),
+            writes_guest_memory: false,
             stage: HwStage::Cs,
             dxil: lowered.dxil,
             user_data: lowered.user_data,

@@ -2236,6 +2236,9 @@ mod tests {
         let sample_c = [0xF0A0_0108u32, 0x0022_0500];
 
         let run = |first: [u32; 2], second: [u32; 2]| -> HostShader {
+            written_root_uavs: Vec::new(),
+            writes_guest_memory: false,
+            half_views: Vec::new(),
             let words = [
                 0xBE81_0380, // s_mov_b32 s1, 0
                 0xF40C_0200,
@@ -2981,6 +2984,8 @@ mod tests {
             return;
         };
         let cs = super::HostShader {
+            written_root_uavs: Vec::new(),
+            writes_guest_memory: false,
             stage: super::HwStage::Cs,
             dxil,
             user_data: l.user_data,
@@ -3688,6 +3693,9 @@ mod barycentric_tests {
     }
 
     fn first_half_pixel(paired: bool) -> HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
+        half_views: Vec::new(),
         let [e0, e1] = exp_mrt0(2);
         let mut words = vec![0xC808_0000]; // v_interp_p1_f32 v2, v0, attr0.x
         if paired {
@@ -3739,6 +3747,8 @@ mod barycentric_tests {
         }
         s.m.terminate(s.entry, Term::Ret);
         let vs = HostShader {
+            written_root_uavs: Vec::new(),
+            writes_guest_memory: false,
             stage: HwStage::Vs,
             dxil: s.finish(),
             user_data: Vec::new(),
@@ -3932,6 +3942,9 @@ mod barycentric_tests {
         isg1: &[SigElement],
         osg1: &[SigElement],
     ) -> HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
+        half_views: Vec::new(),
         let native = NativeProgram {
             stage,
             wave64: false,

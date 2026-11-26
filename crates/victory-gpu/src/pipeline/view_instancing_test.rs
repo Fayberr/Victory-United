@@ -40,6 +40,8 @@ fn shader_bytes(dxc: &std::path::Path, dir: &std::path::Path) -> [Vec<u8>; 2] {
         shader(name, &bytes).translated.get_or_init(|| {
             Some(Translated {
                 host: HostShader {
+                    written_root_uavs: Vec::new(),
+                    writes_guest_memory: false,
                     stage,
                     dxil: bytes.clone(),
                     user_data: vec![],

@@ -158,6 +158,8 @@ fn lower(native: &NativeProgram) -> Result<HostShader, ShaderError> {
         mesh_stride: 0,
     })?;
     Ok(HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: HwStage::Cs,
         dxil: lowered.dxil,
         user_data: lowered.user_data,
@@ -173,6 +175,9 @@ fn lower(native: &NativeProgram) -> Result<HostShader, ShaderError> {
 
 /// The program lowered and validated.
 fn build(dmask: u8, d16: bool, mip: Mip, atomic: bool) -> HostShader {
+    written_root_uavs: Vec::new(),
+    writes_guest_memory: false,
+    half_views: Vec::new(),
     let shader = lower(&program(dmask, d16, mip, atomic)).expect("lower");
     if let Ok(mut v) = validator::Validator::load(validator::Validator::default_path().as_deref()) {
         let mut copy = shader.dxil.clone();

@@ -3876,8 +3876,7 @@ impl<'a> Lower<'a> {
         let k64k = k(self, 0xFFFF);
         let within = self.s.m.bin(c, Bin::And, lo, k64k);
         let byte = self.s.m.bin(c, Bin::Add, start, within);
-        let mapped = self.s.m.cmp(c, pred::NE, copy, zero);
-        (h, byte, mapped)
+        (h, byte)
     }
 
     /// Transfer up to four consecutive dwords in title memory. The directory
@@ -8348,13 +8347,10 @@ impl<'a> Lower<'a> {
                 // The static samplers of the range: both registered now, so
                 // they are consecutive whatever the program used before.
                 let lo = self.samplers.len() as u32;
+                let cmp = props.0 & 0x8000 != 0;
                 for w in words {
                     self.samplers.push(w);
-                }
-                if props.0 & 0x8000 != 0 {
-                    for n in lo..lo + args.len() as u32 {
-                        self.s.cmp_samplers |= 1 << n;
-                    }
+                    self.s.sampler_cmp.push(cmp);
                 }
                 // A path phi at the join: true for the lanes that came by
                 // the second predecessor. (`reach` would name a value from

@@ -156,12 +156,18 @@ fn a_group_number_in_x_counts_from_the_host_s_first_group() {
 /// 4 dwords of root constants in `s0..s3`, runs `body` (leaving its result in
 /// `v0`), and stores `v0` to dword 0 of the raw UAV at heap index 0.
 fn build_valu_cs(body: &[u32]) -> HostShader {
+    written_root_uavs: Vec::new(),
+    writes_guest_memory: false,
+    half_views: Vec::new(),
     build_cs(body, 1, 0)
 }
 
 /// Stores `v1` to the buffer, then reads it back into `v0` with the tbuffer
 /// load `op` in buffer format `format`.
 fn tbuffer_load_of_v1(op: u8, format: u8) -> HostShader {
+    written_root_uavs: Vec::new(),
+    writes_guest_memory: false,
+    half_views: Vec::new(),
     let mut body = buffer_store_dword(1, 8, 0).to_vec();
     body.extend(mtbuf(op, 0, 8, format));
     build_valu_cs(&body)
@@ -170,6 +176,9 @@ fn tbuffer_load_of_v1(op: u8, format: u8) -> HostShader {
 /// [`build_valu_cs`] with `threads` threads in x (thread index in `v0`
 /// on entry, before `body`) and `lds_bytes` of LDS (a multiple of 512).
 fn build_cs(body: &[u32], threads: u32, lds_bytes: u32) -> HostShader {
+    written_root_uavs: Vec::new(),
+    writes_guest_memory: false,
+    half_views: Vec::new(),
     let mut words = Vec::new();
     // s[4:5] = descriptor table address (heap index 0 -> byte offset 0).
     words.push(s_mov_b32(5, 0x80)); // inline constant 0
@@ -2466,6 +2475,8 @@ fn ps_sample_coverage_input_reads_coverage_mask() {
     });
     s.m.terminate(b, Term::Ret);
     let vs = HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: HwStage::Vs,
         dxil: s.finish(),
         user_data: Vec::new(),
@@ -2739,6 +2750,8 @@ fn wave_prefix_f32_uses_signed_flag_and_validates() {
         v.validate(&mut dxil).unwrap();
     }
     let shader = HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: HwStage::Cs,
         dxil,
         user_data: l.user_data,
@@ -2985,6 +2998,8 @@ fn halves_go_through_a_table_as_they_are_and_name_their_views() {
     .expect("lower");
     assert_eq!(lowered.half_views, [(1, 0), (1, 8)]);
     let shader = HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: HwStage::Cs,
         dxil: lowered.dxil,
         user_data: lowered.user_data,
@@ -3263,6 +3278,8 @@ fn a_format_load_read_as_halves_loads_the_integer() {
         })
         .expect("lower");
         HostShader {
+            written_root_uavs: Vec::new(),
+            writes_guest_memory: false,
             stage: HwStage::Cs,
             dxil: l.dxil,
             user_data: l.user_data,

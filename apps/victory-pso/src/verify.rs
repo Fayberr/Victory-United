@@ -65,6 +65,8 @@ fn load(dir: &Path, s: &Stage) -> Result<HostShader> {
         })
         .collect();
     Ok(HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage,
         dxil,
         user_data,

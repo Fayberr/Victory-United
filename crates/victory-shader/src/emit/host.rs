@@ -607,6 +607,9 @@ pub fn stub_vs(ps: &HostShader) -> Result<HostShader, String> {
 
 /// A pixel shader that reads nothing and writes target 0.
 pub fn stub_ps() -> HostShader {
+    written_root_uavs: Vec::new(),
+    writes_guest_memory: false,
+    half_views: Vec::new(),
     let target = SigElement {
         name: "SV_Target".into(),
         index: 0,
@@ -1732,6 +1735,8 @@ impl Host {
 /// position ([`View::MsaaDepth`]'s draws).
 #[cfg(test)]
 fn position_vs() -> HostShader {
+    written_root_uavs: Vec::new(),
+    writes_guest_memory: false,
     use super::bitcode::{Attr, Term};
     let mut s = super::shader::Shader::new(false);
     let b = s.entry;
@@ -1757,6 +1762,8 @@ fn position_vs() -> HostShader {
     }
     s.m.terminate(b, Term::Ret);
     HostShader {
+        written_root_uavs: Vec::new(),
+        writes_guest_memory: false,
         stage: crate::native::HwStage::Vs,
         dxil: s.finish(),
         user_data: Vec::new(),
