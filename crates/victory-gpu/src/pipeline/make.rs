@@ -12,7 +12,6 @@
 //! bake) are there at once as before; past the budget a draw or dispatch
 //! whose pipeline is not ready is dropped, as an untranslated one is.
 //!
-<<<<<<< HEAD
 //! The default budget is 12 s per title frame and kind, a window the
 //! recording threads wait in together ([`DEFAULT_WAIT_MS`]); it was half
 //! a second. A pass the title runs only once and whose pipeline takes
@@ -23,19 +22,12 @@
 //! long ([`held_too_long`]).
 //! Ported from the sibling fork `joshuu/victory-amd`'s 4436f8f1 (its
 //! loading waits only).
-||||||| a26859fc
-//! The default budget is half a second per title frame. A pass the title
-//! runs only once and whose pipeline takes longer is lost.
-=======
-//! The default budget is half a second per title frame. A pass the title
-//! runs only once and whose pipeline takes longer is lost. Passes over the
-//! screen (no vertex input, no depth) have workers and a longer budget of
-//! their own ([`screen_budget`]): the title fills its lighting tables with
-//! such draws once, at the world's first frame, and behind a world's worth of
-//! pipelines they were dropped; that run had no lamps and no diffuse light to
-//! its end (run textures-d2, the first after a new translation; Belobug
-//! 18e57db8 found the same).
->>>>>>> avatar/main
+//! Passes over the screen (no vertex input, no depth) have workers and a
+//! longer budget of their own ([`screen_budget`]): the title fills its
+//! lighting tables with such draws once, at the world's first frame, and
+//! behind a world's worth of pipelines they were dropped; that run had no
+//! lamps and no diffuse light to its end (run textures-d2, the first after a
+//! new translation; Belobug 18e57db8 found the same).
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
@@ -57,7 +49,8 @@ pub(crate) struct Pending {
     /// whether a draw or dispatch has requested it yet.
     key: String,
     used: AtomicBool,
-<<<<<<< HEAD
+    /// A pass over the screen ([`GraphicsState::screen_pass`]).
+    screen: bool,
     /// Why it is not made, if it is not ([`left_out`]).
     left_out: Option<&'static str>,
     /// When a worker began it ([`slow`]).
@@ -111,11 +104,6 @@ fn without_structures(shaders: &[Arc<Shader>]) -> bool {
         std::env::var_os("VICTORY_RT_RESOLVE").is_some_and(|v| v == "0") && !builder
     });
     out && named(shaders, b"CS_RaytracingResolve")
-||||||| a26859fc
-=======
-    /// A pass over the screen ([`GraphicsState::screen_pass`]).
-    screen: bool,
->>>>>>> avatar/main
 }
 
 // SAFETY: D3D12 objects are free-threaded; the graphics state (whose input
@@ -147,7 +135,6 @@ impl Pending {
         }
     }
 
-<<<<<<< HEAD
     /// Whether it is a compute pipeline.
     fn computes(&self) -> bool {
         matches!(self.shaders.as_slice(), [only] if only.stage == "compute")
@@ -159,29 +146,18 @@ impl Pending {
         self.begun.get().is_some_and(|at| held_too_long(at.elapsed(), self.computes(), wait_budget()))
     }
 
-||||||| a26859fc
-=======
     pub(super) fn key(&self) -> &str {
         &self.key
     }
 
->>>>>>> avatar/main
     fn make(&self) {
-<<<<<<< HEAD
         let _ = self.begun.set(Instant::now());
-        self.made
-            .get_or_init(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
-||||||| a26859fc
-        self.made
-            .get_or_init(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
-=======
         self.made.get_or_init(|| {
             let began = Instant::now();
             let made = HostPipeline::new(&self.shaders, self.graphics.as_deref());
             super::library::note_time(&self.key, began.elapsed().as_millis() as u64);
             made
         });
->>>>>>> avatar/main
         let (lock, done) = &DONE;
         let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
         done.notify_all();
@@ -239,7 +215,6 @@ fn wait_budget() -> Duration {
     })
 }
 
-<<<<<<< HEAD
 /// The default of [`wait_budget`]: the picture before frame rate. A frame
 /// waits for pipelines still being made rather than drop their draws and
 /// dispatches, up to 12 s for each kind (graphics, compute), the threads
@@ -305,8 +280,6 @@ fn held_too_long(held: Duration, compute: bool, base: Duration) -> bool {
     base < most && held > most
 }
 
-||||||| a26859fc
-=======
 /// As [`wait_budget`], for passes over the screen (`VICTORY_SCREEN_WAIT_MS`,
 /// 10 s; 0: like the others). Below the title's 30 s watchdog.
 fn screen_budget() -> Duration {
@@ -321,8 +294,6 @@ fn screen_budget() -> Duration {
 fn screens_first() -> bool {
     !screen_budget().is_zero()
 }
-
->>>>>>> avatar/main
 /// Pipelines queued and not made yet.
 static WAITING: AtomicU64 = AtomicU64::new(0);
 
@@ -479,17 +450,9 @@ impl FrameWait {
 
 /// Waits for `p` while frame `frame` has budget left.
 fn wait(p: &Pending, frame: u64) {
-<<<<<<< HEAD
-    let base = wait_budget();
-    if base.is_zero() || p.slow() {
-||||||| a26859fc
-    let budget = wait_budget();
-    if budget.is_zero() {
-=======
     let screen = p.screen && screens_first();
-    let budget = if screen { screen_budget() } else { wait_budget() };
-    if budget.is_zero() {
->>>>>>> avatar/main
+    let base = if screen { screen_budget() } else { wait_budget() };
+    if base.is_zero() || p.slow() {
         return;
     }
     // What was waited past the base budget since the start, in
@@ -499,45 +462,14 @@ fn wait(p: &Pending, frame: u64) {
     let past = &PAST[usize::from(compute)];
     let budget = frame_budget(base, compute, loading_allowance(), Duration::from_millis(past.load(Ordering::Relaxed)));
     // The frame the budget belongs to, and what was waited of it (or is
-<<<<<<< HEAD
-    // taken by a thread waiting now), by kind.
-    static FRAMES: [Mutex<FrameWait>; 2] = [const { Mutex::new(FrameWait::new()) }; 2];
-    let frame_wait = &FRAMES[usize::from(compute)];
+    // taken by a thread waiting now), by kind; of the passes over the screen
+    // too.
+    static FRAMES: [Mutex<FrameWait>; 4] = [const { Mutex::new(FrameWait::new()) }; 4];
+    let kind = usize::from(compute) * 2 + usize::from(screen);
+    let frame_wait = &FRAMES[kind];
     let sharing = shared_budget();
     let started = Instant::now();
     let left = frame_wait.lock().unwrap_or_else(|e| e.into_inner()).begin(sharing, frame, budget, started);
-||||||| a26859fc
-    // taken by a thread waiting now).
-    static SPENT: Mutex<(u64, Duration)> = Mutex::new((u64::MAX, Duration::ZERO));
-    let shared = shared_budget();
-    let left = {
-        let mut spent = SPENT.lock().unwrap_or_else(|e| e.into_inner());
-        if spent.0 != frame {
-            *spent = (frame, Duration::ZERO);
-        }
-        let left = budget.saturating_sub(spent.1);
-        if shared {
-            spent.1 += left;
-        }
-        left
-    };
-=======
-    // taken by a thread waiting now); of the passes over the screen too.
-    static SPENT: [Mutex<(u64, Duration)>; 2] = [const { Mutex::new((u64::MAX, Duration::ZERO)) }; 2];
-    let spent_of = &SPENT[usize::from(screen)];
-    let shared = shared_budget();
-    let left = {
-        let mut spent = spent_of.lock().unwrap_or_else(|e| e.into_inner());
-        if spent.0 != frame {
-            *spent = (frame, Duration::ZERO);
-        }
-        let left = budget.saturating_sub(spent.1);
-        if shared {
-            spent.1 += left;
-        }
-        left
-    };
->>>>>>> avatar/main
     if left.is_zero() {
         return;
     }
@@ -554,23 +486,6 @@ fn wait(p: &Pending, frame: u64) {
     }
     drop(held);
     let waited = started.elapsed().min(left);
-<<<<<<< HEAD
-    past.fetch_add(waited.saturating_sub(base).as_millis() as u64, Ordering::Relaxed);
-    frame_wait.lock().unwrap_or_else(|e| e.into_inner()).end(sharing, frame, left, waited, Instant::now());
-    crate::framelog::add(crate::framelog::T::PipelineWaitUs, started.elapsed().as_micros() as u64);
-||||||| a26859fc
-    {
-        let mut spent = SPENT.lock().unwrap_or_else(|e| e.into_inner());
-        // A frame that began meanwhile has its own budget.
-        if spent.0 == frame {
-            if shared {
-                spent.1 = spent.1.saturating_sub(left - waited);
-            } else {
-                spent.1 += waited;
-            }
-        }
-    }
-=======
     if screen && waited > Duration::from_millis(500) {
         tracing::info!(
             ms = waited.as_millis() as u64,
@@ -579,18 +494,9 @@ fn wait(p: &Pending, frame: u64) {
             "a pass over the screen was waited for (VICTORY_SCREEN_WAIT_MS=0: dropped past half a second a frame)"
         );
     }
-    {
-        let mut spent = spent_of.lock().unwrap_or_else(|e| e.into_inner());
-        // A frame that began meanwhile has its own budget.
-        if spent.0 == frame {
-            if shared {
-                spent.1 = spent.1.saturating_sub(left - waited);
-            } else {
-                spent.1 += waited;
-            }
-        }
-    }
->>>>>>> avatar/main
+    past.fetch_add(waited.saturating_sub(base).as_millis() as u64, Ordering::Relaxed);
+    frame_wait.lock().unwrap_or_else(|e| e.into_inner()).end(sharing, frame, left, waited, Instant::now());
+    crate::framelog::add(crate::framelog::T::PipelineWaitUs, started.elapsed().as_micros() as u64);
     #[cfg(feature = "diagnostics")]
     crate::copystat::add(
         crate::copystat::C::PipelineWaitUs,
@@ -730,7 +636,6 @@ fn next(screens_only: bool) -> Arc<Pending> {
     }
 }
 
-<<<<<<< HEAD
 /// Workers at work until the title draws a world.
 const MENU_WORKERS: usize = 2;
 static WORLD: AtomicBool = AtomicBool::new(false);
@@ -744,10 +649,6 @@ pub(crate) fn frame_drew(drawn: u64) {
     }
 }
 
-/// Starts the workers (half the logical processors, 2 to 8) on first use.
-||||||| a26859fc
-/// Starts the workers (half the logical processors, 2 to 8) on first use.
-=======
 /// How many workers make pipelines: `asked` (`VICTORY_PIPELINE_WORKERS`, 1 to
 /// 64), else two thirds of the logical processors, 2 to 16. They run below the
 /// title's own threads, and a cold cache queues hundreds at once.
@@ -759,7 +660,6 @@ fn worker_count(asked: Option<usize>, processors: usize) -> usize {
 }
 
 /// Starts the workers ([`worker_count`]) on first use.
->>>>>>> avatar/main
 fn workers() -> bool {
     static RUNNING: OnceLock<bool> = OnceLock::new();
     *RUNNING.get_or_init(|| {
@@ -776,19 +676,11 @@ fn workers() -> bool {
             let screens_only = i >= workers;
             let spawned = std::thread::Builder::new()
                 .name(format!("victory-pipelines-{i}"))
-<<<<<<< HEAD
-                .spawn(move || {
-                    // Below the title's own threads (loading, recording).
-||||||| a26859fc
-                .spawn(|| {
-                    // Below the title's own threads (loading, recording).
-=======
                 .spawn(move || {
                     // Below the title's own threads (loading, recording),
                     // and the streaming one, which is below normal itself
                     // (`VICTORY_PIPELINE_LOWEST=0`: level with it, as before).
                     let lowest = !screens_only && std::env::var_os("VICTORY_PIPELINE_LOWEST").is_none_or(|v| v != "0");
->>>>>>> avatar/main
                     // SAFETY: a plain call on our own thread.
                     unsafe {
                         use windows::Win32::System::Threading::*;
@@ -796,16 +688,11 @@ fn workers() -> bool {
                         let _ = SetThreadPriority(GetCurrentThread(), priority);
                     }
                     loop {
-<<<<<<< HEAD
                         // All of them during the intro and the menus starve
                         // the title's threads: frames come unevenly.
                         while i >= MENU_WORKERS && !WORLD.load(Ordering::Relaxed) {
                             std::thread::sleep(Duration::from_millis(50));
                         }
-                        next().make();
-||||||| a26859fc
-                        next().make();
-=======
                         let p = next(screens_only);
                         p.make();
                         if p.was_slow.load(Ordering::Relaxed) {
@@ -813,7 +700,6 @@ fn workers() -> bool {
                             queue.slow_now -= 1;
                             AVAILABLE.notify_all();
                         }
->>>>>>> avatar/main
                         if WAITING.fetch_sub(1, Ordering::Relaxed) == 1 {
                             drained();
                         } else {
