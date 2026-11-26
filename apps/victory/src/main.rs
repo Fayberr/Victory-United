@@ -8,17 +8,11 @@ mod census;
 #[cfg(windows)]
 mod doctor;
 mod inspect;
-<<<<<<< HEAD
 #[cfg(windows)]
 mod prebuild;
 mod precompile;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod replay;
-||||||| a66ac212
-=======
-#[cfg(windows)]
-mod prebuild;
->>>>>>> klbf/beta-2
 mod run;
 mod shader;
 mod translate;
@@ -157,7 +151,13 @@ enum Command {
         /// Worker threads (default: every logical core).
         #[arg(long)]
         jobs: Option<usize>,
-<<<<<<< HEAD
+        /// Warm the run's shader cache: a file of shader hashes (the 16
+        /// hex digits a run's log names a shader by, anywhere in a line);
+        /// the containers with those hashes are translated into the
+        /// cache and nothing else is done. Set `VICTORY_HOST_WAVE` and
+        /// `VICTORY_VIEW_LIMIT` to what the run's log says of the host.
+        #[arg(long)]
+        warm: Option<PathBuf>,
         /// Fill the shader cache that `run` reads.
         #[arg(long, conflicts_with_all = ["validate", "list"])]
         cache: bool,
@@ -214,32 +214,6 @@ enum Command {
         /// (What the processes it starts are given.)
         #[arg(long, hide = true)]
         these: Option<String>,
-||||||| a66ac212
-=======
-        /// Warm the run's shader cache: a file of shader hashes (the 16
-        /// hex digits a run's log names a shader by, anywhere in a line);
-        /// the containers with those hashes are translated into the
-        /// cache and nothing else is done. Set `VICTORY_HOST_WAVE` and
-        /// `VICTORY_VIEW_LIMIT` to what the run's log says of the host.
-        #[arg(long)]
-        warm: Option<PathBuf>,
-        /// With --pipelines: fill the shader cache and host pipeline
-        /// library `run` reads with every pipeline of the title's shader
-        /// pack (resumable; honours VICTORY_SKIP_PIPELINES).
-        #[arg(long, requires = "pipelines", conflicts_with_all = ["validate", "list"])]
-        cache: bool,
-    },
-    /// Translate the shaders of a title's archives into the cache and make
-    /// their compute pipelines, so that a run finds them there.
-    Warm {
-        paths: Vec<PathBuf>,
-        /// Worker threads (default: every logical core).
-        #[arg(long)]
-        jobs: Option<usize>,
-        /// Only translate: no host pipelines.
-        #[arg(long)]
-        no_pipelines: bool,
->>>>>>> klbf/beta-2
     },
     /// Prepare, map and bind a title executable; with --execute, run it.
     Run {
@@ -310,15 +284,11 @@ unsafe impl Sync for SdkPath {}
 pub static D3D12SDKPath: SdkPath = SdkPath(b".\\D3D12\\\0".as_ptr());
 
 fn main() -> Result<()> {
-<<<<<<< HEAD
+    // `VICTORY_HEAP_COUNT=1`: the Rust heap's live bytes for the resident line (off: it slowed loading).
+    victory_core::heapcount::enable(std::env::var_os("VICTORY_HEAP_COUNT").is_some_and(|v| v == "1"));
     // LOCAL-ONLY (branch local/win10-agility): keep the Agility exports.
     std::hint::black_box(agility::D3D12SDKVersion);
     std::hint::black_box(&agility::D3D12SDKPath);
-||||||| a66ac212
-=======
-    // `VICTORY_HEAP_COUNT=1`: the Rust heap's live bytes for the resident line (off: it slowed loading).
-    victory_core::heapcount::enable(std::env::var_os("VICTORY_HEAP_COUNT").is_some_and(|v| v == "1"));
->>>>>>> klbf/beta-2
     victory_core::logging::init("info");
     // The audio recorder `run` starts for `VICTORY_AUDIO_CAPTURE`.
     #[cfg(all(windows, feature = "diagnostics"))]
@@ -346,7 +316,6 @@ fn main() -> Result<()> {
             paths,
             verbose,
             disasm,
-<<<<<<< HEAD
             effects,
         } => shader::run(paths, verbose || disasm, disasm, effects),
         Command::Translate {
@@ -357,60 +326,22 @@ fn main() -> Result<()> {
             cache: true,
             ..
         } => translate::warm(paths, jobs, pipelines, used_pipelines),
-||||||| a66ac212
-        } => shader::run(paths, verbose || disasm, disasm),
-=======
-        } => shader::run(paths, verbose || disasm, disasm),
-        #[cfg(windows)]
-        Command::Translate {
-            paths,
-            jobs,
-            cache: true,
-            ..
-        } => prebuild::run(paths, jobs),
->>>>>>> klbf/beta-2
         Command::Translate {
             paths,
             validate,
             pipelines,
             list,
             jobs,
-<<<<<<< HEAD
             cache: false,
-            ..
-||||||| a66ac212
-=======
             warm,
             ..
->>>>>>> klbf/beta-2
         } => {
-<<<<<<< HEAD
             apply_host_shader_overrides_from_env();
-||||||| a66ac212
-            // `VICTORY_VIEW_LIMIT=<null slot>`: translate as on a host whose view heap is capped
-            if let Some(n) = std::env::var("VICTORY_VIEW_LIMIT").ok().and_then(|v| v.parse().ok()) {
-                victory_shader::emit::set_view_heap_limit(n);
-            }
-            // `VICTORY_HOST_WAVE=32`: translate as for a GPU whose waves are at most 32 lanes
-            if let Some(n) = std::env::var("VICTORY_HOST_WAVE").ok().and_then(|v| v.parse().ok()) {
-                victory_shader::emit::set_host_max_wave(n);
-            }
-=======
-            // `VICTORY_VIEW_LIMIT=<null slot>`: translate as on a host whose view heap is capped
-            if let Some(n) = std::env::var("VICTORY_VIEW_LIMIT").ok().and_then(|v| v.parse().ok()) {
-                victory_shader::emit::set_view_heap_limit(n);
-            }
-            // `VICTORY_HOST_WAVE=32`: translate as for a GPU whose waves are at most 32 lanes
-            if let Some(n) = std::env::var("VICTORY_HOST_WAVE").ok().and_then(|v| v.parse().ok()) {
-                victory_shader::emit::set_host_max_wave(n);
-            }
             if let Some(file) = warm {
                 return translate::warm_translations(paths, &file, jobs);
             }
->>>>>>> klbf/beta-2
             translate::run(paths, validate, pipelines, list, jobs)
         }
-<<<<<<< HEAD
         Command::Precompile {
             paths,
             pipelines,
@@ -425,22 +356,19 @@ fn main() -> Result<()> {
         }
         #[cfg(windows)]
         Command::Warm { jobs, limit, again, used, these } => warm::run(jobs, limit, again, used, these),
-||||||| a66ac212
-=======
-        Command::Warm { paths, jobs, no_pipelines } => translate::warm(paths, jobs, !no_pipelines),
->>>>>>> klbf/beta-2
         Command::Run {
             exe,
             unimplemented,
             strict,
             execute,
             console,
-<<<<<<< HEAD
             work: _,
             title_args,
         } => {
             victory_hle::runtime::set_title_args(title_args);
             let code = run::run(&exe, unimplemented, strict, execute, console)?;
+            // The title's own end, before the process status is returned.
+            tracing::info!("runtime exit: code {code}");
             if code != 0 {
                 // Preserve all 32 bits of the Windows process status.
                 std::process::exit(code as i32);
@@ -449,21 +377,6 @@ fn main() -> Result<()> {
         }
         #[cfg(all(windows, feature = "diagnostics"))]
         Command::Replay(options) => replay::run(options),
-||||||| a66ac212
-            title_args: _,
-        } => run::run(&exe, unimplemented, strict, execute, console),
-=======
-            title_args: _,
-        } => {
-            let result = run::run(&exe, unimplemented, strict, execute, console);
-            // The process's own end, as `main`'s Result maps it: Ok is 0,
-            // Err is 1. A title that ends the process itself logs its own
-            // line and never returns here.
-            let code = if result.is_ok() { 0 } else { 1 };
-            tracing::info!("runtime exit: code {code}");
-            result
-        }
->>>>>>> klbf/beta-2
         Command::Config => show_config(),
         #[cfg(windows)]
         Command::Doctor => doctor::run(),
