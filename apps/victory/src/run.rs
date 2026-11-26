@@ -74,7 +74,7 @@ pub fn run(
     victory_hle::runtime::set_main_image(image.base());
     victory_hle::runtime::set_image_path(image.base(), exe);
     if let Some(dir) = exe.parent() {
-        victory_gpu::set_title_dir(dir);
+        victory_hle::set_title_dir(dir);
     }
     println!(
         "mapped at      {:#x} (preferred {:#x})",
