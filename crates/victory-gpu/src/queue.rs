@@ -651,7 +651,6 @@ pub(crate) struct Plane {
     count: u32,
     resources: *const This,
 }
-<<<<<<< HEAD
 /// Retail PresentX adds source-rectangle and destination pointers, a color
 /// space and seven option words after the common prefix. Older callers pass
 /// only the prefix for single-plane presents.
@@ -708,45 +707,6 @@ fn overlay_resource(parameters: *const Plane) -> Option<This> {
     let resource = usize::from_ne_bytes(pointer) as This;
     crate::resource::is_resource(resource).then_some(resource)
 }
-||||||| 0a4356653
-=======
-/// Retail PresentX adds source-rectangle and destination pointers, a color
-/// space and seven option words after the common prefix. Older callers pass
-/// only the prefix for single-plane presents.
-#[cfg(windows)]
-#[repr(C)]
-struct RetailPlane {
-    prefix: Plane,
-    source_rects: *const (),
-    destination: *const (),
-    color_space: u32,
-    options: [u32; 7],
-}
-#[cfg(windows)]
-const _: () = assert!(size_of::<RetailPlane>() == 72);
-
-#[cfg(windows)]
-fn overlay_resource(parameters: *const Plane) -> Option<This> {
-    // Read only the second prefix at the 72-byte retail PresentX stride. A
-    // caller using a different layout can still present its base plane safely.
-    let second = parameters.cast::<RetailPlane>().wrapping_add(1).cast::<u8>();
-    let mut prefix = [0; size_of::<Plane>()];
-    if !crate::host::read_into(second, &mut prefix) {
-        return None;
-    }
-    // SAFETY: the prefix has the C layout above and its bytes were copied.
-    let plane = unsafe { prefix.as_ptr().cast::<Plane>().read_unaligned() };
-    let mut pointer = [0; size_of::<This>()];
-    if plane.count == 0
-        || plane.resources.is_null()
-        || !crate::host::read_into(plane.resources.cast(), &mut pointer)
-    {
-        return None;
-    }
-    let resource = usize::from_ne_bytes(pointer) as This;
-    crate::resource::is_resource(resource).then_some(resource)
-}
->>>>>>> vicetay/main
 /// Submission tagged with the frame it belongs to `(count, lists, frame
 /// token, flags)`; frames are paced elsewhere, so it runs as a plain one.
 extern "system" fn execute_x(this: This, count: u32, lists: *const This, _token: u64, _flags: u32) {
@@ -1046,22 +1006,12 @@ extern "system" fn present(
                 (resource as usize, copy, state)
             })
         };
-<<<<<<< HEAD
         let texture = base_res.and_then(take_copy);
         let overlay = (planes > 1 && !plane_parameters.is_null() && planes_seen(planes, plane_parameters))
             .then(|| overlay_resource(plane_parameters))
             .flatten()
             .filter(|&over_res| base_res != Some(over_res))
             .and_then(take_copy);
-||||||| 0a4356653
-=======
-        let texture = base_res.and_then(take_copy);
-        let overlay = (planes > 1 && !plane_parameters.is_null())
-            .then(|| overlay_resource(plane_parameters))
-            .flatten()
-            .filter(|&over_res| base_res != Some(over_res))
-            .and_then(take_copy);
->>>>>>> vicetay/main
         let resource = texture.as_ref().map_or(0, |t| t.0);
         behind::present(
             this,
@@ -1088,7 +1038,6 @@ extern "system" fn present(
         const COPY_SOURCE: u32 = 0x800;
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
-<<<<<<< HEAD
         let overlay = (planes > 1 && planes_seen(planes, plane_parameters))
             .then(|| overlay_resource(plane_parameters))
             .flatten()
@@ -1106,27 +1055,6 @@ extern "system" fn present(
             overlay.as_ref().map(|(_, tex, st)| (*tex, *st)),
             Shown { frame, resource: resource as usize },
         );
-||||||| 0a4356653
-        show(texture, state, Shown { frame, resource: resource as usize });
-=======
-        let overlay = (planes > 1)
-            .then(|| overlay_resource(plane_parameters))
-            .flatten()
-            .filter(|&over_res| over_res != resource)
-            .and_then(|over_res| {
-                crate::resource::host_resource(over_res).map(|over_tex| {
-                    let over_state = crate::resource::host_transition(over_res, COPY_SOURCE)
-                        .map_or(COPY_SOURCE, |(_, before)| before);
-                    (over_res, over_tex, over_state)
-                })
-            });
-        show_planes(
-            texture,
-            state,
-            overlay.as_ref().map(|(_, tex, st)| (*tex, *st)),
-            Shown { frame, resource: resource as usize },
-        );
->>>>>>> vicetay/main
         crate::resource::host_transition(resource, state);
         if let Some((over_res, _, over_state)) = overlay {
             crate::resource::host_transition(over_res, over_state);
