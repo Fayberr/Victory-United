@@ -4346,38 +4346,21 @@ impl State {
                 self.table_entry(list, u, compute);
             }
         }
-<<<<<<< HEAD
         let mut made = MadeTables::default();
         for slot in fresh.ordered() {
-||||||| a26859fc
-        let mut made = Vec::new();
-        for slot in fresh {
-=======
-        let mut made = Few::default();
-        for &slot in fresh.iter() {
->>>>>>> avatar/main
             let Some(&Root::Table(table)) = self.roots_ref(compute).get(usize::from(slot)) else {
                 continue;
             };
-<<<<<<< HEAD
             let Ok(layout) = layouts.binary_search_by_key(&slot, |layout| layout.slot) else {
                 continue;
             };
             let layout = &layouts[layout];
-||||||| a26859fc
-            let entries: Vec<&UsedResource> = used
-                .iter()
-                .filter(tables)
-                .filter(|u| u.slot == slot)
-                .collect();
-=======
             // (Their places among `used`.)
             let mut places: Few<u16, 32> = Few::default();
             for (i, _) in used.iter().enumerate().filter(|(_, u)| tables(u) && u.slot == slot) {
                 places.push(i as u16);
             }
             let entries = || places.iter().map(|&i| &used[usize::from(i)]);
->>>>>>> avatar/main
             let Some(heap) = self.heap_of(table) else {
                 continue;
             };
@@ -4387,36 +4370,7 @@ impl State {
             let Some(host) = heap.host() else {
                 continue;
             };
-<<<<<<< HEAD
-            let evaluate = |index: &victory_shader::resource::RootIndexedView| {
-                let constant = self.user_value(
-                    compute,
-                    index.constant_slot,
-                    RootType::Constants,
-                    index.constant_dword,
-                );
-                // The shader adds i32 byte offsets and shifts by 5.
-                index.byte_offset.wrapping_add(constant << index.shift) / 32
-            };
-            let single;
-            let mut many;
-            let selected: &[u32] = match layout.indexed.as_slice() {
-                [] => &[],
-                [expression] => {
-                    single = evaluate(expression);
-                    std::slice::from_ref(&single)
-                }
-                expressions => {
-                    many = expressions.iter().map(evaluate).collect::<Vec<_>>();
-                    many.sort_unstable();
-                    many.dedup();
-                    &many
-                }
-            };
-            let n = layout.records.last().map_or(0, |entry| entry.0)
-                .max(selected.last().copied().unwrap_or(0))
-||||||| a26859fc
-            let mut selected: Vec<u32> = indexed
+            let mut selected: Vec<u32> = layout.indexed
                 .iter()
                 .filter(|index| index.table_slot == slot)
                 .map(|index| {
@@ -4432,35 +4386,11 @@ impl State {
                 .collect();
             selected.sort_unstable();
             selected.dedup();
-            let n = entries
-                .iter()
+            let n = layout.entries.iter()
                 .map(|u| u.table_offset_dwords / 8)
                 .chain(selected.last().copied())
                 .max()
                 .unwrap_or(0)
-=======
-            let mut selected: Vec<u32> = indexed
-                .iter()
-                .filter(|index| index.table_slot == slot)
-                .map(|index| {
-                    let constant = self.user_value(
-                        compute,
-                        index.constant_slot,
-                        RootType::Constants,
-                        index.constant_dword,
-                    );
-                    // The shader adds i32 byte offsets and shifts by 5.
-                    index.byte_offset.wrapping_add(constant << index.shift) / 32
-                })
-                .collect();
-            selected.sort_unstable();
-            selected.dedup();
-            let n = entries()
-                .map(|u| u.table_offset_dwords / 8)
-                .chain(selected.last().copied())
-                .max()
-                .unwrap_or(0)
->>>>>>> avatar/main
                 + 1;
             let last = table.checked_add(u64::from(n - 1) * 32);
             if n > crate::descriptor::host::DYNAMIC
@@ -4469,33 +4399,6 @@ impl State {
                 once!(slot, n, "fresh descriptor table exceeds the available span");
                 continue;
             }
-<<<<<<< HEAD
-            let key = table_hash(table, n);
-            let same = self.fresh_tables.get(&key).filter(|f| {
-                f.table == table
-                    && f.n == n
-                    && self.fresh_records[f.at..f.at + n as usize]
-                        .iter()
-                        .enumerate()
-                        .all(|(k, r)| *r == record(table, k as u32))
-            });
-            if let Some(&Fresh { first, .. }) = same {
-                for u in layout.entries.iter().filter(|u| u.kind != ResourceType::Cbv) {
-||||||| a26859fc
-            // The table and what its entries hold (record words).
-            let key = {
-                use std::hash::{Hash, Hasher};
-                let mut h = std::collections::hash_map::DefaultHasher::new();
-                for k in 0..n {
-                    let at = table + u64::from(k) * 32;
-                    // SAFETY: a descriptor slot in title memory.
-                    unsafe { (at as *const [u32; 3]).read_unaligned() }.hash(&mut h);
-                }
-                (table, n, h.finish())
-            };
-            if let Some(&first) = self.fresh_tables.get(&key) {
-                for u in entries.iter().filter(|u| u.kind != ResourceType::Cbv) {
-=======
             // The table and what its entries hold (record words).
             let key = {
                 let mut h = RecordHash::default();
@@ -4512,7 +4415,7 @@ impl State {
                 let first = known.first;
                 // This reader had it brought up to date, and nothing in the
                 // list changed since: nothing to do again.
-                let once = ready_once() && selected.is_empty() && entries().all(|u| u.kind != ResourceType::Uav);
+                let once = ready_once() && selected.is_empty() && layout.entries.iter().all(|u| u.kind != ResourceType::Uav);
                 if once
                     && known.epoch == list.epoch()
                     && let Some((_, depth)) = known.ready.iter().find(|(r, _)| *r == reader)
@@ -4525,23 +4428,14 @@ impl State {
                 }
                 let depth_before = TESTED_DEPTH.get();
                 TESTED_DEPTH.set((depth_before.0, false));
-                for u in entries().filter(|u| u.kind != ResourceType::Cbv) {
->>>>>>> avatar/main
+                for u in layout.entries.iter().filter(|u| u.kind != ResourceType::Cbv) {
                     let handle = table + u64::from(u.table_offset_dwords) * 4;
                     if let Some(view) = crate::descriptor::view(handle) {
                         readable(list, u.kind, &view);
                     }
                 }
-<<<<<<< HEAD
-                for &k in selected {
-                    if layout.records.binary_search_by_key(&k, |entry| entry.0).is_ok() {
-||||||| a26859fc
                 for k in selected {
-                    if entries.iter().any(|u| u.table_offset_dwords / 8 == k) {
-=======
-                for k in selected {
-                    if entries().any(|u| u.table_offset_dwords / 8 == k) {
->>>>>>> avatar/main
+                    if layout.entries.iter().any(|u| u.table_offset_dwords / 8 == k) {
                         continue;
                     }
                     let handle = table + u64::from(k) * 32;
@@ -4574,15 +4468,7 @@ impl State {
                 made.push((slot, u32::MAX));
                 continue;
             };
-<<<<<<< HEAD
-            let at = self.fresh_records.len();
-            self.fresh_records.extend((0..n).map(|k| record(table, k)));
-            self.fresh_tables.insert(key, Fresh { table, n, at, first });
-||||||| a26859fc
-            self.fresh_tables.insert(key, first);
-=======
             self.fresh_tables.insert(key, FreshTable { first, epoch: 0, ready: Vec::new() });
->>>>>>> avatar/main
             self.dynamic
                 .push((std::ptr::from_ref(heap) as usize, first, n));
             // The title's own slots of this table: what the draw reads of
@@ -4607,24 +4493,13 @@ impl State {
             let mut records = layout.records.as_slice();
             for k in 0..n {
                 let index = first + k;
-<<<<<<< HEAD
-                let used = match records.split_first() {
-                    Some((&(record, kind), rest)) if record == k => {
-                        records = rest;
-                        Some(kind)
-                    }
-                    _ => None,
-                };
-||||||| a26859fc
-                let used = entries.iter().find(|u| u.table_offset_dwords / 8 == k);
-=======
                 // A view this list has made before: its descriptor copied,
                 // and nothing more if nothing changed in the list since.
                 if list_views
                     && let Some(words) = crate::descriptor::record_at(table + u64::from(k) * 32)
                     && let Some(mut listed) = host.make_listed(recording, words, index)
                 {
-                    let kind = entries()
+                    let kind = layout.entries.iter()
                         .find(|u| u.table_offset_dwords / 8 == k)
                         .map(|u| u.kind)
                         .or_else(|| selected.binary_search(&k).ok().and(listed.kind));
@@ -4660,8 +4535,13 @@ impl State {
                     }
                     continue;
                 }
-                let used = entries().find(|u| u.table_offset_dwords / 8 == k);
->>>>>>> avatar/main
+                let used = match records.split_first() {
+                    Some((&(record, kind), rest)) if record == k => {
+                        records = rest;
+                        Some(kind)
+                    }
+                    _ => None,
+                };
                 match crate::descriptor::view(table + u64::from(k) * 32) {
                     Some(View::Constant(address, size)) => {
                         let Some((buffer, gpu, to)) = list.scratch_held(u64::from(size)) else {
@@ -4806,12 +4686,8 @@ impl State {
                 list.list
                     .DrawInstanced(count, instances, from, first_instance)
             };
-<<<<<<< HEAD
             self.note_writes(list);
-||||||| a26859fc
-=======
             self.drew(crate::pipeline::host_pipeline(self.pipeline as This));
->>>>>>> avatar/main
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         if !ran {
@@ -4918,12 +4794,8 @@ impl State {
                 list.list
                     .DrawIndexedInstanced(indices, instances, first, base, first_instance)
             };
-<<<<<<< HEAD
             self.note_writes(list);
-||||||| a26859fc
-=======
             self.drew(crate::pipeline::host_pipeline(self.pipeline as This));
->>>>>>> avatar/main
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         if !ran {
@@ -5187,7 +5059,6 @@ impl State {
         let previous = self
             .window
             .as_ref()
-<<<<<<< HEAD
             .filter(|w| same(w))
             .map(|w| LastWindow {
                 base: w.base,
@@ -5206,7 +5077,7 @@ impl State {
         );
         // A record that misses its window: a slot the list's prelude fills,
         // if the list still gathers ([`gathers`]).
-        let gathered = if matches!(served, Serve::Clamp { .. }) && windowed && gathers() {
+        let gathered = if batch.is_none() && matches!(served, Serve::Clamp { .. }) && windowed && gathers() {
             let slot = crate::indirect::gather(list, (&args.buffer, args.id()), offset, (kind, stride));
             #[cfg(feature = "diagnostics")]
             WINDOW_WHY[if slot.is_some() { 12 } else { 13 }].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -5214,8 +5085,11 @@ impl State {
         } else {
             None
         };
-        let (bounded, at) = match (served, gathered) {
-            (Serve::Held { at }, _) => {
+        let (bounded, at) = match (batch, served, gathered) {
+            // Clamped in a batch of its own (`batches`): the record's place
+            // in the batch's scratch buffer.
+            (Some((scratch, at)), _, _) => (scratch, at),
+            (None, Serve::Held { at }, _) => {
                 // `serve` says `Held` only for a record of the window
                 // `previous` came from, and nothing has cleared it since.
                 let window = self
@@ -5244,62 +5118,11 @@ impl State {
                     self.window_read = true;
                     if let Some(w) = self.window.as_ref().filter(|w| w.records > 1) {
                         self.walk_step = Some((w.copy, w.kind, w.stride, w.step));
-||||||| a26859fc
-            .filter(|w| same(w) && offset >= w.base)
-            .filter(|w| (offset - w.base) % u64::from(w.step) == 0 && (offset - w.base) / u64::from(w.step) < u64::from(w.records))
-            .map(|w| (w.scratch.clone(), offset - w.base));
-        let (bounded, at) = match hit {
-            Some(hit) => hit,
-            None => {
-                // A record a short step after the last window's last one
-                // (the same step as that window's, if it had one): the
-                // title walks the buffer, so the ones that step apart
-                // after it are clamped with it.
-                let (step, records) = match &self.window {
-                    Some(w) if windowed && same(w) => {
-                        let last = w.base + u64::from(w.records - 1) * u64::from(w.step);
-                        let step = offset.saturating_sub(last);
-                        let walks = step >= u64::from(stride)
-                            && step <= 256
-                            && step % 4 == 0
-                            && (w.records == 1 || step == u64::from(w.step));
-                        if walks {
-                            let fit = (args.left(arguments) / step).min(WINDOW_MOST) as u32;
-                            (step as u32, (if w.records == 1 { 16 } else { w.records * 2 }).min(fit).max(1))
-                        } else {
-                            (stride, max)
-                        }
-=======
-            .filter(|w| same(w) && offset >= w.base)
-            .filter(|w| (offset - w.base) % u64::from(w.step) == 0 && (offset - w.base) / u64::from(w.step) < u64::from(w.records))
-            .map(|w| (w.scratch.clone(), offset - w.base));
-        let (bounded, at) = match batch.or(hit) {
-            Some(hit) => hit,
-            None => {
-                // A record a short step after the last window's last one
-                // (the same step as that window's, if it had one): the
-                // title walks the buffer, so the ones that step apart
-                // after it are clamped with it.
-                let (step, records) = match &self.window {
-                    Some(w) if windowed && same(w) => {
-                        let last = w.base + u64::from(w.records - 1) * u64::from(w.step);
-                        let step = offset.saturating_sub(last);
-                        let walks = step >= u64::from(stride)
-                            && step <= 256
-                            && step % 4 == 0
-                            && (w.records == 1 || step == u64::from(w.step));
-                        if walks {
-                            let fit = (args.left(arguments) / step).min(WINDOW_MOST) as u32;
-                            (step as u32, (if w.records == 1 { 16 } else { w.records * 2 }).min(fit).max(1))
-                        } else {
-                            (stride, max)
-                        }
->>>>>>> avatar/main
                     }
                 }
                 (scratch, at)
             }
-            (Serve::Clamp { .. }, Some((scratch, at))) => {
+            (None, Serve::Clamp { .. }, Some((scratch, at))) => {
                 // The record's bytes are up to date when the list is
                 // submitted, as for a record clamped in the list.
                 args.refresh(list, arguments, len);
@@ -5311,7 +5134,7 @@ impl State {
                 }
                 (scratch, at)
             }
-            (Serve::Clamp { step, records }, None) => {
+            (None, Serve::Clamp { step, records }, None) => {
                 // Transition the previous window's scratch buffer back to
                 // `COMMON` before the next clamp pass transitions it to `UAV`.
                 self.end_window(list);
@@ -5422,14 +5245,9 @@ impl State {
             _ => false,
         };
         if !ran {
-<<<<<<< HEAD
             if self.window.as_ref().is_none_or(|w| w.scratch != bounded) {
                 crate::indirect::done(list, &bounded);
             }
-||||||| a26859fc
-            crate::indirect::done(list, &bounded);
-=======
->>>>>>> avatar/main
             why("prepare failed");
             return false;
         }
@@ -5484,25 +5302,17 @@ impl State {
         if kind == MESH {
             self.mesh_scissor(list, false);
         }
-<<<<<<< HEAD
+        if kind == DISPATCH {
+            self.buffers_written();
+        } else {
+            self.drew(Some(p));
+        }
         if self.window.as_ref().is_none_or(|w| w.scratch != bounded) {
             crate::indirect::done(list, &bounded);
         }
         // The scratch buffer stays readable as arguments: the next draw of
         // the window reads it with no barrier, and the next clamp moves it
         // back (`crate::indirect`).
-||||||| a26859fc
-        crate::indirect::done(list, &bounded);
-=======
-        if kind == DISPATCH {
-            self.buffers_written();
-        } else {
-            self.drew(Some(p));
-        }
-        // The scratch buffer stays readable as arguments: the next draw of
-        // the window reads it with no barrier, and the next clamp moves it
-        // back (`crate::indirect`).
->>>>>>> avatar/main
         if kind == DISPATCH {
             DISPATCHED.fetch_add(1, Ordering::Relaxed);
         } else {
@@ -5512,7 +5322,6 @@ impl State {
     }
 }
 
-<<<<<<< HEAD
 /// Where a compute pipeline's program takes the number of its first thread
 /// group (`victory_shader::emit::USER_GROUP_BASE`): the root parameter of
 /// its user data and the dword in it.
@@ -5524,8 +5333,6 @@ fn group_base(p: &crate::pipeline::host::HostPipeline) -> Option<(u32, u32)> {
     Some((param, word.index))
 }
 
-||||||| a26859fc
-=======
 /// `DispatchX`: the counts are threads (the console's dispatch initiator bit
 /// "use thread dimensions"; DexNom/VIctory bc3cd4b0). Taken for groups, a
 /// rehydration stage of the structure builder ran up to 64 times its threads
@@ -5565,7 +5372,6 @@ mod thread_tests {
     }
 }
 
->>>>>>> avatar/main
 /// The host command signature for one argument of `kind` with records
 /// `stride` bytes apart (no root arguments, so no root signature), made
 /// once.
@@ -5754,16 +5560,6 @@ fn readable(list: &HostList, kind: ResourceType, view: &View) {
                 && let Some(t) = crate::resource::host_copy(*resource as This)
                 && t.flags() & 0x7 == 0
             {
-<<<<<<< HEAD
-                // Of a texture the title placed, the mips the view shows.
-                let first = match (&placed, view) {
-                    (Some(_), View::Shader(_, Some(desc))) => crate::resource::first_mip(desc),
-                    _ => 0,
-                };
-                crate::texture::upload_from(list, *resource as This, t, first);
-||||||| a26859fc
-                crate::texture::upload(list, *resource as This, t);
-=======
                 // (A texture the title writes: no target, depth or unordered
                 // access, `crate::texture::title_written`.)
                 // Of a texture the title placed, the levels the view shows.
@@ -5772,7 +5568,6 @@ fn readable(list: &HostList, kind: ResourceType, view: &View) {
                     _ => 0,
                 };
                 crate::texture::upload_from(list, *resource as This, first);
->>>>>>> avatar/main
             }
             // A depth texture shaders also write: what they wrote, first.
             list.twin_use(*resource as This, false, false);
@@ -6005,10 +5800,9 @@ pub(crate) fn depth_bounds(list: &HostList, min: f32, max: f32) {
         unsafe { l1.OMSetDepthBounds(min, max) };
     }
 }
-<<<<<<< HEAD
 
 #[cfg(test)]
-mod tests {
+mod serve_tests {
     //! The indirect window's walk arithmetic (`serve`), with no device: this
     //! is the part of `State::execute_indirect` that decides, from numbers,
     //! whether a record is already clamped and how many to clamp next.
@@ -6414,8 +6208,7 @@ mod tests {
         assert_eq!(jump_window(None, (7, 10, 12), 1 << 20), None);
     }
 }
-||||||| a26859fc
-=======
+
 
 /// Per-frame texture staging byte budget scaled from the adapter's local VRAM
 /// budget (`None` keeps the 192 MiB 12 GiB baseline).
@@ -6491,4 +6284,3 @@ mod record_hash_tests {
         assert!(zeros.iter().all(|h| seen.insert(*h)));
     }
 }
->>>>>>> avatar/main
