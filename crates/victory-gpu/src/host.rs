@@ -12851,10 +12851,12 @@ impl Host {
             copy.close();
             match slot {
                 Some(i) => {
-                    let flown = self.execute_own(copy);
+                    let (flown, _fence) = self.execute_own(copy);
                     p.ahead[i].1 = flown;
                 }
-                None => self.execute(&[copy]),
+                None => {
+                    let _ = self.execute(&[copy]);
+                }
             }
             #[cfg(feature = "diagnostics")]
             if let Some(Some((buffer, footprint))) = capture {

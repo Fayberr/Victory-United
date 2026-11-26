@@ -7931,11 +7931,11 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert_eq!(heap.dynamic(rest), Some(4 + 16));
         // The search starts at 0 again. Slots 0..16 back, then 0..12 taken:
         // it starts at 12, with 12..16 free.
-        heap.release(4, 16);
+        heap.release(heap.id(), 4, 16);
         assert_eq!(heap.dynamic(12), Some(4));
         // 10..12 back: the free run 10..16 lies across 12. Six slots fit
         // only there.
-        heap.release(4 + 10, 2);
+        heap.release(heap.id(), 4 + 10, 2);
         assert_eq!(heap.dynamic(6), Some(4 + 10));
         // And nothing is found where nothing is.
         assert_eq!(heap.dynamic(1), None);
@@ -8062,13 +8062,13 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert_eq!((a, b), (4, 12));
         let rest = heap.dynamic - 16;
         assert_eq!(heap.dynamic(rest), Some(20));
-        heap.release(4, 12);
+        heap.release(heap.id(), 4, 12);
         assert_eq!(heap.dynamic(12), Some(4));
 
         // Release dynamic slots 10..14 (heap slots 14..18, crossing cursor at 12).
         // Before the fix, a request of 4 slots starting search at 12 scanned
         // 12..end (2 free) then 0..12 (2 free), missing the contiguous run at 10..14.
-        heap.release(14, 4);
+        heap.release(heap.id(), 14, 4);
         let c = heap.dynamic(4);
         assert_eq!(c, Some(14));
     }
