@@ -24,7 +24,7 @@ cabelo e luz bem melhores. Por cima dela vieram os ajustes para NVIDIA de 8 GB.
 | Imagem, perfil Series X | rostos e pele com textura, luz coerente nas cutscenes |
 | fps, perfil Series X, release | ~5,6 (a placa sozinha leva ~105 ms por quadro) |
 | Memória da placa, Series X | no limite; na prisão passa do orçamento e a textura borra |
-| Perfil Series S, release, cutscene de abertura | imagem certa, placa em 5,3 de 6,9 GB, ~16 fps com `CARD_STEPS=2` (vídeo de abertura: 30 fps) |
+| Perfil Series S, release, cutscene de abertura | imagem certa, boca animada, placa em 5,2 de 6,8 GB, ~18–19 fps (vídeo de abertura: 30 fps) |
 | Perfil Series S, release, prisão (jogável, ~430 s depois do início) | ~14 fps, luz limpa com `VICTORY_AMBIENT=constant:0.1` |
 
 **Ainda não está jogável.** O alvo é ter 15 fps ou mais, com imagem nítida, nas cutscenes e na prisão. Use o perfil Series S.
