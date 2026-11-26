@@ -320,7 +320,6 @@ pub(crate) fn sync_heaps() {
         // Capped host heaps have no counterparts for the title slots reserved
         // for per-draw tables; raw writes there must not be mirrored.
         let mirrored_count = heap.desc.count.min(host.count());
-<<<<<<< HEAD
         // The records of some frames ago that no draw read through a table
         // since: a shader may pick them by index.
         let before = host.copied_before(frame);
@@ -340,14 +339,6 @@ pub(crate) fn sync_heaps() {
         kinds[4] += before.len() as u64 - of_tables;
         // Those of the changed pages, made together at the end.
         let mut make: Vec<u32> = Vec::new();
-        let began = std::time::Instant::now();
-        let taken = written.take(start as usize, end as usize);
-        spent[0] += since(began);
-        let mut parts: Vec<(usize, usize)> = Vec::new();
-        for (range_from, range_end) in taken {
-||||||| 9c184b35b
-        for (range_from, range_end) in written.take(start as usize, end as usize) {
-=======
         // With `VICTORY_HEAP_SYNC_CUT`: only the pages that hold slots the
         // host heap has title slots for are taken and read ([`sync_cut`]).
         let looked_end = if sync_cut() {
@@ -355,11 +346,13 @@ pub(crate) fn sync_heaps() {
         } else {
             end as usize
         };
-        let asking = std::time::Instant::now();
-        let ranges = written.take(start as usize, looked_end);
-        SYNC_PARTS[0].fetch_add(asking.elapsed().as_micros() as u64, Relaxed);
-        for (range_from, range_end) in ranges {
->>>>>>> origin/exp/fork-head
+        let began = std::time::Instant::now();
+        let taken = written.take(start as usize, looked_end);
+        let asking = since(began);
+        spent[0] += asking;
+        SYNC_PARTS[0].fetch_add(asking / 1_000, Relaxed);
+        let mut parts: Vec<(usize, usize)> = Vec::new();
+        for (range_from, range_end) in taken {
             let mut page = range_from & !(crate::watch::PAGE - 1);
             while page < range_end {
                 parts.push((page.max(range_from), (page + crate::watch::PAGE).min(range_end)));
@@ -382,8 +375,10 @@ pub(crate) fn sync_heaps() {
                 // copy: a page the title unmaps meanwhile fails the read
                 // where 2,048 reads in place would fault.
                 page_bytes.resize(to - from, 0);
-<<<<<<< HEAD
-                if !crate::host::read_into(from as *const u8, &mut page_bytes) {
+                let reading = std::time::Instant::now();
+                let read = crate::host::read_into(from as *const u8, &mut page_bytes);
+                SYNC_PARTS[1].fetch_add(reading.elapsed().as_micros() as u64, Relaxed);
+                if !read {
                     continue;
                 }
                 out.pages += 1;
@@ -411,38 +406,6 @@ pub(crate) fn sync_heaps() {
                             .get(at + 4 * n..at + 4 * n + 4)
                             .and_then(|b| b.try_into().ok())
                             .map_or(0, u32::from_le_bytes)
-||||||| 9c184b35b
-                if crate::host::read_into(from as *const u8, &mut page_bytes) {
-                    pages += 1;
-                    let slots = changed_slots(from, to, start as usize, step, mirrored_count);
-                    // The page's records in one go, under one lock
-                    // (`HostHeap::mirror_copied_page`); one by one below
-                    // with `VICTORY_HEAP_SYNC_PAGE=0`.
-                    let slots = if page_at_once() {
-                        let (seen, made) = host.mirror_copied_page(slots, (start, step), from, &page_bytes);
-                        looked += seen;
-                        mirrored += made;
-                        0..0
-                    } else {
-                        slots
-=======
-                let reading = std::time::Instant::now();
-                let read = crate::host::read_into(from as *const u8, &mut page_bytes);
-                SYNC_PARTS[1].fetch_add(reading.elapsed().as_micros() as u64, Relaxed);
-                if read {
-                    pages += 1;
-                    let slots = changed_slots(from, to, start as usize, step, mirrored_count);
-                    // The page's records in one go, under one lock
-                    // (`HostHeap::mirror_copied_page`); one by one below
-                    // with `VICTORY_HEAP_SYNC_PAGE=0`.
-                    let slots = if page_at_once() {
-                        let (seen, made) = host.mirror_copied_page(slots, (start, step), from, &page_bytes);
-                        looked += seen;
-                        mirrored += made;
-                        0..0
-                    } else {
-                        slots
->>>>>>> origin/exp/fork-head
                     };
                     if !samplers && word(0) == VIEW_TAG {
                         // A draw's own table: the draw makes what it
@@ -524,7 +487,6 @@ pub(crate) fn sync_heaps() {
     }
 }
 
-<<<<<<< HEAD
 /// Of those mirrored, since the last frame line: no view, a view of an object,
 /// another, a sampler; waited and no draw came.
 #[cfg(windows)]
@@ -553,8 +515,6 @@ const SYNC_PAGES: usize = 8;
 #[cfg(windows)]
 const SYNC_AT_A_TIME: usize = 256;
 
-||||||| 9c184b35b
-=======
 /// Whether a submission's pass over the title's view heaps ([`sync_heaps`])
 /// and the making of the slots that waited for a texture's host copy
 /// ([`make_waiting`]) run on a thread of their own while the submitting
@@ -723,7 +683,6 @@ fn sync_cut() -> bool {
 /// 286).
 pub(crate) static SYNC_PARTS: [std::sync::atomic::AtomicU64; 4] = [const { std::sync::atomic::AtomicU64::new(0) }; 4];
 
->>>>>>> origin/exp/fork-head
 /// Since the last frame line, of [`sync_heaps`]: changed pages of placed
 /// shader-visible heaps looked at, slots on them, slots whose record was
 /// not the one last seen and was mirrored, the microseconds it took; then
