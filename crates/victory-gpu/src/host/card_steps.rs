@@ -148,16 +148,12 @@ pub(super) fn writers(items: &[Late]) -> Vec<Writer> {
                         copy: false,
                     }));
                 }
-                for &i in &flight.order {
-                    for &(_, at, [row, rows, pitch]) in &flight.lists[i].host().deferred().backs {
-                        out.push(Writer {
-                            shadow: None,
-                            from: at,
-                            to: at + rows.saturating_sub(1) * pitch + row,
-                            copy: false,
-                        });
-                    }
-                }
+                out.extend(flight.texture_back_ranges.iter().map(|&(from, to)| Writer {
+                    shadow: None,
+                    from,
+                    to,
+                    copy: false,
+                }));
                 out.extend(flight.own.iter().flat_map(Taken::copied));
             }
             Late::Write(at, _, bytes) => out.push(Writer {
@@ -201,6 +197,7 @@ pub(super) fn copied_read(copies: &[Writer], runs: &[&HostList]) -> bool {
                 .iter()
                 .any(|w| w.from < *at + *len && *at < w.to && w.shadow.as_ref().is_none_or(|s| !Arc::ptr_eq(s, shadow))),
             Step::Host(_, (from, to)) => copies.iter().any(|w| w.from < *to && *from < w.to),
+            Step::Plane((at, len), _) => copies.iter().any(|w| w.from < at.saturating_add(*len) && *at < w.to),
             _ => false,
         })
     })
@@ -440,6 +437,11 @@ fn does_of(written: &[(usize, usize)], runs: &[&HostList]) -> (Vec<Does>, Vec<(u
                         asked: touches(written, at, at + len),
                     }
                 }
+                &Step::Plane((at, len), _) => Does::Read {
+                    from: at,
+                    to: at.saturating_add(len),
+                    asked: touches(written, at, at.saturating_add(len)),
+                },
                 &Step::Host(_, (from, to)) if from < to => Does::Read { from, to, asked: false },
                 Step::Refresh(shadow, at, len) => Does::Refresh {
                     shadow: Arc::as_ptr(shadow) as usize,

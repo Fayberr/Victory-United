@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="509" viewBox="0 0 920 509" role="img" aria-labelledby="title description">
+  <title id="title">Frame rate by run</title>
+  <desc id="description">Series X median 14.3 fps, 1% low 3.5, P10 to P90 13.6 to 14.7. Series S median 20.8 fps, 1% low 8.7, P10 to P90 19.2 to 21.8. Series X (-Safe) median 15.4 fps, 1% low 3.3, P10 to P90 13.5 to 17.8. Series S (70 min) median 12.9 fps, 1% low 5.0, P10 to P90 8.3 to 20.1.</desc>
+  <style>
+    text { font-family: system-ui, 'Segoe UI', sans-serif; font-variant-numeric: tabular-nums; }
+    .muted { fill: #A6B7CD; font-size: 16px; }
+    .tick { fill: #A6B7CD; font-size: 15px; }
+    .grid { stroke: #32435B; stroke-width: 1; }
+    .guide { stroke: #FFC186; stroke-width: 2; stroke-dasharray: 5 5; }
+  </style>
+  <rect x=".5" y=".5" width="919" height="508" rx="16" fill="#0E1829" stroke="#3A4B60"/>
+  <text x="34" y="52" fill="#EDF4FF" font-size="32" font-weight="730">Frame rate by run</text>
+  <text x="36" y="80" class="muted">RTX 4090 · Build 672cf831 · In-world samples</text>
+  <path d="M36 95H884" class="grid"/>
+  <path d="M252 111l6 6-6 6-6-6z" fill="#0E1829" stroke="#EDF4FF" stroke-width="2"/>
+  <text x="266" y="122" class="tick">1% low</text>
+  <path d="M351 117h26" stroke="#A6B7CD" stroke-width="6" stroke-linecap="round"/>
+  <text x="387" y="122" class="tick">P10–P90</text>
+  <circle cx="479" cy="117" r="6" fill="#EDF4FF"/>
+  <text x="493" y="122" class="tick">Median</text>
+  <path d="M246 145V462" class="grid"/>
+  <text x="246" y="485" class="tick" text-anchor="middle">0</text>
+  <path d="M309.75 145V462" class="grid"/>
+  <text x="309.75" y="485" class="tick" text-anchor="middle">5</text>
+  <path d="M373.5 145V462" class="grid"/>
+  <text x="373.5" y="485" class="tick" text-anchor="middle">10</text>
+  <path d="M437.25 145V462" class="grid"/>
+  <text x="437.25" y="485" class="tick" text-anchor="middle">15</text>
+  <path d="M501 145V462" class="grid"/>
+  <text x="501" y="485" class="tick" text-anchor="middle">20</text>
+  <path d="M564.75 145V462" class="grid"/>
+  <text x="564.75" y="485" class="tick" text-anchor="middle">25</text>
+  <path d="M628.5 145V462" class="grid"/>
+  <text x="628.5" y="485" class="tick" text-anchor="middle">30</text>
+  <path d="M692.25 145V462" class="grid"/>
+  <text x="692.25" y="485" class="tick" text-anchor="middle">35</text>
+  <path d="M756 145V462" class="grid"/>
+  <text x="756" y="485" class="tick" text-anchor="middle">40 fps</text>
+  <path d="M628.5 146V462" class="guide"/>
+  <text x="628.5" y="128" fill="#FFC186" font-size="16" font-weight="650" text-anchor="middle">30 fps target</text>
+  <text x="36" y="171" fill="#EDF4FF" font-size="20" font-weight="690">Series X</text>
+  <text x="36" y="196" class="muted">123 samples</text>
+  <path d="M246 168H756" stroke="#26384F" stroke-width="8" stroke-linecap="round"/>
+  <path d="M419.4 168H433.43" stroke="#91ADFF" stroke-width="9" stroke-linecap="round"/>
+  <path d="M290.63 162l6 6-6 6-6-6z" fill="#0E1829" stroke="#91ADFF" stroke-width="2"/>
+  <circle cx="428.32" cy="168" r="7" fill="#EDF4FF" stroke="#0E1829" stroke-width="2"/>
+  <text x="246" y="196" class="muted">1% low 3.5 · P10–P90 13.6–14.7</text>
+  <text x="882" y="176" fill="#91ADFF" text-anchor="end" font-size="25" font-weight="720">14.3 <tspan font-size="15">fps</tspan></text>
+  <text x="36" y="250" fill="#EDF4FF" font-size="20" font-weight="690">Series S</text>
+  <text x="36" y="275" class="muted">117 samples</text>
+  <path d="M246 247H756" stroke="#26384F" stroke-width="8" stroke-linecap="round"/>
+  <path d="M490.8 247H523.95" stroke="#63E6C5" stroke-width="9" stroke-linecap="round"/>
+  <path d="M356.93 241l6 6-6 6-6-6z" fill="#0E1829" stroke="#63E6C5" stroke-width="2"/>
+  <circle cx="511.2" cy="247" r="7" fill="#EDF4FF" stroke="#0E1829" stroke-width="2"/>
+  <text x="246" y="275" class="muted">1% low 8.7 · P10–P90 19.2–21.8</text>
+  <text x="882" y="255" fill="#63E6C5" text-anchor="end" font-size="25" font-weight="720">20.8 <tspan font-size="15">fps</tspan></text>
+  <text x="36" y="329" fill="#EDF4FF" font-size="20" font-weight="690">Series X (-Safe)</text>
+  <text x="36" y="354" class="muted">118 samples</text>
+  <path d="M246 326H756" stroke="#26384F" stroke-width="8" stroke-linecap="round"/>
+  <path d="M418.13 326H472.95" stroke="#F3A4C5" stroke-width="9" stroke-linecap="round"/>
+  <path d="M288.07 320l6 6-6 6-6-6z" fill="#0E1829" stroke="#F3A4C5" stroke-width="2"/>
+  <circle cx="442.35" cy="326" r="7" fill="#EDF4FF" stroke="#0E1829" stroke-width="2"/>
+  <text x="246" y="354" class="muted">1% low 3.3 · P10–P90 13.5–17.8</text>
+  <text x="882" y="334" fill="#F3A4C5" text-anchor="end" font-size="25" font-weight="720">15.4 <tspan font-size="15">fps</tspan></text>
+  <text x="36" y="408" fill="#EDF4FF" font-size="20" font-weight="690">Series S (70 min)</text>
+  <text x="36" y="433" class="muted">775 samples</text>
+  <path d="M246 405H756" stroke="#26384F" stroke-width="8" stroke-linecap="round"/>
+  <path d="M351.82 405H502.27" stroke="#CCADF9" stroke-width="9" stroke-linecap="round"/>
+  <path d="M309.75 399l6 6-6 6-6-6z" fill="#0E1829" stroke="#CCADF9" stroke-width="2"/>
+  <circle cx="410.48" cy="405" r="7" fill="#EDF4FF" stroke="#0E1829" stroke-width="2"/>
+  <text x="246" y="433" class="muted">1% low 5.0 · P10–P90 8.3–20.1</text>
+  <text x="882" y="413" fill="#CCADF9" text-anchor="end" font-size="25" font-weight="720">12.9 <tspan font-size="15">fps</tspan></text>
+</svg>

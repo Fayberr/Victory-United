@@ -442,12 +442,25 @@ impl LateDlls {
                     inner: &old,
                     dlls: &new,
                 };
-                for (name, dll) in &new {
+                // All of them bound before any is known as an image: a load
+                // that fails here leaves none behind, unattached, for the
+                // next `LoadLibrary` of its name to return.
+                let bound = new.iter().try_for_each(|(name, dll)| {
                     println!(
                         "title dll      {name} at {:#x} (loaded by the title)",
                         dll.base()
                     );
                     show(name, dll.bind_imports(&resolver, self.policy)?);
+                    anyhow::Ok(())
+                });
+                if let Err(error) = bound {
+                    for (_, dll) in new {
+                        // SAFETY: never attached, and no title code holds it.
+                        unsafe { dll.unload() };
+                    }
+                    return Err(error);
+                }
+                for (name, dll) in &new {
                     set_image_path(dll.base(), &self.title_dir.join(name));
                 }
                 // Visible before their `DllMain`s run, which may load more.

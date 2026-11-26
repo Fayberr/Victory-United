@@ -27,6 +27,18 @@ const ALLOWED_NAMES: &[&str] = &[
     "LICENSE-MIT",
     "LICENSE-APACHE",
 ];
+// The benchmark documentation still goes through every content check below.
+const ALLOWED_DOCUMENTATION: &[&str] = &[
+    "docs/.nojekyll",
+    "docs/benchmark-dashboard.css",
+    "docs/benchmark-dashboard.js",
+    "docs/benchmark-data.js",
+    "docs/charts/profile-frame-rate.svg",
+    "docs/charts/profile-frame-timing.svg",
+    "docs/charts/session-frame-rate.svg",
+    "docs/index.html",
+    "scripts/generate-benchmark-charts.mjs",
+];
 
 /// Paths explicitly exempted, with a reason. Keep this empty if at all possible.
 const EXCEPTIONS: &[(&str, &str)] = &[(
@@ -149,6 +161,7 @@ pub fn check(path: &str, content: &[u8]) -> Vec<String> {
     let name = path.rsplit('/').next().unwrap_or(path);
     let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
     let allowed = ALLOWED_NAMES.contains(&name)
+        || ALLOWED_DOCUMENTATION.contains(&path)
         || ext
             .as_deref()
             .is_some_and(|e| ALLOWED_EXTENSIONS.contains(&e));
@@ -236,6 +249,17 @@ mod tests {
         assert!(check("crates/x/src/lib.rs", b"fn main() {}\n").is_empty());
         assert!(check(".gitignore", b"/target/\n").is_empty());
         assert!(check(".githooks/pre-commit", b"#!/bin/sh\n").is_empty());
+    }
+
+    #[test]
+    fn documentation_paths_keep_the_content_checks() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg"/>"#;
+        for path in super::ALLOWED_DOCUMENTATION {
+            assert!(check(path, b"original documentation").is_empty());
+            assert!(!check(path, b"DDS \0").is_empty());
+        }
+        assert!(!check("docs/charts/other.svg", svg).is_empty());
+        assert!(!check("docs/unrelated.js", b"let data = 0;").is_empty());
     }
 
     #[test]

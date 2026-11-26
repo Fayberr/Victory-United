@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="430" viewBox="0 0 920 430" role="img" aria-labelledby="title description">
+  <title id="title">Frame rate over the playtest</title>
+  <desc id="description">Series S from 09:11 to 10:22 UTC. The per-minute medians range from 6.7 to 24.5 fps. The final minute measured 7.9 fps.</desc>
+  <style>
+    text { font-family: system-ui, 'Segoe UI', sans-serif; font-variant-numeric: tabular-nums; }
+    .muted { fill: #A6B7CD; font-size: 16px; }
+    .tick { fill: #A6B7CD; font-size: 15px; }
+    .grid { stroke: #32435B; stroke-width: 1; }
+    .guide { stroke: #FFC186; stroke-width: 2; stroke-dasharray: 5 5; }
+  </style>
+  <rect x=".5" y=".5" width="919" height="429" rx="16" fill="#0E1829" stroke="#3A4B60"/>
+  <text x="34" y="52" fill="#EDF4FF" font-size="32" font-weight="730">Frame rate over the playtest</text>
+  <text x="36" y="80" class="muted">Series S · Build 672cf831 · FPS median for each logged minute</text>
+  <path d="M36 95H884" class="grid"/>
+  <text x="36" y="124" fill="#CCADF9" font-size="18" font-weight="700">24.5 fps</text>
+  <text x="116" y="124" class="tick">Peak minute</text>
+  <text x="322" y="124" fill="#CCADF9" font-size="18" font-weight="700">6.7 fps</text>
+  <text x="402" y="124" class="tick">Lowest minute</text>
+  <text x="608" y="124" fill="#CCADF9" font-size="18" font-weight="700">7.9 fps</text>
+  <text x="688" y="124" class="tick">Final minute</text>
+  <path d="M70 356H862" class="grid"/>
+  <text x="58" y="361" class="tick" text-anchor="end">0</text>
+  <path d="M70 322.17H862" class="grid"/>
+  <text x="58" y="327.17" class="tick" text-anchor="end">5</text>
+  <path d="M70 288.33H862" class="grid"/>
+  <text x="58" y="293.33" class="tick" text-anchor="end">10</text>
+  <path d="M70 254.5H862" class="grid"/>
+  <text x="58" y="259.5" class="tick" text-anchor="end">15</text>
+  <path d="M70 220.67H862" class="grid"/>
+  <text x="58" y="225.67" class="tick" text-anchor="end">20</text>
+  <path d="M70 186.83H862" class="grid"/>
+  <text x="58" y="191.83" class="tick" text-anchor="end">25</text>
+  <path d="M70 153H862" class="grid"/>
+  <text x="58" y="158" class="tick" text-anchor="end">30</text>
+  <path d="M70 153H862" class="guide"/>
+  <text x="857" y="174" fill="#FFC186" font-size="15" font-weight="650" text-anchor="end">30 fps target</text>
+  <path d="M70 240.97L81.15 215.93L92.31 210.52L103.46 230.82L114.62 221.34L125.77 190.22L136.93 203.07L148.08 214.58L159.24 224.73L170.39 244.35L181.55 229.46L192.7 225.4L203.86 265.33L215.01 272.77L226.17 191.57L237.32 270.06L248.48 230.14L259.63 232.85L270.79 226.76L281.94 232.85L293.1 240.29L304.25 231.49L315.41 232.85L326.56 228.11L337.72 239.61L348.87 244.35L360.03 240.29L371.18 245.03L382.34 249.09L393.49 260.59L404.65 260.59L415.8 264.65L426.96 266.68L438.11 253.82L449.27 259.24L460.42 264.65L471.58 261.94L482.73 263.3L493.89 270.74L505.04 274.8L516.2 272.77L527.35 273.45L538.51 269.39L549.66 283.6L560.82 283.6L571.97 280.21L583.13 278.18L594.28 287.66L605.44 284.95L616.59 284.27L627.75 288.33L638.9 287.66L650.06 284.95L661.21 285.63L672.37 292.39L683.52 301.87L694.68 305.25L705.83 293.07L716.99 282.24L728.14 269.39L739.3 295.78L750.45 293.75L761.61 295.78L772.76 300.51L783.92 310.66L795.07 294.42L806.23 297.13L817.38 291.04L828.54 291.72L839.69 284.27L850.85 299.16L862 302.54" fill="none" stroke="#CCADF9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="70" cy="240.97" r="2" fill="#CCADF9"/>
+  <circle cx="81.15" cy="215.93" r="2" fill="#CCADF9"/>
+  <circle cx="92.31" cy="210.52" r="2" fill="#CCADF9"/>
+  <circle cx="103.46" cy="230.82" r="2" fill="#CCADF9"/>
+  <circle cx="114.62" cy="221.34" r="2" fill="#CCADF9"/>
+  <circle cx="125.77" cy="190.22" r="5" fill="#CCADF9" stroke="#0E1829" stroke-width="1.5"/>
+  <circle cx="136.93" cy="203.07" r="2" fill="#CCADF9"/>
+  <circle cx="148.08" cy="214.58" r="2" fill="#CCADF9"/>
+  <circle cx="159.24" cy="224.73" r="2" fill="#CCADF9"/>
+  <circle cx="170.39" cy="244.35" r="2" fill="#CCADF9"/>
+  <circle cx="181.55" cy="229.46" r="2" fill="#CCADF9"/>
+  <circle cx="192.7" cy="225.4" r="2" fill="#CCADF9"/>
+  <circle cx="203.86" cy="265.33" r="2" fill="#CCADF9"/>
+  <circle cx="215.01" cy="272.77" r="2" fill="#CCADF9"/>
+  <circle cx="226.17" cy="191.57" r="2" fill="#CCADF9"/>
+  <circle cx="237.32" cy="270.06" r="2" fill="#CCADF9"/>
+  <circle cx="248.48" cy="230.14" r="2" fill="#CCADF9"/>
+  <circle cx="259.63" cy="232.85" r="2" fill="#CCADF9"/>
+  <circle cx="270.79" cy="226.76" r="2" fill="#CCADF9"/>
+  <circle cx="281.94" cy="232.85" r="2" fill="#CCADF9"/>
+  <circle cx="293.1" cy="240.29" r="2" fill="#CCADF9"/>
+  <circle cx="304.25" cy="231.49" r="2" fill="#CCADF9"/>
+  <circle cx="315.41" cy="232.85" r="2" fill="#CCADF9"/>
+  <circle cx="326.56" cy="228.11" r="2" fill="#CCADF9"/>
+  <circle cx="337.72" cy="239.61" r="2" fill="#CCADF9"/>
+  <circle cx="348.87" cy="244.35" r="2" fill="#CCADF9"/>
+  <circle cx="360.03" cy="240.29" r="2" fill="#CCADF9"/>
+  <circle cx="371.18" cy="245.03" r="2" fill="#CCADF9"/>
+  <circle cx="382.34" cy="249.09" r="2" fill="#CCADF9"/>
+  <circle cx="393.49" cy="260.59" r="2" fill="#CCADF9"/>
+  <circle cx="404.65" cy="260.59" r="2" fill="#CCADF9"/>
+  <circle cx="415.8" cy="264.65" r="2" fill="#CCADF9"/>
+  <circle cx="426.96" cy="266.68" r="2" fill="#CCADF9"/>
+  <circle cx="438.11" cy="253.82" r="2" fill="#CCADF9"/>
+  <circle cx="449.27" cy="259.24" r="2" fill="#CCADF9"/>
+  <circle cx="460.42" cy="264.65" r="2" fill="#CCADF9"/>
+  <circle cx="471.58" cy="261.94" r="2" fill="#CCADF9"/>
+  <circle cx="482.73" cy="263.3" r="2" fill="#CCADF9"/>
+  <circle cx="493.89" cy="270.74" r="2" fill="#CCADF9"/>
+  <circle cx="505.04" cy="274.8" r="2" fill="#CCADF9"/>
+  <circle cx="516.2" cy="272.77" r="2" fill="#CCADF9"/>
+  <circle cx="527.35" cy="273.45" r="2" fill="#CCADF9"/>
+  <circle cx="538.51" cy="269.39" r="2" fill="#CCADF9"/>
+  <circle cx="549.66" cy="283.6" r="2" fill="#CCADF9"/>
+  <circle cx="560.82" cy="283.6" r="2" fill="#CCADF9"/>
+  <circle cx="571.97" cy="280.21" r="2" fill="#CCADF9"/>
+  <circle cx="583.13" cy="278.18" r="2" fill="#CCADF9"/>
+  <circle cx="594.28" cy="287.66" r="2" fill="#CCADF9"/>
+  <circle cx="605.44" cy="284.95" r="2" fill="#CCADF9"/>
+  <circle cx="616.59" cy="284.27" r="2" fill="#CCADF9"/>
+  <circle cx="627.75" cy="288.33" r="2" fill="#CCADF9"/>
+  <circle cx="638.9" cy="287.66" r="2" fill="#CCADF9"/>
+  <circle cx="650.06" cy="284.95" r="2" fill="#CCADF9"/>
+  <circle cx="661.21" cy="285.63" r="2" fill="#CCADF9"/>
+  <circle cx="672.37" cy="292.39" r="2" fill="#CCADF9"/>
+  <circle cx="683.52" cy="301.87" r="2" fill="#CCADF9"/>
+  <circle cx="694.68" cy="305.25" r="2" fill="#CCADF9"/>
+  <circle cx="705.83" cy="293.07" r="2" fill="#CCADF9"/>
+  <circle cx="716.99" cy="282.24" r="2" fill="#CCADF9"/>
+  <circle cx="728.14" cy="269.39" r="2" fill="#CCADF9"/>
+  <circle cx="739.3" cy="295.78" r="2" fill="#CCADF9"/>
+  <circle cx="750.45" cy="293.75" r="2" fill="#CCADF9"/>
+  <circle cx="761.61" cy="295.78" r="2" fill="#CCADF9"/>
+  <circle cx="772.76" cy="300.51" r="2" fill="#CCADF9"/>
+  <circle cx="783.92" cy="310.66" r="5" fill="#CCADF9" stroke="#0E1829" stroke-width="1.5"/>
+  <circle cx="795.07" cy="294.42" r="2" fill="#CCADF9"/>
+  <circle cx="806.23" cy="297.13" r="2" fill="#CCADF9"/>
+  <circle cx="817.38" cy="291.04" r="2" fill="#CCADF9"/>
+  <circle cx="828.54" cy="291.72" r="2" fill="#CCADF9"/>
+  <circle cx="839.69" cy="284.27" r="2" fill="#CCADF9"/>
+  <circle cx="850.85" cy="299.16" r="2" fill="#CCADF9"/>
+  <circle cx="862" cy="302.54" r="5" fill="#CCADF9" stroke="#0E1829" stroke-width="1.5"/>
+  <text x="70" y="382" class="tick" text-anchor="middle">09:11</text>
+  <text x="270.79" y="382" class="tick" text-anchor="middle">09:29</text>
+  <text x="471.58" y="382" class="tick" text-anchor="middle">09:47</text>
+  <text x="661.21" y="382" class="tick" text-anchor="middle">10:04</text>
+  <text x="862" y="382" class="tick" text-anchor="middle">10:22</text>
+  <text x="862" y="409" class="tick" text-anchor="end">Time (UTC)</text>
+</svg>

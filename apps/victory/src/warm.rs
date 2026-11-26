@@ -73,6 +73,7 @@ pub fn run(jobs: Option<usize>, limit: Option<usize>, again: bool, used: bool, t
     // (Read back by the runs: these are made beside the others, not before.)
     let slow_out = Mutex::new(std::fs::OpenOptions::new().create(true).append(true).open(dir.join("slow-pipelines.txt"))?);
     let bad_out = Mutex::new(std::fs::OpenOptions::new().create(true).append(true).open(&bad_file)?);
+<<<<<<< HEAD
     run_batches(
         &all,
         jobs,
@@ -97,6 +98,81 @@ pub fn run(jobs: Option<usize>, limit: Option<usize>, again: bool, used: bool, t
             lock(&state).2 += 1;
         },
     )?;
+||||||| 0a4356653
+    std::thread::scope(|s| {
+        for _ in 0..jobs.min(chunks.len()) {
+            s.spawn(|| {
+                while let Some(&chunk) = chunks.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    let mut rest = chunk;
+                    while !rest.is_empty() {
+                        let (made, ended) = child(rest, |n, ms, there| {
+                            if ms >= SLOW_MS {
+                                let _ = writeln!(lock(&slow_out), "\n{} {ms:.0}", keys[n]);
+                            }
+                            let mut state = lock(&state);
+                            state.0.push(ms);
+                            state.1 += usize::from(!there);
+                            let count = state.0.len();
+                            if count % 1000 == 0 {
+                                println!("{count} of {}, {:.0} s", all.len(), began.elapsed().as_secs_f64());
+                            }
+                            drop(state);
+                            let _ = writeln!(lock(&done_out), "{fingerprint} {}", keys[n]);
+                        });
+                        rest = &rest[made.min(rest.len())..];
+                        match (ended, rest.split_first()) {
+                            (Some(why), Some((&n, after))) => {
+                                // The one it was at.
+                                println!("pipeline {n} {}: {why}", keys[n]);
+                                let _ = writeln!(lock(&bad_out), "{} {why}", keys[n]);
+                                lock(&state).2 += 1;
+                                rest = after;
+                            }
+                            _ => break,
+                        }
+                    }
+                }
+            });
+        }
+    });
+=======
+    std::thread::scope(|s| {
+        for _ in 0..jobs.min(chunks.len()) {
+            s.spawn(|| {
+                while let Some(&chunk) = chunks.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    let mut rest = chunk;
+                    while !rest.is_empty() {
+                        let (made, ended) = child(rest, |n, ms, there| {
+                            if ms >= SLOW_MS {
+                                let _ = writeln!(lock(&slow_out), "\n{} {ms:.0}", keys[n]);
+                            }
+                            let mut state = lock(&state);
+                            state.0.push(ms);
+                            state.1 += usize::from(!there);
+                            let count = state.0.len();
+                            if count.is_multiple_of(1000) {
+                                println!("{count} of {}, {:.0} s", all.len(), began.elapsed().as_secs_f64());
+                            }
+                            drop(state);
+                            let _ = writeln!(lock(&done_out), "{fingerprint} {}", keys[n]);
+                        });
+                        rest = &rest[made.min(rest.len())..];
+                        match (ended, rest.split_first()) {
+                            (Some(why), Some((&n, after))) => {
+                                // The one it was at.
+                                println!("pipeline {n} {}: {why}", keys[n]);
+                                let _ = writeln!(lock(&bad_out), "{} {why}", keys[n]);
+                                lock(&state).2 += 1;
+                                rest = after;
+                            }
+                            _ => break,
+                        }
+                    }
+                }
+            });
+        }
+    });
+>>>>>>> vicetay/main
     let (mut times, refused, crashed) = state.into_inner().unwrap_or_else(|e| e.into_inner());
     times.sort_by(f64::total_cmp);
     let at = |q: f64| times.get((times.len() as f64 * q) as usize).copied().unwrap_or(0.0);
