@@ -869,45 +869,11 @@ fn emit_forms(
                 }
             }
         }
-        if wide_last {
-            let deep_on = std::env::var_os("VICTORY_WAVE_DEEP_SKIPS").is_none_or(|v| v != "0");
-            let deep = if deep_on { form(ir::without_skips(p, true)) } else { None };
-            let bases = [
-                deep.as_ref().map(|f| &f.0),
-                forms[1].1.as_ref().map(|f| &f.0),
-                forms[0].1.as_ref().map(|f| &f.0),
-                Some(p),
-            ];
-            if let Some(base) = bases.into_iter().flatten().next() {
-                let again = widen(c, native, base, why);
-                report("wave-wide branches (last)", &again);
-                if done(&again) {
-                    return again;
-                }
-            }
-        }
-        // Last of all, for a program that would still ask for 64-lane waves, which this host
-        // refuses outright: the wave-wide form after all (unless `VICTORY_WAVE_WIDE=0`). Every
-        // group barrier it adds now stands behind decisions the two host waves take as one
-        // ([`widen`]). Not before the forms above: the programs they take keep their
-        // translation.
-        let wide_last = !wide_on && std::env::var_os("VICTORY_WAVE_WIDE").is_none_or(|v| v != "0");
-        let several = matches!(native.io, crate::native::StageIo::Cs(cs) if cs.threads.iter().product::<u32>() > 64);
-        let wide_last_form = || {
-            let deep_on = std::env::var_os("VICTORY_WAVE_DEEP_SKIPS").is_none_or(|v| v != "0");
-            let deep = if deep_on { form(ir::without_skips(p, true)) } else { None };
-            wide_form(deep.as_ref().map(|f| &f.0))
-        };
-        if wide_last && !several && matches!(&original, Ok((_, Some(64)))) {
-            let again = wide_last_form();
-            if done(&again) {
-                return again;
-            }
-        }
         // A thread group of several console waves: every form once more with the group's LDS
         // left to the title's own barriers ([`lower::with_group_barriers`];
         // `VICTORY_WAVE_GROUP_BARRIERS=0` turns it off), and then the wave-wide form, whose
         // halves meet alone there.
+        let several = matches!(native.io, crate::native::StageIo::Cs(cs) if cs.threads.iter().product::<u32>() > 64);
         let group_on = std::env::var_os("VICTORY_WAVE_GROUP_BARRIERS").is_none_or(|v| v != "0");
         let mut grouped = None;
         if several && group_on && matches!(&original, Ok((_, Some(64)))) {
@@ -921,8 +887,16 @@ fn emit_forms(
                 grouped = Some(again);
             }
         }
-        if wide_last && several && matches!(&original, Ok((_, Some(64)))) {
-            let again = wide_last_form();
+        // Last of all, for a program that would still ask for 64-lane waves, which this host
+        // refuses outright: the wave-wide form after all (unless `VICTORY_WAVE_WIDE=0`). Every
+        // group barrier it adds now stands behind decisions the two host waves take as one
+        // ([`widen`]). Not before the forms above: the programs they take keep their
+        // translation.
+        if wide_last {
+            let deep_on = std::env::var_os("VICTORY_WAVE_DEEP_SKIPS").is_none_or(|v| v != "0");
+            let deep = if deep_on { form(ir::without_skips(p, true)) } else { None };
+            let again = wide_form(deep.as_ref().map(|f| &f.0));
+            report("wave-wide branches (last)", &again);
             if done(&again) {
                 return again;
             }
@@ -972,6 +946,18 @@ fn emit_forms(
     let io = io::raise(&p, native)?;
     let res = resource::track(&p, &native.layout, native.stage, Some(&st))?;
     emit_program(c, native, &p, &st, &io, &res)
+}
+
+/// [`emit_forms`], the name the wave64 retries and their tests call it by.
+fn emit_sized(
+    c: &Container,
+    native: &NativeProgram,
+    p: &ir::Program,
+    st: &structure::Structured,
+    io: &io::Io,
+    res: &resource::Resources,
+) -> Result<(HostShader, Option<u32>), ShaderError> {
+    emit_forms(c, native, p, st, io, res)
 }
 
 /// `p` translated with the joins of its descriptors chosen by control flow copied for each way
