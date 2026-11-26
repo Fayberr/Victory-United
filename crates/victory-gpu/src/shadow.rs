@@ -4579,48 +4579,14 @@ pub(crate) fn let_go_idle() {
         if map.is_empty() {
             return;
         }
-<<<<<<< HEAD
-        let idle_ms = crate::host::ram_idle_ms(crate::host::available_physical_ram());
         let idle = |s: &Arc<Shadow>| {
             Arc::strong_count(s) == 1
                 && crate::host::long_ago(s.used.load(Ordering::Relaxed), idle_ms, IDLE_FRAMES)
                 && crate::host::references(&s.buffer) == 1
         };
-        let keys: Vec<(u64, u64)> = map.iter().filter(|(_, s)| idle(s)).map(|(key, _)| *key).collect();
-        // Counted before they leave the table, with its lock held, and
-        // each looked at AGAIN after the count ([`TABLES_CHANGED`]): a
-        // thread that took one from its own memory of asks before the
-        // count moved holds it by now, and it stays.
-        if !keys.is_empty() {
-            tables_changed();
-        }
-        let mut gone = Vec::new();
-        for key in keys {
-            if map.get(&key).is_some_and(&idle) {
-                gone.extend(map.remove(&key));
-            }
-        }
-        gone
-||||||| 85d564167
-        let idle_ms = crate::host::ram_idle_ms(crate::host::available_physical_ram());
-        let idle: Vec<(u64, u64)> = map
-            .iter()
-            .filter(|(_, s)| {
-                Arc::strong_count(s) == 1
-                    && crate::host::long_ago(s.used.load(Ordering::Relaxed), idle_ms, IDLE_FRAMES)
-                    && crate::host::references(&s.buffer) == 1
-            })
-            .map(|(key, _)| *key)
-            .collect();
-        idle.into_iter().filter_map(|key| map.remove(&key)).collect()
-=======
         let mut eligible: Vec<(u64, (u64, u64), usize, u64)> = map
             .iter()
-            .filter(|(_, s)| {
-                Arc::strong_count(s) == 1
-                    && crate::host::long_ago(s.used.load(Ordering::Relaxed), idle_ms, IDLE_FRAMES)
-                    && crate::host::references(&s.buffer) == 1
-            })
+            .filter(|(_, s)| idle(s))
             .map(|(&key, s)| {
                 (s.used.load(Ordering::Relaxed), key, Arc::as_ptr(s) as usize, s.len)
             })
@@ -4635,8 +4601,21 @@ pub(crate) fn let_go_idle() {
                 .collect();
             window_victims(&entries, keep)
         };
-        victims.into_iter().filter_map(|i| map.remove(&eligible[i].1)).collect()
->>>>>>> avatar/main
+        // Counted before they leave the table, with its lock held, and
+        // each looked at AGAIN after the count ([`TABLES_CHANGED`]): a
+        // thread that took one from its own memory of asks before the
+        // count moved holds it by now, and it stays.
+        if !victims.is_empty() {
+            tables_changed();
+        }
+        let mut gone = Vec::new();
+        for i in victims {
+            let key = eligible[i].1;
+            if map.get(&key).is_some_and(&idle) {
+                gone.extend(map.remove(&key));
+            }
+        }
+        gone
     };
     if !gone.is_empty() {
         tables_changed();

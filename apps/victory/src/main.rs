@@ -268,39 +268,14 @@ fn main() -> Result<()> {
             cache: false,
             ..
         } => {
-<<<<<<< HEAD
             apply_host_shader_overrides_from_env();
-            translate::run(paths, validate, pipelines, list, jobs)
-||||||| 85d564167
-            // `VICTORY_VIEW_LIMIT=<null slot>`: translate as on a host whose view heap is capped
-            if let Some(n) = std::env::var("VICTORY_VIEW_LIMIT").ok().and_then(|v| v.parse().ok()) {
-                victory_shader::emit::set_view_heap_limit(n);
-            }
-            // `VICTORY_HOST_WAVE=32`: translate as for a GPU whose waves are at most 32 lanes
-            if let Some(n) = std::env::var("VICTORY_HOST_WAVE").ok().and_then(|v| v.parse().ok()) {
-                victory_shader::emit::set_host_max_wave(n);
-            }
-            if let Some(file) = warm {
-                return translate::warm(paths, &file, jobs);
-            }
-            translate::run(paths, validate, pipelines, list, jobs)
-=======
-            // `VICTORY_VIEW_LIMIT=<null slot>`: translate as on a host whose view heap is capped
-            if let Some(n) = std::env::var("VICTORY_VIEW_LIMIT").ok().and_then(|v| v.parse().ok()) {
-                victory_shader::emit::set_view_heap_limit(n);
-            }
             let wave = translate::host_wave::select(
                 std::env::var("VICTORY_HOST_WAVE").ok().as_deref(),
                 std::env::var("VICTORY_HOST_MAX_WAVE").ok().as_deref(),
                 |message| eprintln!("{message}"),
             );
-            if let Some(file) = warm {
-                return translate::warm(paths, &file, jobs, wave);
-            }
             translate::run(paths, validate, pipelines, list, jobs, wave)
->>>>>>> avatar/main
         }
-<<<<<<< HEAD
         Command::Precompile {
             paths,
             pipelines,
@@ -309,15 +284,10 @@ fn main() -> Result<()> {
             jobs,
             pipeline_jobs,
         } => precompile::run(paths, pipelines, only, limit, jobs, pipeline_jobs),
-        Command::Shaders { paths, jobs } => {
+        Command::Shaders { paths, jobs, list } => {
             apply_host_shader_overrides_from_env();
-            translate::precompile(paths, jobs)
+            translate::precompile(paths, jobs, list)
         }
-||||||| 85d564167
-        Command::Shaders { paths, jobs } => translate::precompile(paths, jobs),
-=======
-        Command::Shaders { paths, jobs, list } => translate::precompile(paths, jobs, list),
->>>>>>> avatar/main
         #[cfg(windows)]
         Command::Warm { jobs, limit, again, used, these } => warm::run(jobs, limit, again, used, these),
         Command::Run {

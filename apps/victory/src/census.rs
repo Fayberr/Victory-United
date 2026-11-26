@@ -1,14 +1,8 @@
 //! Which imports do titles need, and which do we cover?
 
 use std::collections::{BTreeMap, BTreeSet};
-<<<<<<< HEAD
-use std::io::{self, Read};
-||||||| 85d564167
-use std::io::Read;
-=======
 use std::fmt;
-use std::io::Read;
->>>>>>> avatar/main
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
