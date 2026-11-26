@@ -75,8 +75,6 @@ pub const DEFAULT: u32 = ALL & !WIDE;
 pub(crate) struct Usage {
     /// A wave or quad operation.
     pub wave_ops: bool,
-    /// A rasterizer ordered view.
-    pub rovs: bool,
     /// A 64-bit integer, as a result or an operand.
     pub int64: bool,
     /// A typed load of several components from a UAV.

@@ -2451,7 +2451,7 @@ impl<'a> Lower<'a> {
             if prefix.is_some() {
                 return Err("a wave prefix of an operation other than a sum");
             }
-            let (lo, hi) = (self.half_tree(lo, 5), self.half_tree(hi, 5));
+            let (lo, hi) = (self.half_tree(lo, 5, true), self.half_tree(hi, 5, true));
             let r = self.join_half_sums(lo, hi);
             return Ok([r, r]);
         }
@@ -2529,7 +2529,7 @@ impl<'a> Lower<'a> {
             return Err(WHERE);
         }
         let c = self.cur;
-        let mine = self.half_tree(x, if halves { 5 } else { 6 });
+        let mine = self.half_tree(x, if halves { 5 } else { 6 }, every);
         if !halves {
             return Ok(mine);
         }
@@ -2540,7 +2540,7 @@ impl<'a> Lower<'a> {
     /// The first `steps` levels of [`Self::half_sum`]'s tree over this host wave: its lanes'
     /// sum when they are all of its waves' lanes (6 steps for 64, 5 for 32), in the low half;
     /// the high half lane 0's.
-    fn half_tree(&mut self, x: V, steps: u32) -> V {
+    fn half_tree(&mut self, x: V, steps: u32, every: bool) -> V {
         let c = self.cur;
         let i32t = self.s.t.i32;
         let lane = self.s.op(c, "waveGetLaneIndex", Attr::ReadOnly, i32t, 111, &[]);
