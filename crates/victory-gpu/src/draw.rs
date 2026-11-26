@@ -2990,7 +2990,7 @@ impl State {
             // No shader has picked a buffer from the heap yet: the textures' pass alone.
             let heap = crate::descriptor::heap(at as This);
             if let Some(host) = heap.host() {
-                self.heap_textures(list, heap, host);
+                Self::heap_textures(Into::List(list), heap, host);
             }
         }
         AHEAD.set(0);
