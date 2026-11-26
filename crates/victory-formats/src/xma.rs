@@ -375,7 +375,6 @@ fn log2(v: usize) -> u32 {
 /// The rotations come from [`Rotations`], built once per subframe size, so
 /// a subframe costs no sines or cosines and no allocation.
 fn imdct_half(input: &[f32], out: &mut [f32], scale: f32) {
-<<<<<<< HEAD
     match input.len() {
         128 => rotations()[0].transform(input, out, scale, &mut [0.0; 64], &mut [0.0; 64]),
         256 => rotations()[1].transform(input, out, scale, &mut [0.0; 128], &mut [0.0; 128]),
@@ -386,63 +385,6 @@ fn imdct_half(input: &[f32], out: &mut [f32], scale: f32) {
             let (re, im) = scratch.split_at_mut(m);
             Rotations::new(n).transform(input, out, scale, re, im);
         }
-||||||| a26859fc
-    let n = input.len();
-    let m = n / 2;
-    let mut re = vec![0f64; m];
-    let mut im = vec![0f64; m];
-    for k in 0..m {
-        let (a, b) = (input[2 * k] as f64, input[n - 1 - 2 * k] as f64);
-        let (s, c) = (-std::f64::consts::PI * k as f64 / n as f64).sin_cos();
-        (re[k], im[k]) = (a * c - b * s, a * s + b * c);
-    }
-    fft(&mut re, &mut im);
-    for k in 0..m {
-        let (s, c) = (-std::f64::consts::PI * (4 * k + 1) as f64 / (4 * n) as f64).sin_cos();
-        let (wr, wi) = (re[k] * c - im[k] * s, re[k] * s + im[k] * c);
-        // DCT-IV: c[2k] = Re, c[n-1-2k] = -Im; output j is c[n-1-j].
-        out[n - 1 - 2 * k] = (wr as f32) * scale;
-        out[2 * k] = -(wi as f32) * scale;
-=======
-    let n = input.len();
-    let m = n / 2;
-    let built;
-    let rotations = match rotations().get(log2(n).wrapping_sub(7) as usize) {
-        Some(r) if r.pre_re.len() == m => r,
-        _ => {
-            built = Rotations::new(n);
-            &built
-        }
-    };
-    let mut stack = [0f64; FRAME_SAMPLES];
-    let mut heap = Vec::new();
-    let (re, im) = if m <= stack.len() / 2 {
-        stack.split_at_mut(m)
-    } else {
-        heap.resize(2 * m, 0f64);
-        heap.split_at_mut(m)
-    };
-    let im = &mut im[..m];
-    // Pre-rotation, each point stored at its bit-reversed place, which is
-    // where the FFT's input permutation would move it.
-    let pre = rotations
-        .pre_re
-        .iter()
-        .zip(&rotations.pre_im)
-        .zip(&rotations.reversed);
-    for (k, ((&c, &s), &to)) in pre.enumerate() {
-        let (a, b) = (input[2 * k] as f64, input[n - 1 - 2 * k] as f64);
-        re[to as usize] = a * c - b * s;
-        im[to as usize] = a * s + b * c;
-    }
-    rotations.butterflies(re, im);
-    let post = rotations.post_re.iter().zip(&rotations.post_im);
-    for (k, ((&re, &im), (&c, &s))) in re.iter().zip(im.iter()).zip(post).enumerate() {
-        let (wr, wi) = (re * c - im * s, re * s + im * c);
-        // DCT-IV: c[2k] = Re, c[n-1-2k] = -Im; output j is c[n-1-j].
-        out[n - 1 - 2 * k] = (wr as f32) * scale;
-        out[2 * k] = -(wi as f32) * scale;
->>>>>>> avatar/main
     }
 }
 
@@ -518,7 +460,6 @@ impl Rotations {
             twiddle_im,
         }
     }
-<<<<<<< HEAD
 
     #[inline(always)]
     fn transform(
@@ -617,64 +558,6 @@ fn rotations() -> &'static [Rotations; 3] {
             Rotations::new(512),
         ]
     })
-||||||| a26859fc
-=======
-
-    /// The butterfly stages of an in-place radix-2 forward DFT
-    /// (`exp(-2πi nk/N)`) on points already in bit-reversed order.
-    fn butterflies(&self, re: &mut [f64], im: &mut [f64]) {
-        let m = re.len().min(im.len());
-        let mut len = 2;
-        while len <= m {
-            let half = len / 2;
-            let wr = &self.twiddle_re[half - 1..][..half];
-            let wi = &self.twiddle_im[half - 1..][..half];
-            let blocks = re[..m]
-                .chunks_exact_mut(len)
-                .zip(im[..m].chunks_exact_mut(len));
-            for (re, im) in blocks {
-                let (are, bre) = re.split_at_mut(half);
-                let (aim, bim) = im.split_at_mut(half);
-                butterfly_block(are, aim, bre, bim, wr, wi);
-            }
-            len <<= 1;
-        }
-    }
-}
-
-/// One block of butterflies: `a + w·b` into `a`, `a − w·b` into `b`.
-#[inline(always)]
-fn butterfly_block(
-    are: &mut [f64],
-    aim: &mut [f64],
-    bre: &mut [f64],
-    bim: &mut [f64],
-    wr: &[f64],
-    wi: &[f64],
-) {
-    let lanes = are
-        .iter_mut()
-        .zip(aim)
-        .zip(bre.iter_mut().zip(bim))
-        .zip(wr.iter().zip(wi));
-    for (((ar, ai), (br, bi)), (&cr, &ci)) in lanes {
-        let (tr, ti) = (*br * cr - *bi * ci, *br * ci + *bi * cr);
-        (*br, *bi) = (*ar - tr, *ai - ti);
-        (*ar, *ai) = (*ar + tr, *ai + ti);
-    }
-}
-
-/// [`Rotations`] for subframes of 128, 256 and 512 samples.
-fn rotations() -> &'static [Rotations; 3] {
-    static ROTATIONS: OnceLock<[Rotations; 3]> = OnceLock::new();
-    ROTATIONS.get_or_init(|| {
-        [
-            Rotations::new(128),
-            Rotations::new(256),
-            Rotations::new(512),
-        ]
-    })
->>>>>>> avatar/main
 }
 
 /// `ff_sine_windows`: the rising half of a sine window of length `n`.
@@ -1391,7 +1274,6 @@ mod tests {
         assert_eq!(frame.next, None);
     }
 
-<<<<<<< HEAD
     /// A frame whose last eleven bits sit in the next rolling input buffer
     /// comes back byte-for-byte the same as an unsplit frame.
     #[test]
@@ -1476,8 +1358,6 @@ mod tests {
         assert_eq!(next, 32 + NEEDED);
     }
 
-||||||| a26859fc
-=======
     /// A frame that crosses a packet where no frame begins (a full
     /// continuation) and ends in another such packet, followed by padding: the
     /// next frame is the first one of the next packet that has frames, not the
@@ -1507,7 +1387,6 @@ mod tests {
         assert_eq!(read_frame(&data, 3 * PACKET_BITS + HEADER_BITS).unwrap().next, None);
     }
 
->>>>>>> avatar/main
     /// The direct sum `imdct_half` stands for (FFmpeg's naive inverse MDCT:
     /// the standard formula, negated).
     fn imdct_reference(input: &[f32]) -> Vec<f64> {
