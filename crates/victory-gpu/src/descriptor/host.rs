@@ -4899,7 +4899,10 @@ fn buffer_view_ok(format: DXGI_FORMAT, first: u64, count: u32, stride: u32, raw:
             .is_some_and(|end| end <= width)
 }
 
-/// VU's name for the byte length of a constant buffer view ([`constant_bytes`]).
+/// VU's name for a constant buffer view's host byte length
+/// ([`constant_bytes`]): multiple of 256 bytes, at most the 64 KiB a shader
+/// can index. The host removes the device for a larger one, and the title's
+/// heap holds old views of any size in slots it does not use.
 fn constant_size(size: u32) -> u32 {
     constant_bytes(size)
 }
