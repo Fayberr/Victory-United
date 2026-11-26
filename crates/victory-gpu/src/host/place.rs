@@ -128,19 +128,6 @@ pub(super) fn read_by(runs: &[&HostList], written: &[(usize, usize)]) -> bool {
         }
     }
     runs.iter().any(|list| {
-<<<<<<< HEAD
-        list.deferred().copies.iter().any(|step| match step {
-            &Step::Copy(_, src, len) | &Step::Fill(_, src, len, _) => touches(&ranges, src, src + len),
-            Step::Texture { staging, .. } => {
-                let (at, len) = staging.memory();
-                touches(&ranges, at, at + len)
-||||||| e2a28ec7
-        list.deferred().copies.iter().any(|step| match step {
-            &Step::Copy(_, src, len) | &Step::Fill(_, src, len, _) => touches(&ranges, src, src + len),
-            Step::Texture(staging) => {
-                let (at, len) = staging.memory();
-                touches(&ranges, at, at + len)
-=======
         list.deferred().copies.iter().any(|step| {
             // What reads, by kind ([`READERS`]).
             let (read, kind) = match step {
@@ -154,7 +141,7 @@ pub(super) fn read_by(runs: &[&HostList], written: &[(usize, usize)]) -> bool {
                 _ if ranges.is_empty() => (false, 0),
                 &Step::Copy(_, src, len) => (touches(&ranges, src, src + len), 1),
                 &Step::Fill(_, src, len, _) => (touches(&ranges, src, src + len), 2),
-                Step::Texture(staging) => {
+                Step::Texture { staging, .. } => {
                     let (at, len) = staging.memory();
                     (touches(&ranges, at, at + len), 3)
                 }
@@ -164,7 +151,6 @@ pub(super) fn read_by(runs: &[&HostList], written: &[(usize, usize)]) -> bool {
             #[cfg(feature = "diagnostics")]
             if read {
                 READERS[kind].fetch_add(1, Ordering::Relaxed);
->>>>>>> avatar/main
             }
             let _ = kind;
             read

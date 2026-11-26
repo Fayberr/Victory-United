@@ -470,60 +470,8 @@ pub(crate) fn sync_heaps() {
             let mut out = SyncPart::default();
             let mut page_bytes: Vec<u8> = Vec::new();
             let mut changed: Vec<u32> = Vec::new();
-<<<<<<< HEAD
-            for &(from, to) in parts.chunks(SYNC_PAGES).nth(n).unwrap_or_default() {
-                // The page's records are read through the kernel, into a
-                // copy: a page the title unmaps meanwhile fails the read
-                // where 2,048 reads in place would fault.
-                page_bytes.resize(to - from, 0);
-                if !crate::host::read_into(from as *const u8, &mut page_bytes) {
-                    continue;
-                }
-                out.pages += 1;
-                // Skip pages whose bytes did not change: no record on them
-                // changed, so there is nothing to walk (`seen_pages`).
-                let unchanged = {
-                    let mut seen = seen_pages().lock().unwrap_or_else(|e| e.into_inner());
-                    let held = seen.remove(&from);
-                    let moved = match &held {
-                        Some((old_gen, old)) if *old_gen == cur_gen => difference(old, &page_bytes),
-                        _ => Some((0, page_bytes.len())),
-                    };
-                    let same = moved.is_none();
-                    if same {
-                        seen.insert(from, held.unwrap_or_default());
-                    } else {
-                        if seen.len() >= 4096 {
-                            seen.clear();
-                        }
-                        let mut store = held.map(|(_, b)| b).unwrap_or_default();
-                        store.clear();
-                        store.extend_from_slice(&page_bytes);
-                        seen.insert(from, (cur_gen, store));
-                    }
-                    same
-                };
-                if unchanged {
-                    continue;
-                }
-                out.views += u64::from(crate::watch::guarded(from, to));
-                out.bytes += (to - from) as u64;
-||||||| e2a28ec7
-            for &(from, to) in parts.chunks(SYNC_PAGES).nth(n).unwrap_or_default() {
-                // The page's records are read through the kernel, into a
-                // copy: a page the title unmaps meanwhile fails the read
-                // where 2,048 reads in place would fault.
-                page_bytes.resize(to - from, 0);
-                if !crate::host::read_into(from as *const u8, &mut page_bytes) {
-                    continue;
-                }
-                out.pages += 1;
-                out.views += u64::from(crate::watch::guarded(from, to));
-                out.bytes += (to - from) as u64;
-=======
             let mut bits: Vec<u64> = Vec::new();
             for &(from, to) in parts.chunks(pages_a_job).nth(n).unwrap_or_default() {
->>>>>>> avatar/main
                 let slots = changed_slots(from, to, start as usize, step, mirrored_count);
                 // A record that straddles the range's ends is left
                 // to the range that holds its first byte.
@@ -562,6 +510,32 @@ pub(crate) fn sync_heaps() {
                     out.pages += 1;
                     out.views += u64::from(crate::watch::guarded(from, to));
                     out.bytes += (to - from) as u64;
+                    // Skip pages whose bytes did not change: no record on them
+                    // changed, so there is nothing to walk (`seen_pages`).
+                    let unchanged = {
+                        let mut seen = seen_pages().lock().unwrap_or_else(|e| e.into_inner());
+                        let held = seen.remove(&from);
+                        let moved = match &held {
+                            Some((old_gen, old)) if *old_gen == cur_gen => difference(old, &page_bytes),
+                            _ => Some((0, page_bytes.len())),
+                        };
+                        let same = moved.is_none();
+                        if same {
+                            seen.insert(from, held.unwrap_or_default());
+                        } else {
+                            if seen.len() >= 4096 {
+                                seen.clear();
+                            }
+                            let mut store = held.map(|(_, b)| b).unwrap_or_default();
+                            store.clear();
+                            store.extend_from_slice(&page_bytes);
+                            seen.insert(from, (cur_gen, store));
+                        }
+                        same
+                    };
+                    if unchanged {
+                        continue;
+                    }
                     let Some(records) = page_bytes.get(lead.wrapping_sub(from)..) else {
                         continue;
                     };

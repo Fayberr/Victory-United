@@ -2502,7 +2502,6 @@ pub(crate) fn merged_stats() -> [u64; 3] {
     [0, 1, 2].map(|i| MERGED[i].swap(0, Ordering::Relaxed))
 }
 
-<<<<<<< HEAD
 /// Since the last frame-rate line: why [`Shadow::merge_under_writes`] could
 /// not put the title's bytes in and the flights were settled: the copy is
 /// not write-watched; neither the write watch nor the guards could say what
@@ -2660,8 +2659,6 @@ fn dword_runs(runs: Vec<(usize, usize)>, lo: usize, n: usize) -> Vec<(usize, usi
     out
 }
 
-||||||| e2a28ec7
-=======
 /// Adds the time since it was made to [`UNDER_NS`]`[6]` when dropped.
 struct Compared(std::time::Instant);
 
@@ -2671,7 +2668,6 @@ impl Drop for Compared {
     }
 }
 
->>>>>>> avatar/main
 /// The runs of bytes where `now` differs from `was` (of one length), as
 /// (offset, bytes) in order: every differing byte is in a run and no equal
 /// byte is.
@@ -3303,98 +3299,12 @@ unsafe fn take_changed(at: usize, to: usize, held: *mut u8, out: &mut Taken) {
 
 #[cfg(test)]
 mod merge_tests {
-<<<<<<< HEAD
     use super::{
         CHUNK, PAGE, PIECE, SNAPS, Taken, WIDE_COMPARE_JOB, back_piece, changed_chunks,
         changed_dword_runs, changed_runs, changed_runs_bytes, changed_runs_wide, changed_stretches,
         compare_jobs, dword_runs, give_back, join_runs, pooled, put_changed, take_changed,
-        take_snapshots, word_runs,
+        take_snapshots, word_runs, word_runs_put,
     };
-
-    /// Runs with fewer bytes between them than the gap become one, from the
-    /// first's start to the last's end; the others stay as they are.
-    #[test]
-    fn runs_closer_than_the_gap_are_joined() {
-        let runs = vec![(0, 1), (4, 1), (8, 2), (74, 3), (100, 1), (1000, 5)];
-        let joined = |gap| {
-            let mut r = runs.clone();
-            join_runs(&mut r, gap);
-            r
-        };
-        // No gap: every run its own.
-        assert_eq!(joined(0), runs);
-        // 3 bytes lie between the first two and between the next two.
-        assert_eq!(joined(3), runs);
-        assert_eq!(joined(4), [(0, 10), (74, 3), (100, 1), (1000, 5)]);
-        // 64 lie between 10 and 74: not under 64.
-        assert_eq!(joined(64), [(0, 10), (74, 27), (1000, 5)]);
-        assert_eq!(joined(65), [(0, 101), (1000, 5)]);
-        assert_eq!(joined(usize::MAX), [(0, 1005)]);
-        let mut none: Vec<(usize, usize)> = Vec::new();
-        join_runs(&mut none, 64);
-        assert!(none.is_empty());
-        let mut one = vec![(7, 2)];
-        join_runs(&mut one, 64);
-        assert_eq!(one, [(7, 2)]);
-    }
-
-    #[test]
-    fn changed_stretches_hold_every_changed_byte() {
-        let was: Vec<u8> = (0..2000u32).map(|i| (i * 31 + 7) as u8).collect();
-        for changes in [vec![], vec![0usize], vec![1999], vec![255, 256], vec![5, 300, 301, 1024, 1990]] {
-            let mut now = was.clone();
-            for &at in &changes {
-                now[at] ^= 0x5A;
-            }
-            for chunk in [1usize, 64, 256, 4096] {
-                let stretches = changed_stretches(&now, &was, chunk);
-                let mut put = was.clone();
-                for &(at, n) in &stretches {
-                    assert!(at % chunk == 0 && n > 0 && at + n <= now.len());
-                    put[at..at + n].copy_from_slice(&now[at..at + n]);
-                }
-                assert_eq!(put, now, "{changes:?} chunk {chunk}");
-                // No stretch without a changed byte in each of its chunks, and none touching the next.
-                assert!(stretches.windows(2).all(|w| w[0].0 + w[0].1 < w[1].0));
-                let chunks: usize = stretches.iter().map(|s| s.1.div_ceil(chunk)).sum();
-                let mut changed: Vec<usize> = changes.iter().map(|c| c / chunk).collect();
-                changed.dedup();
-                assert_eq!(chunks, changed.len(), "{changes:?} chunk {chunk}");
-            }
-        }
-        assert_eq!(changed_stretches(&[1, 2, 3], &[1, 2, 4], 256), [(0, 3)], "a last chunk shorter than the others");
-    }
-
-    /// Widened runs hold every changed byte, start and end at dwords of
-    /// title memory (or at the stretch's ends) and do not touch.
-    #[test]
-    fn dword_runs_hold_the_changed_bytes_at_dwords() {
-        for lo in [0usize, 1, 2, 3, 0x1000] {
-            let n = 41;
-            let was: Vec<u8> = (0..n as u32).map(|i| (i * 7) as u8).collect();
-            for changes in [vec![], vec![0], vec![40], vec![3, 4], vec![5, 9, 17, 18], vec![1, 2, 3, 4, 5, 6, 7], vec![0, 8, 16, 24, 32, 40]] {
-                let mut now = was.clone();
-                for &at in &changes {
-                    now[at] ^= 0x55;
-                }
-                let runs = dword_runs(changed_runs(&now, &was), lo, n);
-                let mut put = was.clone();
-                for &(at, len) in &runs {
-                    assert!(len > 0 && at + len <= n);
-                    put[at..at + len].copy_from_slice(&now[at..at + len]);
-                    assert!((lo + at) % 4 == 0 || at == 0, "{lo} {at}");
-                    assert!((lo + at + len) % 4 == 0 || at + len == n, "{lo} {at} {len}");
-                }
-                assert_eq!(put, now, "{lo} {changes:?}");
-                assert!(runs.windows(2).all(|w| w[0].0 + w[0].1 < w[1].0), "{lo} {changes:?} {runs:?}");
-            }
-        }
-    }
-||||||| e2a28ec7
-    use super::{PIECE, back_piece, changed_runs, dword_runs, put_changed, word_runs};
-=======
-    use super::{PAGE, PIECE, back_piece, changed_runs, dword_runs, put_changed, word_runs, word_runs_put};
->>>>>>> avatar/main
 
     #[test]
     fn a_piece_put_back_reads_only_its_stretch() {
