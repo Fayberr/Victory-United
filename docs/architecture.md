@@ -23,9 +23,7 @@
 
 Shaders are translated when the title creates a pipeline, from the bytes it
 passes, wherever it loaded them from (executable, archive, memory).
-Converting them ahead of time from files is only a warm-up: `victory warm`
-translates every container it finds into the same cache entries a run
-looks up (docs/precompilacao-shaders.md).
+Converting them ahead of time from files is only a warm-up.
 
 ## Crates
 
@@ -37,17 +35,11 @@ looks up (docs/precompilacao-shaders.md).
 | `victory-hle` | console API implementations, host pass-through policy |
 | `victory-gpu` | D3D12.X objects, command lists and GPU memory → host D3D12 |
 | `victory-shader` | Xbox shader containers → host shaders |
-<<<<<<< HEAD
 | `victory-formats` | the GPU's texture layouts (sizes, tiling, detiling), BCPack, audio codecs |
-||||||| 085ee7c4
-| `victory-formats` | the GPU's texture layouts (sizes, tiling, detiling), audio codecs; planned: BCPack |
-=======
-| `victory-formats` | the GPU's texture layouts (sizes, tiling, detiling), audio codecs, BCPack decoding |
->>>>>>> vitoriabr/main
 | `victory-pipeline` | converter trait, content-addressed cache |
 | `victory-game` | the title-specific formats, build identities, hooks |
 | `apps/victory` | command-line front end |
-| `xtask` | asset-policy check, git hooks, `cargo xtask ci` (the CI steps, locally) |
+| `xtask` | asset-policy check, git hooks |
 | `tests/fixtures/hle-probe` | a stand-in "title" (our own code) for loader tests |
 
 Everything except `victory-game` is platform-level and can be tested with
