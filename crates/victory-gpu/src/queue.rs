@@ -55,22 +55,7 @@ enum Held {
     /// (which it may reset meanwhile), and the order they run in.
     Run(Vec<crate::list::Detached>, Vec<usize>),
     /// A signal of the queue's, due after what it holds before it.
-<<<<<<< HEAD
     Signal(crate::fence::FenceRef, u64),
-||||||| merged common ancestors
-    Signal(usize, u64),
-    /// With [`behind`]: the submission at the head of the line is being
-    /// prepared and sent by our thread, with the line unlocked, so the
-    /// title can add to its end meanwhile; whatever is added stays behind
-    /// this (the line is not empty), signals too.
-    Running,
-    /// With [`present_behind`]: the title's present of a frame, due after
-    /// what the queue holds before it: the host texture shown, the state
-    /// the title's lists leave it in, and the frame's number.
-    Present(windows::Win32::Graphics::Direct3D12::ID3D12Resource, u32, u64),
-=======
-    Signal(usize, u64),
->>>>>>> origin/exp/vibr-head
 }
 
 /// The queues that hold something (their addresses).
@@ -345,25 +330,10 @@ pub(crate) fn release_held(all: bool) {
             let held = unsafe { &(*(q as *const Queue)).held };
             let mut held = lock(held);
             loop {
-<<<<<<< HEAD
                 match held.first() {
                     None => break,
                     Some(Held::Wait(fence, value))
                         if !all && crate::fence::completed(fence.as_this()) < *value =>
-||||||| merged common ancestors
-                // A queue with a part in `joined` has our mark at the head
-                // of its line: what is looked at is behind the mark.
-                let base = usize::from(joined.marked.contains(&q));
-                match held.get(base) {
-                    None | Some(Held::Running) => break,
-                    Some(&Held::Wait(fence, value))
-                        if !all && crate::fence::completed(fence as This) < value =>
-=======
-                match held.first() {
-                    None => break,
-                    Some(&Held::Wait(fence, value))
-                        if !all && crate::fence::completed(fence as This) < value =>
->>>>>>> origin/exp/vibr-head
                     {
                         break;
                     }
@@ -445,19 +415,8 @@ pub(crate) fn release_held(all: bool) {
                     // Behind what was sent to the card and not waited
                     // for, if anything was.
                     Held::Signal(fence, value) => {
-<<<<<<< HEAD
                         if !crate::host::late_signal(fence.as_this(), value) {
                             crate::fence::set(fence.as_this(), value);
-||||||| merged common ancestors
-                        if !joined.is_empty() {
-                            // Behind parts not sent yet: with them.
-                            joined.signals.push((fence, value));
-                        } else if !crate::host::late_signal(fence, value) {
-                            crate::fence::set(fence as This, value);
-=======
-                        if !crate::host::late_signal(fence, value) {
-                            crate::fence::set(fence as This, value);
->>>>>>> origin/exp/vibr-head
                         }
                     }
                 }
@@ -1067,19 +1026,7 @@ extern "system" fn present(
     // A present of several planes (Series S: the world and the interface)
     // runs the way below, which composes them.
     #[cfg(windows)]
-<<<<<<< HEAD
     if behind::on() && !this.is_null() {
-||||||| merged common ancestors
-<<<<<<<<< Temporary merge branch 1
-    if !sent_behind
-        && planes > 0
-||||||||| a26859fc5
-    if planes > 0
-=========
-    if behind::on() && !this.is_null() {
-=======
-    if behind::on() && !this.is_null() && planes <= 1 {
->>>>>>> origin/exp/vibr-head
         const COPY_SOURCE: u32 = 0x800;
         let base_res = if planes > 0
             // SAFETY: the title passes `planes` plane descriptions.
@@ -1124,7 +1071,6 @@ extern "system" fn present(
     // in; nothing without the first. One plane is shown as before; several
     // are composed (`crate::host::Host::present_planes`).
     #[cfg(windows)]
-<<<<<<< HEAD
     if planes > 0
         // SAFETY: the title passes `planes` plane descriptions.
         && let Some(plane) = unsafe { plane_parameters.as_ref() }
@@ -1134,21 +1080,12 @@ extern "system" fn present(
         && let resource = unsafe { *plane.resources }
         && let Some(texture) = crate::resource::host_resource(resource)
         && let Some(host) = crate::host::host()
-||||||| merged common ancestors
-    if planes > 0
->>>>>>>>> Temporary merge branch 2
-        // SAFETY: the title passes `planes` plane descriptions.
-        && let Some(plane) = unsafe { plane_parameters.as_ref() }
-        && plane.count > 0
-        && !plane.resources.is_null()
-        // SAFETY: the plane lists `count` resources.
-        && let resource = unsafe { *plane.resources }
-        && let Some(texture) = crate::resource::host_resource(resource)
-        && let Some(host) = crate::host::host()
-=======
->>>>>>> origin/exp/vibr-head
     {
-<<<<<<< HEAD
+        // With the queues' line on, what was given them so far is sent
+        // before the planes are read.
+        if behind::on() {
+            behind::drain();
+        }
         const COPY_SOURCE: u32 = 0x800;
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
@@ -1174,33 +1111,6 @@ extern "system" fn present(
             crate::resource::host_transition(over_res, over_state);
         }
         let _ = host;
-||||||| merged common ancestors
-        const COPY_SOURCE: u32 = 0x800;
-        let state = crate::resource::host_transition(resource, COPY_SOURCE)
-            .map_or(COPY_SOURCE, |(_, before)| before);
-        show(texture, state, Shown { frame, resource: resource as usize });
-        crate::resource::host_transition(resource, state);
-        let _ = host;
-=======
-        // With the queues' line on, what was given them so far is sent
-        // before the planes are read.
-        if behind::on() {
-            behind::drain();
-        }
-        let shown = shown(planes, plane_parameters);
-        let mut textures = shown
-            .iter()
-            .map(|&(resource, part)| Some((crate::resource::host_resource(resource)?, state_of(resource), part)));
-        if let Some(Some(first)) = textures.next() {
-            let what = Shown { frame, resource: shown[0].0 as usize };
-            if shown.len() == 1 {
-                show(first.0, first.1, what);
-            } else {
-                let all: Vec<crate::host::Shown> = std::iter::once(first).chain(textures.flatten()).collect();
-                show_planes(&all, what);
-            }
-        }
->>>>>>> origin/exp/vibr-head
     }
     #[cfg(not(windows))]
     let _ = (planes, plane_parameters);
