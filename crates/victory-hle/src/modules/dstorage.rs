@@ -1554,8 +1554,8 @@ fn as_enqueued(request: &Request) {
     {
         return;
     }
-    let offset = (request.page_offset & 0xffff) as usize;
-    let n = (offset + request.destination_size as usize).div_ceil(PAGE);
+    let (offset, len) = destination_span(request);
+    let n = (offset + len).div_ceil(PAGE);
     let array = request.destination.cast::<usize>();
     let now = page_numbers(array, n);
     let mut all = ENQUEUED.lock().unwrap_or_else(|e| e.into_inner());
@@ -1705,6 +1705,9 @@ extern "system" fn enqueue_request(this: QueueRef, request: *const Request) {
     let Some(&request) = (unsafe { request.as_ref() }) else {
         return;
     };
+    // (Neptune) What the array holds as it comes in, for a list read when the
+    // request runs ([`as_enqueued`]).
+    as_enqueued(&request);
     let pages = if page_list() == PageList::Enqueue {
         resolve(&request, "enqueue")
     } else {
