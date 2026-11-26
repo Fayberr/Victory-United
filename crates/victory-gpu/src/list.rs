@@ -119,15 +119,7 @@ struct List {
     /// Ours, after the console layout: memory handed out by
     /// [`allocate_upload`], kept until the list is reset; the host list the
     /// calls record into (decision 0007), and the draw state the title set.
-<<<<<<< HEAD
     uploads: std::sync::Mutex<Vec<Upload>>,
-||||||| merged common ancestors
-    uploads: std::sync::Mutex<Vec<Vec<u8>>>,
-=======
-    uploads: std::sync::Mutex<Vec<Vec<u8>>>,
-    /// Replaced at a reset while a submission of it is still to run; titles
-    /// use a list on one thread at a time.
->>>>>>> belobug/main
     #[cfg(windows)]
     host: std::cell::UnsafeCell<Option<Arc<crate::host::HostList>>>,
     /// The recording before its last wait that followed work, cut there so
@@ -844,36 +836,20 @@ fn boxed(kind: u32, pipeline: This, thin: bool) -> Box<List> {
         newer: [0; 256],
         uploads: Default::default(),
         #[cfg(windows)]
-<<<<<<< HEAD
-        host: crate::host::host().filter(|_| !thin).and_then(|h| match h.new_list() {
-            Ok(list) => Some(list),
-            Err(e) => {
-                tracing::warn!(error = %e, "no host command list");
-                None
-            }
-        }),
-||||||| merged common ancestors
-        host: crate::host::host().and_then(|h| match h.new_list() {
-            Ok(list) => Some(list),
-            Err(e) => {
-                tracing::warn!(error = %e, "no host command list");
-                None
-            }
-        }),
-=======
         #[allow(clippy::arc_with_non_send_sync)] // see `Submitted`
-        host: crate::host::host()
-            .and_then(|h| match h.new_list() {
-                Ok(list) => Some(Arc::new(list)),
-                Err(e) => {
-                    tracing::warn!(error = %e, "no host command list");
-                    None
-                }
-            })
-            .into(),
+        host: std::cell::UnsafeCell::new(
+            crate::host::host()
+                .filter(|_| !thin)
+                .and_then(|h| match h.new_list() {
+                    Ok(list) => Some(Arc::new(list)),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "no host command list");
+                        None
+                    }
+                }),
+        ),
         #[cfg(windows)]
         parts: Default::default(),
->>>>>>> belobug/main
         #[cfg(windows)]
         state: {
             let mut state = crate::draw::State::default();
@@ -917,22 +893,11 @@ extern "system" fn list_type(this: This) -> u32 {
 extern "system" fn close(this: This) -> HRESULT {
     let _called = crate::timeline::span("the title's Close");
     #[cfg(windows)]
-<<<<<<< HEAD
     {
         finish_list(this);
         if let Some(host) = host_list(this) {
             host.close();
         }
-||||||| merged common ancestors
-    if let Some(host) = host_list(this) {
-        host.close();
-=======
-    if let Some(host) = host_list(this) {
-        // SAFETY: the title passes one of our lists.
-        let state = unsafe { &(*this.cast::<List>()).state };
-        state.lock().unwrap_or_else(|e| e.into_inner()).end_hoist();
-        host.close();
->>>>>>> belobug/main
     }
     S_OK
 }
@@ -949,7 +914,6 @@ extern "system" fn reset(this: This, allocator: This, pipeline: This) -> HRESULT
     if allocator.is_null() {
         return E_INVALIDARG;
     }
-<<<<<<< HEAD
     let _called = crate::timeline::span("the title's list Reset");
     // A wait recorded and never submitted goes with the recording.
     VALUE_WAITS
@@ -957,23 +921,12 @@ extern "system" fn reset(this: This, allocator: This, pipeline: This) -> HRESULT
         .unwrap_or_else(|e| e.into_inner())
         .retain(|&(list, _)| list != this as usize);
     // Every submission of the list has run (submissions are waited for).
-||||||| merged common ancestors
-    // Every submission of the list has run (submissions are waited for).
-=======
->>>>>>> belobug/main
     // SAFETY: the title passes one of our lists.
     let uploads = unsafe { &(*this.cast::<List>()).uploads };
-<<<<<<< HEAD
     uploads.lock().unwrap_or_else(|e| e.into_inner()).clear();
     // The parts of a recording that was cut and never submitted go with it
     // (a submission takes the parts it runs).
-||||||| merged common ancestors
-    uploads.lock().unwrap_or_else(|e| e.into_inner()).clear();
-=======
-    let mut uploads = uploads.lock().unwrap_or_else(|e| e.into_inner());
->>>>>>> belobug/main
     #[cfg(windows)]
-<<<<<<< HEAD
     {
         // SAFETY: the title passes one of our lists, and neither records
         // into it nor submits it during its reset.
@@ -984,48 +937,9 @@ extern "system" fn reset(this: This, allocator: This, pipeline: This) -> HRESULT
     #[cfg(windows)]
     with_state_how(this, true, |host, state| {
         host.reset();
-||||||| merged common ancestors
-    with_state(this, |host, state| {
-        host.reset();
-=======
-    {
-        // SAFETY: as above; the title uses a list on one thread at a time.
-        let (host, state) = unsafe {
-            let list = &*this.cast::<List>();
-            (&mut *list.host.get(), &list.state)
-        };
-        let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
-        state.end_hoist();
-        // SAFETY: as above.
-        let parts = unsafe { &mut *(*this.cast::<List>()).parts.get() };
-        {
-            let mut parted = PARTED.lock().unwrap_or_else(|e| e.into_inner());
-            parted.extend(parts.drain(..).map(Submitted));
-        }
-        if let Some(old) = host.take_if(|h| Arc::strong_count(h) > 1) {
-            // A submission of it is still to run, with the memory and the
-            // descriptors it was recorded with.
-            old.keep_until_run(Box::new((std::mem::take(&mut *uploads), std::mem::take(&mut *state))));
-            PARTED.lock().unwrap_or_else(|e| e.into_inner()).push(Submitted(old));
-            *host = spare();
-            if host.is_none() {
-                return crate::object::E_OUTOFMEMORY;
-            }
-        } else if let Some(host) = host {
-            host.reset();
-        }
->>>>>>> belobug/main
         state.reset(pipeline);
-<<<<<<< HEAD
     });
     crate::pipeline::bound(pipeline);
-||||||| merged common ancestors
-    });
-=======
-    }
-    uploads.clear();
-    drop(uploads);
->>>>>>> belobug/main
     #[cfg(not(windows))]
     let _ = this;
     S_OK
@@ -1313,18 +1227,12 @@ extern "system" fn copy_buffer_region(
     len: u64,
 ) {
     #[cfg(windows)]
-<<<<<<< HEAD
-    if let Some(list) = host_list_rec(this)
-||||||| merged common ancestors
-    if let Some(list) = host_list(this)
-=======
     if let Some(list) = host_list(this) {
         list.count_write();
         list.count_work();
     }
     #[cfg(windows)]
-    if let Some(list) = host_list(this)
->>>>>>> belobug/main
+    if let Some(list) = host_list_rec(this)
         && let Some(to) = buffer_range(dst, dst_offset, len)
         && let Some(from) = buffer_range(src, src_offset, len)
         && !gpu_buffer_copy(list, to, from, len as usize)
@@ -1382,10 +1290,13 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
             crate::resource::host_resource(dst),
             crate::resource::host_resource(src),
         ) {
-<<<<<<< HEAD
             // Host copies that leave out different numbers of levels differ
             // in shape: copied level by level below.
             let levelwise = crate::resource::dropped(dst) != crate::resource::dropped(src);
+            // shortcut: not between textures without their largest mips.
+            if crate::resource::skipped_mips(dst) + crate::resource::skipped_mips(src) > 0 {
+                return;
+            }
             if unlike(dst, src, true) {
                 return;
             }
@@ -1404,16 +1315,7 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
             // PR #671): a copy read whatever the host texture held.
             if crate::texture::title_written(from) {
                 crate::texture::upload(list, src, from);
-||||||| merged common ancestors
-            if crate::texture::title_written(from) {
-                crate::texture::upload(list, src, from);
-=======
-            // shortcut: not between textures without their largest mips.
-            if crate::resource::skipped_mips(dst) + crate::resource::skipped_mips(src) > 0 {
-                return;
->>>>>>> belobug/main
             }
-<<<<<<< HEAD
             // Depth textures shaders also write: what they wrote, first.
             list.twin_use(dst, false, true);
             list.twin_use(src, false, false);
@@ -1435,18 +1337,6 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
             }
             ensure_state(list, dst, COPY_DEST);
             ensure_state(list, src, COPY_SOURCE);
-||||||| merged common ancestors
-            ensure_state(list, dst, COPY_DEST);
-            ensure_state(list, src, COPY_SOURCE);
-            crate::texture::host_written(dst);
-=======
-            if crate::texture::title_written(from) {
-                crate::texture::upload(&list, src, from);
-            }
-            ensure_state(&list, dst, COPY_DEST);
-            ensure_state(&list, src, COPY_SOURCE);
-            crate::texture::host_written(dst);
->>>>>>> belobug/main
             #[cfg(feature = "diagnostics")]
             list.note_op(|| format!("copy resource {src:?} to {dst:?}"));
             if levelwise {
@@ -1796,7 +1686,6 @@ extern "system" fn copy_texture_region(
             return;
         }
         let Some(to) = crate::resource::host_resource(dst.resource) else {
-<<<<<<< HEAD
             // Texture to buffer: a read back. The list copies the texels
             // into a host buffer of ours; once it has run they go to the
             // title's buffer (`HostList::defer_read_back`).
@@ -1828,11 +1717,6 @@ extern "system" fn copy_texture_region(
                     "a texture to buffer copy (a read back)"
                 );
             }
-||||||| merged common ancestors
-            static ONCE: std::sync::Once = std::sync::Once::new();
-            ONCE.call_once(|| tracing::warn!("texture to buffer copies not implemented"));
-=======
->>>>>>> belobug/main
             return;
         };
         // Both locations are mapped to the levels their host copies have
@@ -1862,11 +1746,13 @@ extern "system" fn copy_texture_region(
             let Some(data) = buffer_range(src.resource, src.footprint.offset, bytes) else {
                 return;
             };
-<<<<<<< HEAD
-            let buffer = match list.place_source(data as usize, bytes as usize) {
+            let (buffer, at) = match list.place_source(data as usize, bytes as usize) {
                 // What shaders wrote to it, at this place of the list.
-                Some(buffer) => buffer,
+                Some(buffer) => (buffer, 0u64),
                 None => {
+                    let Some(host) = crate::host::host() else {
+                        return;
+                    };
                     let Some((buffer, staging)) = list.upload(host, bytes) else {
                         return;
                     };
@@ -1874,26 +1760,9 @@ extern "system" fn copy_texture_region(
                     // report its address as MEM_FREE, so use the host-upload
                     // path.
                     list.defer_fill_buffer(&buffer, staging, data, bytes as usize);
-                    buffer
+                    (buffer, 0u64)
                 }
-||||||| merged common ancestors
-            let Some((buffer, staging)) = list.upload(host, bytes) else {
-                return;
-=======
-            let Some((buffer, at, staging)) = list.upload(bytes) else {
-                return;
->>>>>>> belobug/main
             };
-<<<<<<< HEAD
-||||||| merged common ancestors
-            // The list owns this mapped D3D12 upload buffer. Wine can report
-            // its address as MEM_FREE, so use the host-upload path.
-            list.defer_fill(staging, data, bytes as usize);
-=======
-            // The list owns this mapped D3D12 upload memory. Wine can report
-            // its address as MEM_FREE, so use the host-upload path.
-            list.defer_fill(staging, data, bytes as usize);
->>>>>>> belobug/main
             from.resource = buffer.as_raw().cast_const().cast();
             from.footprint.offset = at;
             #[cfg(feature = "diagnostics")]
@@ -1906,7 +1775,6 @@ extern "system" fn copy_texture_region(
             let Some(texture) = crate::resource::host_resource(src.resource) else {
                 return;
             };
-<<<<<<< HEAD
             // From a host copy without its largest levels: the level it
             // has (the same size as the title's), or nothing.
             if crate::resource::dropped(src.resource) > 0 {
@@ -1926,29 +1794,12 @@ extern "system" fn copy_texture_region(
             list.twin_use(src.resource, false, false);
             if crate::texture::title_written(texture) {
                 crate::texture::upload(list, src.resource, texture);
-||||||| merged common ancestors
-            if crate::texture::title_written(texture) {
-                crate::texture::upload(list, src.resource, texture);
-=======
-            if crate::resource::skipped_mips(src.resource) > 0 {
-                return;
->>>>>>> belobug/main
             }
-<<<<<<< HEAD
             if !same {
                 ensure_state(list, src.resource, COPY_SOURCE);
             }
-||||||| merged common ancestors
-            ensure_state(list, src.resource, COPY_SOURCE);
-=======
-            if crate::texture::title_written(texture) {
-                crate::texture::upload(&list, src.resource, texture);
-            }
-            ensure_state(&list, src.resource, COPY_SOURCE);
->>>>>>> belobug/main
             from.resource = texture.as_raw().cast_const().cast();
         }
-<<<<<<< HEAD
         // A depth texture shaders also write: what they wrote, first (the
         // source above too).
         list.twin_use(dst.resource, false, true);
@@ -1990,15 +1841,10 @@ extern "system" fn copy_texture_region(
         // of its result into a block-compressed texture of that kind, and
         // a copy into a level without memory is dropped.
         crate::texture::card_writes(list, dst.resource, to, Some(dst.footprint.offset as u32));
-||||||| merged common ancestors
-        ensure_state(list, dst.resource, COPY_DEST);
-=======
         // shortcut: as in `copy_resource`.
         if crate::resource::skipped_mips(dst.resource) > 0 {
             return;
         }
-        ensure_state(&list, dst.resource, COPY_DEST);
->>>>>>> belobug/main
         crate::texture::host_written(dst.resource);
         if same {
             SELF_COPIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2135,17 +1981,11 @@ extern "system" fn resolve(
     format: u32,
 ) {
     #[cfg(windows)]
-<<<<<<< HEAD
-    if let Some(list) = host_list_rec(this)
-||||||| merged common ancestors
-    if let Some(list) = host_list(this)
-=======
     if let Some(list) = host_list(this) {
         list.count_work();
     }
     #[cfg(windows)]
-    if let Some(list) = host_list(this)
->>>>>>> belobug/main
+    if let Some(list) = host_list_rec(this)
         && let (Some(to), Some(from)) = (
             crate::resource::host_resource(dst),
             crate::resource::host_resource(src),
@@ -2159,7 +1999,6 @@ extern "system" fn resolve(
         use windows::core::Interface;
         const RESOLVE_DEST: u32 = 0x1000;
         const RESOLVE_SOURCE: u32 = 0x2000;
-<<<<<<< HEAD
         if unlike(dst, src, false) {
             return;
         }
@@ -2170,13 +2009,6 @@ extern "system" fn resolve(
         crate::texture::card_writes(list, dst, to, Some(dst_sub));
         ensure_state(list, dst, RESOLVE_DEST);
         ensure_state(list, src, RESOLVE_SOURCE);
-||||||| merged common ancestors
-        ensure_state(list, dst, RESOLVE_DEST);
-        ensure_state(list, src, RESOLVE_SOURCE);
-=======
-        ensure_state(&list, dst, RESOLVE_DEST);
-        ensure_state(&list, src, RESOLVE_SOURCE);
->>>>>>> belobug/main
         crate::texture::host_written(dst);
         #[cfg(feature = "diagnostics")]
         list.note_op(|| format!("resolve {src:?} to {dst:?} format {format}"));
@@ -2304,7 +2136,6 @@ extern "system" fn clear_dsv(
             unsafe { std::slice::from_raw_parts(rects.cast(), count as usize) }
         });
         const DEPTH_WRITE: u32 = 0x10;
-<<<<<<< HEAD
         // A depth texture shaders also write: what they wrote, first (the
         // clear may be of one slice or of some rectangles).
         list.twin_use(record.resource, false, true);
@@ -2312,11 +2143,6 @@ extern "system" fn clear_dsv(
         if crate::resource::depth_and_unordered(record.resource) {
             crate::resource::DEPTH_UNORDERED[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
-||||||| merged common ancestors
-        ensure_state(list, record.resource, DEPTH_WRITE);
-=======
-        ensure_state(&list, record.resource, DEPTH_WRITE);
->>>>>>> belobug/main
         let dsv = host.dsv(texture, record.depth_desc().as_ref());
         // SAFETY: an open list, a fresh view of a live texture.
         unsafe {
@@ -2332,18 +2158,12 @@ extern "system" fn clear_dsv(
 /// are title memory, copied at submission like buffer copies (if mapped).
 extern "system" fn copy_memory(this: This, dst: u64, src: u64, len: u64, _flags: u32) {
     #[cfg(windows)]
-<<<<<<< HEAD
-    if let Some(list) = host_list_rec(this)
-||||||| merged common ancestors
-    if let Some(list) = host_list(this)
-=======
     if let Some(list) = host_list(this) {
         list.count_write();
         list.count_work();
     }
     #[cfg(windows)]
-    if let Some(list) = host_list(this)
->>>>>>> belobug/main
+    if let Some(list) = host_list_rec(this)
         && dst != 0
         && src != 0
     {
@@ -2370,50 +2190,15 @@ extern "system" fn driver_hint(_: This, _feature: u64, _value: u64) -> u64 {
     0
 }
 
-<<<<<<< HEAD
 /// `DispatchX(x, y, z, flags)`: a dispatch with console flags, of which the
 /// host follows one: the counts are threads, not groups (`draw.rs`
 /// `THREAD_DIMENSIONS`; the ray-tracing structure builder dispatches this way).
 extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
     count_dispatch();
-||||||| merged common ancestors
-/// `DispatchX(x, y, z, flags)`: a dispatch with console flags, which the
-/// host has no use for (the ray-tracing builder dispatches this way).
-extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, _flags: u32) {
-=======
-/// `DispatchX(x, y, z, flags)`: a dispatch with the GPU's initiator flags,
-/// of which the host needs to know if `x` counts threads (as the
-/// ray-tracing builder's does); another picks 32-lane waves, as the
-/// program's own flags do.
-extern "system" fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
-    const USE_THREAD_DIMENSIONS: u32 = 0x20;
->>>>>>> belobug/main
     #[cfg(windows)]
-<<<<<<< HEAD
     with_state(this, |list, s| s.dispatch(list, x, y, z, flags));
-||||||| merged common ancestors
-    state::dispatch(this, x, y, z);
-=======
-    if flags & USE_THREAD_DIMENSIONS != 0 {
-        state::dispatch_threads(this, x, y, z);
-    } else {
-        state::dispatch(this, x, y, z);
-    }
->>>>>>> belobug/main
     #[cfg(not(windows))]
-<<<<<<< HEAD
     let _ = (this, x, y, z, flags);
-||||||| merged common ancestors
-    {
-        let _ = (this, x, y, z);
-        count_dispatch();
-    }
-=======
-    {
-        let _ = (this, x, y, z, flags);
-        count_dispatch();
-    }
->>>>>>> belobug/main
 }
 
 /// `BeginQuery(heap, type, index)`: recorded into the host list, in order
@@ -2720,50 +2505,24 @@ mod state {
         count: u32,
         viewports: *const D3D12_VIEWPORT,
     ) {
-<<<<<<< HEAD
         // (Through the draw state, which keeps them for the host list
         // that continues this one after a cut: `State::replay`.)
         with_state(this, |list, s| s.set_viewports(list, items(viewports, count)));
-||||||| merged common ancestors
-        if let Some(list) = host_list(this) {
-            crate::draw::viewports(list, items(viewports, count));
-        }
-=======
-        with_state(this, |list, s| s.set_viewports(list, items(viewports, count)));
->>>>>>> belobug/main
     }
     pub(super) extern "system" fn scissors(this: This, count: u32, rects: *const RECT) {
         with_state(this, |list, s| s.set_scissors(list, items(rects, count)));
     }
     pub(super) extern "system" fn blend_factor(this: This, factor: *const [f32; 4]) {
-<<<<<<< HEAD
         with_state(this, |list, s| {
             // SAFETY: the title passes four floats or null.
             s.set_blend_factor(list, unsafe { factor.as_ref() })
         });
-||||||| merged common ancestors
-        if let Some(list) = host_list(this) {
-            // SAFETY: the title passes four floats or null.
-            crate::draw::blend_factor(list, unsafe { factor.as_ref() });
-        }
-=======
-        // SAFETY: the title passes four floats or null.
-        with_state(this, |list, s| s.set_blend_factor(list, unsafe { factor.as_ref() }));
->>>>>>> belobug/main
     }
     pub(super) extern "system" fn stencil_ref(this: This, reference: u32) {
-<<<<<<< HEAD
         with_state(this, |list, s| s.set_stencil_ref(list, reference));
     }
     pub(super) extern "system" fn depth_bounds(this: This, min: f32, max: f32) {
         with_state(this, |list, s| s.set_depth_bounds(list, min, max));
-||||||| merged common ancestors
-        if let Some(list) = host_list(this) {
-            crate::draw::stencil_ref(list, reference);
-        }
-=======
-        with_state(this, |list, s| s.set_stencil_ref(list, reference));
->>>>>>> belobug/main
     }
     pub(super) extern "system" fn heaps(this: This, count: u32, heaps: *const This) {
         with_state(this, |_, s| s.set_heaps(items(heaps, count)));
@@ -2866,17 +2625,11 @@ mod state {
     }
     pub(super) extern "system" fn dispatch(this: This, x: u32, y: u32, z: u32) {
         super::count_dispatch();
-<<<<<<< HEAD
         with_state(this, |list, s| s.dispatch(list, x, y, z, 0));
     }
     pub(super) fn dispatch_x(this: This, x: u32, y: u32, z: u32, flags: u32) {
         super::count_dispatch();
         with_state(this, |list, s| s.dispatch_x(list, x, y, z, flags));
-||||||| merged common ancestors
-        with_state(this, |list, s| s.dispatch(list, x, y, z));
-=======
-        with_state(this, |list, s| s.dispatch(list, x, y, z, false));
->>>>>>> belobug/main
     }
     /// A dispatch whose `x` counts threads.
     pub(super) extern "system" fn dispatch_threads(this: This, x: u32, y: u32, z: u32) {
@@ -3036,16 +2789,7 @@ extern "system" fn execute_indirect(
         const DISPATCH: u32 = 2;
         const DISPATCH_SINGLE: u32 = 105;
         let kind = if *kind == DISPATCH_SINGLE { DISPATCH } else { *kind };
-<<<<<<< HEAD
         with_state_how(this, true, |list, s| {
-||||||| merged common ancestors
-        with_state(this, |list, s| {
-=======
-        if kind != DISPATCH {
-            hoist(this);
-        }
-        with_state(this, |list, s| {
->>>>>>> belobug/main
             ran = s.execute_indirect(list, (kind, stride, max), address, counter);
         });
     } else {
@@ -3101,7 +2845,6 @@ pub(crate) fn take_counts() -> (u64, u64) {
     (DRAWS.swap(0, Relaxed), DISPATCHES.swap(0, Relaxed))
 }
 
-<<<<<<< HEAD
 /// A GPU wait for a memory value: the list's commands after it run when
 /// the 32 or 64 bits at `address` compare as asked with `reference`.
 #[derive(Clone, Copy, Debug)]
@@ -3277,37 +3020,6 @@ extern "system" fn wait_value(this: This, address: u64, comparison: u32, referen
 extern "system" fn wait_value64(this: This, address: u64, comparison: u32, reference: u64) {
     wait_for(this, address, comparison, reference, true);
 }
-||||||| merged common ancestors
-/// A GPU wait for a memory value `(address, comparison, reference, ...)`.
-/// Lists run one after another and to completion, so a value another queue
-/// or the CPU has to write first cannot be waited for; nothing to do.
-extern "system" fn wait_value(_: This, _address: u64, _comparison: u32, _reference: u64) {}
-=======
-/// A GPU wait for a memory value `(address, comparison, reference, ...)`.
-/// Another queue or the CPU writes the value: the submission waits for it
-/// before its list runs (`queue::execute`).
-extern "system" fn wait_value(this: This, address: u64, comparison: u32, reference: u64) {
-    note_wait(this, address, comparison, reference, 8);
-}
-extern "system" fn wait_value32(this: This, address: u64, comparison: u32, reference: u32) {
-    note_wait(this, address, comparison, u64::from(reference), 4);
-}
-/// Keeps the wait, waited for when the list is submitted.
-fn note_wait(this: This, address: u64, comparison: u32, reference: u64, bytes: usize) {
-    #[cfg(windows)]
-    cut(this);
-    #[cfg(windows)]
-    if let Some(list) = host_list(this) {
-        list.note_wait(crate::memwait::Wait {
-            address: address as usize,
-            comparison,
-            reference,
-            bytes,
-        });
-    }
-    let _ = (this, address, comparison, reference, bytes);
-}
->>>>>>> belobug/main
 
 /// The enhanced barriers `(group count, groups)`: buffer, texture and
 /// global barriers with layouts instead of states. Every host use of a
@@ -3488,25 +3200,11 @@ const METHODS: [(usize, *const ()); 52] = [
     (52, clear_rtv as *const ()),                 // 0x1a0
     (59, execute_indirect as *const ()),          // 0x1d8 indirect
     (60, copy_memory as *const ()),               // 0x1e0
-<<<<<<< HEAD
     (68, state::depth_bounds as *const ()),       // 0x220 depth bounds
-||||||| merged common ancestors
-    (68, ignored_state as *const ()),             // 0x220 depth bounds
-=======
-    (68, depth_bounds as *const ()),              // 0x220
->>>>>>> belobug/main
     (69, write32 as *const ()),                   // 0x228
     (70, write64 as *const ()),                   // 0x230
-<<<<<<< HEAD
     (71, wait_value as *const ()),                // 0x238, 32 bits
     (72, wait_value64 as *const ()),              // 0x240, 64 bits
-||||||| merged common ancestors
-    (71, wait_value as *const ()),                // 0x238, 32 bits
-    (72, wait_value as *const ()),                // 0x240, 64 bits
-=======
-    (71, wait_value32 as *const ()),              // 0x238, 32 bits
-    (72, wait_value as *const ()),                // 0x240, 64 bits
->>>>>>> belobug/main
     (73, ignored_state as *const ()),             // 0x248 pixel shader depth order
     (83, copy_texture_region_x as *const ()),     // 0x298
     (84, copy_resource_x as *const ()),           // 0x2a0
