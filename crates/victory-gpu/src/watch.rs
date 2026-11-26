@@ -3156,17 +3156,15 @@ pub fn title_memory_written(at: usize, len: usize, pages: bool) {
             return;
         }
     }
-    {
+    let guarded = guards_shared().protected.range(at / BLOCK..end.div_ceil(BLOCK)).count() as u64;
+    if pages {
+        WRITTEN[2].fetch_add(guarded, Relaxed);
+    }
+    if mode & 1 != 0 && guarded != 0 {
         let mut g = guards();
         // Written through a view of our own: the pages may be committed now.
         g.uncommitted.forget(at, end);
-        let guarded = g.protected.range(at / BLOCK..end.div_ceil(BLOCK)).count() as u64;
-        if pages {
-            WRITTEN[2].fetch_add(guarded, Relaxed);
-        }
-        if mode & 1 != 0 && guarded != 0 {
-            open(&mut g, at, end);
-        }
+        open(&mut g, at, end);
     }
     // A placed texture there changed with no descriptor written.
     crate::descriptor::host::page_written(at, len);
