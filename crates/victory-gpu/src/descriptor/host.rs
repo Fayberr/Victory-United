@@ -123,7 +123,6 @@ pub(crate) struct HostHeap {
     /// ours keeps 2^18 there: 2^16 and 2^17 both ran out in this title.)
     dynamic: u32,
     sampler: bool,
-<<<<<<< HEAD
     /// Where the raw twins of the title's slots start
     /// (`victory_shader::emit::raw_views`; 0: there are none), and which of
     /// them are not null.
@@ -138,16 +137,6 @@ pub(crate) struct HostHeap {
     /// The same for a slot whose descriptor is made and stays (else 0): what
     /// [`HostHeap::mirror`] asks first, without the lock. Changed under it.
     quick: Vec<std::sync::atomic::AtomicU64>,
-||||||| c7daeea5
-    /// The record (view index and generation) each slot was last made from.
-    made: Mutex<Vec<u64>>,
-    /// Lock-free mirror of `made` updated with Release after host slot creation
-    /// and cleared before unmaking, so hot-path `mirror` hits avoid locking `made`.
-    made_keys: Vec<AtomicU64>,
-=======
-    /// The record (view index and generation) each slot was last made from.
-    made: SlotKeys,
->>>>>>> integ/vertex
     /// A fingerprint of the record each slot held when the pass over
     /// records copied in as bytes last looked at it
     /// ([`HostHeap::mirror_copied`]; 0: never looked at, or made from another
@@ -157,7 +146,6 @@ pub(crate) struct HostHeap {
     /// Bumped whenever [`forget_copied`] invalidates cached copied state so
     /// [`crate::descriptor::sync_heaps`] re-checks slots on unchanged pages.
     copy_gen: std::sync::atomic::AtomicU64,
-<<<<<<< HEAD
     /// The records of the title's heap as the pass over records copied in
     /// as bytes last saw them ([`Copied::changes`]). Made on first use.
     records: Mutex<Vec<u8>>,
@@ -168,15 +156,12 @@ pub(crate) struct HostHeap {
     /// they were made from and when that was
     /// ([`HostHeap::texture_slot_gone`]).
     away: Mutex<std::collections::HashMap<u32, (u64, u64)>>,
-||||||| c7daeea5
-=======
     /// Title slots that hold a null view of a known kind ([`null_kind`]) and
     /// keep nothing: 0 otherwise. Set where such a null view is made and
     /// forgotten by [`HostHeap::keep`], which follows every other write of a
     /// slot: a record that would make the same null view again is done with
     /// (`VICTORY_SYNC_NULL_SKIP`).
     nulls: Vec<std::sync::atomic::AtomicU8>,
->>>>>>> integ/vertex
     /// The host resource each slot views, held while the slot does: shaders
     /// index heaps directly, so a slot the title has not rewritten since it
     /// released the resource may still be read, and a freed host resource
@@ -313,17 +298,9 @@ impl<T> TiledSlots<T> {
     }
 }
 
-<<<<<<< HEAD
 /// What [`make`] made of a view: the host resource it holds, and the tiled
 /// texture it shows levels of on demand (`crate::tiles`).
 struct Built {
-||||||| c7daeea5
-struct Made {
-=======
-/// A host descriptor [`make`] made: the host resource it views and the
-/// tiled texture it shows, if any.
-struct Built {
->>>>>>> integ/vertex
     kept: Kept,
     tiled: Option<(crate::resource::OnDemand, Option<u32>)>,
 }
@@ -1718,7 +1695,6 @@ pub(crate) fn probe_view_limit() {
 /// table past them is made afresh in these slots like any other.
 pub(crate) const DYNAMIC: u32 = 1 << 18;
 
-<<<<<<< HEAD
 /// [`DYNAMIC`] for a heap of `count` title slots whose null slot is `null`
 /// (0: none): up to four times as many where the host heap has the room (a
 /// host that takes more than [`PORTABLE_VIEWS`]; `VICTORY_DYNAMIC_SLOTS`
@@ -1739,8 +1715,6 @@ fn dynamic_slots(count: u32, null: u32) -> u32 {
     null.saturating_sub(count).min(most).max(DYNAMIC)
 }
 
-||||||| c7daeea5
-=======
 /// Find the first contiguous run in next-fit order. A run that starts
 /// before the cursor can finish after it, up to `n - 1` slots beyond.
 fn find_dynamic_run(taken: &[bool], cursor: usize, n: usize) -> Option<usize> {
@@ -1761,28 +1735,9 @@ fn find_dynamic_run(taken: &[bool], cursor: usize, n: usize) -> Option<usize> {
     None
 }
 
-/// Dynamic slots in a view heap of [`UNCAPPED_VIEWS`] (AMD), when the
-/// title's slots leave room for them before the null slot
-/// (`VICTORY_DYNAMIC_SLOTS`, 2^19; `=262144` is the value before). From
-/// triippywhale/victory-fork 43b65e23: 2^18 ran out in the prison's waiting
-/// room on an RX 7900 XT, where 276 to 565 tables a frame were refused and
-/// their draws dropped. Here (RX 7800 XT) the fly-over while a save loads
-/// asked for some 31,000 tables a frame and 1,300 to 1,900 were refused.
-fn dynamic_uncapped() -> u32 {
-    static MOST: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-    *MOST.get_or_init(|| {
-        std::env::var("VICTORY_DYNAMIC_SLOTS")
-            .ok()
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(1 << 19)
-            .max(DYNAMIC)
-    })
-}
-
 /// Tables refused for want of free dynamic slots, since the start.
 pub(crate) static REFUSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
->>>>>>> integ/vertex
 impl HostHeap {
     pub(crate) fn new(sampler: bool, count: u32) -> Option<Self> {
         let host = host()?;
@@ -1814,22 +1769,11 @@ impl HostHeap {
         } else {
             victory_shader::emit::view_heap_limit()
         };
-<<<<<<< HEAD
         let raw = if sampler { 0 } else { victory_shader::emit::raw_views() };
         let extra = if sampler { 0 } else { dynamic_slots(count, null) };
-||||||| c7daeea5
-=======
-        // More dynamic slots where the title's leave room for them before
-        // the null slot (an uncapped host heap); as many as before where not.
-        let extra = if !sampler && null >= UNCAPPED_VIEWS - 1 && count.saturating_add(dynamic_uncapped()) <= null {
-            dynamic_uncapped()
-        } else {
-            extra
-        };
         if !sampler {
             tracing::info!(count, extra, null, "view heap: the title's slots, dynamic slots, the null slot");
         }
->>>>>>> integ/vertex
         let (heap, count, size) = if null == 0 {
             match make(count + extra) {
                 Ok(heap) => (heap, count, count + extra),
@@ -1909,7 +1853,6 @@ impl HostHeap {
             count,
             dynamic: extra,
             sampler,
-<<<<<<< HEAD
             raw,
             twins: (0..if raw == 0 { 0 } else { count + extra }).map(|_| std::sync::atomic::AtomicBool::new(false)).collect(),
             #[cfg(feature = "diagnostics")]
@@ -1918,33 +1861,15 @@ impl HostHeap {
                 .collect(),
             made: Made::new(count as usize),
             quick: (0..count).map(|_| std::sync::atomic::AtomicU64::new(0)).collect(),
-            copied: Mutex::new(Vec::new()),
-||||||| c7daeea5
-            made: Mutex::new(vec![0; count as usize]),
-            made_keys: (0..count).map(|_| AtomicU64::new(0)).collect(),
-            copied: Mutex::new(Vec::new()),
-=======
-            made: SlotKeys::new(count as usize),
             copied: (0..count).map(|_| std::sync::atomic::AtomicU64::new(0)).collect(),
->>>>>>> integ/vertex
             copy_gen: std::sync::atomic::AtomicU64::new(0),
-<<<<<<< HEAD
             records: Mutex::default(),
             waiting: Mutex::default(),
             away: Mutex::default(),
-            kept: (0..count + extra).map(|_| Mutex::new(None)).collect(),
-            next: Mutex::new((0, vec![false; extra as usize])),
-            free: std::sync::atomic::AtomicU32::new(extra),
-||||||| c7daeea5
-            kept: Mutex::new(vec![None; (count + extra) as usize]),
-            next: Mutex::new((0, taken)),
-            free: std::sync::atomic::AtomicU32::new(DYNAMIC),
-=======
             nulls: (0..if sampler { 0 } else { count }).map(|_| std::sync::atomic::AtomicU8::new(0)).collect(),
-            kept: Mutex::new(vec![None; (count + extra) as usize]),
+            kept: (0..count + extra).map(|_| Mutex::new(None)).collect(),
             next: Mutex::new((0, taken)),
             free: std::sync::atomic::AtomicU32::new(extra),
->>>>>>> integ/vertex
             too_long: std::sync::atomic::AtomicU32::new(u32::MAX),
             strides,
             views,
@@ -2091,13 +2016,7 @@ impl HostHeap {
         crate::copystat::add(crate::copystat::C::DynamicNs, started.elapsed().as_nanos() as u64);
         taken[first..first + n].fill(true);
         self.free.fetch_sub(n as u32, std::sync::atomic::Ordering::Relaxed);
-<<<<<<< HEAD
-        *next = ((first + n) % end) as u32;
-||||||| c7daeea5
-        *next = ((first + n) % DYNAMIC as usize) as u32;
-=======
         *next = ((first + n) % self.dynamic as usize) as u32;
->>>>>>> integ/vertex
         Some(self.count + first as u32)
     }
 
@@ -2412,17 +2331,15 @@ impl HostHeap {
     /// whose pass runs first takes them (a title has one view heap).
     pub(crate) fn texture_slots_remapped(&self, frame: u64) -> usize {
         self.texture_slots_page_written(frame);
-<<<<<<< HEAD
-        let mut ranges = std::mem::take(&mut *REMAPPED.lock().unwrap_or_else(|e| e.into_inner()));
-||||||| c7daeea5
-        let ranges = std::mem::take(&mut *REMAPPED.lock().unwrap_or_else(|e| e.into_inner()));
-=======
         self.slots_remapped_under(&take_texture_changes(&REMAPPED), frame)
     }
 
+    /// The slots of placed textures that lie in `ranges` made due from the
+    /// next frame (as [`HostHeap::texture_slots_remapped`]); returns how
+    /// many.
     fn slots_remapped_under(&self, ranges: &[(u64, u64)], frame: u64) -> usize {
         use std::sync::atomic::Ordering::Relaxed;
->>>>>>> integ/vertex
+        let mut ranges = ranges.to_vec();
         if ranges.is_empty() {
             return 0;
         }
@@ -2540,36 +2457,12 @@ impl HostHeap {
         // from a view the host could not make (`make` gave nothing, the
         // slot is null and keeps nothing). The host copy of such a
         // texture is held by no slot, may have been let go, and would be
-<<<<<<< HEAD
         // made anew here, with the card full.
         if key == 0 || self.made.get(index) != Some(key) {
             return false;
         }
         let _made = self.made.lock(index);
         self.made.get(index) == Some(key) && self.kept_in(index).is_some()
-||||||| c7daeea5
-        // made anew here, with the card full. `made` first, then `kept`,
-        // as `mirror` takes them.
-        let made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-        made.get(index as usize).is_some_and(|&made| made != 0 && made == key)
-            && self
-                .kept
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(index as usize)
-                .is_some_and(Option::is_some)
-=======
-        // made anew here, with the card full. `made` first, then `kept`,
-        // as `mirror` takes them.
-        let _hold = self.made.hold(index);
-        self.made.get(index).is_some_and(|made| made != 0 && made == key)
-            && self
-                .kept
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(index as usize)
-                .is_some_and(Option::is_some)
->>>>>>> integ/vertex
     }
 
     /// Levels on demand (`crate::tiles`): makes again the host slots of the
@@ -2670,15 +2563,8 @@ impl HostHeap {
         slots.dedup();
         let mut remade = 0;
         for slot in slots {
-<<<<<<< HEAD
             let _made = self.made.lock(slot);
             let Some(key) = self.made.get(slot).filter(|&key| key != 0) else {
-||||||| c7daeea5
-            let Some(&key) = made.get(slot as usize) else {
-=======
-            let _hold = self.made.hold(slot);
-            let Some(key) = self.made.get(slot) else {
->>>>>>> integ/vertex
                 continue;
             };
             let Some(view) = view_at(key as u32, (key >> 32) as u32) else {
@@ -2744,7 +2630,6 @@ impl HostHeap {
     /// away `AWAY_MS` after it was first found away
     /// (`VICTORY_TEXTURE_AWAY_MS`; 0: at once, as before).
     pub(crate) fn texture_slot_gone(&self, index: u32) -> bool {
-<<<<<<< HEAD
         const AWAY_MS: u64 = 3000;
         static WAIT: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
         let wait = *WAIT.get_or_init(|| {
@@ -2752,13 +2637,6 @@ impl HostHeap {
         });
         let _made = self.made.lock(index);
         let Some(key) = self.made.get(index).filter(|&key| key != 0) else {
-||||||| c7daeea5
-        let mut made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-        if made.get(index as usize).is_none_or(|&key| key == 0) {
-=======
-        let hold = self.made.hold(index);
-        if self.made.get(index).is_none_or(|key| key == 0) {
->>>>>>> integ/vertex
             return false;
         };
         let now = crate::host::now_ms();
@@ -2776,16 +2654,8 @@ impl HostHeap {
                 }
             }
         }
-<<<<<<< HEAD
         self.unmake(index);
         drop(_made);
-||||||| c7daeea5
-        self.unmake(&mut made, index);
-        drop(made);
-=======
-        self.unmake(index);
-        drop(hold);
->>>>>>> integ/vertex
         self.textures.lock().unwrap_or_else(|e| e.into_inner()).rechecks.remove(&index);
         self.forget_copied(index);
         STALE[4].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2809,7 +2679,6 @@ impl HostHeap {
         }
     }
 
-<<<<<<< HEAD
 
     /// Whether host slot `index` shows the placed texture the title's record
     /// at `handle` views, by an earlier view of it.
@@ -3027,21 +2896,6 @@ impl HostHeap {
     fn unmake(&self, index: u32) {
         self.quick_is(index, 0);
         let Some(key) = self.made.get(index) else {
-||||||| c7daeea5
-    /// Makes host slot `index` null again, as it is before its view is
-    /// made: a null view of the kind it held.
-    fn unmake(&self, made: &mut [u64], index: u32) {
-        if let Some(slot) = self.made_keys.get(index as usize) {
-            slot.store(0, Ordering::Release);
-        }
-        let Some(key) = made.get_mut(index as usize).map(std::mem::take) else {
-=======
-    /// Makes host slot `index` null again, as it is before its view is
-    /// made: a null view of the kind it held. The caller holds the slot
-    /// ([`SlotKeys::hold`]).
-    fn unmake(&self, index: u32) {
-        let Some(key) = self.made.get(index) else {
->>>>>>> integ/vertex
             return;
         };
         self.made.set(index, 0);
@@ -3465,26 +3319,10 @@ impl HostHeap {
         for old in removed_objs {
             crate::host::retire(old);
         }
-<<<<<<< HEAD
         for &slot in &evicted_slots {
             let _made = self.made.lock(slot);
             self.made.set(slot, 0);
             self.quick_is(slot, 0);
-||||||| c7daeea5
-        {
-            let mut made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-            for &slot in &evicted_slots {
-                if let Some(entry) = made.get_mut(slot as usize) {
-                    *entry = 0;
-                }
-                if let Some(key) = self.made_keys.get(slot as usize) {
-                    key.store(0, Ordering::Release);
-                }
-            }
-=======
-        for &slot in &evicted_slots {
-            self.made.set(slot, 0);
->>>>>>> integ/vertex
         }
         {
             let mut placed = self.placed.lock().unwrap_or_else(|e| e.into_inner());
@@ -3534,7 +3372,9 @@ impl HostHeap {
     }
     /// Slot `index` now views `resource` (or nothing of the host's).
     fn keep(&self, index: u32, resource: Option<ID3D12Resource>) {
-<<<<<<< HEAD
+        if let Some(null) = self.nulls.get(index as usize) {
+            null.store(0, std::sync::atomic::Ordering::Relaxed);
+        }
         let Some(slot) = self.kept.get(index as usize) else {
             return;
         };
@@ -3544,24 +3384,6 @@ impl HostHeap {
             // The same again: nothing to retire.
             if slot.as_ref().map(Interface::as_raw) == resource.as_ref().map(Interface::as_raw) {
                 return;
-||||||| c7daeea5
-        let mut kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(slot) = kept.get_mut(index as usize) {
-            // A running submission may still read the old resource through
-            // this slot.
-            if let Some(old) = std::mem::replace(slot, resource) {
-                crate::host::retire(old);
-=======
-        if let Some(null) = self.nulls.get(index as usize) {
-            null.store(0, std::sync::atomic::Ordering::Relaxed);
-        }
-        let mut kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(slot) = kept.get_mut(index as usize) {
-            // A running submission may still read the old resource through
-            // this slot.
-            if let Some(old) = std::mem::replace(slot, resource) {
-                crate::host::retire(old);
->>>>>>> integ/vertex
             }
             std::mem::replace(&mut *slot, resource)
         };
@@ -3704,13 +3526,7 @@ impl HostHeap {
         let Some(host) = host() else { return };
         let desc = D3D12_CONSTANT_BUFFER_VIEW_DESC {
             BufferLocation: gpu,
-<<<<<<< HEAD
             SizeInBytes: constant_bytes(size),
-||||||| c7daeea5
-            SizeInBytes: constant_size(size),
-=======
-            SizeInBytes: cbv_size(size),
->>>>>>> integ/vertex
         };
         // SAFETY: a slot of our heap; the memory is the caller's.
         unsafe {
@@ -3894,37 +3710,10 @@ impl HostHeap {
         let Some(last) = self.copied.get(index as usize) else {
             return false;
         };
-<<<<<<< HEAD
-        if check_made_for_zero {
-            let is_made = self.made.get(index).is_some_and(|key| key != 0);
-            if !is_made {
-                return false;
-            }
-            let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(last) = copied.get_mut(index as usize) {
-                *last = print;
-            }
-||||||| c7daeea5
-        if check_made_for_zero {
-            let is_made = self
-                .made
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(index as usize)
-                .is_some_and(|&key| key != 0);
-            if !is_made {
-                return false;
-            }
-            let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(last) = copied.get_mut(index as usize) {
-                *last = print;
-            }
-=======
         let words = |at: usize| u32::from_le_bytes([header[at], header[at + 1], header[at + 2], header[at + 3]]);
         let words = [words(0), words(4), words(8)];
         if !self.to_mirror(index, last, print, record) || self.left_to_tables(index, words, crate::frame::current()) {
             return false;
->>>>>>> integ/vertex
         }
         last.store(print, std::sync::atomic::Ordering::Relaxed);
         // The bytes that were fingerprinted, not a second read of the slot.
@@ -3999,113 +3788,6 @@ impl HostHeap {
     ) -> u64 {
         let (frame, tables) = (crate::frame::current(), sync_tables());
         let mut looked = 0u64;
-<<<<<<< HEAD
-        let mut due: Vec<(u32, u64)> = Vec::new();
-        // Never raw-copied and zero now, but possibly written through the API
-        // (`Create*View`, `CopyDescriptors`): `made` is read after the lock of
-        // the fingerprints is let go, as in `mirror_copied`.
-        let mut zeros: Vec<(u32, u64, u64)> = Vec::new();
-        {
-            let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-            if copied.is_empty() {
-                copied.resize(self.count as usize, 0);
-            }
-            for index in slots {
-                let handle = start + index * step;
-                // A record that straddles the range's ends is left to the
-                // range that holds its first byte.
-                let Some(at) = (handle as usize).checked_sub(from) else {
-                    continue;
-                };
-                let Some(record) = page.get(at..at + step as usize) else {
-                    continue;
-                };
-                looked += 1;
-                // None past the host heap's slots, as `mirror_copied`.
-                let Some(last) = copied.get_mut(index as usize) else {
-                    continue;
-                };
-                // Never 0, which is "never looked at".
-                let print = record_print(record) | 1;
-                if *last == print {
-                    continue;
-                }
-                if *last == 0 && record.iter().all(|&b| b == 0) {
-                    zeros.push((index as u32, handle, print));
-                    continue;
-                }
-                // A table's slot lately: left to its draws, and looked at
-                // again next time.
-                if !tables && self.tabled_lately(index as u32, frame) {
-                    COPIED_TABLED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    continue;
-                }
-                *last = print;
-                due.push((index as u32, handle));
-            }
-        }
-        if !zeros.is_empty() {
-            zeros.retain(|&(index, _, _)| self.made.get(index).is_some_and(|key| key != 0));
-            if !zeros.is_empty() {
-                let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-                for (index, handle, print) in zeros {
-                    if !tables && self.tabled_lately(index, frame) {
-                        COPIED_TABLED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-||||||| c7daeea5
-        let mut due: Vec<(u32, u64)> = Vec::new();
-        // Never raw-copied and zero now, but possibly written through the API
-        // (`Create*View`, `CopyDescriptors`): `made` is read after the lock of
-        // the fingerprints is let go, as in `mirror_copied`.
-        let mut zeros: Vec<(u32, u64, u64)> = Vec::new();
-        {
-            let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-            if copied.is_empty() {
-                copied.resize(self.count as usize, 0);
-            }
-            for index in slots {
-                let handle = start + index * step;
-                // A record that straddles the range's ends is left to the
-                // range that holds its first byte.
-                let Some(at) = (handle as usize).checked_sub(from) else {
-                    continue;
-                };
-                let Some(record) = page.get(at..at + step as usize) else {
-                    continue;
-                };
-                looked += 1;
-                // None past the host heap's slots, as `mirror_copied`.
-                let Some(last) = copied.get_mut(index as usize) else {
-                    continue;
-                };
-                // Never 0, which is "never looked at".
-                let print = record_print(record) | 1;
-                if *last == print {
-                    continue;
-                }
-                if *last == 0 && record.iter().all(|&b| b == 0) {
-                    zeros.push((index as u32, handle, print));
-                    continue;
-                }
-                // A table's slot lately: left to its draws, and looked at
-                // again next time.
-                if !tables && self.tabled_lately(index as u32, frame) {
-                    COPIED_TABLED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    continue;
-                }
-                *last = print;
-                due.push((index as u32, handle));
-            }
-        }
-        if !zeros.is_empty() {
-            let made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-            zeros.retain(|&(index, _, _)| made.get(index as usize).is_some_and(|&key| key != 0));
-            drop(made);
-            if !zeros.is_empty() {
-                let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-                for (index, handle, print) in zeros {
-                    if !tables && self.tabled_lately(index, frame) {
-                        COPIED_TABLED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-=======
         for index in slots {
             let handle = start + index * step;
             let mut whole = [0u8; 32];
@@ -4113,7 +3795,6 @@ impl HostHeap {
                 Some(record) => record,
                 None => {
                     if step as usize > whole.len() || !straddling(handle, &mut whole) {
->>>>>>> integ/vertex
                         continue;
                     }
                     &whole[..step as usize]
@@ -4252,63 +3933,16 @@ impl HostHeap {
         // Generations start at 1, so a made slot's key is never 0.
         let key = u64::from(generation) << 32 | u64::from(i);
         if tag == VIEW_TAG
-<<<<<<< HEAD
             && quick_mirror()
-            && self.quick.get(index as usize).is_some_and(|slot| slot.load(Ordering::Acquire) == key)
-||||||| c7daeea5
-            && self
-                .made_keys
-                .get(index as usize)
-                .is_some_and(|slot| slot.load(Ordering::Acquire) == key)
-=======
             && key != 0
-            && self.made.get(index) == Some(key)
->>>>>>> integ/vertex
+            && self.quick.get(index as usize).is_some_and(|slot| slot.load(Ordering::Acquire) == key)
             && let Some(view) = view_at(i, generation)
         {
             return Some(view);
         }
-<<<<<<< HEAD
-        let mut stale_unmade: Vec<u32> = Vec::new();
-        let mut self_changed = false;
-        let result = {
-            let _held = self.made.lock(index);
-            let shown = self.made.get(index).unwrap_or(0);
-            let Some(view) = (tag == VIEW_TAG).then(|| view_at(i, generation)).flatten() else {
-                // Not a view of ours (never written, or of a resource the
-                // title released): nothing to read.
-                if shown != 0 {
-                    self.quick_is(index, 0);
-                    self.made.set(index, 0);
-                    self.forget_tiled(index);
-                    self.make_null(index);
-                    let _ = self.note_buffer(index, None, false);
-                    self_changed = true;
-                } else if for_draw {
-                    // Left for later and stale since: out of the sets and the stride table.
-                    let _ = self.note_buffer(index, None, false);
-||||||| c7daeea5
-        let mut stale_unmade: Vec<u32> = Vec::new();
-        let mut self_changed = false;
-        let result = {
-            let mut made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(view) = (tag == VIEW_TAG).then(|| view_at(i, generation)).flatten() else {
-                // Not a view of ours (never written, or of a resource the
-                // title released): nothing to read.
-                if made[index as usize] != 0 {
-                    self.made_keys[index as usize].store(0, Ordering::Release);
-                    made[index as usize] = 0;
-                    self.forget_tiled(index);
-                    self.make_null(index);
-                    let _ = self.note_buffer(index, None, false);
-                    self_changed = true;
-                } else if for_draw {
-                    // Left for later and stale since: out of the sets and the stride table.
-                    let _ = self.note_buffer(index, None, false);
-=======
         let mut stale_slots = Vec::new();
         let view = {
-            let _hold = self.made.hold(index);
+            let _hold = self.made.lock(index);
             let was = self.made.get(index).unwrap_or(0);
             let view = self.mirror_held(index, handle, (tag, i, generation), for_draw, &mut stale_slots);
             // (A draw that makes a slot left for later makes it from the
@@ -4317,15 +3951,19 @@ impl HostHeap {
             if forget && (!for_draw || (was != 0 && was != self.made.get(index).unwrap_or(0))) {
                 self.forget_copied(index);
             }
+            // What `mirror` asks first, without the lock: the record a slot
+            // whose descriptor is made and stays was made from (else 0).
+            let made = self.made.get(index).unwrap_or(0);
+            self.quick_is(index, if made == key { key } else { 0 });
             view
         };
         // Views of other textures in the memory this one describes, each
         // under its own hold (never two holds at once).
         for stale in stale_slots {
-            let hold = self.made.hold(stale);
+            let _hold = self.made.lock(stale);
             if self.made.get(stale).is_some_and(|key| key != 0) {
                 self.unmake(stale);
-                drop(hold);
+                drop(_hold);
                 self.forget_copied(stale);
             }
         }
@@ -4363,23 +4001,10 @@ impl HostHeap {
             // Views of other textures in the memory this one describes
             // are stale: their host slots read nothing from here on, and
             // let go of the host copies they held.
-            for stale in self.note_buffer(index, Some(&view), for_draw) {
+            for (stale, _) in self.note_buffer(index, Some(&view), for_draw) {
                 if stale != index {
                     stale_slots.push(stale);
->>>>>>> integ/vertex
                 }
-<<<<<<< HEAD
-                if invalidate_copied && self_changed {
-                    self.forget_copied(index);
-                }
-                return None;
-||||||| c7daeea5
-                drop(made);
-                if invalidate_copied && self_changed {
-                    self.forget_copied(index);
-                }
-                return None;
-=======
             }
             // A view of a texture object that has no host copy yet waits
             // for it, as buffer views wait for a draw: the slot is made
@@ -4410,7 +4035,6 @@ impl HostHeap {
                 None
             } else {
                 make(&view, self.cpu(index))
->>>>>>> integ/vertex
             };
 <<<<<<< HEAD
             if shown != key {
