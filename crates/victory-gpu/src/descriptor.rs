@@ -1129,11 +1129,6 @@ static VIEWS: std::sync::RwLock<Views> = std::sync::RwLock::new(Views {
     shape_index: std::collections::BTreeMap::new(),
     ownerless: std::collections::VecDeque::new(),
 });
-<<<<<<< HEAD
-pub(crate) const VIEW_TAG: u32 = u32::from_le_bytes(*b"vVIE");
-||||||| 0a4356653
-const VIEW_TAG: u32 = u32::from_le_bytes(*b"vVIE");
-=======
 
 /// How many table entries of views without a resource are kept
 /// ([`Views::ownerless`]). Once the shapes of placed views are full (the
@@ -1153,8 +1148,7 @@ fn ownerless_cap() -> usize {
             .unwrap_or(1 << 20)
     })
 }
-const VIEW_TAG: u32 = u32::from_le_bytes(*b"vVIE");
->>>>>>> vicetay/main
+pub(crate) const VIEW_TAG: u32 = u32::from_le_bytes(*b"vVIE");
 
 /// A record is the tag and two words, `i` and `generation` (the host keeps
 /// them as one 64-bit key per slot). The top two bits of `generation` say
