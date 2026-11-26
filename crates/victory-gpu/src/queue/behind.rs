@@ -455,19 +455,6 @@ enum Job {
     /// begin in the order, and the signals given behind them.
     Joined(usize, Vec<crate::list::Detached>, Vec<usize>, Vec<usize>, Vec<(FenceRef, u64)>),
     /// A signal of the queue's.
-<<<<<<< HEAD
-    Signal(usize, u64),
-    /// A frame is shown: the base texture (and optional overlay plane) and the states their lists leave them in.
-    Present(
-        Option<(std::sync::Arc<crate::resource::HostTexture>, u32)>,
-        Option<(std::sync::Arc<crate::resource::HostTexture>, u32)>,
-        super::Shown,
-    ),
-||||||| 0a4356653
-    Signal(usize, u64),
-    /// A frame is shown: the texture and the state its lists leave it in.
-    Present(Option<(std::sync::Arc<crate::resource::HostTexture>, u32)>, super::Shown),
-=======
     Signal(FenceRef, u64),
     /// A frame is shown: the base texture (and optional overlay plane) and the states their lists leave them in.
     Present(
@@ -475,7 +462,6 @@ enum Job {
         Option<(std::sync::Arc<crate::resource::HostTexture>, u32)>,
         super::Shown,
     ),
->>>>>>> vicetay/main
 }
 
 // SAFETY: D3D12 objects are free-threaded; a job is touched by whoever put it
