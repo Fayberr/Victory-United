@@ -129,15 +129,6 @@ impl Default for GraphicsState {
     }
 }
 
-/// Whether `format` is an integer (UINT/SINT) render target format, which
-/// the host cannot blend.
-fn integer_format(format: DXGI_FORMAT) -> bool {
-    matches!(
-        format.0,
-        3 | 4 | 7 | 8 | 12 | 14 | 17 | 18 | 25 | 30 | 32 | 36 | 38 | 42 | 43 | 50 | 52 | 57 | 59 | 62 | 64
-    )
-}
-
 impl GraphicsState {
     /// The blend description for the host: blending off for integer render
     /// targets. The console's blender passes integer targets through; D3D12
@@ -195,7 +186,6 @@ fn host_blend(blend: &D3D12_BLEND_DESC, targets: &D3D12_RT_FORMAT_ARRAY) -> D3D1
 }
 
 impl GraphicsState {
-<<<<<<< HEAD
     /// Whether the draws are a pass over the screen: no vertex input, no
     /// depth or stencil, a target. Such passes fill tables once; their shaders
     /// are few. (After Belobug/VIctory-Belobug-AMD 18e57db8.)
@@ -207,39 +197,6 @@ impl GraphicsState {
             && self.topology == D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE
     }
 
-||||||| c7daeea5
-=======
-    /// The blend state the host can make for these render targets. D3D12
-    /// refuses a pipeline that blends into a target of an integer format
-    /// (`UINT` or `SINT`): the title does, and the console's GPU lets it
-    /// (the blend is a no-op there). Blending is switched off for those
-    /// targets and kept for the others; with no integer target that blends
-    /// the state is returned as it is (so a logic op on an integer target,
-    /// which D3D12 refuses together with independent blending, stays valid).
-    pub(crate) fn host_blend(&self) -> D3D12_BLEND_DESC {
-        let mut blend = self.blend;
-        let n = (self.targets.NumRenderTargets as usize).min(8);
-        let independent = blend.IndependentBlendEnable.as_bool();
-        // Without independent blending, target 0's state stands for all.
-        let integer = |i: usize| {
-            integer_format(self.targets.RTFormats[i])
-                && self.blend.RenderTarget[if independent { i } else { 0 }].BlendEnable.as_bool()
-        };
-        if !(0..n).any(integer) {
-            return blend;
-        }
-        if !independent {
-            let first = blend.RenderTarget[0];
-            blend.RenderTarget = [first; 8];
-            blend.IndependentBlendEnable = true.into();
-        }
-        for i in (0..n).filter(|&i| integer(i)) {
-            blend.RenderTarget[i].BlendEnable = false.into();
-        }
-        blend
-    }
-
->>>>>>> integ/vertex
     /// Takes in one subobject of a stream: its type, then its data at +4
     /// (+8 for those holding pointers).
     ///
@@ -638,7 +595,6 @@ fn refuse(reason: &'static str, shaders: &[Arc<Shader>]) -> Option<HostPipeline>
     None
 }
 
-<<<<<<< HEAD
 /// Whether the device filters anisotropically with point mips (an optional
 /// feature, `D3D12_OPTIONS19`).
 fn device_aniso_point_mip(device: &ID3D12Device) -> bool {
@@ -656,27 +612,6 @@ fn device_aniso_point_mip(device: &ID3D12Device) -> bool {
         && options.AnisoFilterWithPointMipSupported.as_bool()
 }
 
-||||||| c7daeea5
-=======
-/// Whether the host device filters anisotropically with a point mip
-/// (`D3D12_OPTIONS19`); older devices keep the linear-mip approximation
-/// (`StaticSampler::filter_for_host`).
-fn aniso_point_mip_supported(device: &ID3D12Device) -> bool {
-    let mut options = D3D12_FEATURE_DATA_D3D12_OPTIONS19::default();
-    // SAFETY: the feature query writes the structure of the given size.
-    // Older runtimes may not recognize OPTIONS19; that means no support.
-    unsafe {
-        device.CheckFeatureSupport(
-            D3D12_FEATURE_D3D12_OPTIONS19,
-            (&raw mut options).cast(),
-            size_of_val(&options) as u32,
-        )
-    }
-    .is_ok()
-        && options.AnisoFilterWithPointMipSupported.as_bool()
-}
-
->>>>>>> integ/vertex
 /// Appends one translated stage's root parameters and static samplers to a
 /// host root signature description, returning the slot-to-parameter bindings
 /// for that stage. Shared between runtime pipeline creation and offline
@@ -688,7 +623,6 @@ fn aniso_point_mip_supported(device: &ID3D12Device) -> bool {
 fn collect_stage_bindings(
     t: &victory_shader::emit::HostShader,
     visibility: D3D12_SHADER_VISIBILITY,
-    aniso_point_mip_supported: bool,
     params: &mut Vec<D3D12_ROOT_PARAMETER1>,
     ranges: &mut Vec<Box<D3D12_DESCRIPTOR_RANGE1>>,
     samplers: &mut Vec<D3D12_STATIC_SAMPLER_DESC>,
@@ -817,7 +751,6 @@ pub(crate) fn precompile_compute(
     collect_stage_bindings(
         shader,
         D3D12_SHADER_VISIBILITY_ALL,
-        aniso_point_mip_supported(&host.device),
         &mut params,
         &mut ranges,
         &mut samplers,
@@ -896,14 +829,8 @@ impl HostPipeline {
         }
         let host = host()?;
 
-<<<<<<< HEAD
         let aniso_point_mip_supported = device_aniso_point_mip(&host.device);
 
-||||||| c7daeea5
-=======
-        let aniso_point_mip = aniso_point_mip_supported(&host.device);
-
->>>>>>> integ/vertex
         // The root signature the translated shaders' bindings define.
         let mut params: Vec<D3D12_ROOT_PARAMETER1> = Vec::new();
         // The ranges table parameters point at, alive until the root
@@ -914,22 +841,8 @@ impl HostPipeline {
         for &(shader, visibility) in &stages {
             let translated = shader.translated()?;
             let t = &translated.host;
-<<<<<<< HEAD
             let (user_data, root_cbvs, root_srvs, root_uavs) =
                 collect_stage_bindings(t, visibility, &mut params, &mut ranges, &mut samplers, aniso_point_mip_supported);
-||||||| c7daeea5
-            let (user_data, root_cbvs, root_srvs, root_uavs) =
-                collect_stage_bindings(t, visibility, &mut params, &mut ranges, &mut samplers);
-=======
-            let (user_data, root_cbvs, root_srvs, root_uavs) = collect_stage_bindings(
-                t,
-                visibility,
-                aniso_point_mip,
-                &mut params,
-                &mut ranges,
-                &mut samplers,
-            );
->>>>>>> integ/vertex
             bound.push(Stage {
                 shader: shader.clone(),
                 tables: TableLayout::build(&translated.used, &t.root_indexed_views),
