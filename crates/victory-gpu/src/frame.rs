@@ -163,17 +163,13 @@ pub(crate) extern "system" fn wait(
         tick -= 1;
         wait = Duration::ZERO;
     }
-<<<<<<< HEAD
     let _called = crate::timeline::span("the title's frame wait");
-||||||| a66ac212
-=======
     // (Neptune) `VICTORY_PACE=0`: no wait sleeps (a poll whose tick is not due times out at
     // once, a blocking wait ends at once on the next tick): an experiment, to see how much
     // of a slow frame is the title waiting for its own clock.
     static PACED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let paced = *PACED.get_or_init(|| std::env::var_os("VICTORY_PACE").is_none_or(|v| v != "0"));
     let started = Instant::now();
->>>>>>> klbf/beta-2
     let hr = if wait > limit {
         if paced {
             std::thread::sleep(limit);
@@ -189,22 +185,18 @@ pub(crate) extern "system" fn wait(
         }
         S_OK
     };
-<<<<<<< HEAD
     #[cfg(windows)]
     {
         let us = wait.min(limit).as_micros() as u64;
         crate::framelog::add(crate::framelog::T::PaceUs, us);
         crate::framelog::here(crate::framelog::H::PaceUs, us);
     }
-||||||| a66ac212
-=======
     // Since the last line in the log: waits that ended on a tick and waits that timed out,
     // by kind (origin, other), and the microseconds slept in them.
     let slot = usize::from(hr != S_OK) * 2 + usize::from(!origin);
     WAITS[slot].fetch_add(1, Ordering::Relaxed);
     WAITS[4 + slot].fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
     WAITS[8].fetch_max(u64::from(timeout_ms.min(100_000)), Ordering::Relaxed);
->>>>>>> klbf/beta-2
     #[cfg(all(windows, feature = "diagnostics"))]
     {
         use crate::copystat::{C, add};

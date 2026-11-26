@@ -37,6 +37,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::c_void;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use windows::Win32::Foundation::HANDLE;
@@ -350,7 +351,6 @@ impl PageSet {
 struct Views {
     /// By address: bytes, the section's handle, the offset in it.
     views: BTreeMap<usize, (usize, usize, u64)>,
-<<<<<<< HEAD
     /// By section and byte offset of a 64 KiB page: the address of that
     /// page in every view that shows it. A write through one view of a
     /// page is a write of the bytes every other view shows
@@ -365,21 +365,8 @@ struct Views {
     /// Our own view of a whole section, by its handle (0: the host gave
     /// none), made when first asked for ([`beside`]) and kept.
     whole: Vec<(usize, usize)>,
-||||||| a66ac212
-    /// Sections by handle: bytes, and whether made committed.
-    sections: Vec<(usize, u64, bool)>,
-=======
-    /// By section and byte offset of a 64 KiB page: the address of that
-    /// page in every view that shows it. A write through one view of a
-    /// page is a write of the bytes every other view shows
-    /// (`crate::watch` guards them all).
-    pages: BTreeMap<(usize, u64), Vec<usize>>,
-    /// Sections by handle: bytes, and whether made committed.
-    sections: Vec<(usize, u64, bool)>,
->>>>>>> klbf/beta-2
 }
 
-<<<<<<< HEAD
 /// Read by many threads at once (write faults, landings), changed when the
 /// runtime maps or unmaps.
 static VIEWS: std::sync::RwLock<Views> = std::sync::RwLock::new(Views {
@@ -389,12 +376,6 @@ static VIEWS: std::sync::RwLock<Views> = std::sync::RwLock::new(Views {
     sections: BTreeMap::new(),
     whole: Vec::new(),
 });
-||||||| a66ac212
-static VIEWS: Mutex<Views> = Mutex::new(Views { views: BTreeMap::new(), sections: Vec::new() });
-=======
-static VIEWS: Mutex<Views> =
-    Mutex::new(Views { views: BTreeMap::new(), pages: BTreeMap::new(), sections: Vec::new() });
->>>>>>> klbf/beta-2
 
 fn views() -> std::sync::RwLockReadGuard<'static, Views> {
     VIEWS.read().unwrap_or_else(|e| e.into_inner())
@@ -412,7 +393,6 @@ fn views_mut() -> std::sync::RwLockWriteGuard<'static, Views> {
 /// The runtime made a section of `bytes` for physical pages; `committed`
 /// if with `SEC_COMMIT` (only such a section can be opened as a heap).
 pub fn title_memory_section(section: usize, bytes: u64, committed: bool) {
-<<<<<<< HEAD
     {
         let mut v = views_mut();
         // A handle's number given out again: the view was of the section that
@@ -427,6 +407,17 @@ pub fn title_memory_section(section: usize, bytes: u64, committed: bool) {
     let gone = OWN.write().unwrap_or_else(|e| e.into_inner()).as_mut().and_then(|own| own.remove(&section)).flatten();
     if gone.is_some() {
         tracing::info!(section, "a section handle's number came round again: our own view of the earlier section is forgotten");
+    }
+    // (Neptune) A view of our own of a section this handle named before is of that one.
+    {
+        let mut aliases = ALIASES.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(at) = aliases.iter().position(|a| a.0 == section) {
+            let (_, host, _) = aliases.swap_remove(at);
+            if host != 0 {
+                // SAFETY: a view this module mapped.
+                unsafe { mem::UnmapViewOfFile(mem::MEMORY_MAPPED_VIEW_ADDRESS { Value: host as *mut c_void }) };
+            }
+        }
     }
 }
 
@@ -444,32 +435,11 @@ pub fn title_memory_section_gone(section: usize) {
         // (`crate::watch::title_memory_reading`), which came before this.
         unsafe { mem::UnmapViewOfFile(mem::MEMORY_MAPPED_VIEW_ADDRESS { Value: base as *mut c_void }) };
     }
-||||||| a66ac212
-    let mut v = views();
-    v.sections.retain(|s| s.0 != section);
-    v.sections.push((section, bytes, committed));
-=======
-    // (Neptune) A view of our own of a section this handle named before is of that one.
-    {
-        let mut aliases = ALIASES.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(at) = aliases.iter().position(|a| a.0 == section) {
-            let (_, host, _) = aliases.swap_remove(at);
-            if host != 0 {
-                // SAFETY: a view this module mapped.
-                unsafe { mem::UnmapViewOfFile(mem::MEMORY_MAPPED_VIEW_ADDRESS { Value: host as *mut c_void }) };
-            }
-        }
-    }
-    let mut v = views();
-    v.sections.retain(|s| s.0 != section);
-    v.sections.push((section, bytes, committed));
->>>>>>> klbf/beta-2
 }
 
 /// The runtime mapped `[at, at + len)` as a view of `section` from
 /// `offset` on. Call after [`crate::title_memory_remapped`] of the range.
 pub fn title_memory_view(at: usize, len: usize, section: usize, offset: u64) {
-<<<<<<< HEAD
     let mut open = Vec::new();
     {
         let mut v = views_mut();
@@ -531,21 +501,6 @@ pub(crate) fn view_census(at: usize, len: usize) -> (usize, usize) {
         }
     }
     (in_views, multi)
-||||||| a66ac212
-    views().views.insert(at, (len, section, offset));
-=======
-    {
-        let mut v = views();
-        v.views.insert(at, (len, section, offset));
-        for k in 0..len.div_ceil(K64) {
-            v.pages.entry((section, offset + (k * K64) as u64)).or_default().push(at + k * K64);
-        }
-    }
-    // This view is writable from now on: a guard over the same bytes at
-    // another view must look at them again, and the pages are noted written
-    // there (`crate::watch`).
-    crate::watch::views_mapped(section, offset, len);
->>>>>>> klbf/beta-2
 }
 
 /// What `[at, at + len)` showed is gone ([`crate::title_memory_remapped`]):
@@ -563,7 +518,6 @@ pub(crate) fn views_gone(at: usize, len: usize) -> Vec<(usize, usize)> {
     let gone: Vec<usize> = first.into_iter().chain(v.views.range(at.saturating_add(1)..end).map(|(base, _)| *base)).collect();
     let mut was_many = std::collections::BTreeSet::new();
     for base in gone {
-<<<<<<< HEAD
         let Some((bytes, section, offset)) = v.views.remove(&base) else {
             continue;
         };
@@ -583,23 +537,6 @@ pub(crate) fn views_gone(at: usize, len: usize) -> Vec<(usize, usize)> {
                 v.pages_twice = v.pages_twice.saturating_sub(usize::from(before >= 2 && after < 2));
             }
         }
-||||||| a66ac212
-        v.views.remove(&base);
-=======
-        let Some((bytes, section, offset)) = v.views.remove(&base) else {
-            continue;
-        };
-        for k in 0..bytes.div_ceil(K64) {
-            let key = (section, offset + (k * K64) as u64);
-            if let Some(pages) = v.pages.get_mut(&key) {
-                let page = base + k * K64;
-                pages.retain(|&shown| shown != page);
-                if pages.is_empty() {
-                    v.pages.remove(&key);
-                }
-            }
-        }
->>>>>>> klbf/beta-2
     }
     if was_many.is_empty() {
         return Vec::new();
@@ -959,24 +896,6 @@ pub(crate) fn shown_runs(at: usize, len: usize) -> Vec<(usize, usize)> {
     runs
 }
 
-/// The title views that overlap `[start, end)`, as `(address, bytes)`.
-pub(crate) fn views_between(start: usize, end: usize) -> Vec<(usize, usize)> {
-    if start >= end {
-        return Vec::new();
-    }
-    let v = views();
-    let mut out = Vec::new();
-    if let Some((&base, &(bytes, _, _))) = v.views.range(..=start).next_back()
-        && base + bytes > start
-    {
-        out.push((base, bytes));
-    }
-    for (&base, &(bytes, _, _)) in v.views.range(start.saturating_add(1)..end) {
-        out.push((base, bytes));
-    }
-    out
-}
-
 /// (Neptune) Views of our own of the title's sections, whole and writable, by the section's
 /// handle: the address (0: it could not be mapped) and the section's bytes.
 static ALIASES: Mutex<Vec<(usize, usize, u64)>> = Mutex::new(Vec::new());
@@ -990,7 +909,7 @@ pub(crate) fn host_alias(at: usize, len: usize) -> Option<*mut u8> {
     let (within, bytes, section, offset, size) = {
         let v = views();
         let (&base, &(bytes, section, offset)) = v.views.range(..=at).next_back()?;
-        let size = v.sections.iter().find(|s| s.0 == section).map(|s| s.1)?;
+        let size = v.sections.get(&section).map(|s| s.0)?;
         (at.checked_sub(base)?, bytes, section, offset, size)
     };
     if len == 0 || within.checked_add(len)? > bytes || offset + (within + len) as u64 > size {
@@ -1015,20 +934,6 @@ pub(crate) fn host_alias(at: usize, len: usize) -> Option<*mut u8> {
     (host != 0).then(|| (host + offset as usize + within) as *mut u8)
 }
 
-/// The address of the 64 KiB page shown at `page` in every title view that
-/// shows it, `page`'s own address included; empty if `page` is not a view.
-pub(crate) fn pages_of(page: usize) -> Vec<usize> {
-    let v = views();
-    let Some((&base, &(bytes, section, offset))) = v.views.range(..=page).next_back() else {
-        return Vec::new();
-    };
-    let within = page.wrapping_sub(base);
-    if within >= bytes || !within.is_multiple_of(K64) {
-        return Vec::new();
-    }
-    v.pages.get(&(section, offset + within as u64)).cloned().unwrap_or_default()
-}
-
 /// The title views that show any of the physical bytes `[offset, offset +
 /// len)` of `section`, as `(address, bytes)` ranges in address order; not
 /// those of a page shown in very many views (`MANY_VIEWS`).
@@ -1044,7 +949,7 @@ pub(crate) fn views_of_section(section: usize, offset: u64, len: usize) -> Vec<(
         if let Some(shown) = v.pages.get(&(section, at))
             && shown.len() <= crate::watch::MANY_VIEWS
         {
-            pages.extend(shown.iter().copied());
+            pages.extend(shown.to_vec());
         }
         match at.checked_add(K64 as u64) {
             Some(next) => at = next,
