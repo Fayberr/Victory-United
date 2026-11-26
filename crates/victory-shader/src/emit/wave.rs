@@ -486,7 +486,6 @@ fn simulate(
             }
             continue;
         }
-<<<<<<< HEAD
         if let Fields::Sop { dst, src, .. } = &inst.fields {
             let is_wave_and = if wave == 64 {
                 name == "s_and_b64"
@@ -501,17 +500,6 @@ fn simulate(
                 && let Some(Operand::Scalar { code: dc, .. }) = *dst
                 && dc != NULL
                 && let Some(lo) = inst.write(Reg::S(dc))
-||||||| a66ac212
-        if let Fields::Sop { src, .. } = &inst.fields {
-            if name.starts_with("s_and_b")
-                && src.iter().any(|o| matches!(*o, Operand::Scalar { code, .. } if inst.read(Reg::S(code)).is_some_and(|v| masked.contains(&v))))
-                && let Some(&(_, w)) = inst.writes.iter().find(|w| matches!(w.0, Reg::S(_)))
-=======
-        if let Fields::Sop { dst, src, .. } = &inst.fields {
-            if name.starts_with("s_and_b")
-                && src.iter().any(|o| matches!(*o, Operand::Scalar { code, .. } if inst.read(Reg::S(code)).is_some_and(|v| masked.contains(&v))))
-                && let Some(&(_, w)) = inst.writes.iter().find(|w| matches!(w.0, Reg::S(_)))
->>>>>>> klbf/beta-2
             {
                 let hi = if wave == 64 {
                     inst.write(Reg::S(dc + 1))
@@ -1244,7 +1232,6 @@ mod tests {
         }
     }
 
-<<<<<<< HEAD
     /// A wave OR whose last step stays in the section's VGPR: the lower
     /// lanes add the first half's to themselves, so only the upper ones
     /// hold the whole, and the last lane is read after the section (an
@@ -1340,70 +1327,6 @@ mod tests {
         assert!(!buddies(0b11, 0b11));
     }
 
-||||||| a66ac212
-=======
-    /// `WaveActiveSum` of 16-bit floats, as compiled in
-    /// `compute_graph_ops:CS_TransposeVecMatMulAlignedOperation` (0x19c on): the tree the
-    /// lowering reproduces. A tree in another order is not followed.
-    #[test]
-    fn a_sum_of_halves_over_the_wave_is_followed_in_the_order_of_its_tree() {
-        let words = |first: [u32; 2], second: [u32; 2]| {
-            [
-                0xBE84_25C1, // s_or_saveexec_b64 s[4:5], -1
-                0xD501_0001,
-                0x0012_0E80, // v_cndmask_b32 v1, 0, v7, s[4:5]
-                first[0],
-                first[1],
-                second[0],
-                second[1],
-                0x6402_02E9,
-                0x0009_2401, // v_add_f16 v1, v1, v1 dpp8:[4,4,4,4,0,0,0,0]
-                0x6402_02FA,
-                0xFF09_4001, // v_add_f16 v1, v1, v1 row_mirror bound_ctrl:1
-                0xD778_0002,
-                0x0201_0101, // v_permlanex16_b32 v2, v1, 0, 0
-                0x6402_0302, // v_add_f16 v1, v2, v1
-                0xD760_0007,
-                0x0001_4101, // v_readlane_b32 s7, v1, 32
-                0x6402_0207, // v_add_f16 v1, s7, v1
-                0xD760_0007,
-                0x0001_0101, // v_readlane_b32 s7, v1, 0
-                0xBEFE_0404, // s_mov_b64 exec, s[4:5]
-            ]
-        };
-        let pairs = [0x6402_02E9, 0xDE54_C101]; // v_add_f16 v1, v1, v1 dpp8:[1,0,3,2,5,4,7,6]
-        let quads = [0x6402_02E9, 0x9360_1201]; // v_add_f16 v1, v1, v1 dpp8:[2,2,0,0,6,6,4,4]
-        let shape = |w: &[u32]| {
-            let p = build(w, true);
-            let insts = &p.blocks[0].insts;
-            let saved = insts[0].write(Reg::S(4)).unwrap();
-            let v7 = p.inputs.iter().find_map(|&(r, v)| (r == Reg::V(7)).then_some(v)).unwrap();
-            // ..., v_readlane_b32 s7, v1, 0; s_mov_b64 exec, s[4:5]; s_endpgm
-            let total = insts[insts.len() - 3].write(Reg::S(7)).unwrap();
-            (sections(&p, 0)[&0].shapes.get(&total).copied(), Shape::Active(Op::AddH, v7, saved, 0))
-        };
-        let (found, want) = shape(&words(pairs, quads));
-        assert_eq!(found, Some(want));
-        // lanes two apart first, neighbours second: every lane counted once, but
-        // (x0 + x2) + (x1 + x3) rounds differently from (x0 + x1) + (x2 + x3)
-        let (found, _) = shape(&words(quads, pairs));
-        assert_eq!(found, None);
-    }
-
-    #[test]
-    fn buddies_are_the_two_halves_of_an_aligned_run() {
-        assert!(buddies(0b01, 0b10));
-        assert!(buddies(0b1100, 0b0011));
-        assert!(buddies(0xF0, 0x0F));
-        assert!(buddies(u64::from(u32::MAX), u64::from(u32::MAX) << 32));
-        assert!(!buddies(0b010, 0b100)); // lanes 1 and 2: not one pair
-        assert!(!buddies(0b0011, 0b110000)); // pairs 0 and 2
-        assert!(!buddies(0b0101, 0b1010)); // not runs
-        assert!(!buddies(0b01, 0b1100)); // unequal
-        assert!(!buddies(0b11, 0b11));
-    }
-
->>>>>>> klbf/beta-2
     #[test]
     fn wave32_mov_b64_all_lanes_keeps_exec_masked_for_dpp() {
         let w = [
