@@ -106,11 +106,13 @@ struct Last {
     asked: u64,
     /// The frame a partly mapped texture was last read in.
     partial: Option<u64>,
-<<<<<<< HEAD
     /// Until this frame a guarded texture is hashed at every check: its
     /// first checks, and after the hash found a change the guard had not
     /// seen ([`hot_textures`]). 0: not checked under the guard yet.
     hot_until: u64,
+    /// The frame it was read in ahead of its submission
+    /// ([`Staging::refresh_ahead`]).
+    ahead: Option<u64>,
 }
 
 impl Last {
@@ -145,12 +147,6 @@ const HOT_FRAMES: u64 = 64;
 fn hot_textures() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_TEXTURE_HOT").is_none_or(|v| v != "0"))
-||||||| 9c184b35b
-=======
-    /// The frame it was read in ahead of its submission
-    /// ([`Staging::refresh_ahead`]).
-    ahead: Option<u64>,
->>>>>>> origin/exp/fork-head
 }
 
 // SAFETY: the staging mapping is written only at submission, under
@@ -1328,11 +1324,9 @@ impl Staging {
             const HASH_EVERY: u64 = 8;
             let unwritten = last.asked != 0 && written.iter().all(|&(_, w)| w <= last.asked);
             last.asked = now;
-<<<<<<< HEAD
             let frame = crate::frame::current();
-            let turn = frame
-                .wrapping_add((start >> 16) as u64)
-                .is_multiple_of(HASH_EVERY);
+            let turn = frame.wrapping_add((start >> 16) as u64).is_multiple_of(HASH_EVERY)
+                && last.ahead.is_none_or(|at| frame > at + 1);
             // A texture starts hot: one written that way from its first
             // frames on changes before the hash has ever caught it.
             if last.hot_until == 0 {
@@ -1340,15 +1334,6 @@ impl Staging {
             }
             let hot = hot_textures() && frame < last.hot_until;
             if !exact && unwritten && !turn && !hot {
-||||||| 9c184b35b
-            let turn = crate::frame::current().wrapping_add((start >> 16) as u64).is_multiple_of(HASH_EVERY);
-            if unwritten && !turn {
-=======
-            let frame = crate::frame::current();
-            let turn = frame.wrapping_add((start >> 16) as u64).is_multiple_of(HASH_EVERY)
-                && last.ahead.is_none_or(|at| frame > at + 1);
-            if unwritten && !turn {
->>>>>>> origin/exp/fork-head
                 return 0;
             }
             blind = unwritten;
@@ -1945,7 +1930,6 @@ fn staging(resource: This, copy: &crate::resource::HostTexture, first: u32) -> O
             Some(&mut total),
         );
     }
-<<<<<<< HEAD
     let (piece, buffer, base, data) = match crate::pool::staging(host, total) {
         Some((piece, buffer, base, data)) => (Some(piece), buffer, base, data),
         None => {
@@ -1957,7 +1941,7 @@ fn staging(resource: This, copy: &crate::resource::HostTexture, first: u32) -> O
                 return None;
             }
             let (buffer, data) = host.upload_buffer(total)?;
-            crate::host::name(&buffer, || {
+            crate::host::name_frame(&buffer, || {
                 format!(
                     "staging of {resource:?} {}x{}x{} f{}",
                     d.Width, d.Height, d.DepthOrArraySize, d.Format.0
@@ -1966,23 +1950,6 @@ fn staging(resource: This, copy: &crate::resource::HostTexture, first: u32) -> O
             (None, buffer, 0, data)
         }
     };
-||||||| 9c184b35b
-    let (buffer, data, pooled) = staging_buffer(host, total)?;
-    crate::host::name(&buffer, || {
-        format!(
-            "staging of {resource:?} {}x{}x{} f{}",
-            d.Width, d.Height, d.DepthOrArraySize, d.Format.0
-        )
-    });
-=======
-    let (buffer, data, pooled) = staging_buffer(host, total)?;
-    crate::host::name_frame(&buffer, || {
-        format!(
-            "staging of {resource:?} {}x{}x{} f{}",
-            d.Width, d.Height, d.DepthOrArraySize, d.Format.0
-        )
-    });
->>>>>>> origin/exp/fork-head
     tracing::debug!(?desc, total, "texture contents uploaded from title memory");
     STAGED[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     STAGED[1].fetch_add(total, std::sync::atomic::Ordering::Relaxed);
