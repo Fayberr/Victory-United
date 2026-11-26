@@ -12618,7 +12618,6 @@ impl HostList {
             (s.current, s.used) = (s.current + 1, 0);
         }
         if s.current == s.chunks.len() {
-<<<<<<< HEAD
             let size = if scratch_pool() && s.chunks.is_empty() && len <= SCRATCH_FIRST {
                 SCRATCH_FIRST
             } else {
@@ -12626,29 +12625,8 @@ impl HostList {
             };
             let chunk = take_chunk(host, size)?;
             s.chunks.push((chunk, size));
-||||||| merged common ancestors
-            let (buffer, data) = host.upload_buffer(SCRATCH_CHUNK)?;
-            name(&buffer, || "list scratch".into());
-            // SAFETY: a live buffer.
-            let gpu = unsafe { buffer.GetGPUVirtualAddress() };
-            s.chunks.push((buffer, data as usize, gpu));
-=======
-            let free = SCRATCH_FREE.lock().unwrap_or_else(|e| e.into_inner()).pop();
-            let chunk = match free {
-                Some(chunk) => chunk,
-                None => {
-                    let (buffer, data) = host.upload_buffer(SCRATCH_CHUNK)?;
-                    name(&buffer, || "list scratch".into());
-                    // SAFETY: a live buffer.
-                    let gpu = unsafe { buffer.GetGPUVirtualAddress() };
-                    (buffer, data as usize, gpu)
-                }
-            };
-            s.chunks.push(chunk);
->>>>>>> belobug/main
             s.used = 0;
         }
-<<<<<<< HEAD
         let (data, buffer) = (s.chunks[s.current].0.data, s.chunks[s.current].0.buffer.clone());
         let at = s.used;
         s.used += len;
@@ -12660,18 +12638,6 @@ impl HostList {
     pub(crate) fn scratch_kept(&self) -> u64 {
         let scratch = self.scratch.lock().unwrap_or_else(|e| e.into_inner());
         scratch.chunks.iter().map(|c| c.1).sum()
-||||||| merged common ancestors
-        let (_, data, gpu) = s.chunks[s.current];
-        let at = s.used;
-        s.used += len;
-        Some((gpu + at, (data + at as usize) as *mut u8))
-=======
-        let (buffer, data, gpu) = &s.chunks[s.current];
-        let at = s.used.next_multiple_of(align);
-        let made = f(buffer, at, gpu + at, (data + at as usize) as *mut u8);
-        s.used = at + len;
-        Some(made)
->>>>>>> belobug/main
     }
 
     /// The host address of the list's indirect-work budget, zeroed at each
@@ -13004,7 +12970,6 @@ impl HostList {
     /// `work` may write title memory (refreshes after it copy again).
     #[allow(dead_code)]
     pub(crate) fn defer(&self, work: impl Fn() + Send + 'static) {
-<<<<<<< HEAD
         let mut deferred = self.deferred();
         deferred.copies.push(Step::Run(Box::new(work), None));
         deferred.title_written();
@@ -13022,15 +12987,24 @@ impl HostList {
         deferred.memory_read_seen = 0;
         drop(deferred);
         self.changed_something();
-||||||| merged common ancestors
-        self.deferred().copies.push(Step::Run(Box::new(work)));
-        self.deferred().refreshed.clear();
-=======
-        let mut deferred = self.deferred();
-        deferred.copies.push(Step::Run(Box::new(work)));
-        deferred.refreshed.clear();
-        deferred.gpu_written.clear();
-        deferred.filled.clear();
+    }
+
+    /// As [`HostList::defer`], for work that writes only host memory.
+    pub(crate) fn defer_host(&self, work: impl Fn() + Send + 'static) {
+        self.deferred().copies.push(Step::Host(Box::new(work), (0, 0)));
+    }
+
+    /// As [`HostList::defer_host`], for work that reads `len` bytes of title
+    /// memory at `from`.
+    pub(crate) fn defer_host_read(&self, from: usize, len: usize, work: impl Fn() + Send + 'static) {
+        self.deferred().copies.push(Step::Host(Box::new(work), (from, from + len)));
+    }
+
+    /// Queue-timeline tile mappings (`UpdateTileMappings`) that must run after
+    /// preceding command lists in the same submission and immediately before
+    /// this list executes.
+    pub(crate) fn defer_tiles(&self, work: impl Fn() + Send + 'static) {
+        self.deferred().copies.push(Step::Tiles(Box::new(work)));
     }
 
     /// Queues submission-time materialization and refresh of the bindless
@@ -13052,31 +13026,6 @@ impl HostList {
         }
     }
 
-    /// Whether each heap queued for bindless preparation may be written.
-    #[cfg(test)]
-    pub(crate) fn bindless_queued(&self) -> Vec<bool> {
-        self.deferred().bindless.iter().map(|&(_, w)| w).collect()
->>>>>>> belobug/main
-    }
-
-    /// As [`HostList::defer`], for work that writes only host memory.
-    pub(crate) fn defer_host(&self, work: impl Fn() + Send + 'static) {
-        self.deferred().copies.push(Step::Host(Box::new(work), (0, 0)));
-    }
-
-    /// As [`HostList::defer_host`], for work that reads `len` bytes of title
-    /// memory at `from`.
-    pub(crate) fn defer_host_read(&self, from: usize, len: usize, work: impl Fn() + Send + 'static) {
-        self.deferred().copies.push(Step::Host(Box::new(work), (from, from + len)));
-    }
-
-    /// Queue-timeline tile mappings (`UpdateTileMappings`) that must run after
-    /// preceding command lists in the same submission and immediately before
-    /// this list executes.
-    pub(crate) fn defer_tiles(&self, work: impl Fn() + Send + 'static) {
-        self.deferred().copies.push(Step::Tiles(Box::new(work)));
-    }
-
     fn has_tile_steps(&self) -> bool {
         self.deferred()
             .copies
@@ -13093,7 +13042,6 @@ impl HostList {
     }
 
     /// Brings a texture's staging buffer up to date when the list is
-<<<<<<< HEAD
     /// submitted, keeping it alive until the list is reset.
     pub(crate) fn defer_texture(&self, staging: std::sync::Arc<crate::texture::Staging>, uploads: bool) {
         self.deferred().copies.push(Step::Texture { staging, uploads });
@@ -13112,50 +13060,21 @@ impl HostList {
             })
             .collect();
         textures.iter().filter(|staging| !staging.refresh_ahead()).count() as u64
-||||||| merged common ancestors
-    /// submitted, keeping it alive until the list is reset.
-    pub(crate) fn defer_texture(&self, staging: std::sync::Arc<crate::texture::Staging>) {
-        self.deferred().copies.push(Step::Texture(staging));
-=======
-    /// submitted (and copies it to `texture` on the prelude only if dirty),
-    /// keeping both alive until the list is reset.
-    pub(crate) fn defer_texture(
-        &self,
-        staging: std::sync::Arc<crate::texture::Staging>,
-        texture: std::sync::Arc<crate::resource::HostTexture>,
-    ) {
-        self.deferred()
-            .copies
-            .push(Step::Texture(staging, texture));
->>>>>>> belobug/main
     }
 
     /// Runs the list's submission-time steps; refreshes go into `batch`
     /// (the title's big buffers, a 174 MB one among them, are read by most
-<<<<<<< HEAD
     /// lists of a submission, through many ranges). Copies and fills that
     /// `taken` names (by their place) are left out: they are done on the
     /// card ([`card_steps`]).
     fn run_deferred(&self, batch: &mut Batch, air: &[(usize, usize)], taken: impl Fn(usize) -> bool) {
-||||||| merged common ancestors
-    /// lists of a submission, through many ranges).
-    fn run_deferred(&self, batch: &mut Batch) {
-=======
-    /// lists of a submission, through many ranges). Returns the textures
-    /// whose staging buffers changed and must be copied onto the prelude.
-    fn run_deferred(
-        &self,
-        batch: &mut Batch,
-    ) -> Vec<(
-        std::sync::Arc<crate::texture::Staging>,
-        std::sync::Arc<crate::resource::HostTexture>,
-    )> {
->>>>>>> belobug/main
         #[cfg(feature = "diagnostics")]
         use crate::copystat::{C, add};
-<<<<<<< HEAD
         let deferred = self.deferred();
         let steps = &deferred.copies;
+        for (heap, writes) in &deferred.bindless {
+            batch.bindless(heap, *writes);
+        }
         let workers = fill_workers();
         // The time and the bytes of the copies and fills, some 13,000 a
         // frame between 20,000 refreshes: summed here and added once.
@@ -13173,55 +13092,19 @@ impl HostList {
                 continue;
             }
             let (started, copied) = match step {
-||||||| merged common ancestors
-        for step in &self.deferred().copies {
-            let started = std::time::Instant::now();
-            let copied = match step {
-=======
-        let mut uploads = Vec::new();
-        let deferred = self.deferred();
-        for (heap, writes) in &deferred.bindless {
-            batch.bindless(heap, *writes);
-        }
-        let mut copy_bytes = 0u64;
-        let mut copy_us = 0u64;
-        #[cfg(feature = "diagnostics")]
-        let mut copy_count = 0u64;
-        #[cfg(feature = "diagnostics")]
-        let mut refresh_count = 0u64;
-        #[cfg(feature = "diagnostics")]
-        let mut refresh_bytes = 0u64;
-        for step in &deferred.copies {
-            match step {
->>>>>>> belobug/main
                 &Step::Copy(dst, src, len) => {
                     let started = std::time::Instant::now();
                     #[cfg(feature = "diagnostics")]
                     {
-<<<<<<< HEAD
                         copies += 1;
-||||||| merged common ancestors
-                        add(C::Copies, 1);
-                        add(C::CopyBytes, len as u64);
-=======
-                        copy_count += 1;
->>>>>>> belobug/main
                     }
-<<<<<<< HEAD
                     batch.fill();
                     batch.title_wrote(dst, len);
                     #[cfg(feature = "diagnostics")]
                     fill_check::copy_runs(dst, src, len);
                     #[cfg(feature = "diagnostics")]
                     let _reads_as = crate::backreads::reading_as(crate::backreads::TITLE_COPY, 0);
-||||||| merged common ancestors
-                    batch.title_written();
-=======
-                    let started = std::time::Instant::now();
-                    batch.title_written();
->>>>>>> belobug/main
                     copy_mapped(dst as *mut u8, src as *const u8, len, true);
-<<<<<<< HEAD
                     // With the submission's one asking: the journal learns it.
                     crate::watch::wrote(dst, len);
                     // What the card holds there may be another value although
@@ -13230,12 +13113,6 @@ impl HostList {
                         crate::shadow::send_copied(dst, len);
                     }
                     (started, len)
-||||||| merged common ancestors
-                    len
-=======
-                    copy_us += started.elapsed().as_micros() as u64;
-                    copy_bytes += len as u64;
->>>>>>> belobug/main
                 }
                 &Step::Fill(dst, src, len, _) if wide_fills() => {
                     // Done together with the run's others, at the next step
@@ -13249,18 +13126,10 @@ impl HostList {
                     let started = std::time::Instant::now();
                     #[cfg(feature = "diagnostics")]
                     {
-<<<<<<< HEAD
                         add(C::Copies, 1);
                         add(C::CopyBytes, len as u64);
                         fill_check::runs(src, len);
-||||||| merged common ancestors
-                        add(C::Copies, 1);
-                        add(C::CopyBytes, len as u64);
-=======
-                        copy_count += 1;
->>>>>>> belobug/main
                     }
-<<<<<<< HEAD
                     #[cfg(feature = "diagnostics")]
                     let _reads_as = crate::backreads::reading_as(crate::backreads::TITLE_COPY, 0);
                     copy_fill(dst as *mut u8, src as *const u8, len);
@@ -13292,33 +13161,15 @@ impl HostList {
                     }
                     run_fills(&run, workers);
                     (started, bytes)
-||||||| merged common ancestors
-                    copy_mapped(dst as *mut u8, src as *const u8, len, false);
-                    len
-=======
-                    let started = std::time::Instant::now();
-                    copy_mapped(dst as *mut u8, src as *const u8, len, false);
-                    copy_us += started.elapsed().as_micros() as u64;
-                    copy_bytes += len as u64;
->>>>>>> belobug/main
                 }
                 Step::Refresh(shadow, address, len) => {
                     #[cfg(feature = "diagnostics")]
                     {
-<<<<<<< HEAD
                         refreshes += 1;
                         refreshed += *len as u64;
-||||||| merged common ancestors
-                        add(C::Refreshes, 1);
-                        add(C::RefreshBytes, *len as u64);
-=======
-                        refresh_count += 1;
-                        refresh_bytes += *len as u64;
->>>>>>> belobug/main
                     }
                     batch.add(shadow, *address, *len);
                 }
-<<<<<<< HEAD
                 Step::Run(work, _) | Step::Host(work, _) => {
                     #[cfg(feature = "diagnostics")]
                     let started = std::time::Instant::now();
@@ -13326,15 +13177,6 @@ impl HostList {
                     // it too: they are done first.
                     batch.fill();
                     if matches!(step, Step::Run(..)) {
-||||||| merged common ancestors
-                Step::Run(work) | Step::Host(work) => {
-                    if matches!(step, Step::Run(_)) {
-=======
-                Step::Run(work) | Step::Host(work) => {
-                    #[cfg(feature = "diagnostics")]
-                    let started = std::time::Instant::now();
-                    if matches!(step, Step::Run(_)) {
->>>>>>> belobug/main
                         batch.title_written();
                     }
                     let _step = crate::timeline::span("a step of ours");
@@ -13368,19 +13210,13 @@ impl HostList {
                     #[cfg(feature = "diagnostics")]
                     let snapshot = std::time::Instant::now();
                     shadow.writing(*address, *len);
-<<<<<<< HEAD
                     #[cfg(feature = "diagnostics")]
                     {
                         add(C::GpuWrites, 1);
                         add(C::SnapshotUs, snapshot.elapsed().as_micros() as u64);
                     }
                     continue;
-||||||| merged common ancestors
-                    continue;
-=======
->>>>>>> belobug/main
                 }
-<<<<<<< HEAD
                 Step::Texture { staging, uploads } => {
                     if *uploads {
                         staging.note_upload();
@@ -13390,30 +13226,12 @@ impl HostList {
                         if !wide_textures() {
                             batch.refresh_textures();
                         }
-||||||| merged common ancestors
-                Step::Texture(staging) => {
-                    if batch.texture_due(staging) {
-                        staging.refresh();
-=======
-                Step::Texture(staging, copy) => {
-                    if batch.texture_due(staging) && staging.refresh() {
-                        uploads.push((staging.clone(), copy.clone()));
->>>>>>> belobug/main
                     }
                 }
-<<<<<<< HEAD
             };
             us += started.elapsed();
             bytes += copied as u64;
-||||||| merged common ancestors
-            };
-            PREPARING[0].fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
-            PREPARING[1].fetch_add(copied as u64, Ordering::Relaxed);
-=======
-            }
->>>>>>> belobug/main
         }
-<<<<<<< HEAD
         preparing(0, us.as_micros() as u64);
         preparing(1, bytes);
         #[cfg(feature = "diagnostics")]
@@ -13907,24 +13725,6 @@ mod fill_tests {
         aliased[1].src = aliased[0].dst;
         assert_eq!(run_fills(&aliased, 2), 1);
         assert_eq!(output[1], 167);
-||||||| merged common ancestors
-=======
-        if copy_bytes > 0 || copy_us > 0 {
-            PREPARING[0].fetch_add(copy_us, Ordering::Relaxed);
-            PREPARING[1].fetch_add(copy_bytes, Ordering::Relaxed);
-            #[cfg(feature = "diagnostics")]
-            {
-                add(C::Copies, copy_count);
-                add(C::CopyBytes, copy_bytes);
-            }
-        }
-        #[cfg(feature = "diagnostics")]
-        if refresh_count > 0 {
-            add(C::Refreshes, refresh_count);
-            add(C::RefreshBytes, refresh_bytes);
-        }
-        uploads
->>>>>>> belobug/main
     }
 }
 
@@ -13939,7 +13739,6 @@ mod fill_tests {
 #[derive(Default)]
 struct Batch {
     refreshes: Vec<(std::sync::Arc<crate::shadow::Shadow>, usize, usize)>,
-<<<<<<< HEAD
     /// Where each copy (by address) is in `refreshes`: the list that makes
     /// the heap's buffers ready adds some 4,100 copies, and searching them
     /// for every refresh of a submission was tens of millions of
@@ -13950,13 +13749,7 @@ struct Batch {
     /// brought up to date in this submission that no step of ours has
     /// written since.
     current: std::collections::HashMap<usize, (std::sync::Arc<crate::shadow::Shadow>, usize, usize)>,
-||||||| merged common ancestors
-=======
-    /// The same of sparse copies.
-    pieces: Vec<(std::sync::Arc<crate::shadow::Shadow>, usize, usize)>,
->>>>>>> belobug/main
     /// Staging buffers (by address) refreshed since the last title write.
-<<<<<<< HEAD
     textures: crate::fx::Set<usize>,
     /// Texture refreshes running beside the submitting thread
     /// ([`crate::memcopy::texture_overlap`]).
@@ -13974,8 +13767,15 @@ struct Batch {
     /// `ahead` holds everything the submission refreshes
     /// ([`Batch::refresh_front`]).
     front: bool,
+    /// View heaps the submission's draws index directly, and whether their
+    /// shaders may write memory.
+    bindless: Vec<(std::sync::Arc<crate::descriptor::host::HostHeap>, bool)>,
+    /// Their plans, which hold the host resources the slots view until the
+    /// submission has run.
+    plans: Vec<std::sync::Arc<crate::descriptor::host::BindlessPlan>>,
+    /// Bindless unordered access ranges, copied back after the submission.
+    bindless_writes: Vec<(std::sync::Arc<crate::shadow::Shadow>, usize, usize)>,
 }
-
 
 /// Whether the copies that a submission's shaders write are brought up to
 /// date together, on several threads, ahead of its steps
@@ -14193,24 +13993,10 @@ fn wide_fills() -> bool {
 fn wide_textures() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_WIDE_TEXTURES").is_none_or(|v| v != "0") && wide_refresh())
-||||||| merged common ancestors
-    textures: std::collections::HashSet<usize>,
-=======
-    textures: std::collections::HashSet<usize>,
-    /// View heaps the submission's draws index directly, and whether their
-    /// shaders may write memory.
-    bindless: Vec<(std::sync::Arc<crate::descriptor::host::HostHeap>, bool)>,
-    /// Their plans, which hold the host resources the slots view until the
-    /// submission has run.
-    plans: Vec<std::sync::Arc<crate::descriptor::host::BindlessPlan>>,
-    /// Bindless unordered access ranges, copied back after the submission.
-    bindless_writes: Vec<(std::sync::Arc<crate::shadow::Shadow>, usize, usize)>,
->>>>>>> belobug/main
 }
 
 impl Batch {
     fn add(&mut self, shadow: &std::sync::Arc<crate::shadow::Shadow>, address: usize, len: usize) {
-<<<<<<< HEAD
         // Checked already in this submission (`crate::stamp`): nothing to
         // merge into the batch.
         if shadow.current(address, len) {
@@ -14220,30 +14006,6 @@ impl Batch {
                 crate::copystat::add(crate::copystat::C::SkippedBytes, len as u64);
             }
             return;
-||||||| merged common ancestors
-        let end = address + len;
-        match self
-            .refreshes
-            .iter_mut()
-            .find(|(s, ..)| std::sync::Arc::ptr_eq(s, shadow))
-        {
-            Some((_, from, to)) => (*from, *to) = ((*from).min(address), (*to).max(end)),
-            None => self.refreshes.push((shadow.clone(), address, end)),
-=======
-        let end = address + len;
-        if shadow.is_sparse() {
-            // It stands for far more memory than a list reads.
-            self.pieces.push((shadow.clone(), address, end));
-            return;
-        }
-        match self
-            .refreshes
-            .iter_mut()
-            .find(|(s, ..)| std::sync::Arc::ptr_eq(s, shadow))
-        {
-            Some((_, from, to)) => (*from, *to) = ((*from).min(address), (*to).max(end)),
-            None => self.refreshes.push((shadow.clone(), address, end)),
->>>>>>> belobug/main
         }
         let end = address + len;
         let key = std::sync::Arc::as_ptr(shadow) as usize;
@@ -14357,21 +14119,6 @@ impl Batch {
         self.textures.insert(std::sync::Arc::as_ptr(staging) as *const () as usize)
     }
 
-<<<<<<< HEAD
-    /// Waits for texture refreshes running beside the submitting thread.
-    fn join_textures(&self) {
-        if self.textures_beside.busy() {
-            let started = std::time::Instant::now();
-            self.textures_beside.join();
-            crate::memcopy::add(
-                crate::memcopy::M::OverlapWaitUs,
-                started.elapsed().as_micros() as u64,
-            );
-        }
-    }
-
-||||||| merged common ancestors
-=======
     /// A list of the submission indexes `heap` directly.
     fn bindless(&mut self, heap: &std::sync::Arc<crate::descriptor::host::HostHeap>, writes: bool) {
         match self
@@ -14384,7 +14131,18 @@ impl Batch {
         }
     }
 
->>>>>>> belobug/main
+    /// Waits for texture refreshes running beside the submitting thread.
+    fn join_textures(&self) {
+        if self.textures_beside.busy() {
+            let started = std::time::Instant::now();
+            self.textures_beside.join();
+            crate::memcopy::add(
+                crate::memcopy::M::OverlapWaitUs,
+                started.elapsed().as_micros() as u64,
+            );
+        }
+    }
+
     /// Before a step that writes title memory: pending refreshes are done
     /// first, and textures are checked again after it.
     fn title_written(&mut self) {
@@ -14693,7 +14451,6 @@ impl Batch {
     }
 
     fn flush(&mut self) {
-<<<<<<< HEAD
         self.flush_refreshes();
         self.join_textures();
     }
@@ -14738,37 +14495,6 @@ pub(crate) fn list_reuse() -> bool {
                 );
             }
             on
-||||||| merged common ancestors
-        for (shadow, from, to) in self.refreshes.drain(..) {
-            let started = std::time::Instant::now();
-            let copied = shadow.update(from, to - from);
-            let us = started.elapsed().as_micros() as u64;
-            #[cfg(feature = "diagnostics")]
-            crate::copystat::range(from, to - from, us, 0);
-            PREPARING[0].fetch_add(us, Ordering::Relaxed);
-            PREPARING[1].fetch_add(copied as u64, Ordering::Relaxed);
-=======
-        for (shadow, from, to) in std::mem::take(&mut self.refreshes) {
-            update(&shadow, from, to - from);
-        }
-        let mut pieces = std::mem::take(&mut self.pieces);
-        pieces.sort_unstable_by_key(|(s, from, _)| (s.root_key(), *from));
-        let mut run: Option<(std::sync::Arc<crate::shadow::Shadow>, usize, usize)> = None;
-        for (shadow, from, to) in pieces {
-            if let Some((s, _, end)) = &mut run
-                && s.root_key() == shadow.root_key()
-                && from <= *end + 4096
-            {
-                *end = (*end).max(to);
-                continue;
-            }
-            if let Some((s, a, b)) = run.replace((shadow, from, to)) {
-                update(&s, a, b - a);
-            }
-        }
-        if let Some((s, a, b)) = run {
-            update(&s, a, b - a);
->>>>>>> belobug/main
         }
     }
 
@@ -15126,7 +14852,6 @@ pub(crate) fn copy_mapped(dst: *mut u8, src: *const u8, len: usize, title_dst: b
     }
     #[cfg(feature = "diagnostics")]
     crate::copystat::add(crate::copystat::C::Fallbacks, 1);
-<<<<<<< HEAD
     #[cfg(feature = "diagnostics")]
     let sparse = std::time::Instant::now();
     if !title_dst && len >= 64 << 10 {
@@ -15172,50 +14897,6 @@ fn read_sparse(src: *const u8, dst: *mut u8, len: usize) {
 }
 
 fn read_pieces(src: *const u8, dst: *mut u8, len: usize) {
-||||||| merged common ancestors
-=======
-    if !title_dst && len >= 64 << 10 {
-        read_sparse(src, dst, len);
-    } else {
-        read_pieces(src, dst, len);
-    }
-}
-
-/// After a failed bulk read into host memory, skip contiguous holes. Never
-/// cache the query across copies: the title may remap the same address.
-fn read_sparse(src: *const u8, dst: *mut u8, len: usize) {
-    use windows_sys::Win32::System::Memory::{
-        MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_NOACCESS, VirtualQuery,
-    };
-    let mut offset = 0;
-    while offset < len {
-        let at = src.wrapping_add(offset);
-        let to = dst.wrapping_add(offset);
-        let remaining = len - offset;
-        // SAFETY: the query inspects an address and fills a local structure.
-        let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
-        let size = unsafe { VirtualQuery(at.cast(), &mut info, size_of_val(&info)) };
-        let n = (info.BaseAddress as usize).saturating_add(info.RegionSize)
-            .saturating_sub(at as usize).min(remaining);
-        if size != size_of_val(&info) || n == 0 {
-            read_pieces(at, to, remaining);
-            break;
-        }
-        if info.State != MEM_COMMIT || info.Protect == PAGE_NOACCESS {
-            #[cfg(feature = "diagnostics")]
-            crate::copystat::add(crate::copystat::C::Unmapped, n as u64);
-            // SAFETY: this path is only used with a writable host destination.
-            unsafe { to.write_bytes(0, n) };
-        } else if !read(at, to, n) {
-            // A mapping may change between query and read.
-            read_pieces(at, to, n);
-        }
-        offset += n;
-    }
-}
-
-fn read_pieces(src: *const u8, dst: *mut u8, len: usize) {
->>>>>>> belobug/main
     // Something is unmapped: page by page (64 KiB, then 4 KiB in a piece
     // that fails), zeros for what cannot be read.
     for_pieces(src as usize, len, 64 << 10, |at, n| {
@@ -15233,7 +14914,6 @@ fn read_pieces(src: *const u8, dst: *mut u8, len: usize) {
     });
 }
 
-<<<<<<< HEAD
 /// Zeros at `to`, in one 4 KiB page or two. It may be title memory (the
 /// destination of a title's copy), which can go between the question whether
 /// it is there and this.
@@ -15250,157 +14930,6 @@ fn zero(to: *mut u8, n: usize) {
     unsafe { to.write_bytes(0, n) };
 }
 
-||||||| merged common ancestors
-=======
-#[cfg(target_arch = "x86_64")]
-core::arch::global_asm!(
-    ".globl victory_safe_copy",
-    ".globl victory_safe_copy_start",
-    ".globl victory_safe_copy_end",
-    ".globl victory_safe_copy_fault",
-    "victory_safe_copy:",
-    "victory_safe_copy_start:",
-    "cmp r8, 64",
-    "jb 2f",
-    "1:",
-    "movdqu xmm0, xmmword ptr [rdx]",
-    "movdqu xmm1, xmmword ptr [rdx + 16]",
-    "movdqu xmm2, xmmword ptr [rdx + 32]",
-    "movdqu xmm3, xmmword ptr [rdx + 48]",
-    "movdqu xmmword ptr [rcx], xmm0",
-    "movdqu xmmword ptr [rcx + 16], xmm1",
-    "movdqu xmmword ptr [rcx + 32], xmm2",
-    "movdqu xmmword ptr [rcx + 48], xmm3",
-    "add rdx, 64",
-    "add rcx, 64",
-    "sub r8, 64",
-    "cmp r8, 64",
-    "jae 1b",
-    "2:",
-    "cmp r8, 16",
-    "jb 3f",
-    "movdqu xmm0, xmmword ptr [rdx]",
-    "movdqu xmmword ptr [rcx], xmm0",
-    "add rdx, 16",
-    "add rcx, 16",
-    "sub r8, 16",
-    "jmp 2b",
-    "3:",
-    "cmp r8, 8",
-    "jb 4f",
-    "mov rax, qword ptr [rdx]",
-    "mov qword ptr [rcx], rax",
-    "add rdx, 8",
-    "add rcx, 8",
-    "sub r8, 8",
-    "4:",
-    "test r8, r8",
-    "jz 5f",
-    "mov al, byte ptr [rdx]",
-    "mov byte ptr [rcx], al",
-    "inc rdx",
-    "inc rcx",
-    "dec r8",
-    "jnz 4b",
-    "5:",
-    "victory_safe_copy_end:",
-    "mov eax, 1",
-    "ret",
-    "victory_safe_copy_fault:",
-    "xor eax, eax",
-    "ret",
-);
-
-#[cfg(target_arch = "x86_64")]
-unsafe extern "C" {
-    fn victory_safe_copy(dst: *mut u8, src: *const u8, len: usize) -> u32;
-    static victory_safe_copy_start: u8;
-    static victory_safe_copy_end: u8;
-    static victory_safe_copy_fault: u8;
-}
-
-/// Installs our Vectored Exception Handler once, ahead of the crash reporter,
-/// so `safe_copy` can copy mapped memory in pure user mode without kernel
-/// syscalls and recover cleanly if a page is unmapped.
-#[cfg(target_arch = "x86_64")]
-fn ensure_safe_copy_veh() {
-    use windows_sys::Win32::Foundation::{
-        EXCEPTION_ACCESS_VIOLATION, EXCEPTION_IN_PAGE_ERROR, NTSTATUS,
-    };
-    use windows_sys::Win32::System::Diagnostics::Debug::{
-        AddVectoredExceptionHandler, EXCEPTION_CONTINUE_EXECUTION, EXCEPTION_CONTINUE_SEARCH,
-        EXCEPTION_POINTERS,
-    };
-    unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
-        // SAFETY: Windows passes valid exception and context pointers.
-        let r = unsafe { &*(*info).ExceptionRecord };
-        if r.ExceptionCode != EXCEPTION_ACCESS_VIOLATION as NTSTATUS
-            && r.ExceptionCode != EXCEPTION_IN_PAGE_ERROR as NTSTATUS
-        {
-            return EXCEPTION_CONTINUE_SEARCH;
-        }
-        // SAFETY: `ContextRecord` is valid for x86_64 exceptions.
-        let ctx = unsafe { &mut *(*info).ContextRecord };
-        let rip = ctx.Rip as usize;
-        let start = (&raw const victory_safe_copy_start) as usize;
-        let end = (&raw const victory_safe_copy_end) as usize;
-        if rip >= start && rip < end {
-            const WRITE: usize = 1;
-            if r.ExceptionCode == EXCEPTION_ACCESS_VIOLATION as NTSTATUS
-                && r.NumberParameters >= 2
-                && r.ExceptionInformation[0] == WRITE
-                && crate::watch::try_open_guarded(r.ExceptionInformation[1])
-            {
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-            ctx.Rip = (&raw const victory_safe_copy_fault) as u64;
-            return EXCEPTION_CONTINUE_EXECUTION;
-        }
-        EXCEPTION_CONTINUE_SEARCH
-    }
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    // SAFETY: registers a read-only IP-range check handler ahead of crash reporting.
-    ONCE.call_once(|| unsafe {
-        AddVectoredExceptionHandler(1, Some(handler));
-    });
-}
-
-/// Whether to force kernel `ReadProcessMemory` / `WriteProcessMemory` copies
-/// (`VICTORY_KERNEL_COPY=1`, diagnostic escape hatch).
-fn kernel_copy() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("VICTORY_KERNEL_COPY").is_some())
-}
-
-/// Zero-syscall user-mode copy for non-overlapping ranges; returns `false` if
-/// either side hits an unmapped or inaccessible page.
-#[cfg(target_arch = "x86_64")]
-fn try_user_copy(dst: *mut u8, src: *const u8, len: usize) -> Option<bool> {
-    if kernel_copy() {
-        return None;
-    }
-    let (d, s) = (dst as usize, src as usize);
-    if len == 0 {
-        return Some(true);
-    }
-    // Reject obviously invalid low addresses without even taking a fault.
-    if d < 0x10000 || s < 0x10000 {
-        return Some(false);
-    }
-    let (Some(d_end), Some(s_end)) = (d.checked_add(len), s.checked_add(len)) else {
-        return Some(false);
-    };
-    // Overlapping ranges fall back to kernel copy (memmove semantics).
-    if d < s_end && s < d_end {
-        return None;
-    }
-    ensure_safe_copy_veh();
-    // SAFETY: leaf assembly uses only volatile registers and recovers via VEH
-    // if `src` or `dst` hits an unmapped page.
-    Some(unsafe { victory_safe_copy(dst, src, len) != 0 })
-}
-
->>>>>>> belobug/main
 /// Reads title memory at `src` into `dst`; false if a page of it is not
 /// readable.
 pub(crate) fn read_into(src: *const u8, dst: &mut [u8]) -> bool {
@@ -15458,16 +14987,6 @@ pub(crate) fn read_there(src: *const u8, dst: &mut [u8]) -> usize {
 /// a success: the destination is then partly the old bytes, which merges
 /// reuse (`crate::shadow`'s scratch).
 fn read(src: *const u8, dst: *mut u8, len: usize) -> bool {
-<<<<<<< HEAD
-||||||| merged common ancestors
-    use windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory;
-=======
-    #[cfg(target_arch = "x86_64")]
-    if let Some(ok) = try_user_copy(dst, src, len) {
-        return ok;
-    }
-    use windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory;
->>>>>>> belobug/main
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
     if crate::safecopy::on() {
         // SAFETY: the destination is mapped writable memory of `len` bytes;
@@ -15529,19 +15048,11 @@ fn write_mapped_now(dst: *mut u8, src: *const u8, len: usize) {
     let since = crate::watch::changes();
     let write = |at: usize, n: usize| {
         let from = src.wrapping_add(at - dst as usize);
-<<<<<<< HEAD
         if crate::safecopy::on() {
             // SAFETY: the source is ours; a destination page that is not
             // there, or not writable, fails the copy.
             return unsafe { crate::safecopy::copy(at as *mut u8, from, n) };
         }
-||||||| merged common ancestors
-=======
-        #[cfg(target_arch = "x86_64")]
-        if let Some(ok) = try_user_copy(at as *mut u8, from, n) {
-            return ok;
-        }
->>>>>>> belobug/main
         let mut done = 0;
         if direct {
             // SAFETY: as below; the kernel checks the destination and
@@ -15591,7 +15102,6 @@ fn for_pieces(start: usize, len: usize, step: usize, mut f: impl FnMut(usize, us
 }
 
 impl Host {
-<<<<<<< HEAD
     /// The queue everything of ours runs on, for a call that must go to it
     /// in order with the lists (`crate::tiles`: a texture's levels are
     /// given memory ahead of the list that uploads them).
@@ -15665,20 +15175,14 @@ impl Host {
         }
     }
 
-||||||| merged common ancestors
-    /// A buffer in the upload heap, mapped for writing.
-=======
-    /// A buffer in GPU-upload (Resizable BAR VRAM, when supported and within
-    /// 85% of the live VRAM budget) or standard upload heap, mapped for CPU
-    /// writing.
->>>>>>> belobug/main
     pub(crate) fn upload_buffer(&self, size: u64) -> Option<(ID3D12Resource, *mut u8)> {
-<<<<<<< HEAD
         crate::census::made(1, size);
         MADE[0].fetch_add(1, Ordering::Relaxed);
         MADE[1].fetch_add(size, Ordering::Relaxed);
-||||||| merged common ancestors
-=======
+        let heap = D3D12_HEAP_PROPERTIES {
+            Type: D3D12_HEAP_TYPE_UPLOAD,
+            ..Default::default()
+        };
         let desc = D3D12_RESOURCE_DESC {
             Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
             Width: size.max(1),
@@ -15692,49 +15196,34 @@ impl Host {
             Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
             ..Default::default()
         };
-        let use_gpu_upload = self.gpu_upload
-            && video_memory().is_none_or(|[(used, budget), _]| {
-                budget == 0 || used.saturating_add(size) < budget * 85 / 100
-            });
-        let try_make = |heap_type: D3D12_HEAP_TYPE, state: D3D12_RESOURCE_STATES| {
-            let heap = D3D12_HEAP_PROPERTIES {
-                Type: heap_type,
-                ..Default::default()
-            };
-            let mut buffer: Option<ID3D12Resource> = None;
-            let mut data = std::ptr::null_mut();
-            // SAFETY: plain creation and mapping of an upload buffer.
-            let made = unsafe {
-                self.device
-                    .CreateCommittedResource(
-                        &heap,
-                        D3D12_HEAP_FLAG_NONE,
-                        &desc,
-                        state,
-                        None,
-                        &mut buffer,
-                    )
-                    .and_then(|()| {
-                        let b = buffer.as_ref().ok_or_else(windows::core::Error::empty)?;
-                        b.Map(0, None, Some(&mut data))
-                    })
-            };
-            made.map(|()| (buffer, data))
+        let mut buffer: Option<ID3D12Resource> = None;
+        let mut data = std::ptr::null_mut();
+        // SAFETY: plain creation and mapping of an upload buffer.
+        let made = unsafe {
+            self.device
+                .CreateCommittedResource(
+                    &heap,
+                    not_resident(),
+                    &desc,
+                    D3D12_RESOURCE_STATE_GENERIC_READ,
+                    None,
+                    &mut buffer,
+                )
+                .and_then(|()| {
+                    let b = buffer.as_ref().ok_or_else(windows::core::Error::empty)?;
+                    resident(&self.device, b)?;
+                    b.Map(0, None, Some(&mut data))
+                })
         };
-        let made = if use_gpu_upload {
-            try_make(D3D12_HEAP_TYPE_GPU_UPLOAD, D3D12_RESOURCE_STATE_COMMON)
-                .or_else(|_| try_make(D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ))
-        } else {
-            try_make(D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ)
-        };
+        #[cfg(feature = "diagnostics")]
+        if made.is_ok()
+            && let Some(b) = &buffer
+        {
+            crate::book::made(b, || "an upload buffer".into());
+        }
         match made {
-            Ok((buffer, data)) => {
-                let buffer = buffer?;
-                crate::memstat::track(&buffer, 0, size);
-                Some((buffer, data.cast()))
-            }
+            Ok(()) => Some((buffer?, data.cast())),
             Err(e) => {
-                wait_if_removed(&self.device, &e);
                 tracing::warn!(error = %e, size, "no upload buffer");
                 None
             }
@@ -15743,7 +15232,6 @@ impl Host {
 
     /// A buffer in the readback heap, mapped for reading.
     pub(crate) fn readback_buffer(&self, size: u64) -> Option<(ID3D12Resource, *const u8)> {
->>>>>>> belobug/main
         let heap = D3D12_HEAP_PROPERTIES {
             Type: D3D12_HEAP_TYPE_READBACK,
             ..Default::default()
@@ -15826,50 +15314,8 @@ struct Presenter {
     ahead: Vec<(HostList, u64)>,
     hwnd: HWND,
     meter: Meter,
-<<<<<<< HEAD
     #[cfg(feature = "diagnostics")]
     panel: panel::Panel,
-||||||| merged common ancestors
-=======
-    /// One render target view, for the back buffer the readout is drawn on.
-    rtv: ID3D12DescriptorHeap,
-}
-
-impl Presenter {
-    /// Writes the frame rate and frame time in the top left corner of
-    /// `back`, which is a render target on `list`.
-    ///
-    /// # Safety
-    /// `back` is this swap chain's buffer, in the render target state.
-    unsafe fn readout(&self, device: &ID3D12Device, list: &ID3D12GraphicsCommandList, back: &ID3D12Resource) {
-        let Some((fps, ms)) = self.meter.shown else { return };
-        if !crate::readout::on() {
-            return;
-        }
-        let text = format!("{fps:.1} FPS  {ms:.0} MS");
-        // Dots that keep their share of the picture at any size.
-        let dot = (self.height as i32 / 216).max(2);
-        let at = (dot * 3, dot * 3);
-        let (w, h) = crate::readout::size(&text);
-        let behind = RECT {
-            left: at.0,
-            top: at.1,
-            right: at.0 + w * dot,
-            bottom: at.1 + h * dot,
-        };
-        let marks = crate::readout::rects(&text, at, dot);
-        // SAFETY: our heap of one view, and rectangles inside the picture
-        // (a text of a few characters at this size).
-        unsafe {
-            let view = self.rtv.GetCPUDescriptorHandleForHeapStart();
-            device.CreateRenderTargetView(back, None, view);
-            if behind.right <= self.width as i32 && behind.bottom <= self.height as i32 {
-                list.ClearRenderTargetView(view, &[0.0, 0.0, 0.0, 1.0], Some(&[behind]));
-                list.ClearRenderTargetView(view, &[1.0, 0.9, 0.1, 1.0], Some(&marks));
-            }
-        }
-    }
->>>>>>> belobug/main
 }
 
 /// The frame rate, shown in the window's caption every second and logged
@@ -15916,15 +15362,9 @@ fn meter_lines(lines: impl FnOnce() + Send + 'static) {
 struct Meter {
     since: std::time::Instant,
     frames: u32,
-<<<<<<< HEAD
     logged_frames: u64,
     #[cfg(feature = "diagnostics")]
     copy_stats_frames: u64,
-||||||| merged common ancestors
-    #[cfg(feature = "diagnostics")]
-    copy_stats_frames: u64,
-=======
->>>>>>> belobug/main
     drawn: u64,
     logged: std::time::Instant,
     /// The caption the window had, once read.
@@ -15939,15 +15379,9 @@ impl Meter {
         Meter {
             since: now,
             frames: 0,
-<<<<<<< HEAD
             logged_frames: 0,
             #[cfg(feature = "diagnostics")]
             copy_stats_frames: 0,
-||||||| merged common ancestors
-            #[cfg(feature = "diagnostics")]
-            copy_stats_frames: 0,
-=======
->>>>>>> belobug/main
             drawn: crate::draw::drawn(),
             logged: now,
             caption: None,
@@ -16149,61 +15583,16 @@ impl Meter {
         // once every 5 s) are made by a thread of ours ([`meter_lines`]).
         if self.logged.elapsed() >= std::time::Duration::from_secs(5) {
             self.logged = std::time::Instant::now();
-<<<<<<< HEAD
             let logged_frames = std::mem::take(&mut self.logged_frames).max(1) as f64;
-||||||| merged common ancestors
-            tracing::info!(
-                "{fps:.1} fps, {ms:.1} ms/frame ({cpu:.1} preparing: copies {copy_ms:.1} ms \
-                 {copy_mb:.1} MB, textures {texture_ms:.1} ms {texture_mb:.1} MB; {gpu:.1} on the \
-                 GPU; {back_ms:.1} copying back {back_mb:.1} MB), {draws:.0} draws/frame, \
-                 dropped {dropped:.0} without a host pipeline ({making} being made) and \
-                 {indirect:.0} indirect",
-                making = crate::pipeline::making()
-            );
-=======
             #[cfg(feature = "diagnostics")]
             tracing::info!("sparse writes since: {}", crate::shadow::sparse_writes_text());
             #[cfg(feature = "diagnostics")]
             log_gpu_waits();
             #[cfg(feature = "diagnostics")]
             log_gpu_times();
-            tracing::info!(
-                "[{} {}] {fps:.1} fps, {ms:.1} ms/frame ({cpu:.1} preparing: copies {copy_ms:.1} ms \
-                 {copy_mb:.1} MB, textures {texture_ms:.1} ms {texture_mb:.1} MB, bindless plans \
-                 {plans_ms:.1} ms; {gpu:.1} on the GPU; {back_ms:.1} copying back {back_mb:.1} MB; \
-                 bindless records {records_ms:.1} ms), {draws:.0} draws/frame, \
-                 dropped {dropped:.0} without a host pipeline ({making} being made) and \
-                 {indirect:.0} indirect",
-                crate::descriptor::host::BACKLOG[0].load(Ordering::Relaxed),
-                crate::descriptor::host::BACKLOG[1].load(Ordering::Relaxed),
-                making = crate::pipeline::making()
-            );
->>>>>>> belobug/main
             #[cfg(feature = "diagnostics")]
-<<<<<<< HEAD
             let copy_stats_frames = std::mem::take(&mut self.copy_stats_frames) as f64;
             meter_lines(move || {
-                tracing::info!(
-                    "placed texture views: {} writes of another view of the texture a slot showed (it kept the old view until the new was made)",
-                    crate::descriptor::host::KEPT_VIEWS.load(Ordering::Relaxed)
-                );
-                tracing::info!(
-                    "copies left out since the start because both sides were one host texture: {}",
-                    crate::list::SELF_COPIES.load(Ordering::Relaxed)
-                );
-                if crate::drvwatch::errors() > 0 {
-                    tracing::warn!(
-                        "errors the graphics driver reported to the system since the start: {} (the paths under suspicion are off)",
-                        crate::drvwatch::errors()
-||||||| merged common ancestors
-            {
-                crate::copystat::log(std::mem::take(&mut self.copy_stats_frames) as f64);
-                for (why, n) in drops.iter().take(40) {
-                    tracing::info!(
-                        "dropped {:.1}/frame without a host pipeline: {why}",
-                        *n as f64 / frames
-=======
-            {
                 tracing::info!(
                     written = crate::resource::rewrites(),
                     evicted = crate::resource::EVICTED.load(Ordering::Relaxed),
@@ -16218,12 +15607,18 @@ impl Meter {
                         crate::resource::placed_census();
                     }
                 }
-                crate::copystat::log(frames);
-                for (why, n) in drops.iter().take(40) {
-                    tracing::info!(
-                        "dropped {:.1}/frame without a host pipeline: {why}",
-                        *n as f64 / frames
->>>>>>> belobug/main
+                tracing::info!(
+                    "placed texture views: {} writes of another view of the texture a slot showed (it kept the old view until the new was made)",
+                    crate::descriptor::host::KEPT_VIEWS.load(Ordering::Relaxed)
+                );
+                tracing::info!(
+                    "copies left out since the start because both sides were one host texture: {}",
+                    crate::list::SELF_COPIES.load(Ordering::Relaxed)
+                );
+                if crate::drvwatch::errors() > 0 {
+                    tracing::warn!(
+                        "errors the graphics driver reported to the system since the start: {} (the paths under suspicion are off)",
+                        crate::drvwatch::errors()
                     );
                 }
                 crate::tiles::status();
@@ -16432,7 +15827,6 @@ impl Host {
     /// Shows `texture`, which is in `state` (a host state) and stays in it,
     /// as frame `frame` (saved if captures are on). `None` if nothing was
     /// shown; else, in diagnostics builds, whether the frame was black.
-<<<<<<< HEAD
     pub(crate) fn present(
         &self,
         texture: &ID3D12Resource,
@@ -16453,12 +15847,6 @@ impl Host {
         frame: u64,
         over: Option<(&ID3D12Resource, u32)>,
     ) -> Option<bool> {
-||||||| merged common ancestors
-    pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-=======
-    pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-        self.wait_in_flight();
->>>>>>> belobug/main
         // SAFETY: a live resource.
         let desc = unsafe { texture.GetDesc() };
         let Some(format) = swap_format(desc.Format) else {
@@ -16567,7 +15955,6 @@ impl Host {
             p.panel.draw(self, copy, &back, (width, height), format);
             #[cfg(not(feature = "diagnostics"))]
             let _ = frame;
-<<<<<<< HEAD
             // The present's second plane, if it has one (e.g. Series S HUD
             // plane over game plane), goes over the copy (`crate::over`):
             // the back buffer is a target meanwhile.
@@ -16641,28 +16028,6 @@ impl Host {
             }
             #[cfg(not(feature = "diagnostics"))]
             let _ = flown;
-||||||| merged common ancestors
-            list.ResourceBarrier(&[
-                transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state),
-                transition(
-                    &back,
-                    D3D12_RESOURCE_STATE_COPY_DEST,
-                    D3D12_RESOURCE_STATE_PRESENT,
-                ),
-            ]);
-            p.copy.close();
-            self.execute(&[&p.copy]);
-=======
-            let target = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            list.ResourceBarrier(&[
-                transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state),
-                transition(&back, D3D12_RESOURCE_STATE_COPY_DEST, target),
-            ]);
-            p.readout(&self.device, list, &back);
-            list.ResourceBarrier(&[transition(&back, target, D3D12_RESOURCE_STATE_PRESENT)]);
-            p.copy.close();
-            self.execute(&[&p.copy]);
->>>>>>> belobug/main
             #[cfg(feature = "diagnostics")]
             if let Some((buffer, footprint)) = capture {
                 crate::capture::save_read_back(frame, &buffer, &footprint);
@@ -16816,12 +16181,6 @@ impl Host {
                 .cast::<IDXGISwapChain3>()?;
             let copy = self.new_list()?;
             copy.close();
-            let rtv: ID3D12DescriptorHeap =
-                self.device.CreateDescriptorHeap(&D3D12_DESCRIPTOR_HEAP_DESC {
-                    Type: D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-                    NumDescriptors: 1,
-                    ..Default::default()
-                })?;
             tracing::info!(width, height, format = format.0, "presenting to a window");
             self.log_video_memory("right after the swap chain is made");
             Ok(Presenter {
@@ -16833,13 +16192,8 @@ impl Host {
                 ahead: Vec::new(),
                 hwnd,
                 meter: Meter::new(),
-<<<<<<< HEAD
                 #[cfg(feature = "diagnostics")]
                 panel: panel::Panel::new(),
-||||||| merged common ancestors
-=======
-                rtv,
->>>>>>> belobug/main
             })
         }
     }
@@ -16893,7 +16247,6 @@ pub(crate) fn legal_for(flags: u32, state: u32) -> u32 {
 }
 
 impl Host {
-<<<<<<< HEAD
     /// The card's memory as the system accounts it to this process, in
     /// bytes: the budget and the use of the card's own memory, then of the
     /// PC's memory shared with the card (where the system moves what does
@@ -17081,14 +16434,6 @@ impl Host {
             }
         }
     }
-
-||||||| merged common ancestors
-=======
-    pub(crate) fn queue(&self) -> &ID3D12CommandQueue {
-        &self.queue
-    }
-
->>>>>>> belobug/main
     /// A buffer in system memory that the CPU maps (write-back, so reading
     /// it is fast too) and shaders read and write: for host copies of title
     /// memory that shaders write, which upload memory cannot be. Starts in
@@ -17332,14 +16677,8 @@ impl Host {
                 Some((buffer, data.cast()))
             }
             Err(e) => {
-<<<<<<< HEAD
-                tracing::warn!(error = %e, size, "no GPU upload buffer (ReBAR)");
-||||||| merged common ancestors
-                tracing::warn!(error = %e, size, "no shared buffer");
-=======
                 wait_if_removed(&self.device, &e);
-                tracing::warn!(error = %e, size, "no shared buffer");
->>>>>>> belobug/main
+                tracing::warn!(error = %e, size, "no GPU upload buffer (ReBAR)");
                 None
             }
         }
@@ -18512,7 +17851,6 @@ mod batch {   // Batch::texture_due lives here; `mod tests` is already taken at 
             before.as_secs_f64() / after.as_secs_f64()
         );
     }
-<<<<<<< HEAD
 
     #[test]
     fn vram_idle_ms_scales_with_pressure() {
@@ -18585,8 +17923,7 @@ mod batch {   // Batch::texture_due lives here; `mod tests` is already taken at 
         assert!(!should_record_brought(1, None));
         assert!(should_record_brought(2, None));
     }
-||||||| merged common ancestors
-=======
+
 
     #[test]
     fn safe_copy_handles_valid_unaligned_and_unmapped_memory() {
@@ -18648,7 +17985,6 @@ fn wait_if_removed(device: &ID3D12Device, error: &windows::core::Error) {
         tracing::error!(?reason, layer = ?host().and_then(|h| h.log_messages()), "host GPU device gone");
     });
     std::thread::sleep(std::time::Duration::from_secs(20));
->>>>>>> belobug/main
 }
 
 /// The host's own paths for a copy in the card's memory, end to end, on
