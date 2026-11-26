@@ -175,16 +175,6 @@ pub fn run(
         show(name, dll.bind_imports(&with_dlls, policy)?);
     }
     let exe_name = exe.file_name().unwrap_or_default().to_string_lossy();
-<<<<<<< HEAD
-    show(&exe_name, image.bind_imports(&with_dlls, policy)?);
-    if execute {
-        let size = image.info().size_of_image as usize;
-        // SAFETY: the image stays mapped, and nothing of it has run yet.
-        unsafe { victory_loader::write_sites::apply_asked(&image_name, image.base(), size) };
-    }
-||||||| c7daeea5
-    show(&exe_name, image.bind_imports(&with_dlls, policy)?);
-=======
     // The upscale dispatch is ours (`victory_hle::modules::ffx`); the rest of
     // that DLL is the title's own.
     struct TakeDispatch<'a>(&'a dyn victory_loader::ImportResolver);
@@ -206,7 +196,11 @@ pub fn run(
         }
     }
     show(&exe_name, image.bind_imports(&TakeDispatch(&with_dlls), policy)?);
->>>>>>> integ/vertex
+    if execute {
+        let size = image.info().size_of_image as usize;
+        // SAFETY: the image stays mapped, and nothing of it has run yet.
+        unsafe { victory_loader::write_sites::apply_asked(&image_name, image.base(), size) };
+    }
     if !execute {
         println!("not executing (pass --execute to start the title)");
         return Ok(0);

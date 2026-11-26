@@ -341,7 +341,6 @@ pub fn run(
     Ok(())
 }
 
-<<<<<<< HEAD
 /// Every shader found into the cache runs translate from.
 pub fn precompile(paths: Vec<PathBuf>, jobs: Option<usize>) -> Result<()> {
     let cfg = victory_core::Config::load()?;
@@ -403,8 +402,6 @@ pub fn precompile(paths: Vec<PathBuf>, jobs: Option<usize>) -> Result<()> {
     Ok(())
 }
 
-||||||| c7daeea5
-=======
 /// The warm-up (`--cache`): every distinct container found goes through
 /// the shader cache `run` reads (`<cache>/shaders`, decision 0003), by the
 /// same code, so a run finds it translated or refused. With `pipelines`,
@@ -586,7 +583,6 @@ pub fn warm(_: Vec<PathBuf>, _: Option<usize>, _: bool, _: bool) -> Result<()> {
     anyhow::bail!("precompiling shaders requires Windows D3D12")
 }
 
->>>>>>> integ/vertex
 fn translate(
     source: &Source,
     path: &Path,
