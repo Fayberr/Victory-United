@@ -2787,6 +2787,8 @@ mod tests {
                 root_cbvs: l.root_cbvs,
                 root_srvs: l.root_srvs,
                 root_uavs: l.root_uavs,
+                written_root_uavs: l.written_root_uavs,
+                writes_guest_memory: l.writes_guest_memory,
                 root_indexed_views: Vec::new(),
                 half_views: Vec::new(),
             };

@@ -138,15 +138,11 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
                 #[cfg(windows)]
                 translated: OnceLock::new(),
                 #[cfg(windows)]
-                resolves_light: bytes
-                    .windows(crate::ambient::PROGRAM.len())
-                    .any(|w| w == crate::ambient::PROGRAM),
+                resolves_light: false,
                 #[cfg(windows)]
-                ends_reflections: bytes
-                    .windows(crate::ambient::REFLECTED.len())
-                    .any(|w| w == crate::ambient::REFLECTED),
+                ends_reflections: false,
                 #[cfg(windows)]
-                draws_sky: bytes.windows(crate::ambient::SKY.len()).any(|w| w == crate::ambient::SKY),
+                draws_sky: false,
             })
         })
         .clone()

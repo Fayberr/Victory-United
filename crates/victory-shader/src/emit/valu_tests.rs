@@ -2793,6 +2793,8 @@ fn halves_go_through_a_table_as_they_are_and_name_their_views() {
         root_cbvs: lowered.root_cbvs,
         root_srvs: lowered.root_srvs,
         root_uavs: lowered.root_uavs,
+        written_root_uavs: lowered.written_root_uavs,
+        writes_guest_memory: lowered.writes_guest_memory,
         root_indexed_views: res.root_indexed_views,
         half_views: lowered.half_views,
     };
@@ -3071,6 +3073,8 @@ fn a_format_load_read_as_halves_loads_the_integer() {
             root_cbvs: l.root_cbvs,
             root_srvs: l.root_srvs,
             root_uavs: l.root_uavs,
+            written_root_uavs: l.written_root_uavs,
+            writes_guest_memory: l.writes_guest_memory,
             root_indexed_views: res.root_indexed_views,
             half_views: l.half_views,
         }
