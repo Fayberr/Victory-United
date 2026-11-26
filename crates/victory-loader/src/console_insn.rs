@@ -478,7 +478,6 @@ fn writable_to(va: usize, end: usize) -> Option<usize> {
     Some(to.min(end))
 }
 
-<<<<<<< HEAD
 /// The register `r` of `ctx` (CONTEXT order: rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8..r15).
 fn register(ctx: &mut CONTEXT, r: u8) -> &mut u64 {
     match r & 15 {
@@ -566,43 +565,7 @@ unsafe fn clzero_loop15(ctx: &mut CONTEXT, rip: usize, ptr_reg: u8, end_reg: u8)
     Some(true)
 }
 
-||||||| a66ac212
-=======
-/// (Neptune) The title waits in loops of MONITORX and MWAITX, which this CPU lacks: every pass
-/// was two exceptions (a fifth of the title's main thread in one sample). The three bytes
-/// become a NOP, or PAUSE and a NOP, the first time each is met: the loop then spins as a PC
-/// one does. Written with the byte behind them in one store, so a thread running into the
-/// instruction meanwhile sees the old one or the new one. `VICTORY_PATCH_WAITS=0`: as before.
-fn patch_wait(rip: usize, len: usize, bytes: [u8; 3]) {
-    use windows_sys::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if len != 3 || !*ON.get_or_init(|| std::env::var_os("VICTORY_PATCH_WAITS").is_none_or(|v| v != "0")) {
-        return;
-    }
-    if !readable(rip, 4) {
-        return;
-    }
-    let mut old = 0u32;
-    // SAFETY: four readable bytes of code, made writable for one store and restored; the
-    // fourth byte is written back as it was read.
-    unsafe {
-        if VirtualProtect(rip as *const _, 4, PAGE_EXECUTE_READWRITE, &mut old) != 0 {
-            let behind = *((rip + 3) as *const u8);
-            let word = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], behind]);
-            std::ptr::write_unaligned(rip as *mut u32, word);
-            VirtualProtect(rip as *const _, 4, old, &mut old);
-            static TOLD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            if TOLD.fetch_add(1, Relaxed) < 8 {
-                tracing::info!(at = format_args!("{rip:#x}"), "a wait instruction this CPU lacks: replaced where it stands");
-            }
-        }
-    }
-}
-
-/// (Neptune) Instructions emulated so far by kind: clzero, clzero loops, monitorx/mwaitx,
-/// rdpru, rdpid, extrq, insertq, others.
-static KINDS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
-/// Clzero loops replaced where they stand ([`patch_clzero_loop`]).
+/// Clzero loops replaced where they stand by the fallback [`patch_clzero_loop`].
 static LOOPS_REPLACED: AtomicU64 = AtomicU64::new(0);
 
 /// Executable memory near the title's code for [`patch_clzero_loop`]: its start, how much
@@ -700,28 +663,6 @@ fn patch_clzero_loop(rip: usize, end_reg: u8) {
     }
 }
 
-/// `jmp rel32` at `at` to `to`, if it reaches.
-pub(crate) fn jump(at: usize, to: usize) -> Option<[u8; 5]> {
-    let rel = i32::try_from(to as i64 - (at as i64 + 5)).ok()?;
-    let [a, b, c, d] = rel.to_le_bytes();
-    Some([0xe9, a, b, c, d])
-}
-
-/// Bytes of code memory [`near`] gives.
-pub(crate) const STUBS_LEN: usize = 64 << 10;
-
-/// Memory for code within reach of a `jmp rel32` at `at`.
-pub(crate) fn near(at: usize) -> Option<usize> {
-    use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE, VirtualAlloc};
-    let at = at & !0xffff;
-    (0x10_0000..0x7000_0000).step_by(0x10_0000).flat_map(|d| [at.checked_sub(d), at.checked_add(d)]).flatten().find_map(|place| {
-        // SAFETY: reserves free memory at that address or fails.
-        let got = unsafe { VirtualAlloc(place as *const _, STUBS_LEN, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE) } as usize;
-        (got != 0).then_some(got)
-    })
-}
-
->>>>>>> klbf/beta-2
 /// An illegal instruction at `ctx.Rip`: a console-only one is emulated and stepped over
 /// (`CONTINUE_EXECUTION`); anything else returns 0 (the crash report and the title's handlers
 /// see it).
@@ -799,7 +740,6 @@ pub(crate) unsafe fn emulate(ctx: &mut CONTEXT) -> i32 {
                 }
             }
         }
-<<<<<<< HEAD
         ConsoleOnly::Monitorx => {
             KINDS[K_MONITORX].fetch_add(1, Relaxed);
             MONITOR.with(|m| m.set((ctx.Rax as usize, ctx.Rsi)));
@@ -850,18 +790,6 @@ pub(crate) unsafe fn emulate(ctx: &mut CONTEXT) -> i32 {
                 return CONTINUE_EXECUTION;
             }
             KINDS[K_CLZERO].fetch_add(1, Relaxed);
-||||||| a66ac212
-        ConsoleOnly::Monitorx => {}
-        ConsoleOnly::Mwaitx => std::hint::spin_loop(),
-        ConsoleOnly::Clzero => {
-=======
-        ConsoleOnly::Monitorx => patch_wait(rip, len, [0x0F, 0x1F, 0x00]),
-        ConsoleOnly::Mwaitx => {
-            std::hint::spin_loop();
-            patch_wait(rip, len, [0xF3, 0x90, 0x90]);
-        }
-        ConsoleOnly::Clzero => {
->>>>>>> klbf/beta-2
             // with an address-size prefix (0x67) the line is at EAX, zero-extended
             let a32 = code[..len - 3].contains(&0x67);
             let line = (if a32 { ctx.Rax & 0xFFFF_FFFF } else { ctx.Rax } as usize) & !63;
@@ -907,7 +835,6 @@ pub(crate) unsafe fn emulate(ctx: &mut CONTEXT) -> i32 {
                 unsafe { std::ptr::write_bytes(at as *mut u8, 0, to - at) };
                 at = to;
             }
-<<<<<<< HEAD
             let done = (at - first) / 64;
             if done == 0 {
                 return 0;
@@ -920,12 +847,9 @@ pub(crate) unsafe fn emulate(ctx: &mut CONTEXT) -> i32 {
                 return CONTINUE_EXECUTION;
             }
             ctx.EFlags = ctx.EFlags & !crate::crash::CMP_FLAGS | crate::crash::cmp_flags(ctx.Rax, end as u64);
-||||||| a66ac212
-            ctx.Rax = end as u64;
-=======
-            ctx.Rax = end as u64;
+            // (klbf) A second try at replacing the loop where it stands, for a loop whose
+            // bytes `patch_clzero` did not take: it does nothing where that one did.
             patch_clzero_loop(rip, end_reg);
->>>>>>> klbf/beta-2
         }
         ConsoleOnly::Rdpru => {
             let mut v = 0i64;

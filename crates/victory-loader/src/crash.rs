@@ -53,13 +53,7 @@ pub fn log_crashes_to(file: std::path::PathBuf) {
         std::panic::set_hook(Box::new(move |info| {
             print(info);
             append_to_log(&format!(
-<<<<<<< HEAD
                 "VItoriaBr: panic on thread {:?}: {info}\n{}",
-||||||| a66ac212
-                "VIctory: panic on thread {:?}: {info}\n{}",
-=======
-                "KLBF Lab: panic on thread {:?}: {info}\n{}",
->>>>>>> klbf/beta-2
                 std::thread::current().name().unwrap_or("?"),
                 title_output()
             ));
@@ -289,13 +283,7 @@ unsafe fn report(what: &str, info: *const EXCEPTION_POINTERS, to_file: bool) {
         text.push('\n');
     };
     line(format!(
-<<<<<<< HEAD
         "VItoriaBr: {what} {:#010x} at {}{detail}",
-||||||| a66ac212
-        "VIctory: {what} {:#010x} at {}{detail}",
-=======
-        "KLBF Lab: {what} {:#010x} at {}{detail}",
->>>>>>> klbf/beta-2
         code as u32,
         locate(at)
     ));
