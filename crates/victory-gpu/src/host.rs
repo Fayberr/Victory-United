@@ -9195,7 +9195,6 @@ impl Host {
     /// shown; else, in diagnostics builds, whether the frame was black.
     #[allow(dead_code)]
     pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-<<<<<<< HEAD
         self.present_planes(texture, state, None, frame)
     }
 
@@ -9208,22 +9207,6 @@ impl Host {
         overlay: Option<(&ID3D12Resource, u32)>,
         frame: u64,
     ) -> Option<bool> {
-||||||| 0a4356653
-=======
-        self.present_over(texture, state, None, frame)
-    }
-
-    /// LOCAL (port of fxceless #1189): [`Self::present`], with a second
-    /// plane laid over `texture` if there is one (`crate::compose`): its
-    /// texture and its state, which it is left in.
-    pub(crate) fn present_over(
-        &self,
-        texture: &ID3D12Resource,
-        state: u32,
-        over: Option<(&ID3D12Resource, u32)>,
-        frame: u64,
-    ) -> Option<bool> {
->>>>>>> nvidia/main
         // SAFETY: a live resource.
         let desc = unsafe { texture.GetDesc() };
         let planes = overlay.and_then(|(over, over_state)| {
@@ -9406,26 +9389,10 @@ impl Host {
                     &back,
                     D3D12_RESOURCE_STATE_PRESENT,
                     D3D12_RESOURCE_STATE_COPY_DEST,
-<<<<<<< HEAD
                 ));
                 list.ResourceBarrier(&pre);
                 list.CopyResource(&back, texture);
             }
-||||||| 0a4356653
-                ),
-            ]);
-            list.CopyResource(&back, texture);
-=======
-                ),
-            ]);
-            // LOCAL (port of fxceless #1189): the second plane laid over the
-            // first, into a texture of ours shown instead (`crate::compose`).
-            let laid = over.and_then(|(ui, ui_state)| crate::compose::record(&self.device, list, texture, ui, ui_state));
-            if let Some(laid) = &laid {
-                copy.keep(laid);
-            }
-            list.CopyResource(&back, laid.as_ref().unwrap_or(texture));
->>>>>>> nvidia/main
             #[cfg(feature = "diagnostics")]
             let capture = crate::capture::wanted(frame)
                 .then(|| {
