@@ -1532,7 +1532,6 @@ void look() {
             };
             assert_eq!(read, expected, "resource minimum LOD {min_lod}");
         }
-        }
         rig.step = "the end";
         rig.check("every step done");
         eprintln!(
