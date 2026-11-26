@@ -4534,7 +4534,8 @@ impl HostHeap {
                         self.keep(index, kept);
                     }
                     let late = Some(crate::frame::current());
-                    let flip = Flip { after, heap: std::ptr::from_ref(self) as usize, index, handle, key, late };
+                    let asked = crate::host::now_ms();
+                    let flip = Flip { after, heap: std::ptr::from_ref(self) as usize, index, handle, key, late, asked };
                     FLIPS.lock().unwrap_or_else(|e| e.into_inner()).push(flip);
                     NEW_LATER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     drop(_held);
@@ -6041,7 +6042,8 @@ fn make_twinned(
                 // Renderer port 5: shaders read constant buffers as raw bytes
                 // through the twin; a constant buffer view there would be read
                 // raw, with no end on AMD.
-                return constant_twinned(&shadow.buffer, gpu, size, at, twin).then(|| Some(shadow.buffer.clone()));
+                return constant_twinned(&shadow.buffer, gpu, size, at, twin)
+                    .then(|| Built::plain(Some(shadow.buffer.clone())));
             }
             if gpu % 256 != 0 {
                 once!(
@@ -7956,7 +7958,7 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         let made = make(&v, at);
         let refreshed = buffer_copy(&v);
         crate::shadow::unregister(key, start);
-        let made = made.expect("a view").expect("a buffer");
+        let made = made.expect("a view").kept.expect("a buffer");
         let (copy, address, bytes) = refreshed.unwrap();
         assert_eq!((address, bytes), (start + 456, 3 * 456));
         assert_eq!(made, copy.buffer, "the descriptor and refresh share a copy");

@@ -457,7 +457,7 @@ pub(crate) fn translate_code(container: &[u8], code: Option<Vec<u8>>) -> Result<
             lower::with_first_half_pairs(|| translate_plain(container, code.as_deref()))
         }
         Err(ShaderError::Unsupported { what, .. }) if what == lower::MASK_ELSEWHERE => {
-            lower::with_mask_ops_on_numbers(|| translate_plain(container))
+            lower::with_mask_ops_on_numbers(|| translate_plain(container, code.as_deref()))
         }
         other => other,
     }
@@ -3268,6 +3268,9 @@ mod tests {
                 root_srvs: l.root_srvs,
                 root_uavs: l.root_uavs,
                 root_indexed_views: Vec::new(),
+                written_root_uavs: Vec::new(),
+                writes_guest_memory: false,
+                half_views: Vec::new(),
             };
             let (root, pso) = host.compute_pipeline(&cs).unwrap();
             let views: Vec<super::host::View> = if raw {

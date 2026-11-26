@@ -7242,7 +7242,6 @@ impl Host {
                                 ));
                             }
                         }
-                        }
                     }
                     if !sent.is_empty() {
                         list.ResourceBarrier(&sent);
@@ -9077,6 +9076,7 @@ impl Host {
         } else {
             Vec::new()
         };
+        #[cfg(feature = "diagnostics")]
         let groups: Vec<(&[(Option<usize>, std::ops::Range<usize>)], crate::copystat::Timed)> = if timing() {
             timed_pieces
                 .iter()

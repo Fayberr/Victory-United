@@ -55,6 +55,7 @@ fn shader_bytes(dxc: &std::path::Path, dir: &std::path::Path) -> [Vec<u8>; 2] {
                 },
                 threads: None,
                 used: vec![],
+                tables: crate::draw::TablePlan::new(&[], &[]),
                 stores: false,
                 writes: false,
                 stores_by_address: false,

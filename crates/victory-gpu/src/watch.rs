@@ -129,6 +129,7 @@ static JOURNAL: RwLock<Journal> = RwLock::new(Journal {
 /// furthest end of it and those before it: whether one holds a range is
 /// found in a few steps. Each refresh asked it two or three times, through
 /// all of the ranges (10,000 refreshes a frame, a few hundred ranges).
+#[derive(Debug)]
 struct Ahead {
     ranges: Vec<(usize, usize)>,
     most: Vec<usize>,
@@ -880,6 +881,7 @@ pub(crate) fn alone_line(frames: f64) {
         us as f64 / 1e3 / frames,
         top.join("; ")
     );
+}
 
 /// The submission's one asking stands no longer: its refreshes are done,
 /// or title memory was written in a way the journal was not told.

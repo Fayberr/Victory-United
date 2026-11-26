@@ -157,8 +157,6 @@ struct Checks {
     host: Option<(Host, emit::HostShader)>,
 }
 
-
->>>>>>> avatar/main
 pub fn run(
     paths: Vec<PathBuf>,
     validate: bool,

@@ -3091,6 +3091,7 @@ mod title_memory_tests {
             rows,
             row_sizes,
             layout,
+            shape: desc.shape(),
             mips: u32::from(d.MipLevels),
             first_mip: 0,
             size: size as usize,

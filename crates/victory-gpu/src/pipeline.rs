@@ -134,6 +134,8 @@ impl Shader {
             #[cfg(windows)]
             ambient: (stage == "compute").then(|| crate::ambient::role(bytes)).flatten(),
             #[cfg(windows)]
+            probe: crate::lightprobe::on().then(|| crate::lightprobe::role(bytes)).flatten(),
+            #[cfg(windows)]
             translated: OnceLock::new(),
             #[cfg(windows)]
             walks: OnceLock::new(),

@@ -2313,7 +2313,6 @@ impl<'a> Lower<'a> {
             bpermute_slot,
             bpermute_base: None,
             halves,
-            partial_active: None,
             wave_base: None,
             lds_dwords,
             flat: None,
