@@ -1,0 +1,31 @@
+name: Bug report
+description: Something crashes, looks wrong or is slow.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not attach game files, screenshots or recordings of the game, and do not ask for help
+        with pirated or cracked copies.** Such issues are closed. Logs from this project are fine.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect
+    validations:
+      required: true
+  - type: input
+    id: pc
+    attributes:
+      label: PC (CPU, GPU, RAM, Windows build, GPU driver)
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or crash report text (no game data)
+  - type: checkboxes
+    id: legal
+    attributes:
+      label: Confirm
+      options:
+        - label: I use my own legally obtained copy of the game.
+          required: true
