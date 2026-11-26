@@ -95,30 +95,27 @@ pub const USER_VIEW_ADDRESS: u32 = 0x101;
 /// 4 and c). The shader adds the dword to every byte offset through that
 /// view. Asked for every root UAV.
 pub const USER_VIEW_BIAS: u32 = 0x103;
-<<<<<<< HEAD
 /// `RootType::Other` code of a user-data dword the host sets: the number of
 /// the first thread group in x. The console dispatches any number of groups
 /// in one dimension; the host at most 65,535, so a larger dispatch runs in
 /// parts, each with the groups before it here. Asked for by compute programs
 /// that are told the x number alone (the one-dimensional ones).
 pub const USER_GROUP_BASE: u32 = 0x104;
-||||||| a26859fc
-=======
 /// `RootType::Other` code of a user-data dword the host computes: the low
 /// 32 bits of the title address in the root view of root parameter `slot`;
 /// [`USER_ROOT_ADDRESS`] + 1: its bits from 32 up. Programs with a spilled
 /// user-data table (the ray-tracing structure builder's) reach what their
 /// root views name as title memory by address ([`SLOT_MEMORY`]): a root view
 /// has no size, and the host's copy of what it names may end in the middle of
-/// it (a structure of megabytes crosses the 4 MiB windows).
-pub const USER_ROOT_ADDRESS: u32 = 0x104;
+/// it (a structure of megabytes crosses the 4 MiB windows). 0x104 is taken
+/// by [`USER_GROUP_BASE`].
+pub const USER_ROOT_ADDRESS: u32 = 0x107;
 /// `RootType::Other` code of a user-data dword the host sets at a dispatch
 /// counted in threads (the console's `DispatchX`): how many of the threads
 /// numbered along X run (0: all of every group). The metadata's `dword` is
 /// the group's width. Asked for by the structure builder's programs
 /// ([`crate::spill::is_spilled`]).
 pub const USER_DISPATCH_THREADS_X: u32 = 0x106;
->>>>>>> avatar/main
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {
@@ -126,14 +123,9 @@ pub(crate) mod flags {
     pub const RAW_BUFFERS: u64 = 1 << 4;
     pub const STENCIL_REF: u64 = 1 << 11;
     pub const TYPED_UAV_LOADS: u64 = 1 << 13;
-<<<<<<< HEAD
-    pub const ROVS: u64 = 1 << 18;
-||||||| a26859fc
-=======
     /// Unordered views in a vertex, geometry or mesh program.
     pub const UAVS_EVERY_STAGE: u64 = 1 << 16;
     pub const ROVS: u64 = 1 << 18;
->>>>>>> avatar/main
     pub const WAVE_OPS: u64 = 1 << 19;
     pub const BARYCENTRICS: u64 = 1 << 22;
     pub const INT64: u64 = 1 << 20;
