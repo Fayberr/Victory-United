@@ -105,8 +105,19 @@ fn lowered_on(
     wide: &HashSet<usize>,
     host_wave: u32,
 ) -> Result<HostShader, ShaderError> {
-<<<<<<< HEAD
     lowered_counted(native, p, wide, host_wave, false)
+}
+
+/// [`lowered_counted`] as the partial-dispatch tests name it: `partial`
+/// says whether the lanes past a dispatch's count of threads leave at once.
+fn lowered_dispatch(
+    native: &NativeProgram,
+    p: &ir::Program,
+    wide: &HashSet<usize>,
+    host_wave: u32,
+    partial: bool,
+) -> Result<HostShader, ShaderError> {
+    lowered_counted(native, p, wide, host_wave, partial)
 }
 
 fn lowered_counted(
@@ -116,24 +127,10 @@ fn lowered_counted(
     host_wave: u32,
     counted: bool,
 ) -> Result<HostShader, ShaderError> {
-||||||| 085ee7c4c
-=======
-    lowered_dispatch(native, p, wide, host_wave, false)
-}
-
-fn lowered_dispatch(
-    native: &NativeProgram,
-    p: &ir::Program,
-    wide: &HashSet<usize>,
-    host_wave: u32,
-    partial: bool,
-) -> Result<HostShader, ShaderError> {
->>>>>>> origin/exp/vitoriabr-head
     let st = structure::structure_wide(p, wide).expect("structure");
     let res = resource::track(p, &native.layout, native.stage, Some(&st)).expect("resource::track");
     let io = io::raise(p, native).expect("io::raise");
     let was = lower::TEST_HOST_WAVE.replace(Some(host_wave));
-<<<<<<< HEAD
     let lowered = lower::lower_counted(&lower::Parts {
         native,
         p,
@@ -145,34 +142,6 @@ fn lowered_dispatch(
         prims: Vec::new(),
         mesh_stride: 0,
     }, counted);
-||||||| 085ee7c4c
-    let lowered = lower::lower(&lower::Parts {
-        native,
-        p,
-        st: &st,
-        io: &io,
-        res: &res,
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        prims: Vec::new(),
-        mesh_stride: 0,
-    });
-=======
-    let lowered = lower::lower_with_thread_limit(
-        &lower::Parts {
-            native,
-            p,
-            st: &st,
-            io: &io,
-            res: &res,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            prims: Vec::new(),
-            mesh_stride: 0,
-        },
-        partial,
-    );
->>>>>>> origin/exp/vitoriabr-head
     lower::TEST_HOST_WAVE.set(was);
     let lowered = lowered?;
     Ok(HostShader {
@@ -878,7 +847,6 @@ fn scc_of_a_mask_operation_joined_with_a_scalar_test_needs_the_skip_wave_wide() 
     }
     eprintln!("ran on the hardware device: the inner test's SCC for every lane once some lane is inside");
 }
-<<<<<<< HEAD
 
 /// A dispatch counted in threads: of the last group only the lanes below the
 /// count store (after DexNom/VIctory bc3cd4b0).
@@ -1117,8 +1085,6 @@ fn the_console_threads_of_a_two_dimensional_group_are_each_given_once() {
     }
     eprintln!("ran on the hardware device: 64 of 64 console threads, each once");
 }
-||||||| 085ee7c4c
-=======
 
 /// The ray-tracing builder's scans refuse on `v_readfirstlane_b32` under a
 /// per-lane branch: the cross-lane retry ([`super::widen`]) has to take the
@@ -1201,4 +1167,3 @@ fn an_automatic_barrier_inside_a_lane_branch_runs_on_narrow_hardware() {
     }
     eprintln!("ran automatic divergent barriers on hardware (max wave {}): 1, 10, 32, 33 and 64 active lanes", waves.WaveLaneCountMax);
 }
->>>>>>> origin/exp/vitoriabr-head
