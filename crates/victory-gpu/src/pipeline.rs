@@ -120,31 +120,7 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
         .or_insert_with(|| {
             KEPT[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             KEPT[1].fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
-<<<<<<< HEAD
             Arc::new(Shader::new(stage, bytes, full))
-||||||| 85d564167
-            Arc::new(Shader {
-                stage,
-                hash: full.to_hex()[..16].to_owned(),
-                container: bytes.to_vec(),
-                #[cfg(windows)]
-                ambient: (stage == "compute").then(|| crate::ambient::role(bytes)).flatten(),
-                #[cfg(windows)]
-                translated: OnceLock::new(),
-            })
-=======
-            Arc::new(Shader {
-                stage,
-                hash: full.to_hex()[..16].to_owned(),
-                container: bytes.to_vec(),
-                #[cfg(windows)]
-                ambient: (stage == "compute").then(|| crate::ambient::role(bytes)).flatten(),
-                #[cfg(windows)]
-                probe: crate::lightprobe::on().then(|| crate::lightprobe::role(bytes)).flatten(),
-                #[cfg(windows)]
-                translated: OnceLock::new(),
-            })
->>>>>>> avatar/main
         })
         .clone()
 }
@@ -202,18 +178,12 @@ impl Shader {
     pub(crate) fn translated(&self) -> Option<&Translated> {
         self.translated
             .get_or_init(|| {
-<<<<<<< HEAD
                 // (a panic once, not again in each pipeline with this shader)
-                let done = std::panic::catch_unwind(|| translate(&self.container))
-                    .unwrap_or_else(|_| Err("the translator panicked".to_owned()));
-||||||| 85d564167
-                let done = translate(&self.container);
-=======
-                let done = {
+                let done = std::panic::catch_unwind(|| {
                     let _translation = crate::timeline::span("pipeline: translate a shader");
                     translate(&self.container)
-                };
->>>>>>> avatar/main
+                })
+                .unwrap_or_else(|_| Err("the translator panicked".to_owned()));
                 // `VICTORY_SHADER_SAVE=<dir>`: each shader as the title gave it (`.cdxil`) and as
                 // translated (`.dxil`), by the hash crash reports name it with
                 if let Some(dir) = std::env::var_os("VICTORY_SHADER_SAVE") {
@@ -279,7 +249,6 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         _ => None,
     });
     let stores_by_address = programs.is_empty() || programs.iter().any(stores_by_address);
-<<<<<<< HEAD
     let chosen = programs.iter().find(|p| {
         matches!(
             p.stage,
@@ -294,30 +263,7 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         // Another stage's table store could name the same descriptor.
         write_unknown = true;
     }
-||||||| 85d564167
-    let used = programs
-        .into_iter()
-        .find(|p| {
-            matches!(
-                p.stage,
-                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-            )
-        })
-        .map(|p| p.used)
-        .unwrap_or_default();
-=======
-    let used = programs
-        .into_iter()
-        .find(|p| {
-            matches!(
-                p.stage,
-                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-            )
-        })
-        .map(|p| p.used)
-        .unwrap_or_default();
     let tables = crate::draw::TablePlan::new(&used, &host.root_indexed_views);
->>>>>>> avatar/main
     Ok(Translated {
         host,
         threads,

@@ -12152,13 +12152,7 @@ impl<'a> Lower<'a> {
             return Err(name);
         }
         let site = (b, i);
-<<<<<<< HEAD
-        let guard = self.effect_guard(b, i)?;
-||||||| 85d564167
-        let guard = self.guard(b, i)?;
-=======
         let guard = self.memory_guard(b, i)?;
->>>>>>> avatar/main
         let c = self.cur;
         let store = name.starts_with("buffer_store_");
         // DXIL atomic operations: add, and, or, xor, signed and unsigned
@@ -13407,7 +13401,6 @@ mod tests {
     const S_ENDPGM: u32 = 0xBF81_0000;
 
     #[test]
-<<<<<<< HEAD
     fn automatic_barriers_keep_fences_and_only_drop_unsafe_sync() {
         for writes in [false, true] {
             let fence = 8 | if writes { 2 } else { 0 };
@@ -13486,8 +13479,6 @@ mod tests {
     }
 
     #[test]
-||||||| 85d564167
-=======
     fn shifted_thread_ids_are_uniform_only_when_every_lane_agrees() {
         use crate::ir::Reg;
         for shift in 0..=64u32 {
@@ -13525,7 +13516,6 @@ mod tests {
     }
 
     #[test]
->>>>>>> avatar/main
     fn packed_pixel_inputs_find_their_second_row() {
         use super::super::container::SigElement;
         use super::half_input_partners;

@@ -3795,17 +3795,9 @@ static PLACED_RAW: std::sync::Mutex<std::collections::BTreeSet<(u64, [u32; 14])>
 #[cfg(windows)]
 static PLACED_TWINS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-<<<<<<< HEAD
-/// See [`PLACED_TWINS`]. Read by the diagnostics' memory report only.
-#[cfg(all(windows, feature = "diagnostics"))]
-||||||| 85d564167
-/// See [`PLACED_TWINS`].
-#[cfg(windows)]
-=======
 /// See [`PLACED_TWINS`].
 #[cfg(windows)]
 #[cfg_attr(not(feature = "diagnostics"), allow(dead_code))]
->>>>>>> avatar/main
 pub(crate) fn placed_filler_twins() -> u64 {
     PLACED_TWINS.load(std::sync::atomic::Ordering::Relaxed)
 }
