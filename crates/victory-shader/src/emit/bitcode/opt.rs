@@ -87,14 +87,8 @@ pub(crate) struct Usage {
     pub heap_samplers: bool,
     /// A 64-bit atomic.
     pub atomic64: bool,
-<<<<<<< HEAD
     /// A 64-bit float, as a result or an operand.
     pub doubles: bool,
-||||||| 085ee7c4
-=======
-    /// A rasterizer-ordered UAV handle.
-    pub rov: bool,
->>>>>>> vitoriabr/main
 }
 
 /// What makes two instructions without an effect the same value.
@@ -1108,14 +1102,12 @@ impl Module {
                 if name.starts_with("wave") || name.starts_with("quad") {
                     u.wave_ops = true;
                 } else if name == "annotateHandle" {
-                    u.rov |= annotation(V::Inst(i)).is_some_and(|(kind, _)| kind & 0x2000 != 0);
+                    u.rovs |= annotation(V::Inst(i)).is_some_and(|(kind, _)| kind & 0x2000 != 0);
                 } else if name == "createHandleFromHeap" {
                     match args.get(2).and_then(|&s| self.int_k(s)) {
                         Some((_, 0)) => u.heap_views = true,
                         _ => u.heap_samplers = true,
                     }
-                } else if name == "annotateHandle" {
-                    u.rovs |= annotation(V::Inst(i)).is_some_and(|(kind, _)| kind & 0x2000 != 0);
                 } else if name.starts_with("atomic") && name.ends_with(".i64") {
                     u.atomic64 = true;
                 } else if name.starts_with("textureLoad") || name.starts_with("bufferLoad") {
