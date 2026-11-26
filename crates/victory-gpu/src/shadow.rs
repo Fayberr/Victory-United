@@ -476,7 +476,7 @@ pub(crate) fn card_masked(sent_as: u64) -> Vec<(Arc<Shadow>, Arc<MaskBlocks>)> {
     }
     let carded = CARDED.lock().unwrap_or_else(|e| e.into_inner());
     let fetched = RELAY_FETCHED.load(Ordering::Acquire);
-    for weak in carded.iter() {
+    for weak in carded.values() {
         let Some(shadow) = weak.upgrade() else {
             continue;
         };
@@ -2801,7 +2801,7 @@ fn back_piece(
     if differs == 0 {
         return None;
     }
-    mask_runs(mask, runs);
+    mask_runs_bytes(mask, runs);
     Some((first, n))
 }
 
@@ -2810,7 +2810,7 @@ fn back_piece(
 /// shader wrote here and there in a piece, most of its mask is zeros: the
 /// byte-by-byte search ran at 2-4 GB/s, this at 10-27 (`mask_runs_speed`),
 /// with the same runs (`word_search_finds_the_byte_runs`).
-fn mask_runs(mask: &[u8], runs: &mut Vec<(usize, usize)>) {
+fn mask_runs_bytes(mask: &[u8], runs: &mut Vec<(usize, usize)>) {
     let n = mask.len();
     let zero_word = |i: usize| i + 8 <= n && mask[i..i + 8] == [0; 8];
     let mut i = 0;
@@ -8003,6 +8003,7 @@ mod card_merge_tests {
                 before: Mutex::new(None),
                 dirty: Mutex::default(),
                 sent: Mutex::default(),
+                queued: std::sync::atomic::AtomicBool::new(false),
                 masked: Mutex::new(super::Masked {
                     pending: bits(&[(waiting, waiting + 1)]),
                     sent: vec![
@@ -8090,7 +8091,7 @@ pub(crate) fn near(va: u64) -> String {
 
 #[cfg(test)]
 mod mask_runs_tests {
-    use super::mask_runs;
+    use super::mask_runs_bytes;
 
     /// The byte-by-byte run search `mask_runs` replaces, kept as the
     /// reference.
@@ -8139,7 +8140,7 @@ mod mask_runs_tests {
                         })
                         .collect();
                     let mut runs = Vec::new();
-                    mask_runs(&mask, &mut runs);
+                    mask_runs_bytes(&mask, &mut runs);
                     assert_eq!(runs, runs_bytes(&mask), "length {len}, density {density}");
                 }
             }
@@ -8167,7 +8168,7 @@ mod mask_runs_tests {
             let bytes = time(&|m| runs_bytes(m).len());
             let words = time(&|m| {
                 let mut r = Vec::new();
-                mask_runs(m, &mut r);
+                mask_runs_bytes(m, &mut r);
                 r.len()
             });
             eprintln!("{name}: byte by byte {bytes:.2} GB/s, by words {words:.2} GB/s");

@@ -6479,8 +6479,9 @@ impl Host {
                             }
                             // What the merge went over, each piece once.
                             if let Some((_, stretches)) = merges.iter().find(|(s, _)| Arc::ptr_eq(s, shadow)) {
-                                runs.extend(crate::shadow::joined_piece_runs(
+                                runs.extend(crate::shadow::joined_piece_runs_within(
                                     stretches.iter().map(|s| shadow.card_run(s.at, s.at + s.bytes)).collect(),
+                                    0,
                                 ));
                             }
                             runs

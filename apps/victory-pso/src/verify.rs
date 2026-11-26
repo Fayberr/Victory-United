@@ -496,6 +496,7 @@ pub fn run(dir: &Path, want: Want, execute: bool) -> Result<()> {
 
     let host = Host {
         device: a.device.clone(),
+        adapter: format!("{} (vendor {:#06x})", a.name, a.vendor),
     };
     let stages: Vec<(&HostShader, D3D12_SHADER_VISIBILITY)> = shaders
         .iter()

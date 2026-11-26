@@ -1375,6 +1375,7 @@ pub(crate) fn empty(list: &HostList, heap: &HostHeap) -> Option<Ready> {
         directory: directory.2,
         faults: faults.2,
         base,
+        count: m.copies.len() as u32,
     })
 }
 

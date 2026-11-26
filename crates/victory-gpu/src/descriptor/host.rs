@@ -8448,8 +8448,7 @@ mod own_copy_tests {
         super::super::create_placed_uav(std::ptr::null(), &vol_res, &vol_uav, slot_handle);
         assert!(heap.mirror(0, slot_handle, false).is_some());
         {
-            let kept = heap.kept.lock().unwrap();
-            let tex = kept[0].as_ref().expect("3D placed UAV must mirror immediately");
+            let tex = heap.kept_in(0).expect("3D placed UAV must mirror immediately");
             // SAFETY: live D3D12 resource.
             let d = unsafe { tex.GetDesc() };
             assert_eq!(d.Dimension, D3D12_RESOURCE_DIMENSION_TEXTURE3D);
@@ -8487,7 +8486,7 @@ mod own_copy_tests {
         let Some(View::Unordered(uav_obj, _, _)) = placed_texture(&uav_placed) else {
             panic!("expected placed UAV texture");
         };
-        assert!(make(&uav_placed, heap.cpu(1)).flatten().is_some());
+        assert!(make(&uav_placed, heap.cpu(1)).is_some());
 
         let mut srv_words = [0u32; 16];
         (srv_words[0], srv_words[1], srv_words[2], srv_words[5]) =
@@ -8497,7 +8496,7 @@ mod own_copy_tests {
         let Some(View::Shader(srv_obj, _)) = placed_texture(&srv_placed) else {
             panic!("expected placed SRV texture");
         };
-        assert!(make(&srv_placed, heap.cpu(2)).flatten().is_some());
+        assert!(make(&srv_placed, heap.cpu(2)).is_some());
         assert_eq!(
             crate::resource::alias_of(srv_obj as crate::object::This),
             Some(uav_obj as crate::object::This),

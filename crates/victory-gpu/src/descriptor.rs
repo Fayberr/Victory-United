@@ -1910,7 +1910,7 @@ mod tests {
             user_data: 4,
             slot: 1,
         };
-        let made = state.tables(&list, &[range], &[], &[(1, 8)], true);
+        let made = state.tables(&list, &[range], &[], &[(1, 8)], &[], false, true);
         let made: Vec<(u8, u32)> = made.iter().copied().collect();
         let [(1, offset)] = made[..] else {
             panic!("one fresh table for root parameter 1, not {made:?}");

@@ -59,6 +59,8 @@ fn shader_bytes(dxc: &std::path::Path, dir: &std::path::Path) -> [Vec<u8>; 2] {
                 writes: false,
                 stores_by_address: false,
                 picks: Default::default(),
+                used_written: vec![],
+                write_unknown: false,
             })
         });
         bytes
