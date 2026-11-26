@@ -3695,56 +3695,9 @@ impl State {
                 BAKED_MS.fetch_add(began.elapsed().as_millis() as u64, Ordering::Relaxed);
                 return;
             }
-<<<<<<< HEAD
-        }
-        // What can wait for a later list is the worker's.
-        if !bake && crate::heap_worker::kick(heap) {
-            return;
-        }
-        let _pass = crate::heap_worker::on().then(crate::heap_worker::urgent);
-        let n = EARLY_TEXTURE_PASSES[usize::from(bake)].fetch_add(1, Ordering::Relaxed) + 1;
-        if bake && n.is_power_of_two() {
-            let [slots, due, ..] = HEAP_TEXTURES_QUEUE.each_ref().map(|c| c.load(Ordering::Relaxed));
-            tracing::info!(
-                frame,
-                bakes = n,
-                queued_at_the_last_pass = slots,
-                due_at_the_last_pass = due,
-                uploaded_so_far = HEAP_TEXTURES.load(Ordering::Relaxed),
-                "a draw of the title's decoration bake: textures picked by index are uploaded first (VICTORY_BAKE_TEXTURES_MS=0: not)"
-            );
-        }
-        let began = std::time::Instant::now();
-        crate::descriptor::sync_heaps();
-        PASS_BUDGET.set(Some(budget));
-        crate::texture::BAKING.set(bake && bake_exact());
-        Self::heap_textures(Into::List(list), heap, host);
-        crate::texture::BAKING.set(false);
-        PASS_BUDGET.set(None);
-        if bake {
-||||||| 0a4356653
-        }
-        let n = EARLY_TEXTURE_PASSES[usize::from(bake)].fetch_add(1, Ordering::Relaxed) + 1;
-        if bake && n.is_power_of_two() {
-            let [slots, due, ..] = HEAP_TEXTURES_QUEUE.each_ref().map(|c| c.load(Ordering::Relaxed));
-            tracing::info!(
-                frame,
-                bakes = n,
-                queued_at_the_last_pass = slots,
-                due_at_the_last_pass = due,
-                uploaded_so_far = HEAP_TEXTURES.load(Ordering::Relaxed),
-                "a draw of the title's decoration bake: textures picked by index are uploaded first (VICTORY_BAKE_TEXTURES_MS=0: not)"
-            );
-        }
-        let began = std::time::Instant::now();
-        PASS_BUDGET.set(Some(budget));
-        crate::texture::BAKING.set(bake && bake_exact());
-        self.heap_textures(list, heap, host);
-        crate::texture::BAKING.set(false);
-        PASS_BUDGET.set(None);
-        if bake {
-=======
             // Fallback when no host GPU list can be created (e.g. headless tests).
+            let _pass = crate::heap_worker::on().then(crate::heap_worker::urgent);
+            crate::descriptor::sync_heaps();
             crate::texture::BAKING.set(exact);
             self.flush_for_bake(list, host, None);
             crate::texture::BAKING.set(false);
@@ -3761,10 +3714,9 @@ impl State {
             EARLY_TEXTURE_PASSES[1].fetch_add(1, Ordering::Relaxed);
             PASS_BUDGET.set(Some((left, 2 << 30, true)));
             crate::texture::BAKING.set(exact);
-            let _ = self.heap_textures(list, heap, host, None);
+            let _ = Self::heap_textures(Into::List(list), heap, host, None);
             crate::texture::BAKING.set(false);
             PASS_BUDGET.set(None);
->>>>>>> vicetay/main
             BAKED_MS.fetch_add(began.elapsed().as_millis() as u64, Ordering::Relaxed);
             return;
         }
@@ -3931,7 +3883,19 @@ impl State {
         // Slots whose texture's memory the runtime mapped, unmapped or
         // wrote since the last pass are due again.
         host.texture_slots_remapped(frame);
-<<<<<<< HEAD
+        let early = matches!(into, Into::List(_))
+            && PASS_BUDGET.get().is_some_and(|(_, _, bake)| !bake);
+        if early && crate::heap_worker::kick(heap) {
+            return true;
+        }
+        let _pass = (sync.is_some() && crate::heap_worker::on()).then(crate::heap_worker::urgent);
+        if early || sync.is_some() {
+            crate::descriptor::sync_heaps();
+        }
+        let baking = crate::texture::BAKING.get();
+        if baking {
+            host.texture_slots_bake_written(frame);
+        }
         host.texture_sweep(heap, frame);
         if heap_recheck() {
             let [same, changed, waiting] = host.texture_slots_rechecked(frame);
@@ -3939,13 +3903,6 @@ impl State {
             HEAP_TEXTURES_RECHECKED[1].fetch_add(changed, Ordering::Relaxed);
             HEAP_TEXTURES_RECHECKED[2].store(waiting, Ordering::Relaxed);
         }
-||||||| 0a4356653
-=======
-        let baking = crate::texture::BAKING.get();
-        if baking {
-            host.texture_slots_bake_written(frame);
-        }
->>>>>>> vicetay/main
         host.texture_slots_short(frame);
         // The slots of textures whose first level with memory (levels on
         // demand), or whose host copy for one with more levels, changed since
@@ -4048,19 +4005,13 @@ impl State {
         };
 
         let began = std::time::Instant::now();
-<<<<<<< HEAD
         // Several slots can show the same texture from the same mip. The pass
         // holds each upload even after its staging entry is removed. Reuse it
         // within this pass, where there are no intervening title copies.
         let mut uploaded = std::collections::HashMap::new();
-        BAKE_SERVED.store(0, Ordering::Relaxed);
-||||||| 0a4356653
-        BAKE_SERVED.store(0, Ordering::Relaxed);
-=======
         if sync.is_none() {
             BAKE_SERVED.store(0, Ordering::Relaxed);
         }
->>>>>>> vicetay/main
         let mut served = true;
         for (index, write) in due {
             if SPENT.load(Ordering::Relaxed) >= bytes_at_most || began.elapsed() > span {
@@ -4200,33 +4151,21 @@ impl State {
                 && !sync_bake
                 && crate::descriptor::host::show_after()
                 && heap.handle(index).is_some_and(|handle| !host.texture_slot_made_from(index, handle));
-<<<<<<< HEAD
-            // On the worker the slot shows the view when the upload is in
-            // the queue ([`crate::heap_worker::Batch::publish`]): there the
-            // view is the record's.
-            let view = match &into {
-                Into::List(_) => heap.handle(index).and_then(|handle| {
-                    if shows_other || late { crate::descriptor::view(handle) } else { host.mirror(index, handle, true) }
-                }),
-                Into::Ahead(_) => record.as_ref().map(|(view, _)| view.clone()),
-            };
-||||||| 0a4356653
-            let view = heap.handle(index).and_then(|handle| {
-                if shows_other || late { crate::descriptor::view(handle) } else { host.mirror(index, handle, true) }
-            });
-=======
             let (view, bake_key) = if sync_bake {
                 match heap.handle(index).and_then(|handle| host.prepare_bake_slot(index, handle)) {
                     Some((view, key)) => (Some(view), Some(key)),
                     None => (None, None),
                 }
             } else {
-                let view = heap.handle(index).and_then(|handle| {
-                    if shows_other || late { crate::descriptor::view(handle) } else { host.mirror(index, handle, true) }
-                });
+                // The worker publishes the slot with its submitted upload.
+                let view = match &into {
+                    Into::List(_) => heap.handle(index).and_then(|handle| {
+                        if shows_other || late { crate::descriptor::view(handle) } else { host.mirror(index, handle, true) }
+                    }),
+                    Into::Ahead(_) => record.as_ref().map(|(view, _)| view.clone()),
+                };
                 (view, None)
             };
->>>>>>> vicetay/main
             let at_once = || {
                 if (late || bake_key.is_some()) && let Some(handle) = heap.handle(index) {
                     let _ = host.mirror(index, handle, true);
@@ -4245,23 +4184,12 @@ impl State {
                     continue;
                 }
             };
-<<<<<<< HEAD
-            let Some(texture) = crate::resource::host_resource(resource)
-                .filter(|texture| crate::texture::title_written(texture))
-            else {
-||||||| 0a4356653
-            let texture = crate::resource::host_resource(resource);
-            let title_fills = texture.is_some_and(crate::texture::title_written);
-            if !title_fills {
-=======
             let texture = crate::resource::host_resource(resource);
             if crate::residency::upload_refused() {
                 served = false;
                 break;
             }
-            let title_fills = texture.is_some_and(crate::texture::title_written);
-            if !title_fills {
->>>>>>> vicetay/main
+            let Some(texture) = texture.filter(|texture| crate::texture::title_written(texture)) else {
                 at_once();
                 // a render target, a depth or unordered access texture: the host's own
                 host.texture_slot_done(index, write, None);
@@ -4304,27 +4232,9 @@ impl State {
             let same = !tabled && crate::texture::unchanged(resource, first);
             if same {
                 HEAP_TEXTURES_SAME.fetch_add(1, Ordering::Relaxed);
-<<<<<<< HEAD
-                if shows_other && let Some(handle) = heap.handle(index) {
-                    let _ = host.mirror(index, handle, true);
-                }
-                // Its bytes are in, or on the way there in a list before.
-                if late && crate::pool::fresh(texture) && !crate::texture::ahead::there(resource) {
-                    if let Some(handle) = heap.handle(index) {
-                        show_after(&mut into, index, handle);
-||||||| 0a4356653
-                if shows_other && let Some(handle) = heap.handle(index) {
-                    let _ = host.mirror(index, handle, true);
-                }
-                // Its bytes are in, or on the way there in a list before.
-                if late && texture.is_some_and(crate::pool::fresh) && !crate::texture::ahead::there(resource) {
-                    if let Some(handle) = heap.handle(index) {
-                        host.texture_slot_show_after(list, index, handle);
-=======
                 if let (Some(sync), Some(key), Some(handle)) = (sync.as_deref_mut(), bake_key, heap.handle(index)) {
                     if let Some(copy) = crate::resource::host_copy(resource) {
                         sync.keep.push(copy);
->>>>>>> vicetay/main
                     }
                     sync.publish.push((index, handle, key));
                 } else {
@@ -4373,14 +4283,8 @@ impl State {
                 break;
             }
             let late = late && ahead.is_none();
-<<<<<<< HEAD
-            if previous.is_none() && let Some(view) = &view
-||||||| 0a4356653
-            if let Some(view) = &view
-=======
             let _ = crate::residency::take_staging_deferred();
-            if let Some(view) = &view
->>>>>>> vicetay/main
+            if previous.is_none() && let Some(view) = &view
                 && ahead.is_none()
             {
                 // (What was found mapped of it a moment ago is not asked
@@ -4457,19 +4361,9 @@ impl State {
             // Preserve the last view and stop once the host confirms device loss.
             if let Some(why) = crate::descriptor::host::device_removed() {
                 let text: String = format!("{view:?}").chars().take(300).collect();
-<<<<<<< HEAD
                 crate::host::fail(format_args!(
                     "host device lost while preparing textures picked by index at slot {index}: {why}; last view: {text}"
                 ));
-||||||| 0a4356653
-                tracing::error!(why, slot = index, "the host device went while textures picked by index were made ready; last: {text}");
-                crate::host::log_removal_context();
-                return;
-=======
-                tracing::error!(why, slot = index, "the host device went while textures picked by index were made ready; last: {text}");
-                crate::host::log_removal_context();
-                return false;
->>>>>>> vicetay/main
             }
             // The same texture from the same mip was uploaded already in
             // this pass: this slot gets the host texture and its recheck
@@ -4535,14 +4429,8 @@ impl State {
                 uploaded.insert(key, recheck);
             }
         }
-<<<<<<< HEAD
         catching_up(began.elapsed().saturating_sub(plain));
-        if baking && served {
-||||||| 0a4356653
-        if baking && served {
-=======
         if sync.is_none() && baking && served {
->>>>>>> vicetay/main
             BAKE_SERVED.store(host.texture_news().0 + 1, Ordering::Relaxed);
         }
         served
@@ -5284,20 +5172,12 @@ impl State {
     pub(crate) fn tables(
         &mut self,
         list: &HostList,
-<<<<<<< HEAD
         used: &[UsedResource],
         layouts: &[TableLayout],
         half: &[(u8, u32)],
         written: &[bool],
         unknown_write: bool,
-||||||| 0a4356653
-        used: &[UsedResource],
-        indexed: &[RootIndexedView],
-=======
-        plan: &TablePlan,
->>>>>>> vicetay/main
         compute: bool,
-<<<<<<< HEAD
     ) -> MadeTables {
         let writes = |u: &UsedResource| -> bool {
             if unknown_write {
@@ -5339,130 +5219,59 @@ impl State {
                     format,
                     "a shader moves a buffer's 16-bit channels as integers through a view whose values the console converts: they are read and written unconverted"
                 );
-||||||| 0a4356653
-    ) -> Few<(u8, u32), 16> {
-        let tables = |u: &&UsedResource| u.root == RootType::Table;
-        let mut fresh: Few<u8, 16> = Few::default();
-        for u in used.iter().filter(tables).filter(|u| u.kind == ResourceType::Cbv) {
-            if !fresh.contains(&u.slot) {
-                fresh.push(u.slot);
-=======
-    ) -> Few<(u8, u32), 16> {
-        let mut fresh = [0u64; 4];
-        let selected_slot = |mask: &[u64; 4], slot: u8| mask[usize::from(slot / 64)] & (1u64 << (slot % 64)) != 0;
-        for group in &plan.groups {
-            let slot = group.slot;
-            let needs_snapshot = group.has_cbv
-                || match self.roots_ref(compute).get(usize::from(slot)) {
-                    Some(&Root::Table(table)) => self.heap_of(table).is_some_and(|heap| {
-                        heap.host()
-                            .is_some_and(|host| group.needs_snapshot(heap, host.count(), table))
-                    }),
-                    _ => false,
-                };
-            if needs_snapshot {
-                fresh[usize::from(slot / 64)] |= 1u64 << (slot % 64);
->>>>>>> vicetay/main
             }
         }
-<<<<<<< HEAD
-        // Tables reaching past a host heap smaller than the title's (the
-        // host's limit, 1,000,000 views on NVIDIA) are made afresh too: the
-        // title's slots there have no host slot of their own.
-        for u in used.iter().filter(tables) {
-            if fresh.contains(u.slot) {
+        // Tables reaching past a host heap smaller than the title's need
+        // fresh slots. For an aligned view table, the last precomputed
+        // record bounds all of its entries. Check entries individually
+        // if the last record is outside the title heap or isn't aligned.
+        for layout in layouts {
+            if fresh.contains(layout.slot) {
                 continue;
             }
-            let Some(&Root::Table(table)) = self.roots_ref(compute).get(usize::from(u.slot)) else {
+            let Some(&Root::Table(table)) = self.roots_ref(compute).get(usize::from(layout.slot)) else {
                 continue;
             };
-            let end = table + u64::from(u.table_offset_dwords) * 4;
             let Some(heap) = self.heap_of(table) else {
                 continue;
             };
-            let (Some(host), Some(index)) = (heap.host(), heap.index(end)) else {
+            let Some(host) = heap.host() else {
                 continue;
             };
-            if index >= host.count() {
-                fresh.insert(u.slot);
+            let index_at = |dword: u32| {
+                table.checked_add(u64::from(dword) * 4).and_then(|end| heap.index(end))
+            };
+            let last = if !heap.samplers() && (table - heap.start) % 32 == 0 {
+                layout.records.last().and_then(|&(record, _)| index_at(record * 8))
+            } else {
+                None
+            };
+            let needs_snapshot = match last {
+                Some(index) => index >= host.count(),
+                None => layout.entries.iter().any(|u| {
+                    index_at(u.table_offset_dwords).is_some_and(|index| index >= host.count())
+                }),
+            };
+            if needs_snapshot {
+                fresh.insert(layout.slot);
             }
         }
         for u in used.iter().filter(tables) {
             if !fresh.contains(u.slot) {
                 BINDING_WRITES.set(writes(u));
                 self.table_entry(list, u, compute);
-||||||| 0a4356653
-        // Tables reaching past a host heap smaller than the title's (the
-        // host's limit, 1,000,000 views on NVIDIA) are made afresh too: the
-        // title's slots there have no host slot of their own.
-        for u in used.iter().filter(tables) {
-            if fresh.contains(&u.slot) {
-                continue;
-            }
-            let Some(&Root::Table(table)) = self.roots_ref(compute).get(usize::from(u.slot)) else {
-                continue;
-            };
-            let end = table + u64::from(u.table_offset_dwords) * 4;
-            let Some(heap) = self.heap_of(table) else {
-                continue;
-            };
-            let (Some(host), Some(index)) = (heap.host(), heap.index(end)) else {
-                continue;
-            };
-            if index >= host.count() {
-                fresh.push(u.slot);
             }
         }
-        fresh.sort_unstable();
-        for u in used.iter().filter(tables) {
-            if !fresh.contains(&u.slot) {
-                self.table_entry(list, u, compute);
-=======
-        for &(g, e) in &plan.direct {
-            let group = &plan.groups[g];
-            if !selected_slot(&fresh, group.slot) {
-                self.table_entry(list, &group.entries[e], compute);
->>>>>>> vicetay/main
-            }
-        }
-<<<<<<< HEAD
         let mut made = MadeTables::default();
         for slot in fresh.ordered() {
-||||||| 0a4356653
-        let mut made = Few::default();
-        for &slot in fresh.iter() {
-=======
-        let mut made = Few::default();
-        for group in &plan.groups {
-            let slot = group.slot;
-            if !selected_slot(&fresh, slot) {
-                continue;
-            }
->>>>>>> vicetay/main
             let Some(&Root::Table(table)) = self.roots_ref(compute).get(usize::from(slot)) else {
                 continue;
             };
-<<<<<<< HEAD
             let Ok(layout) = layouts.binary_search_by_key(&slot, |layout| layout.slot) else {
                 continue;
             };
             let layout = &layouts[layout];
-            // (Their places among `used`.)
-            let mut places: Few<u16, 32> = Few::default();
-            for (i, _) in used.iter().enumerate().filter(|(_, u)| tables(u) && u.slot == slot) {
-                places.push(i as u16);
-            }
-            let entries = || places.iter().map(|&i| &used[usize::from(i)]);
-||||||| 0a4356653
-            // (Their places among `used`.)
-            let mut places: Few<u16, 32> = Few::default();
-            for (i, _) in used.iter().enumerate().filter(|(_, u)| tables(u) && u.slot == slot) {
-                places.push(i as u16);
-            }
-            let entries = || places.iter().map(|&i| &used[usize::from(i)]);
-=======
-            let entries = &group.entries;
->>>>>>> vicetay/main
+            let entries = &layout.entries;
             let Some(heap) = self.heap_of(table) else {
                 continue;
             };
@@ -5472,7 +5281,6 @@ impl State {
             let Some(host) = heap.host() else {
                 continue;
             };
-<<<<<<< HEAD
             let evaluate = |index: &victory_shader::resource::RootIndexedView| {
                 let constant = self.user_value(
                     compute,
@@ -5488,42 +5296,10 @@ impl State {
             // the entries give (a range of several views names only its
             // first; review on #927).
             let half_at: Vec<u32> = half
-||||||| 0a4356653
-            let mut selected: Vec<u32> = indexed
-=======
-            let mut selected: Vec<u32> = group
-                .indexed
->>>>>>> vicetay/main
                 .iter()
-<<<<<<< HEAD
                 .filter(|&&(s, _)| s == slot)
                 .map(|&(_, at)| at / 8)
-||||||| 0a4356653
-                .filter(|index| index.table_slot == slot)
-                .map(|index| {
-                    let constant = self.user_value(
-                        compute,
-                        index.constant_slot,
-                        RootType::Constants,
-                        index.constant_dword,
-                    );
-                    // The shader adds i32 byte offsets and shifts by 5.
-                    index.byte_offset.wrapping_add(constant << index.shift) / 32
-                })
-=======
-                .map(|index| {
-                    let constant = self.user_value(
-                        compute,
-                        index.constant_slot,
-                        RootType::Constants,
-                        index.constant_dword,
-                    );
-                    // The shader adds i32 byte offsets and shifts by 5.
-                    index.byte_offset.wrapping_add(constant << index.shift) / 32
-                })
->>>>>>> vicetay/main
                 .collect();
-<<<<<<< HEAD
             let single;
             let mut many;
             let selected: &[u32] = match (layout.indexed.as_slice(), half_at.is_empty()) {
@@ -5546,20 +5322,6 @@ impl State {
             let n = layout.records.last().map_or(0, |entry| entry.0)
                 .max(selected.last().copied().unwrap_or(0))
                 + 1;
-||||||| 0a4356653
-            selected.sort_unstable();
-            selected.dedup();
-            let n = entries()
-                .map(|u| u.table_offset_dwords / 8)
-                .chain(selected.last().copied())
-                .max()
-                .unwrap_or(0)
-                + 1;
-=======
-            selected.sort_unstable();
-            selected.dedup();
-            let n = (group.max_dword / 8).max(selected.last().copied().unwrap_or(0)) + 1;
->>>>>>> vicetay/main
             let last = table.checked_add(u64::from(n - 1) * 32);
             if n > crate::descriptor::host::DYNAMIC
                 || last.and_then(|handle| heap.index(handle)).is_none()
@@ -5583,28 +5345,16 @@ impl State {
                 (table, n, h)
             };
             // Who reads of it, and as what, as far as [`readable`] goes by it.
-<<<<<<< HEAD
             let reader = (used.as_ptr() as usize, used.len(), STORES.get(), TESTED_DEPTH.get().0);
             #[cfg(feature = "diagnostics")]
             tally(0, 1);
-||||||| 0a4356653
-            let reader = (used.as_ptr() as usize, used.len(), STORES.get(), TESTED_DEPTH.get().0);
-=======
-            let reader = (std::ptr::from_ref(plan) as usize, plan.direct.len(), STORES.get(), TESTED_DEPTH.get().0);
->>>>>>> vicetay/main
             if let Some(known) = self.fresh_tables.get_mut(&key) {
                 #[cfg(feature = "diagnostics")]
                 tally(1, 1);
                 let first = known.first;
                 // This reader had it brought up to date, and nothing in the
                 // list changed since: nothing to do again.
-<<<<<<< HEAD
                 let once = ready_once() && selected.is_empty() && layout.entries.iter().all(|u| u.kind != ResourceType::Uav);
-||||||| 0a4356653
-                let once = ready_once() && selected.is_empty() && entries().all(|u| u.kind != ResourceType::Uav);
-=======
-                let once = ready_once() && selected.is_empty() && !group.has_uav;
->>>>>>> vicetay/main
                 if once
                     && known.epoch == list.epoch()
                     && let Some((_, depth)) = known.ready.iter().find(|(r, _)| *r == reader)
@@ -5627,13 +5377,7 @@ impl State {
                     }
                 }
                 for k in selected {
-<<<<<<< HEAD
-                    if layout.entries.iter().any(|u| u.table_offset_dwords / 8 == *k) {
-||||||| 0a4356653
-                    if entries().any(|u| u.table_offset_dwords / 8 == k) {
-=======
-                    if group.entry(k).is_some() {
->>>>>>> vicetay/main
+                    if layout.records.binary_search_by_key(k, |&(record, _)| record).is_ok() {
                         continue;
                     }
                     let handle = table + u64::from(*k) * 32;
@@ -5663,18 +5407,12 @@ impl State {
                 made.push((slot, first * 32));
                 continue;
             }
-<<<<<<< HEAD
             #[cfg(feature = "diagnostics")]
             let mut clock = table_asked(&mut self.recording, table, n);
-            let Some(first) = host.dynamic(n) else {
-||||||| 0a4356653
-            let Some(first) = host.dynamic(n) else {
-=======
             let Some(first) = host.dynamic(n).or_else(|| {
                 crate::host::settle_for_fence();
                 host.dynamic(n)
             }) else {
->>>>>>> vicetay/main
                 // No room: the draw must not run with the title's own
                 // offsets (slots never made for it); `bind` drops it.
                 made.push((slot, u32::MAX));
@@ -5715,16 +5453,13 @@ impl State {
                     && let Some(words) = crate::descriptor::record_view_at(table + u64::from(k) * 32)
                     && let Some(mut listed) = host.make_listed(recording, words, index)
                 {
-<<<<<<< HEAD
-                    let kind = layout.entries.iter()
-                        .find(|u| u.table_offset_dwords / 8 == k)
-||||||| 0a4356653
-                    let kind = entries()
-                        .find(|u| u.table_offset_dwords / 8 == k)
-=======
-                    let kind = group
-                        .entry(k)
->>>>>>> vicetay/main
+                    let kind = match records.split_first() {
+                        Some((&(record, kind), rest)) if record == k => {
+                            records = rest;
+                            Some(kind)
+                        }
+                        _ => None,
+                    }
                         .map(|u| u.kind)
                         .or_else(|| selected.binary_search(&k).ok().and(listed.kind));
                     let was = (listed.ready, listed.tabled);
@@ -5760,7 +5495,6 @@ impl State {
                     }
                     continue;
                 }
-<<<<<<< HEAD
                 let used = match records.split_first() {
                     Some((&(record, kind), rest)) if record == k => {
                         records = rest;
@@ -5768,11 +5502,6 @@ impl State {
                     }
                     _ => None,
                 };
-||||||| 0a4356653
-                let used = entries().find(|u| u.table_offset_dwords / 8 == k);
-=======
-                let used = group.entry(k);
->>>>>>> vicetay/main
                 match crate::descriptor::view(table + u64::from(k) * 32) {
                     Some(View::Constant(address, size)) => {
                         // The host takes at most 64 KiB for a constant buffer
