@@ -169,17 +169,11 @@ extern "system" fn open_file(_: Factory, path: *const u16, iid: *const Guid, out
     tracing::info!(path = name, iid = iid_text(iid), "dstorage: file opened");
     // SAFETY: a handle we just opened and nobody else owns.
     let file = unsafe { std::fs::File::from_raw_handle(handle) };
-<<<<<<< HEAD
-    let file = Instance::create(Object::new("dstorage file", &FILE_VTABLE), File { file, unbuffered });
-||||||| a26859fc
-    let file = Instance::create(Object::new("dstorage file", &FILE_VTABLE), File { file });
-=======
     let files = Files::new(file, Io::chosen());
-    let file = Instance::create(Object::new("dstorage file", &FILE_VTABLE), File { files });
+    let file = Instance::create(Object::new("dstorage file", &FILE_VTABLE), File { files, unbuffered });
     if stream_log::on() {
         stream_log::line(format_args!("F\t{:x}\t{kept}", file as usize));
     }
->>>>>>> avatar/main
     WALLS_FILES.lock().unwrap_or_else(|e| e.into_inner()).push((file as usize, kept));
     put(out, file)
 }
@@ -294,15 +288,10 @@ static FACTORY_VTABLE: Methods<16> = Methods([
 // Files.
 
 struct File {
-<<<<<<< HEAD
-    file: std::fs::File,
+    files: Files,
     /// Opened with `FILE_FLAG_NO_BUFFERING`: every read must be a whole
     /// number of sectors, in a buffer aligned to one ([`read_uncached`]).
     unbuffered: bool,
-||||||| a26859fc
-    file: std::fs::File,
-=======
-    files: Files,
 }
 
 /// How files are read (`VICTORY_DSTORAGE_IO`).
@@ -480,7 +469,6 @@ fn read_direct(file: &std::fs::File, out: &mut [u8], offset: u64) -> std::io::Re
         out[..n].copy_from_slice(&aligned[before..before + n]);
         Ok(n)
     })
->>>>>>> avatar/main
 }
 
 static FILE_VTABLE: Methods<8> = Methods([
@@ -605,13 +593,7 @@ struct Lane {
     held: Vec<Command>,
     /// Submitted, by sequence number: reads not started, status entries
     /// not written, reads running, and failures not yet reported.
-<<<<<<< HEAD
     reads: VecDeque<(u64, QueuedRead)>,
-||||||| a26859fc
-    reads: VecDeque<(u64, Request)>,
-=======
-    reads: VecDeque<(u64, Read)>,
->>>>>>> avatar/main
     statuses: VecDeque<(u64, Status)>,
     running: BTreeSet<u64>,
     failures: BTreeMap<u64, HRESULT>,
@@ -627,14 +609,7 @@ unsafe impl Send for Lane {}
 struct Job {
     lane: u64,
     seq: u64,
-<<<<<<< HEAD
     read: QueuedRead,
-||||||| a26859fc
-    request: Request,
-=======
-    request: Request,
-    note: Note,
->>>>>>> avatar/main
     staging: u64,
 }
 
@@ -873,7 +848,7 @@ pub(crate) mod stream_log {
         }
         let now = now();
         let ago = |t: Option<std::time::Instant>| now - t.map_or(0, |t| t.elapsed().as_millis() as u64);
-        let r = &job.request;
+        let r = &job.read.request;
         line(format_args!(
             "R\t{}\t{}\t{:x}\t{}\t{}\t{}\t{:x}\t{}\t{}\t{}\t{now}\t{:x}",
             job.lane,
@@ -883,8 +858,8 @@ pub(crate) mod stream_log {
             r.source_size,
             r.destination_size,
             r.options,
-            ago(job.note.enqueued),
-            ago(job.note.submitted),
+            ago(job.read.note.enqueued),
+            ago(job.read.note.submitted),
             ago(Some(started)),
             result.err().unwrap_or(0)
         ));
@@ -912,26 +887,18 @@ fn work(scheduler: &'static Scheduler) {
         let mut job = job;
         drop(lanes);
         let started = std::time::Instant::now();
-<<<<<<< HEAD
-        let result = execute(&job.read);
-        walls_request(&job.read.request, &result, started);
-        // Drop our COM reference on the file before signaling completion and
-        // outside `scheduler.lock()`.
-        job.read.release_file();
-||||||| a26859fc
-        let result = execute(&job.request);
-        walls_request(&job.request, &result, started);
-=======
         let traced = Traced::start(&job);
         let reading = victory_gpu::timeline::span("streaming: a request");
-        let result = execute(&job.request);
+        let result = execute(&job.read);
         reading.end();
-        walls_request(&job.request, &result, started);
+        walls_request(&job.read.request, &result, started);
         stream_log::request(&job, started, &result);
         if let Some(traced) = traced {
             traced.end(&job, &result);
         }
->>>>>>> avatar/main
+        // Drop our COM reference on the file before signaling completion and
+        // outside `scheduler.lock()`.
+        job.read.release_file();
         lanes = scheduler.lock();
         lanes.finish(&job, result);
         lanes.count(&job, started);
@@ -995,15 +962,8 @@ impl Lanes {
             .filter_map(|(&id, l)| Some((l.clock, l.reads.front()?.0, id)))
             .min()?;
         let lane = self.lanes.get_mut(&id)?;
-<<<<<<< HEAD
-        let staging = staging_bytes(&lane.reads.front()?.1.request);
-||||||| a26859fc
-        let &(seq, request) = lane.reads.front()?;
-        let staging = staging_bytes(&request);
-=======
-        let &(seq, Read { request, note }) = lane.reads.front()?;
-        let staging = staging_bytes(&request);
->>>>>>> avatar/main
+        let &(seq, ref read) = lane.reads.front()?;
+        let staging = staging_bytes(&read.request);
         if self.staged > 0 && self.staged + staging > self.staging {
             self.starved = true;
             self.refused += 1;
@@ -1020,14 +980,7 @@ impl Lanes {
         Some(Job {
             lane: id,
             seq,
-<<<<<<< HEAD
             read,
-||||||| a26859fc
-            request,
-=======
-            request,
-            note,
->>>>>>> avatar/main
             staging,
         })
     }
@@ -1043,29 +996,14 @@ impl Lanes {
         }
     }
 
-<<<<<<< HEAD
-    /// Moves a queue's enqueued commands to the workers (the title's
-    /// Submit).
-    fn submit(&mut self, id: u64) {
-        self.submit_as(id, true);
-    }
-
-    /// As [`Lanes::submit`]; `explicit` false when a half-full queue submits
-    /// itself, which leaves reads into physical pages for the title's
-    /// Submit: their page lists point into the title's page table, which
-    /// The title fills for the batch in its own submit path, right
-    /// before Submit (`sub_1400e88f0`), so until then they name no page or a
-    /// page that now holds something else. A status entry behind a held
-    /// read waits with it.
-    fn submit_as(&mut self, id: u64, explicit: bool) {
-||||||| a26859fc
-    /// Moves a queue's enqueued commands to the workers.
-    fn submit(&mut self, id: u64) {
-=======
     /// Moves a queue's enqueued commands to the workers; `early` when the
-    /// title has not asked for it ([`queue`]).
+    /// title has not asked for it ([`queue`]), which leaves reads into
+    /// physical pages for the title's Submit: their page lists point into
+    /// the title's page table, which it fills for the batch in its own
+    /// submit path, right before Submit (`sub_1400e88f0`), so until then
+    /// they name no page or a page that now holds something else. A status
+    /// entry behind a held read waits with it.
     fn submit(&mut self, id: u64, early: bool) {
->>>>>>> avatar/main
         let Some(class) = self.lanes.get(&id).map(|l| l.class) else {
             return;
         };
@@ -1084,11 +1022,11 @@ impl Lanes {
         if lane.reads.is_empty() {
             lane.clock = lane.clock.max(self.lane_now[class]);
         }
-<<<<<<< HEAD
-        let mut commands = if explicit { std::mem::take(&mut lane.held) } else { Vec::new() };
+        let mut commands = if early { Vec::new() } else { std::mem::take(&mut lane.held) };
         commands.append(&mut lane.unsubmitted);
+        trace_batch(id, &commands, early);
         for command in commands {
-            let hold = !explicit
+            let hold = early
                 && match &command {
                     Command::Read(r) => r.request.options & PAGE_DESTINATION != 0,
                     Command::Status(_) => !lane.held.is_empty(),
@@ -1097,12 +1035,6 @@ impl Lanes {
                 lane.held.push(command);
                 continue;
             }
-||||||| a26859fc
-        for command in std::mem::take(&mut lane.unsubmitted) {
-=======
-        trace_batch(id, &lane.unsubmitted, early);
-        for command in std::mem::take(&mut lane.unsubmitted) {
->>>>>>> avatar/main
             let seq = self.next_seq;
             self.next_seq += 1;
             match command {
@@ -1248,17 +1180,10 @@ const MEMORY_SOURCE: u64 = 1 << 22;
 const PAGE: usize = 64 * 1024;
 
 enum Command {
-<<<<<<< HEAD
     Read(QueuedRead),
-||||||| a26859fc
-    Read(Request),
-=======
-    Read(Read),
->>>>>>> avatar/main
     Status(Status),
 }
 
-<<<<<<< HEAD
 /// An enqueued read request, holding a COM reference on its file object (when
 /// not a memory source) and an owned copy of its debug name until completion
 /// or drop.
@@ -1266,10 +1191,13 @@ struct QueuedRead {
     request: Request,
     file: Option<*mut Instance<File>>,
     name: String,
+    /// What the trace knows of it.
+    note: Note,
 }
 
 impl QueuedRead {
     fn new(mut request: Request) -> Self {
+        let note = Note::enqueued(&request);
         let name = text(request.name);
         request.name = std::ptr::null();
         let file = if request.options & MEMORY_SOURCE == 0 && !request.source.is_null() {
@@ -1283,6 +1211,7 @@ impl QueuedRead {
             request,
             file,
             name,
+            note,
         }
     }
 
@@ -1297,15 +1226,6 @@ impl Drop for QueuedRead {
     fn drop(&mut self) {
         self.release_file();
     }
-}
-
-||||||| a26859fc
-=======
-/// An enqueued request, and what the trace knows of it.
-#[derive(Clone, Copy)]
-struct Read {
-    request: Request,
-    note: Note,
 }
 
 /// The streaming trace (`VICTORY_DSTORAGE_TRACE`): 0 or unset: off; 1: a
@@ -1420,9 +1340,9 @@ impl Traced {
         if trace() == 0 {
             return None;
         }
-        let at_start = list_hash(&job.request);
-        let pages = list_of(&job.request).unwrap_or_default();
-        let (offset, len) = Traced::bytes(&job.request);
+        let at_start = list_hash(&job.read.request);
+        let pages = list_of(&job.read.request).unwrap_or_default();
+        let (offset, len) = Traced::bytes(&job.read.request);
         {
             let mut writers = WRITERS.lock().unwrap_or_else(|e| e.into_inner());
             let writers = writers.get_or_insert_with(Writers::new);
@@ -1455,8 +1375,8 @@ impl Traced {
     }
 
     fn end(self, job: &Job, result: &Result<(), HRESULT>) {
-        let (offset, len) = Traced::bytes(&job.request);
-        let at_end = list_hash(&job.request);
+        let (offset, len) = Traced::bytes(&job.read.request);
+        let at_end = list_hash(&job.read.request);
         let moved = super::xmem::pages_shown(&self.pages, offset, len) != self.shown;
         {
             let mut writers = WRITERS.lock().unwrap_or_else(|e| e.into_inner());
@@ -1470,7 +1390,7 @@ impl Traced {
                 }
             }
         }
-        let note = &job.note;
+        let note = &job.read.note;
         // A request of the title's submit: its list is filled in by then,
         // and stays.
         let late = note.at_submit != self.at_start || self.at_start != at_end;
@@ -1482,8 +1402,8 @@ impl Traced {
             seq = job.seq,
             queue = job.lane,
             early = note.early,
-            list = format_args!("{:p}", job.request.destination),
-            page_offset = job.request.page_offset,
+            list = format_args!("{:p}", job.read.request.destination),
+            page_offset = job.read.request.page_offset,
             size = len,
             enqueued_ms_ago = since(note.enqueued),
             submitted_ms_ago = since(note.submitted),
@@ -1499,7 +1419,6 @@ impl Traced {
         );
     }
 }
->>>>>>> avatar/main
 
 /// A status entry to write, holding a reference on its array.
 struct Status {
@@ -1532,14 +1451,7 @@ extern "system" fn enqueue_request(this: QueueRef, request: *const Request) {
     let Some(&request) = (unsafe { request.as_ref() }) else {
         return;
     };
-<<<<<<< HEAD
     queue(this, Command::Read(QueuedRead::new(request)));
-||||||| a26859fc
-    queue(this, Command::Read(request));
-=======
-    let note = Note::enqueued(&request);
-    queue(this, Command::Read(Read { request, note }));
->>>>>>> avatar/main
 }
 
 extern "system" fn enqueue_status(this: QueueRef, array: Array, index: u32) {
@@ -1591,7 +1503,6 @@ fn queue(this: QueueRef, command: Command) {
         if lane.entries() + 1 < lane.capacity.max(2) {
             break;
         }
-<<<<<<< HEAD
         // Full with reads held for a Submit the title cannot make while it
         // waits here: they go now, page lists as they are.
         if !lane.held.is_empty() {
@@ -1599,11 +1510,10 @@ fn queue(this: QueueRef, command: Command) {
             if !WARNED.swap(true, Ordering::Relaxed) {
                 tracing::warn!("dstorage: a full queue's reads into physical pages start before the title's Submit");
             }
-            lanes.submit(id);
+            // Everything goes, held reads first, page lists as they are.
+            lanes.submit(id, false);
             scheduler.work.notify_all();
         }
-||||||| a26859fc
-=======
         if !lane.unsubmitted.is_empty() && lane.reads.is_empty() && lane.running.is_empty() {
             tracing::warn!(
                 queue = id,
@@ -1614,7 +1524,6 @@ fn queue(this: QueueRef, command: Command) {
             scheduler.work.notify_all();
             continue;
         }
->>>>>>> avatar/main
         lanes = scheduler
             .finished
             .wait(lanes)
@@ -1624,17 +1533,9 @@ fn queue(this: QueueRef, command: Command) {
         return;
     };
     lane.unsubmitted.push(command);
-<<<<<<< HEAD
-    if lane.unsubmitted.len() >= (lane.capacity / 2).max(1) {
-        let capacity = lane.capacity;
-        lanes.submit_as(id, false);
-||||||| a26859fc
-    if lane.unsubmitted.len() >= (lane.capacity / 2).max(1) {
-        lanes.submit(id);
-=======
     if half_submits() && lane.unsubmitted.len() >= (lane.capacity / 2).max(1) {
+        let capacity = lane.capacity;
         lanes.submit(id, true);
->>>>>>> avatar/main
         scheduler.work.notify_all();
         let held = lanes.lanes.get(&id).map_or(0, |l| l.held.len());
         let n = AUTO_SUBMITS.fetch_add(1, Ordering::Relaxed) + 1;
@@ -1838,7 +1739,6 @@ fn read_source(request: &Request) -> Result<Cow<'static, [u8]>, HRESULT> {
 /// Nanoseconds workers spent reading files, for the debug summary.
 static READING: AtomicU64 = AtomicU64::new(0);
 
-<<<<<<< HEAD
 /// A read of a file opened with `FILE_FLAG_NO_BUFFERING`: the drive takes
 /// whole sectors in a buffer aligned to one, so the request is widened to
 /// the sectors around it, read into an aligned buffer, and the wanted bytes
@@ -1867,12 +1767,9 @@ fn read_uncached(file: &std::fs::File, offset: u64, out: &mut [u8]) -> std::io::
     Ok(available)
 }
 
-||||||| a26859fc
-=======
 /// How often a read the host refuses is tried again (about 0.25 s in all).
 const READ_RETRIES: u32 = 8;
 
->>>>>>> avatar/main
 /// Fills `out` (the source size) from the request's file or memory.
 fn read_into(request: &Request, out: &mut [u8]) -> Result<(), HRESULT> {
     if request.options & MEMORY_SOURCE != 0 {
@@ -1881,56 +1778,23 @@ fn read_into(request: &Request, out: &mut [u8]) -> Result<(), HRESULT> {
         return Ok(());
     }
     // SAFETY: a file object we created; the title keeps it open.
-<<<<<<< HEAD
-    let file = &unsafe { &*request.source.cast::<Instance<File>>() }.state;
-||||||| a26859fc
-    let file = &unsafe { &*request.source.cast::<Instance<File>>() }
-        .state
-        .file;
-=======
-    let files = &unsafe { &*request.source.cast::<Instance<File>>() }
-        .state
-        .files;
->>>>>>> avatar/main
+    let file = unsafe { &*request.source.cast::<Instance<File>>() }.state;
     let started = std::time::Instant::now();
-<<<<<<< HEAD
-    let result = if unbuffered(file) {
-        // No file cache between the drive and us.
-        match read_uncached(&file.file, request.offset, out) {
-            Ok(n) if n == out.len() => Ok(()),
-            Ok(_) => Err(END_OF_FILE),
-            Err(error) => Err(from_win32(&error)),
-||||||| a26859fc
-    let mut done = 0;
-    let result = loop {
-        if done == out.len() {
-            break Ok(());
-=======
+    let unbuffered = unbuffered(file);
     let (mut done, mut tries) = (0, 0);
     let result = loop {
         if done == out.len() {
             break Ok(());
->>>>>>> avatar/main
         }
-<<<<<<< HEAD
-    } else {
-        let mut done = 0;
-        loop {
-            if done == out.len() {
-                break Ok(());
-            }
-            match file.file.seek_read(&mut out[done..], request.offset + done as u64) {
-                Ok(0) => break Err(END_OF_FILE),
-                Ok(n) => done += n,
-                Err(error) => break Err(from_win32(&error)),
-            }
-||||||| a26859fc
-        match file.seek_read(&mut out[done..], request.offset + done as u64) {
-            Ok(0) => break Err(END_OF_FILE),
-            Ok(n) => done += n,
-            Err(error) => break Err(from_win32(&error)),
-=======
-        let error = match files.read_at(&mut out[done..], request.offset + done as u64) {
+        let at = request.offset + done as u64;
+        let read = if unbuffered {
+            // No file cache between the drive and us: whole sectors into an
+            // aligned buffer ([`read_uncached`]).
+            read_uncached(&file.files.first, at, &mut out[done..])
+        } else {
+            file.files.read_at(&mut out[done..], at)
+        };
+        let error = match read {
             Ok(0) => break Err(END_OF_FILE),
             Ok(n) => {
                 done += n;
@@ -1952,7 +1816,6 @@ fn read_into(request: &Request, out: &mut [u8]) -> Result<(), HRESULT> {
         );
         if tries == READ_RETRIES {
             break Err(from_win32(&error));
->>>>>>> avatar/main
         }
         std::thread::sleep(std::time::Duration::from_millis(1 << tries));
         tries += 1;
@@ -1997,28 +1860,6 @@ fn into_destination(
         return filled;
     }
     let offset = (request.page_offset & 0xffff) as usize;
-<<<<<<< HEAD
-    let count = (offset + len).div_ceil(PAGE);
-    // The page numbers as the title has them now: it may still be writing
-    // them (read each time, not kept).
-    let read_pages = || -> Vec<usize> {
-        (0..count)
-            // SAFETY: the title passes a page number per 64 KiB of
-            // destination, which holds at least `len` bytes from `offset`.
-            .map(|i| unsafe { std::ptr::read_volatile(request.destination.cast::<usize>().add(i)) })
-            .collect()
-    };
-    let mut pages = read_pages();
-||||||| a26859fc
-    // SAFETY: the title passes a page number per 64 KiB of destination,
-    // which holds at least `len` bytes from `offset`.
-    let pages = unsafe {
-        std::slice::from_raw_parts(
-            request.destination.cast::<usize>(),
-            (offset + len).div_ceil(PAGE),
-        )
-    };
-=======
     let list = request.destination.cast();
     let mut pages = page_list(list, offset, len);
     // The title sees its destination through the pages its list names: if
@@ -2026,7 +1867,7 @@ fn into_destination(
     // (Said aloud: by the title's protocol a submitted request's list stays
     // as it is.)
     for _ in 0..3 {
-        into_pages(&pages, offset, len, &mut fill)?;
+        into_pages(list, &pages, offset, len, &mut fill)?;
         let now = read_list(list, offset, len);
         if now == pages || !super::xmem::pages_known(&now, offset, len) {
             break;
@@ -2046,118 +1887,43 @@ fn into_destination(
 
 /// Runs `fill` on `len` bytes of `pages`, from `offset` into the first.
 fn into_pages(
+    list: *const usize,
     pages: &[usize],
     offset: usize,
     len: usize,
     mut fill: impl FnMut(&mut [u8]) -> Result<usize, HRESULT>,
 ) -> Result<(), HRESULT> {
->>>>>>> avatar/main
     // Consecutive pages of one allocation (the usual case): written in
     // place through one view.
     if let Some(mut window) = super::xmem::page_window(&pages, offset, len) {
         let filled = fill(window.bytes()).map(drop);
-<<<<<<< HEAD
-        drop(window);
-        // The title maps pages where the card reads them and has them
-        // filled afterwards: the GPU side's copies of those addresses
-        // learn of the bytes only from this (upstream c75fdba, fork PR
-        // #571). After a decode that failed part way too: what it wrote
-        // is there.
-        super::xmem::pages_written(&pages, offset, len);
-||||||| a26859fc
-        drop(window);
-        // The title maps pages where the card reads them and has them
-        // filled afterwards: the GPU side's copies of those addresses
-        // learn of the bytes only from this (upstream c75fdba, fork PR
-        // #571). After a decode that failed part way too: what it wrote
-        // is there.
         super::xmem::pages_written(pages, offset, len);
-=======
-        super::xmem::pages_written(pages, offset, len);
->>>>>>> avatar/main
         return filled;
     }
     let mut data = vec![0; len];
     let n = fill(&mut data)?;
-<<<<<<< HEAD
-    // A page number not known yet: the title may fill the array after it
-    // enqueued the request, and a queue submits on its own once half full,
-    // so a worker can come to it first. (Failed at once, 302 requests of a
-    // burst at the opening's loading went unwritten in one run, 44 and 9 in
-    // others; one was known 17 us later.) The numbers are read again for a
-    // while.
-    let waiting = std::time::Instant::now();
-    let mut waited = 0u32;
-    while !super::xmem::pages_known(&pages, offset, n) && waiting.elapsed() < std::time::Duration::from_millis(250) {
-        waited += 1;
-        if waited < 16 {
-            std::thread::yield_now();
-        } else {
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        pages = read_pages();
-    }
-    if waited > 0 {
-        DESTINATION_WAITS.fetch_add(1, Ordering::Relaxed);
-        if super::xmem::pages_known(&pages, offset, n) {
-            static SEEN: std::sync::Once = std::sync::Once::new();
-            SEEN.call_once(|| {
-                tracing::info!(
-                    tries = waited,
-                    us = waiting.elapsed().as_micros() as u64,
-                    "dstorage: a destination's page numbers were known only after the request was taken (read again until they were)"
-                );
-            });
-        }
-    }
-    // A page the title has just made, or a view the host refuses for a
-    // moment, comes right a little later: the write is tried again before
-    // the request fails (`VICTORY_DSTORAGE_RETRIES`, 12 tries, about 0.9 s
-    // in all; 0: not tried again, as before). Runs 175-178 lost 12 to 446
-    // reads a launch here, all in one second of the loading; the one build
-    // that tried again (run 165) lost none of 13. The page numbers are read
-    // again before each try.
-||||||| a26859fc
-    // A page the title has just made, or a view the host refuses for a
-    // moment, comes right a little later: the write is tried again before
-    // the request fails (`VICTORY_DSTORAGE_RETRIES`, 12 tries, about 0.9 s
-    // in all; 0: not tried again, as before). Runs 175-178 lost 12 to 446
-    // reads a launch here, all in one second of the loading; the one build
-    // that tried again (run 165) lost none of 13.
-=======
+    // The numbers as the title has them now: it may still be writing them.
+    let mut pages = pages.to_vec();
     // A page the title has just made, or a view the host refuses for a moment (commit
     // or address space short while a load maps many at once), can come right a little
     // later: tried again before the request fails (`VICTORY_DSTORAGE_RETRIES`, default 12,
     // about 1.5 s in all).
->>>>>>> avatar/main
     static RETRIES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
     let retries = *RETRIES.get_or_init(|| {
         std::env::var("VICTORY_DSTORAGE_RETRIES").ok().and_then(|v| v.parse().ok()).unwrap_or(12)
     });
-<<<<<<< HEAD
     // Since the start: writes that succeeded on a later try, and writes
     // given up.
     static RETRIED: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
     let mut written = super::xmem::write_physical(&pages, offset, &data[..n]);
     let mut tries = 0u32;
-||||||| a26859fc
-    // Since the start: writes that succeeded on a later try, and writes
-    // given up.
-    static RETRIED: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-    let mut written = super::xmem::write_physical(pages, offset, &data[..n]);
-    let mut tries = 0u32;
-=======
-    let mut written = super::xmem::write_physical(pages, offset, &data[..n]);
-    let mut tries = 0;
->>>>>>> avatar/main
     while !written && tries < retries {
         std::thread::sleep(std::time::Duration::from_millis((2u64 << tries.min(6)).min(128)));
         tries += 1;
-        pages = read_pages();
+        pages = read_list(list, offset, len);
         written = super::xmem::write_physical(&pages, offset, &data[..n]);
     }
     if written {
-<<<<<<< HEAD
         if tries > 0 {
             let on_a_retry = RETRIED[0].fetch_add(1, Ordering::Relaxed) + 1;
             tracing::info!(
@@ -2171,44 +1937,10 @@ fn into_pages(
         }
         // As above, after the write that succeeded.
         super::xmem::pages_written(&pages, offset, n);
-||||||| a26859fc
-        if tries > 0 {
-            let on_a_retry = RETRIED[0].fetch_add(1, Ordering::Relaxed) + 1;
-            tracing::info!(
-                offset,
-                len,
-                tries,
-                on_a_retry,
-                given_up = RETRIED[1].load(Ordering::Relaxed),
-                "dstorage: a destination's physical pages written after a retry"
-            );
-        }
-        // As above, after the write that succeeded.
-        super::xmem::pages_written(pages, offset, n);
-=======
-        super::xmem::pages_written(pages, offset, n);
-        if tries > 0 {
-            tracing::info!(offset, len, tries, "dstorage: a destination's physical pages written after a retry");
-        }
->>>>>>> avatar/main
         Ok(())
     } else {
-<<<<<<< HEAD
         let known = super::xmem::pages_known(&pages, offset, n);
         let given_up = RETRIED[1].fetch_add(1, Ordering::Relaxed) + 1;
-||||||| a26859fc
-        let given_up = RETRIED[1].fetch_add(1, Ordering::Relaxed) + 1;
-        tracing::warn!(
-            known = super::xmem::pages_known(pages, offset, len),
-            tries,
-            given_up,
-            on_a_retry = RETRIED[0].load(Ordering::Relaxed),
-            "dstorage: retries used up (VICTORY_DSTORAGE_RETRIES)"
-        );
-=======
-        let known = super::xmem::pages_known(pages, offset, len);
-        tracing::warn!(known, last_error = std::io::Error::last_os_error().raw_os_error(), "dstorage: retries used up");
->>>>>>> avatar/main
         // Said aloud: the title never reads a request's result
         // (it only polls for completion), so a destination left unwritten
         // is a model or texture that silently holds whatever its pages
@@ -2228,15 +1960,12 @@ fn into_pages(
     }
 }
 
-<<<<<<< HEAD
 /// Requests whose destination page numbers were read again because one was
 /// not known when a worker took the request.
 static DESTINATION_WAITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Queues that submitted themselves, half full (diagnostics).
 static AUTO_SUBMITS: AtomicU32 = AtomicU32::new(0);
 
-||||||| a26859fc
-=======
 /// The page numbers `list` holds now, one per 64 KiB of destination.
 fn read_list(list: *const usize, offset: usize, len: usize) -> Vec<usize> {
     (0..(offset + len).div_ceil(PAGE))
@@ -2261,6 +1990,7 @@ fn page_list(list: *const usize, offset: usize, len: usize) -> Vec<usize> {
     if super::xmem::pages_known(&pages, offset, len) {
         return pages;
     }
+    DESTINATION_WAITS.fetch_add(1, Ordering::Relaxed);
     // Timed from here: what took long before was the lock on the page table
     // (which the title's mapping calls hold), not the list.
     let started = std::time::Instant::now();
@@ -2278,7 +2008,6 @@ fn page_list(list: *const usize, offset: usize, len: usize) -> Vec<usize> {
     pages
 }
 
->>>>>>> avatar/main
 /// Slots by the 2020 order, which the argument shapes at
 /// the title's call sites match (0x18, 0x20, 0x30 and 0x40 are called).
 static QUEUE_VTABLE: Methods<12> = Methods([
@@ -2778,14 +2507,7 @@ mod tests {
         let mut r = request(options, std::ptr::null_mut(), 0, std::ptr::null(), 0, 0);
         (r.destination_size, r.source_size) = (size, size);
         let lane = lanes.lanes.get_mut(&id).unwrap();
-<<<<<<< HEAD
         lane.unsubmitted.push(Command::Read(QueuedRead::new(r)));
-||||||| a26859fc
-        lane.unsubmitted.push(Command::Read(r));
-=======
-        let note = Note::default();
-        lane.unsubmitted.push(Command::Read(Read { request: r, note }));
->>>>>>> avatar/main
     }
 
     #[test]
@@ -2818,16 +2540,8 @@ mod tests {
         l.lanes.insert(0, Lane::new(0, 64));
         read(&mut l, 0, ZLIB, 60);
         read(&mut l, 0, ZLIB, 60);
-<<<<<<< HEAD
         read(&mut l, 0, MEMORY_SOURCE, 1000); // borrowed, no input buffer
-        l.submit(0);
-||||||| a26859fc
-        read(&mut l, 0, 0, 1000); // raw: straight to its destination
-        l.submit(0);
-=======
-        read(&mut l, 0, 0, 1000); // raw: straight to its destination
         l.submit(0, false);
->>>>>>> avatar/main
         let first = l.start().unwrap();
         assert!(l.start().is_none(), "60 + 60 > 100");
         l.finish(&first, Ok(()));
@@ -2848,7 +2562,7 @@ mod tests {
         l.lanes.insert(0, Lane::new(0, 64));
         read(&mut l, 0, 0, 60);
         read(&mut l, 0, ZLIB, 60);
-        l.submit(0);
+        l.submit(0, false);
 
         let raw = l.start().unwrap();
         assert_eq!(raw.staging, 60);
@@ -2870,9 +2584,12 @@ mod tests {
         );
         request.intermediate_size = 60;
         lane.unsubmitted
-            .extend([Command::Read(QueuedRead::new(request)), Command::Read(QueuedRead::new(request))]);
+            .extend([
+                Command::Read(QueuedRead::new(request)),
+                Command::Read(QueuedRead::new(request)),
+            ]);
         l.lanes.insert(0, lane);
-        l.submit(0);
+        l.submit(0, false);
 
         let first = l.start().unwrap();
         assert!(l.start().is_none(), "the intermediate exceeds remaining space");
@@ -3061,14 +2778,14 @@ mod tests {
         read(&mut l, 0, 0, 16);
         add_ref_instance(array);
         l.lanes.get_mut(&0).unwrap().unsubmitted.push(Command::Status(Status { array, index: 0 }));
-        l.submit_as(0, false);
+        l.submit(0, true);
         // Only the plain read starts; the status waits behind the held one.
         let plain = l.start().unwrap();
         assert_eq!(plain.read.request.options, 0);
         assert!(l.start().is_none());
         l.finish(&plain, Ok(()));
         assert_eq!(l.lanes[&0].held.len(), 2);
-        l.submit(0);
+        l.submit(0, false);
         let paged = l.start().unwrap();
         assert_eq!(paged.read.request.options, PAGE_DESTINATION);
         assert!(l.lanes[&0].held.is_empty());
