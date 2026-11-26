@@ -2729,6 +2729,35 @@ fn stale_pages_in(base: usize, copied: &[u64], a: usize, e: usize, written: &[(u
 }
 
 #[cfg(test)]
+mod parts_tests {
+    use super::{PAGE, by_parts};
+
+    #[test]
+    fn runs_are_cut_to_the_parts_written() {
+        const P: usize = PAGE / 16;
+        let at = |page: usize, part: usize| page * PAGE + part * P;
+        // Pages 10 and 11 again (from the middle of 10's part 1 on), 12
+        // never taken, 14 again.
+        let runs = vec![
+            (at(10, 1) + 100, at(12, 0), true),
+            (at(12, 0), at(13, 0), false),
+            (at(14, 0), at(14, 9) + 7, true),
+        ];
+        let pages = [(10, 5), (11, 5), (14, 6)];
+        assert_eq!(by_parts(runs.clone(), &pages, &[u16::MAX; 3]), runs);
+        assert_eq!(
+            by_parts(runs, &pages, &[0b1000_0000_0000_0011, 0b11, 0b10_0000_0000]),
+            [
+                (at(10, 1) + 100, at(10, 2), true),
+                (at(10, 15), at(11, 2), true),
+                (at(12, 0), at(13, 0), false),
+                (at(14, 9), at(14, 9) + 7, true),
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
 mod stale_tests {
     use super::*;
 
@@ -2888,6 +2917,37 @@ pub(crate) fn memory() -> [u64; 6] {
 unsafe impl Send for Shadow {}
 // SAFETY: as above.
 unsafe impl Sync for Shadow {}
+
+/// `runs` (from, to, whether the copy held it before), cut in those of pages
+/// held before (`pages`: page number and asking, in order) to the parts of
+/// each page that were written since (`parts`: a bit for each 4 KiB).
+fn by_parts(runs: Vec<(usize, usize, bool)>, pages: &[(usize, u64)], parts: &[u16]) -> Vec<(usize, usize, bool)> {
+    const PART: usize = PAGE / 16;
+    if parts.iter().all(|&p| p == u16::MAX) {
+        return runs;
+    }
+    let mut out: Vec<(usize, usize, bool)> = Vec::with_capacity(runs.len() + pages.len());
+    let mut pages = pages.iter().zip(parts).peekable();
+    for (from, to, known) in runs {
+        if !known {
+            out.push((from, to, known));
+            continue;
+        }
+        while let Some((&(page, _), &parts)) = pages.next_if(|((page, _), _)| page * PAGE < to) {
+            for k in (0..16).filter(|k| parts >> k & 1 != 0) {
+                let (a, b) = ((page * PAGE + k * PART).max(from), (page * PAGE + (k + 1) * PART).min(to));
+                if a >= b {
+                    continue;
+                }
+                match out.last_mut() {
+                    Some((_, end, true)) if *end == a => *end = b,
+                    _ => out.push((a, b, true)),
+                }
+            }
+        }
+    }
+    out
+}
 
 impl Shadow {
     /// Where the title buffer starts (`crate::census`).
@@ -3855,8 +3915,13 @@ impl Shadow {
             if written.is_empty() {
                 return 0;
             }
-            let mut bytes = 0;
-            let mut run: Option<(usize, usize)> = None;
+            // Pages taken before and written since: in the order of their
+            // runs, so that only the 4 KiB parts the kernel named are taken
+            // again ([`by_parts`]).
+            let mut runs: Vec<(usize, usize, bool)> = Vec::new();
+            let mut again_at: Vec<(usize, u64)> = Vec::new();
+            // (first page, page after the last one so far, taken before).
+            let mut run: Option<(usize, usize, bool)> = None;
             for &(page, write) in written {
                 if page < first_page || page > last {
                     continue;
@@ -3868,26 +3933,35 @@ impl Shadow {
                 if (page * PAGE).max(start) >= from && ((page + 1) * PAGE).min(end) <= to {
                     copied.set(page - base, now);
                 }
+                let again = at != 0;
+                if again {
+                    again_at.push((page, at));
+                }
                 match run {
-                    Some((_, run_end)) if page < run_end => {}
-                    Some((run_start, run_end)) if page == run_end => {
-                        run = Some((run_start, page + 1));
+                    Some((_, end, _)) if page < end => {}
+                    Some((first, end, known)) if page == end && known == again => run = Some((first, page + 1, known)),
+                    Some((first, end, known)) => {
+                        runs.push(((first * PAGE).max(from), (end * PAGE).min(to), known));
+                        run = Some((page, page + 1, again));
                     }
-                    Some((run_start, run_end)) => {
-                        bytes += self.copy((run_start * PAGE).max(from), (run_end * PAGE).min(to));
-                        run = Some((page, page + 1));
-                    }
-                    None => run = Some((page, page + 1)),
+                    None => run = Some((page, page + 1, again)),
                 }
             }
-            if let Some((run_start, run_end)) = run {
-                bytes += self.copy((run_start * PAGE).max(from), (run_end * PAGE).min(to));
+            if let Some((first, end, known)) = run {
+                runs.push(((first * PAGE).max(from), (end * PAGE).min(to), known));
+            }
+            let runs = by_parts(runs, &again_at, &crate::watch::parts_written(&again_at));
+            let mut bytes = 0;
+            for (a, b, _) in runs {
+                bytes += self.copy(a, b);
             }
             return bytes;
         }
 
         let mut writes = written.iter().peekable();
-        let (mut bytes, mut run) = (0, None);
+        let mut runs: Vec<(usize, usize, bool)> = Vec::new();
+        let mut again_at: Vec<(usize, u64)> = Vec::new();
+        let mut run: Option<(usize, bool)> = None;
         for page in first_page..=last {
             while writes.peek().is_some_and(|&&(p, _)| p < page) {
                 writes.next();
@@ -3906,14 +3980,29 @@ impl Shadow {
                 if (page * PAGE).max(start) >= from && ((page + 1) * PAGE).min(end) <= to {
                     copied.set(page - base, now);
                 }
-                run.get_or_insert(page);
-            } else if let Some(first) = run.take() {
-                bytes += self.copy((first * PAGE).max(from), (page * PAGE).min(to));
+                let again = at != 0;
+                if again {
+                    again_at.push((page, at));
+                }
+                if let Some((first, known)) = run
+                    && known != again
+                {
+                    runs.push(((first * PAGE).max(from), (page * PAGE).min(to), known));
+                    run = None;
+                }
+                run.get_or_insert((page, again));
+            } else if let Some((first, known)) = run.take() {
+                runs.push(((first * PAGE).max(from), (page * PAGE).min(to), known));
             }
         }
         // Cut to the range: next to it shaders may be writing the copy.
-        if let Some(first) = run {
-            bytes += self.copy((first * PAGE).max(from), ((last + 1) * PAGE).min(to));
+        if let Some((first, known)) = run {
+            runs.push(((first * PAGE).max(from), ((last + 1) * PAGE).min(to), known));
+        }
+        let runs = by_parts(runs, &again_at, &crate::watch::parts_written(&again_at));
+        let mut bytes = 0;
+        for (a, b, _) in runs {
+            bytes += self.copy(a, b);
         }
         bytes
     }
