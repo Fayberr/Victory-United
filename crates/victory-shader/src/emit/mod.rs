@@ -687,7 +687,6 @@ fn emit_forms(
         // (`ptfx_CS_lightAtlas_Sprite` and `_Trail`). The 32-lane programs' form below, which
         // has no barrier, stays on.
         let wide_on = std::env::var_os("VICTORY_WAVE_WIDE").is_some_and(|v| v == "1");
-<<<<<<< HEAD
         // Where an approximate form below translates the program, the paired form
         // ([`paired`]) is tried first: it runs each console wave as one host wave and gives
         // what the console's 64 lanes compute, at no barrier but the entry's; the approximate
@@ -712,13 +711,10 @@ fn emit_forms(
             }
             approximate
         };
-||||||| 9c184b35
-=======
         // `VICTORY_WAVE_WIDE=last`: the same form, but only for programs that every other
         // form below leaves at 64 lanes (on a 32-lane host those are refused outright), so
         // the programs the approximate forms already take keep their barrier-free form.
         let wide_last = std::env::var_os("VICTORY_WAVE_WIDE").is_some_and(|v| v == "last");
->>>>>>> fork/main
         // exact first: each host wave on its own where that is exact (the idiom, every
         // form; no barriers), then the other exact forms; then approximate
         for exact in [true, false] {

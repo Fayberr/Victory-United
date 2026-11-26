@@ -1524,21 +1524,14 @@ void look() {
         a_level_on_several_ranges(&mut rig);
         a_full_card_keeps_new_levels_waiting(&mut rig);
         a_claim_given_up_is_made_again(&mut rig);
-<<<<<<< HEAD
         a_texture_kept_by_a_list_keeps_its_tiles(&mut rig);
-        if the_view_starts_at_the_first_level_with_tiles(&mut rig).is_none() {
-            eprintln!("the view test's shader or objects could not be made; that part was skipped");
-||||||| 9c184b35
-        if the_view_starts_at_the_first_level_with_tiles(&mut rig).is_none() {
-            eprintln!("the view test's shader or objects could not be made; that part was skipped");
-=======
         for (min_lod, expected) in [(0.0, [32, 0]), (3.0, [64, 64])] {
             let Some(read) = sample_resident_views(&mut rig, min_lod) else {
                 eprintln!("the view test's shader or objects could not be made; that part was skipped");
                 break;
             };
             assert_eq!(read, expected, "resource minimum LOD {min_lod}");
->>>>>>> fork/main
+        }
         }
         rig.step = "the end";
         rig.check("every step done");

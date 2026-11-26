@@ -51,31 +51,14 @@ fn integer_format(format: DXGI_FORMAT) -> bool {
 /// A stream's graphics state, owned (the title's stream lives only for the
 /// creation call). Subobjects the stream leaves out keep D3D12's defaults.
 pub(crate) struct GraphicsState {
-<<<<<<< HEAD
     pub(super) blend: D3D12_BLEND_DESC,
-    pub(super) sample_mask: u32,
-    pub(super) rasterizer: D3D12_RASTERIZER_DESC,
-    pub(super) depth: D3D12_DEPTH_STENCIL_DESC,
-    pub(super) depth_bounds: bool,
-||||||| 9c184b35
-    blend: D3D12_BLEND_DESC,
-    sample_mask: u32,
-    rasterizer: D3D12_RASTERIZER_DESC,
-    depth: D3D12_DEPTH_STENCIL_DESC,
-    depth_bounds: bool,
-=======
-    blend: D3D12_BLEND_DESC,
     /// The title's own blend state, kept when
     /// [`GraphicsState::integer_targets_do_not_blend`] changed `blend`: the
     /// state for other target formats starts from it
     /// ([`GraphicsState::with_formats`]). Not part of
     /// [`GraphicsState::describe`].
-    blend_as_given: Option<D3D12_BLEND_DESC>,
-    sample_mask: u32,
-    rasterizer: D3D12_RASTERIZER_DESC,
-    depth: D3D12_DEPTH_STENCIL_DESC,
-    depth_bounds: bool,
->>>>>>> fork/main
+    pub(super) blend_as_given: Option<D3D12_BLEND_DESC>,
+    pub(super) sample_mask: u32,
     /// Input elements, their names pointing into `names`.
     pub(super) inputs: Vec<D3D12_INPUT_ELEMENT_DESC>,
     pub(super) names: Vec<CString>,
@@ -152,7 +135,16 @@ impl Default for GraphicsState {
 
 #[cfg(test)]
 impl GraphicsState {
-<<<<<<< HEAD
+    /// A state that declares one render target, of format `format` (tests).
+    pub(crate) fn declaring(format: i32) -> Self {
+        let mut g = Self::default();
+        g.targets.NumRenderTargets = 1;
+        g.targets.RTFormats[0] = DXGI_FORMAT(format);
+        g
+    }
+}
+
+impl GraphicsState {
     /// The blend description for the host: blending off for integer render
     /// targets. The console's blender passes integer targets through; D3D12
     /// calls blending one an error (debug layer message 676, "The render
@@ -208,58 +200,6 @@ fn host_blend(blend: &D3D12_BLEND_DESC, targets: &D3D12_RT_FORMAT_ARRAY) -> D3D1
     host
 }
 
-impl GraphicsState {
-    /// Whether the draws are a pass over the screen: no vertex input, no
-    /// depth or stencil, a target. Such passes fill tables once; their shaders
-    /// are few. (After Belobug/VIctory-Belobug-AMD 18e57db8.)
-    pub(crate) fn screen_pass(&self) -> bool {
-        self.inputs.is_empty()
-            && (self.depth_format == DXGI_FORMAT_UNKNOWN
-                || !self.depth.DepthEnable.as_bool() && !self.depth.StencilEnable.as_bool())
-            && self.targets.NumRenderTargets > 0
-            && self.topology == D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE
-    }
-
-||||||| 9c184b35
-=======
-    /// A state that declares one render target, of format `format` (tests).
-    pub(crate) fn declaring(format: i32) -> Self {
-        let mut g = Self::default();
-        g.targets.NumRenderTargets = 1;
-        g.targets.RTFormats[0] = DXGI_FORMAT(format);
-        g
-    }
-}
-
-/// Whether a render target of `format` holds integers (`_UINT`, `_SINT`):
-/// the host does not blend into those.
-fn integer_target(format: DXGI_FORMAT) -> bool {
-    matches!(
-        format,
-        DXGI_FORMAT_R32G32B32A32_UINT
-            | DXGI_FORMAT_R32G32B32A32_SINT
-            | DXGI_FORMAT_R32G32B32_UINT
-            | DXGI_FORMAT_R32G32B32_SINT
-            | DXGI_FORMAT_R16G16B16A16_UINT
-            | DXGI_FORMAT_R16G16B16A16_SINT
-            | DXGI_FORMAT_R32G32_UINT
-            | DXGI_FORMAT_R32G32_SINT
-            | DXGI_FORMAT_R10G10B10A2_UINT
-            | DXGI_FORMAT_R8G8B8A8_UINT
-            | DXGI_FORMAT_R8G8B8A8_SINT
-            | DXGI_FORMAT_R16G16_UINT
-            | DXGI_FORMAT_R16G16_SINT
-            | DXGI_FORMAT_R32_UINT
-            | DXGI_FORMAT_R32_SINT
-            | DXGI_FORMAT_R8G8_UINT
-            | DXGI_FORMAT_R8G8_SINT
-            | DXGI_FORMAT_R16_UINT
-            | DXGI_FORMAT_R16_SINT
-            | DXGI_FORMAT_R8_UINT
-            | DXGI_FORMAT_R8_SINT
-    )
-}
-
 /// The formats of what a draw draws into, as the host has them: the eight
 /// render targets (0 where there is none), then depth (0 for none).
 pub(crate) type TargetFormats = [u32; 9];
@@ -299,6 +239,17 @@ pub(crate) fn formats_for(declared: &TargetFormats, bound: &TargetFormats) -> Ta
 }
 
 impl GraphicsState {
+    /// Whether the draws are a pass over the screen: no vertex input, no
+    /// depth or stencil, a target. Such passes fill tables once; their shaders
+    /// are few. (After Belobug/VIctory-Belobug-AMD 18e57db8.)
+    pub(crate) fn screen_pass(&self) -> bool {
+        self.inputs.is_empty()
+            && (self.depth_format == DXGI_FORMAT_UNKNOWN
+                || !self.depth.DepthEnable.as_bool() && !self.depth.StencilEnable.as_bool())
+            && self.targets.NumRenderTargets > 0
+            && self.topology == D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE
+    }
+
     /// The formats the state declares ([`TargetFormats`]): nothing past its
     /// count of render targets.
     pub(crate) fn formats(&self) -> TargetFormats {
@@ -351,6 +302,7 @@ impl GraphicsState {
             targets,
             depth_format: self.depth_format,
             samples: self.samples,
+            views: self.views.clone(),
         };
         state.integer_targets_do_not_blend();
         state
@@ -372,7 +324,7 @@ impl GraphicsState {
         // The state of target `i` as the host reads it.
         let of = |i: usize| if independent { i } else { 0 };
         let wrong: Vec<usize> = (0..n)
-            .filter(|&i| integer_target(self.targets.RTFormats[i]) && self.blend.RenderTarget[of(i)].BlendEnable.as_bool())
+            .filter(|&i| integer_format(self.targets.RTFormats[i]) && self.blend.RenderTarget[of(i)].BlendEnable.as_bool())
             .collect();
         if wrong.is_empty() {
             return false;
@@ -393,7 +345,6 @@ impl GraphicsState {
         true
     }
 
->>>>>>> fork/main
     /// Takes in one subobject of a stream: its type, then its data at +4
     /// (+8 for those holding pointers).
     ///

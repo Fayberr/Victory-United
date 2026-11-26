@@ -856,15 +856,6 @@ pub(crate) fn log_removal_context() {
     if !(trail_on() || dred_any()) || SAID.swap(true, Ordering::Relaxed) {
         return;
     }
-<<<<<<< HEAD
-    tracing::error!("when the host device went: {}", removal_context());
-    if dred_any() {
-        let data = host().map(|h| h.removal_data(&[])).unwrap_or_default();
-        tracing::error!("device-removed data{}", if data.is_empty() { "; none" } else { &data });
-    }
-||||||| 9c184b35
-    tracing::error!("when the host device went: {}", removal_context());
-=======
     if trail_on() {
         tracing::error!("when the host device went: {}", removal_context());
     }
@@ -892,7 +883,6 @@ pub(crate) fn log_removal_context() {
             host.removal_data_of(&[], false)
         );
     }
->>>>>>> fork/main
 }
 
 /// Whether [`Host::removal_data`] was asked for (once is enough for
@@ -1211,49 +1201,24 @@ fn create() -> windows::core::Result<Host> {
         }
         // Diagnostics: device-removed data (the command that faulted, the
         // faulting address), read when the device is removed.
-<<<<<<< HEAD
-        if dred_any() {
-||||||| 9c184b35
-        if dred_on() {
-=======
         if dred_any() {
             let mode = dred_mode();
->>>>>>> fork/main
             let mut dred: Option<ID3D12DeviceRemovedExtendedDataSettings> = None;
             if D3D12GetDebugInterface(&mut dred).is_ok()
                 && let Some(dred) = dred
             {
-<<<<<<< HEAD
-                if dred_on() || dred_light() {
-                    dred.SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
-                }
-||||||| 9c184b35
-                dred.SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
-=======
                 // `faults`: no breadcrumbs (the runtime then adds nothing
                 // to the commands), only the faulting address.
                 if mode != Dred::Faults {
                     dred.SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
                 }
->>>>>>> fork/main
                 dred.SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
-<<<<<<< HEAD
-                tracing::info!(
-                    breadcrumbs = dred_on() || dred_light(),
-                    markers = dred_on(),
-                    "crash tracing on (device-removed data)"
-                );
-            } else {
-                tracing::warn!("crash tracing asked for and not there: no device-removed data settings");
-||||||| 9c184b35
-=======
                 tracing::info!("device-removed data on: {}", mode.text());
             } else {
                 tracing::warn!(
                     "device-removed data was asked for ({}) and the runtime gave no settings for it: none will be kept",
                     mode.text()
                 );
->>>>>>> fork/main
             }
         }
         let mut device: Option<ID3D12Device> = None;
@@ -1406,7 +1371,6 @@ pub(crate) fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
 
 #[cfg(test)]
 mod tests {
-<<<<<<< HEAD
     /// The steps whose time goes into the preparing's sums read the clock;
     /// the title's work run at submission only with diagnostics, which sum
     /// it. (Refreshes, shader writes, tile mappings and textures, which need
@@ -1485,8 +1449,7 @@ mod tests {
             VirtualFree(at.cast(), 0, MEM_RELEASE);
         }
     }
-||||||| 9c184b35
-=======
+
     /// Run once with VICTORY_CARD_SYNC_BATCH=0 and once with it set to 1.
     #[test]
     #[ignore = "requires a D3D12 adapter and the card hash pipeline; run alone"]
@@ -1570,7 +1533,6 @@ mod tests {
         unsafe { VirtualFree(allocation, 0, MEM_RELEASE); }
     }
 
->>>>>>> fork/main
     #[test]
     fn sparse_copies_preserve_islands_and_observe_remaps() {
         use windows_sys::Win32::System::Memory::*;
@@ -2231,26 +2193,6 @@ fn record_twin_copy(
 
 /// The forms of device-removed data (`VICTORY_D3D12_DRED`, diagnostics
 /// builds).
-<<<<<<< HEAD
-pub(crate) fn dred_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| cfg!(feature = "diagnostics") && crate::switch::on("VICTORY_D3D12_DRED") && !dred_faults() && !dred_light())
-}
-
-/// Breadcrumbs and the faulting address, but no markers and no texts
-/// (`VICTORY_D3D12_DRED=light`): which list a removed device stopped in, at
-/// which of its commands, and the pipelines the list binds; formatting a text
-/// for every command is what makes the whole of it slow.
-pub(crate) fn dred_light() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        cfg!(feature = "diagnostics") && std::env::var_os("VICTORY_D3D12_DRED").is_some_and(|v| v == "light")
-||||||| 9c184b35
-pub(crate) fn dred_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        cfg!(feature = "diagnostics") && std::env::var_os("VICTORY_D3D12_DRED").is_some()
-=======
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Dred {
     /// Not set.
@@ -2295,14 +2237,31 @@ pub(crate) fn dred_mode() -> Dred {
             // Any other value, as before the two above were known.
             Some(_) => Dred::Full,
         }
->>>>>>> fork/main
     })
 }
 
-<<<<<<< HEAD
-/// Any of the three.
+/// Whether device-removed data is on in its full form (`VICTORY_D3D12_DRED`
+/// set to anything but `light` or `faults`, diagnostics builds): the one
+/// in which every noted command gets a marker and a text
+/// (`HostList::note_op`).
+pub(crate) fn dred_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| dred_mode() == Dred::Full)
+}
+
+/// Whether device-removed data is on in any form ([`Dred`]).
 pub(crate) fn dred_any() -> bool {
-    dred_on() || dred_light() || dred_faults()
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| dred_mode() != Dred::Off)
+}
+
+/// Breadcrumbs and the faulting address, but no markers and no texts
+/// (`VICTORY_D3D12_DRED=light`): which list a removed device stopped in, at
+/// which of its commands, and the pipelines the list binds; formatting a text
+/// for every command is what makes the whole of it slow.
+pub(crate) fn dred_light() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| dred_mode() == Dred::Light)
 }
 
 /// Whether only the faulting address of a removed device is kept
@@ -2310,10 +2269,22 @@ pub(crate) fn dred_any() -> bool {
 /// it costs next to nothing and can stay on while the title is played.
 pub(crate) fn dred_faults() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| dred_mode() == Dred::Faults)
+}
+
+/// Whether objects made while frames are drawn are named too
+/// ([`name_frame`]): always in the full form (as before); in `light` and
+/// `faults` unless `VICTORY_D3D12_DRED_FRAME_NAMES=0`.
+fn frame_names() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
-        cfg!(feature = "diagnostics") && std::env::var_os("VICTORY_D3D12_DRED").is_some_and(|v| v == "faults")
+        dred_on() || (dred_any() && std::env::var_os("VICTORY_D3D12_DRED_FRAME_NAMES").is_none_or(|v| v != "0"))
     })
 }
+
+/// Host objects named since the start ([`name`]), and those of them made
+/// while frames are drawn ([`name_frame`]): each is one `SetName` call.
+static NAMED: [std::sync::atomic::AtomicU64; 2] = [const { std::sync::atomic::AtomicU64::new(0) }; 2];
 
 /// The lists alive while device-removed data is on, by the number their name
 /// ends in, with their marker texts and the pipelines they bind: a report made
@@ -2340,38 +2311,6 @@ fn list_number(name: &str) -> Option<u32> {
     (rest.len() == digits.len() || rest[digits.len()..].starts_with(" (")).then(|| digits.parse().ok()).flatten()
 }
 
-||||||| 9c184b35
-=======
-/// Whether device-removed data is on in its full form (`VICTORY_D3D12_DRED`
-/// set to anything but `light` or `faults`, diagnostics builds): the one
-/// in which every noted command gets a marker and a text
-/// (`HostList::note_op`).
-pub(crate) fn dred_on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| dred_mode() == Dred::Full)
-}
-
-/// Whether device-removed data is on in any form ([`Dred`]).
-pub(crate) fn dred_any() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| dred_mode() != Dred::Off)
-}
-
-/// Whether objects made while frames are drawn are named too
-/// ([`name_frame`]): always in the full form (as before); in `light` and
-/// `faults` unless `VICTORY_D3D12_DRED_FRAME_NAMES=0`.
-fn frame_names() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        dred_on() || (dred_any() && std::env::var_os("VICTORY_D3D12_DRED_FRAME_NAMES").is_none_or(|v| v != "0"))
-    })
-}
-
-/// Host objects named since the start ([`name`]), and those of them made
-/// while frames are drawn ([`name_frame`]): each is one `SetName` call.
-static NAMED: [std::sync::atomic::AtomicU64; 2] = [const { std::sync::atomic::AtomicU64::new(0) }; 2];
-
->>>>>>> fork/main
 /// Indirect mesh dispatches since the last frame line: the largest group
 /// count a record asked for, and the groups asked in all (from the lists'
 /// budget buffers, a run late).
@@ -2405,17 +2344,10 @@ fn timing() -> bool {
 }
 
 /// Names a host object for the device-removed report, which names the
-<<<<<<< HEAD
-/// allocations a page fault hit (only with device-removed data on), or for
-/// the frame recorder (`VICTORY_RECORD`).
-||||||| 9c184b35
-/// allocations a page fault hit (only with device-removed data on).
-=======
 /// allocations a page fault hit (only with device-removed data on, in any
-/// of its forms: the names are what a faulting address is read by).
->>>>>>> fork/main
+/// of its forms: the names are what a faulting address is read by), or for
+/// the frame recorder (`VICTORY_RECORD`).
 pub(crate) fn name(object: &impl Interface, text: impl FnOnce() -> String) {
-<<<<<<< HEAD
     #[cfg(feature = "diagnostics")]
     if crate::book::on()
         && let Ok(resource) = object.cast::<ID3D12Resource>()
@@ -2441,11 +2373,6 @@ fn name_it(object: &impl Interface, text: impl FnOnce() -> String) {
         return;
     }
     if dred_any()
-||||||| 9c184b35
-    if dred_on()
-=======
-    if dred_any()
->>>>>>> fork/main
         && let Ok(object) = object.cast::<ID3D12Object>()
     {
         // Counted, so that a log says what naming costs: one text and one
@@ -2875,7 +2802,6 @@ void main(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID) {
 }
 "#;
 
-<<<<<<< HEAD
 /// Dispatch [`CARD_COMPARE`] for `pieces` pieces (one thread group per piece),
 /// chunking at D3D12's 65,535-group per-dimension limit if ever exceeded.
 /// `hashed`: the bytes of the copy the shader walks (a copy whose hashes
@@ -2909,8 +2835,6 @@ unsafe fn dispatch_card_compare(
     }
 }
 
-||||||| 9c184b35
-=======
 /// [`CARD_COMPARE`] with a group of 64 threads to a piece
 /// (`VICTORY_CARD_HASH_WIDE=1`; the thread a piece unless asked). After fork
 /// pull request #1014 by martindevbr.
@@ -3005,7 +2929,6 @@ pub(crate) fn card_compare_groups(pieces: u32) -> u32 {
     if card_hash_wide() { pieces } else { pieces.div_ceil(64) }
 }
 
->>>>>>> fork/main
 /// Whether the pieces a flight's compare flags come down to the PC inside
 /// the flight itself (`VICTORY_CARD_FETCH_INFLIGHT=1`; off by default, and
 /// only with [`relay`]).
@@ -3366,7 +3289,6 @@ struct Deferred {
     bound: crate::fx::Set<usize>,
     /// Buffer ranges refreshed since the last title copy (host copy,
     /// address, bytes): refreshing them again would find the same bytes.
-<<<<<<< HEAD
     refreshed: crate::fx::Set<(usize, usize, usize)>,
     /// Upload memory filled from title memory since the last title write
     /// (source, bytes): its host address, which a second fill would find
@@ -3376,29 +3298,10 @@ struct Deferred {
     /// refresh on the same host copy, avoiding thousands of duplicate
     /// `Step::GpuWrite` entries per frame.
     gpu_written: crate::fx::Set<(usize, usize, usize)>,
-||||||| 9c184b35
-    refreshed: std::collections::HashSet<(usize, usize, usize)>,
-=======
-    refreshed: std::collections::HashSet<(usize, usize, usize)>,
-    /// With [`list_reuse`]: the host pipelines the list has kept, by
-    /// address ([`HostList::first_bind`]).
-    bound: std::collections::HashSet<usize>,
-    /// With [`list_reuse`]: upload memory filled from title memory since
-    /// the last title copy (source, bytes): its host GPU address, which a
-    /// second fill would find holding the same bytes
-    /// ([`HostList::fill_scratch`]).
-    filled: std::collections::HashMap<(usize, usize), u64>,
->>>>>>> fork/main
     /// Textures whose contents the list brings up to date.
-<<<<<<< HEAD
     textures: crate::fx::Set<usize>,
-||||||| 9c184b35
-    textures: std::collections::HashSet<usize>,
-=======
-    textures: std::collections::HashSet<usize>,
     /// Last GPU source copied into each aliased host texture in this list.
     texture_aliases: std::collections::HashMap<usize, usize>,
->>>>>>> fork/main
     /// Bottom-of-pipe writes, done once the list has run: address, what,
     /// bytes.
     writes: Vec<(usize, crate::queue::Written, usize)>,
@@ -5007,7 +4910,6 @@ fn stale_under_flights(runs: &[&HostList]) -> Vec<(std::sync::Arc<crate::shadow:
     // Per copy, the span of what is refreshed (a flush brings that much
     // up to date at most).
     let mut spans: Vec<(Arc<crate::shadow::Shadow>, usize, usize)> = Vec::new();
-<<<<<<< HEAD
     // Where each copy is in it, if shaders may be writing it (none begins to
     // while this runs): a frame has 20,000 refreshes of some 4,500 copies.
     let mut places: ByCopy<Option<usize>> = ByCopy::default();
@@ -5023,61 +4925,6 @@ fn stale_under_flights(runs: &[&HostList]) -> Vec<(std::sync::Arc<crate::shadow:
                 if let Some(i) = *place {
                     let s = &mut spans[i];
                     (s.1, s.2) = (s.1.min(*address), s.2.max(*address + *len));
-||||||| 9c184b35
-    for list in runs {
-        for step in &list.deferred().copies {
-            if let Step::Refresh(shadow, address, len) = step
-                && shadow.writes_pending()
-            {
-                match spans.iter_mut().find(|s| Arc::ptr_eq(&s.0, shadow)) {
-                    Some(s) => (s.1, s.2) = (s.1.min(*address), s.2.max(*address + *len)),
-                    None => spans.push((shadow.clone(), *address, *address + *len)),
-=======
-    if step_index() {
-        // By copy (its address): its place in `spans`, or that no shader's
-        // writes are pending on it. Asked once a copy, not once a step
-        // (20,000 to 43,000 refresh steps a frame, each a lock and a search
-        // of `spans`); steps of one copy mostly follow one another, so the
-        // last answer is tried first. Only this thread adds pending writes,
-        // after this; a landing may take a copy's away meanwhile, and then
-        // its span is as if the landing came before or after all its
-        // steps, and the merge below finds nothing pending.
-        let mut known: std::collections::HashMap<usize, Option<usize>> = std::collections::HashMap::new();
-        let mut last: (usize, Option<usize>) = (0, None);
-        for list in runs {
-            for step in &list.deferred().copies {
-                if let Step::Refresh(shadow, address, len) = step {
-                    let key = Arc::as_ptr(shadow) as usize;
-                    let at = if last.0 == key {
-                        last.1
-                    } else {
-                        let at = *known.entry(key).or_insert_with(|| {
-                            shadow.writes_pending().then(|| {
-                                spans.push((shadow.clone(), usize::MAX, 0));
-                                spans.len() - 1
-                            })
-                        });
-                        last = (key, at);
-                        at
-                    };
-                    if let Some(at) = at {
-                        let s = &mut spans[at];
-                        (s.1, s.2) = (s.1.min(*address), s.2.max(*address + *len));
-                    }
-                }
-            }
-        }
-    } else {
-        for list in runs {
-            for step in &list.deferred().copies {
-                if let Step::Refresh(shadow, address, len) = step
-                    && shadow.writes_pending()
-                {
-                    match spans.iter_mut().find(|s| Arc::ptr_eq(&s.0, shadow)) {
-                        Some(s) => (s.1, s.2) = (s.1.min(*address), s.2.max(*address + *len)),
-                        None => spans.push((shadow.clone(), *address, *address + *len)),
-                    }
->>>>>>> fork/main
                 }
             }
         }
