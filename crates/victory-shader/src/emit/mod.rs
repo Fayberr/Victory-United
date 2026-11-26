@@ -86,14 +86,10 @@
 mod bitcode;
 mod container;
 #[cfg(all(test, windows))]
-<<<<<<< HEAD
-mod descriptor_tests;
-#[cfg(all(test, windows))]
-||||||| a26859fc
-=======
 mod cube_lod_tests;
 #[cfg(all(test, windows))]
->>>>>>> avatar/main
+mod descriptor_tests;
+#[cfg(all(test, windows))]
 mod diff_tests;
 #[cfg(all(test, windows))]
 mod image_dim_tests;
@@ -136,29 +132,14 @@ use crate::{ShaderError, io, ir, resource, structure};
 pub use bitcode::census;
 pub use link::{link_mesh, mesh_fits};
 pub use sampler::StaticSampler;
-<<<<<<< HEAD
-pub use lower::{host_max_wave, set_host_max_wave};
-||||||| a26859fc
-pub use lower::set_host_max_wave;
-=======
-pub use lower::{host_settings, set_host_max_wave, set_host_rdna};
->>>>>>> avatar/main
+pub use lower::{host_max_wave, host_settings, set_host_max_wave, set_host_rdna};
 pub use rect::rect_list_gs;
 pub use shader::{
-<<<<<<< HEAD
-    MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-    SLOT_STRIDES_COUNT, SLOT_VIEWS, SLOT_VIEWS_COUNT, SLOT_VIEWS_RECORD_BYTES, USER_DATA_SPACE,
-    USER_GROUP_BASE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
-    set_view_heap_limit, view_heap_limit,
-||||||| a26859fc
-    MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-    SLOT_STRIDES_COUNT, USER_DATA_SPACE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
-    set_view_heap_limit, view_heap_limit,
-=======
     MEMORY_FAULTS, MEMORY_PAGES, MEMORY_READ_ONLY, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-    SLOT_STRIDES_COUNT, USER_DATA_SPACE, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS_X, USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
+    SLOT_STRIDES_COUNT, SLOT_VIEWS, SLOT_VIEWS_COUNT, SLOT_VIEWS_RECORD_BYTES, USER_DATA_SPACE,
+    VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS_X, USER_GROUP_BASE,
+    USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
     raw_views, set_raw_views, set_view_heap_limit, view_heap_limit,
->>>>>>> avatar/main
 };
 
 /// The loop limit without an override: 2^20.
@@ -1069,7 +1050,6 @@ fn emit_program(
             _ => 0,
         };
     }
-<<<<<<< HEAD
     if native.stage == HwStage::Ms
         && let (Some(psv), Some(osg)) = (c.part(FourCC::PSV0), c.part(FourCC::OSG1))
         && let Some(modes) = container::mesh_output_modes(psv.data, osg.data, &outputs)
@@ -1078,15 +1058,12 @@ fn emit_program(
             output.interp = mode;
         }
     }
-||||||| a26859fc
-=======
     // (DexNom/VIctory 5f4c3df4.)
     if native.stage == HwStage::Vs
         && let Some(psv) = c.part(FourCC::PSV0)
     {
         vertex_output_interpolation(psv.data, &mut outputs)?;
     }
->>>>>>> avatar/main
     // With a conservative depth output (SV_DepthLessEqual, GreaterEqual) DXIL
     // wants the position centroid (or per sample), as DXC declares it then.
     if pixel && outputs.iter().any(|e| matches!(e.kind, 18 | 19)) {
@@ -1145,7 +1122,6 @@ fn emit_program(
     Ok((shader, wave_size))
 }
 
-<<<<<<< HEAD
 /// Decodes immediate console sampler words into D3D12 static sampler
 /// descriptions, setting the comparison filter reduction mode (`0x80`) on
 /// entries used for comparison sampling.
@@ -1165,8 +1141,6 @@ fn static_samplers(samplers: &[[u32; 4]], cmp: &[bool]) -> Vec<StaticSampler> {
         .collect()
 }
 
-||||||| a26859fc
-=======
 /// The title's vertex output interpolation lives in PSV0. A float packed
 /// beside an integer can be explicitly constant, as can a float on its own.
 /// OSG1 supplies the physical rows and columns used to match both tables.
@@ -1228,7 +1202,6 @@ fn vertex_output_interpolation(
     Ok(())
 }
 
->>>>>>> avatar/main
 /// The rows of an `ISG1`/`OSG1` part.
 fn signature(part: &[u8]) -> Result<Vec<container::SigElement>, ShaderError> {
     use crate::dxbc::u32_at;
@@ -1625,187 +1598,6 @@ mod tests {
         assert_ne!(features & 0x200, 0, "SFI0 {features:#x}: no StencilRef");
     }
 
-<<<<<<< HEAD
-    /// Triangle (0, 1, 2), each corner's 9-bit index in its 10-bit field.
-    const TRIANGLE: u32 = 1 << 10 | 2 << 20;
-    /// The edge flags of the three corners (bits 9, 19 and 29).
-    const EDGE_FLAGS: u32 = 1 << 9 | 1 << 19 | 1 << 29;
-    /// The culling bit.
-    const CULL: u32 = 1 << 31;
-
-    /// A one-wave (32-lane) triangle mesh program whose lanes all export
-    /// primitive `prim` and, as vertex `lane`, the position
-    /// (lane & 1 ? 3 : -1, lane & 2 ? 3 : -1, 0.5, 1): triangle (0, 1, 2)
-    /// covers the whole target.
-    fn triangle_mesh(prim: u32) -> Result<HostShader, ShaderError> {
-        let words = [
-            0xD765_0001u32, // v_mbcnt_lo_u32_b32 v1, -1, 0
-            0x0001_00C1,
-            0x3604_0281, // v_and_b32 v2, 1, v1
-            0x3606_0282, // v_and_b32 v3, 2, v1
-            0x7E04_0D02, // v_cvt_f32_u32 v2, v2
-            0x7E06_0D03, // v_cvt_f32_u32 v3, v3
-            0x1008_04F6, // v_mul_f32 v4, 4.0, v2
-            0x0608_08F3, // v_add_f32 v4, -1.0, v4
-            0x100A_06F4, // v_mul_f32 v5, 2.0, v3
-            0x060A_0AF3, // v_add_f32 v5, -1.0, v5
-            0x7E0C_02F0, // v_mov_b32 v6, 0.5
-            0x7E0E_02F2, // v_mov_b32 v7, 1.0
-            0x7E12_02FF, // v_mov_b32 v9, prim
-            prim,
-            0xF800_0941, // exp prim v9, off, off, off done
-            0x0000_0009,
-            0xF800_08CF, // exp pos0 v4, v5, v6, v7 done
-            0x0706_0504,
-            0xBF81_0000, // s_endpgm
-        ];
-        let native = NativeProgram {
-            stage: HwStage::Ms,
-            wave64: false,
-            vgprs: 10,
-            layout: vec![],
-            used: vec![],
-            io: StageIo::Ms(crate::native::MeshIo {
-                outputs: vec![],
-                clip_cntl: 0,
-                threads: 32,
-                max_vertices: 32,
-                max_primitives: 32,
-                topology: 2,
-                lds_bytes: 0,
-            }),
-            code: words.iter().flat_map(|w| w.to_le_bytes()).collect(),
-        };
-        let position = SigElement {
-            name: "SV_Position".into(),
-            index: 0,
-            kind: 3,
-            comp: 9,
-            interp: 0,
-            row: Some(0),
-            col: 0,
-            cols: 4,
-            usage: 0xF,
-            half: false,
-        };
-        let osg1 = container::signature(&[position], false);
-        let bytes = crate::dxbc::build(&[(FourCC::OSG1, &osg1)]);
-        let c = Container::parse(&bytes)?;
-        let p = ir::build(&native.patched_code(), native.wave64, native.vgprs)?;
-        let st = structure::structure(&p)?;
-        let res = resource::track(&p, &native.layout, native.stage, Some(&st))?;
-        let io = io::raise(&p, &native)?;
-        emit(&c, &native, &p, &st, &io, &res)
-    }
-
-    /// A primitive export's corners are 9-bit indices: the edge flag above
-    /// each (bits 9, 19, 29) is no part of it. Masking ten bits made a
-    /// flagged corner index 512 or more, past any mesh program's vertices
-    /// (the draw test below shows the triangle). Flagged, unflagged and
-    /// culled exports translate, and dxil.dll, where there is one, takes
-    /// each module.
-    #[test]
-    fn primitive_export_indices_drop_the_edge_flags() {
-        #[cfg(windows)]
-        let mut validator = super::validator::Validator::load(
-            super::validator::Validator::default_path().as_deref(),
-        )
-        .ok();
-        for prim in [
-            TRIANGLE,
-            TRIANGLE | EDGE_FLAGS,
-            TRIANGLE | EDGE_FLAGS | CULL,
-        ] {
-            let ms = triangle_mesh(prim).unwrap_or_else(|e| panic!("{prim:#x}: {e}"));
-            #[cfg(windows)]
-            if let Some(v) = validator.as_mut() {
-                v.validate(&mut ms.dxil.clone())
-                    .unwrap_or_else(|e| panic!("{prim:#x}: {e}"));
-            }
-        }
-    }
-
-    /// A triangle mesh program on the host GPU and on WARP (where they have
-    /// mesh shaders): triangle (0, 1, 2) covers the target with its corners'
-    /// edge flags set as without them; with the culling bit, nothing is lit.
-    #[test]
-    #[cfg(windows)]
-    fn edge_flagged_triangles_draw_as_unflagged_ones() {
-        use super::host::{Draw, Host, Root};
-        use windows::Win32::Graphics::Direct3D12::{
-            D3D12_FEATURE_D3D12_OPTIONS7, D3D12_FEATURE_DATA_D3D12_OPTIONS7,
-            D3D12_MESH_SHADER_TIER_NOT_SUPPORTED, D3D12_SHADER_VISIBILITY_MESH,
-        };
-        let _one = super::valu_tests::ONE_AT_A_TIME
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let ps = constant_color();
-        let mut ran = 0;
-        for (label, warp) in [("hardware", false), ("warp", true)] {
-            let Ok(host) = Host::new(warp) else {
-                eprintln!("no SM 6.6 {label} device; skipped");
-                continue;
-            };
-            let mut options = D3D12_FEATURE_DATA_D3D12_OPTIONS7::default();
-            // SAFETY: the query writes the structure of the given size.
-            let queried = unsafe {
-                host.device.CheckFeatureSupport(
-                    D3D12_FEATURE_D3D12_OPTIONS7,
-                    (&raw mut options).cast(),
-                    size_of_val(&options) as u32,
-                )
-            };
-            if queried.is_err() || options.MeshShaderTier == D3D12_MESH_SHADER_TIER_NOT_SUPPORTED {
-                eprintln!("no mesh shaders on the {label} device; skipped");
-                continue;
-            }
-            for (prim, culled) in [
-                (TRIANGLE, false),
-                (TRIANGLE | EDGE_FLAGS, false),
-                (TRIANGLE | EDGE_FLAGS | CULL, true),
-            ] {
-                let ms = triangle_mesh(prim).unwrap();
-                let root = host
-                    .root_signature_for(&[(&ms, D3D12_SHADER_VISIBILITY_MESH)])
-                    .unwrap();
-                let pso = host
-                    .mesh_pipeline_with(&root, &ms.dxil, &ps)
-                    .unwrap_or_else(|e| panic!("{label}: mesh pipeline: {e}"));
-                let texels = host
-                    .draw(
-                        &root,
-                        &pso,
-                        &Draw {
-                            roots: vec![(0, Root::Constants(vec![0]))],
-                            textures: &[],
-                            samplers: &[],
-                            vertices: &[],
-                            stride: 0,
-                            size: (16, 16),
-                            mesh_groups: 1,
-                        },
-                    )
-                    .unwrap_or_else(|e| panic!("{label}: draw: {e}"));
-                let lit = texels.iter().filter(|t| t[3] != 0.0).count();
-                if culled {
-                    assert_eq!(lit, 0, "{label}, {prim:#x}: a culled triangle lit texels");
-                    continue;
-                }
-                assert!(
-                    texels.iter().all(|t| *t == [1.0, 0.5, 0.25, 1.0]),
-                    "{label}, {prim:#x}: {lit} of 256 texels lit"
-                );
-            }
-            eprintln!("{label}: edge-flagged triangles drew");
-            ran += 1;
-        }
-        if ran == 0 {
-            eprintln!("no device with mesh shaders; skipped");
-        }
-    }
-
-||||||| a26859fc
-=======
     /// A pixel program with an ordered section, as the console compiler
     /// makes one of rasterizer ordered views (the title's hair cards keep
     /// their nearest layers that way): the wait for overlapped waves is
@@ -2026,7 +1818,6 @@ mod tests {
         }
     }
 
->>>>>>> avatar/main
     /// A wave64 compute program that writes only EXEC's high dword
     /// (`s_mov_b32 exec_hi, 0`) before a vector instruction. The new mask was
     /// opaque and keyed by the unchanged low dword, so building its lane bit
@@ -2267,7 +2058,6 @@ mod tests {
         assert_eq!(c[4..20], ours[..], "our hash differs from the validator's");
     }
 
-<<<<<<< HEAD
     #[test]
     fn comparison_static_sampler_replaces_min_max_reduction_bits() {
         let standard = [0x3006, 0x00FF_F000, 0x1450_0000, 0x4000_0000];
@@ -2421,8 +2211,6 @@ mod tests {
         assert_eq!(decoded[64].filter, 0x94);
     }
 
-||||||| a26859fc
-=======
     /// A pixel program of `words` with no user data.
     fn emit_native(words: &[u32], input_addr: u32) -> NativeProgram {
         NativeProgram {
@@ -2746,7 +2534,6 @@ mod tests {
         }
     }
 
->>>>>>> avatar/main
     /// A pixel shader interpolating at sample positions (PERSP_SAMPLE
     /// barycentrics, `SPI_PS_INPUT_ADDR` bit 0) runs at sample frequency:
     /// DXC's PSV0 says so in PSInfo.SampleFrequency (runtime info byte 1)
@@ -3320,7 +3107,6 @@ mod barycentric_tests {
     /// Translates a pixel program with the input VGPRs `input_addr`
     /// enables and one float4 TEXCOORD0 attribute (attr 0, row 0).
     fn pixel(words: &[u32], input_addr: u32) -> Result<HostShader, ShaderError> {
-<<<<<<< HEAD
         pixel_of(words, input_addr, false, Vec::new(), Vec::new())
     }
 
@@ -3333,13 +3119,33 @@ mod barycentric_tests {
         layout: Vec<RootParam>,
         used: Vec<UsedResource>,
     ) -> Result<HostShader, ShaderError> {
-||||||| a26859fc
-=======
-        pixel_with_inputs(words, input_addr, &[element("TEXCOORD", 0, 0)])
+        pixel_impl(
+            words,
+            input_addr,
+            fp16,
+            &[element("TEXCOORD", 0, 0)],
+            layout,
+            used,
+        )
     }
 
-    fn pixel_with_inputs(words: &[u32], input_addr: u32, inputs: &[container::SigElement]) -> Result<HostShader, ShaderError> {
->>>>>>> avatar/main
+    /// [`pixel`] with the container's input signature `inputs`.
+    fn pixel_with_inputs(
+        words: &[u32],
+        input_addr: u32,
+        inputs: &[container::SigElement],
+    ) -> Result<HostShader, ShaderError> {
+        pixel_impl(words, input_addr, false, inputs, Vec::new(), Vec::new())
+    }
+
+    fn pixel_impl(
+        words: &[u32],
+        input_addr: u32,
+        fp16: bool,
+        inputs: &[container::SigElement],
+        layout: Vec<RootParam>,
+        used: Vec<UsedResource>,
+    ) -> Result<HostShader, ShaderError> {
         let native = NativeProgram {
             stage: HwStage::Ps,
             wave64: false,
