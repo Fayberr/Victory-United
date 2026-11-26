@@ -61,9 +61,16 @@ extern "system" fn text_entry_async(
     max_length: u32,
 ) -> HRESULT {
     let [title, description, default] = [title, description, default].map(|t| text(t).unwrap_or_default());
+<<<<<<< HEAD
     let max_length = max_length_for(scope, max_length);
     let password = scope == PASSWORD;
     tracing::info!(title, description, max_length, password, "text entry");
+||||||| a26859fc
+    tracing::info!(title, description, max_length, "text entry");
+=======
+    let max_length = max_length_for(scope, max_length);
+    tracing::info!(title, description, max_length, "text entry");
+>>>>>>> avatar/main
     xasync::pending_with(block, (&raw const TEXT).cast(), move || {
         match ask(&title, &description, &default, max_length, password) {
             Some(typed) => {
@@ -370,6 +377,7 @@ mod tests {
         assert_eq!((text(out.as_ptr()).as_deref(), used), (Some("abctyp"), 7));
         assert_eq!(limit("\u{e9}t\u{e9}s", 3), "\u{e9}t\u{e9}");
     }
+<<<<<<< HEAD
 
     /// 0 and limits over 1024 mean 1024; a password ignores the title's.
     #[test]
@@ -475,4 +483,49 @@ mod tests {
             );
         }
     }
+||||||| a26859fc
+=======
+
+    /// 0 and limits over 1024 mean 1024; a password ignores the title's.
+    #[test]
+    fn text_entry_limits_follow_the_console() {
+        assert_eq!(max_length_for(0, 0), 1024);
+        assert_eq!(max_length_for(0, 5000), 1024);
+        assert_eq!(max_length_for(0, 16), 16);
+        assert_eq!(max_length_for(PASSWORD, 8), 1024);
+
+        type Entry = extern "system" fn(
+            This,
+            *mut AsyncBlock,
+            *const c_char,
+            *const c_char,
+            *const c_char,
+            u32,
+            u32,
+        ) -> HRESULT;
+        type Size = extern "system" fn(This, *mut AsyncBlock, *mut u32) -> HRESULT;
+        type Result_ =
+            extern "system" fn(This, *mut AsyncBlock, u32, *mut c_char, *mut u32) -> HRESULT;
+        let this: This = &OBJECT;
+        let entry = method::<Entry>(&OBJECT, 0x88);
+        let null = std::ptr::null();
+        let long = std::ffi::CString::new("a".repeat(2000)).unwrap();
+        for (scope, max, default, expect) in [
+            (0, 0, long.as_ptr(), 1025),
+            (PASSWORD, 8, c"abc".as_ptr(), 9),
+        ] {
+            let mut b = block();
+            let title = c"Type".as_ptr();
+            assert_eq!(entry(this, &mut b, title, null, default, scope, max), S_OK);
+            assert_eq!(xasync::XAsyncGetStatus(&mut b, true), S_OK);
+            let mut size = 0;
+            assert_eq!(method::<Size>(&OBJECT, 0x90)(this, &mut b, &mut size), S_OK);
+            assert_eq!(size, expect, "scope {scope}, max {max}");
+            let mut out = vec![0 as c_char; size as usize];
+            let result = method::<Result_>(&OBJECT, 0x98);
+            let used = std::ptr::null_mut();
+            assert_eq!(result(this, &mut b, size, out.as_mut_ptr(), used), S_OK);
+        }
+    }
+>>>>>>> avatar/main
 }

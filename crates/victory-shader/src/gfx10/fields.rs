@@ -235,6 +235,7 @@ impl Instruction {
             }
             Encoding::Sopp => Fields::Sopp { imm: w0 as u16 },
             Encoding::Smem => {
+<<<<<<< HEAD
                 let no_offset = matches!(
                     name,
                     "s_gl1_inv"
@@ -250,10 +251,39 @@ impl Instruction {
                     n if n.starts_with("s_dcache_discard") || n.starts_with("s_atc_probe") => None,
                     "s_memtime" | "s_memrealtime" => Some(2),
                     _ => Some(data_dwords(name)),
+||||||| a26859fc
+                let data = match name {
+                    "s_gl1_inv" | "s_dcache_inv" | "s_dcache_wb" => None,
+                    n if n.starts_with("s_dcache_discard") => None,
+                    "s_memtime" | "s_memrealtime" => Some(2),
+                    _ => Some(data_dwords(name)),
+=======
+                let sdata = (w0 >> 6 & 0x7F) as u8;
+                // s_atc_probe*: SDATA is a 7-bit immediate, not an SGPR. The
+                // buffer form's resource is 4 dwords. GLC and DLC are not operands.
+                let probe = matches!(name, "s_atc_probe" | "s_atc_probe_buffer");
+                let data = if probe {
+                    Some(Operand::Literal(u32::from(sdata)))
+                } else {
+                    match name {
+                        "s_gl1_inv" | "s_dcache_inv" | "s_dcache_wb" => None,
+                        n if n.starts_with("s_dcache_discard") => None,
+                        "s_memtime" | "s_memrealtime" => Some(scalar(sdata, 2)),
+                        _ => Some(scalar(sdata, data_dwords(name))),
+                    }
+>>>>>>> avatar/main
                 };
+<<<<<<< HEAD
                 let base_dwords = 2
                     + 2 * u8::from(name.starts_with("s_buffer_") || name == "s_atc_probe_buffer");
+||||||| a26859fc
+                let base = 2 + 2 * u8::from(name.starts_with("s_buffer_"));
+=======
+                let base =
+                    2 + 2 * u8::from(name.starts_with("s_buffer_") || name == "s_atc_probe_buffer");
+>>>>>>> avatar/main
                 Fields::Smem {
+<<<<<<< HEAD
                     data: data.map(|d| scalar((w0 >> 6 & 0x7F) as u8, d)),
                     base: (!no_base).then(|| scalar(((w0 & 0x3F) << 1) as u8, base_dwords)),
                     offset: if no_offset { 0 } else { (w1 << 11) as i32 >> 11 },
@@ -263,6 +293,23 @@ impl Instruction {
                         scalar((w1 >> 25) as u8, 1)
                     },
                     cache: cache(bit(w0, 16), false, bit(w0, 14)),
+||||||| a26859fc
+                    data: data.map(|d| scalar((w0 >> 6 & 0x7F) as u8, d)),
+                    base: scalar(((w0 & 0x3F) << 1) as u8, base),
+                    offset: (w1 << 11) as i32 >> 11,
+                    soffset: scalar((w1 >> 25) as u8, 1),
+                    cache: cache(bit(w0, 16), false, bit(w0, 14)),
+=======
+                    data,
+                    base: scalar(((w0 & 0x3F) << 1) as u8, base),
+                    offset: (w1 << 11) as i32 >> 11,
+                    soffset: scalar((w1 >> 25) as u8, 1),
+                    cache: if probe {
+                        Cache::default()
+                    } else {
+                        cache(bit(w0, 16), false, bit(w0, 14))
+                    },
+>>>>>>> avatar/main
                 }
             }
             Encoding::Vop1 | Encoding::Vop2 | Encoding::Vopc | Encoding::Vop3 | Encoding::Vop3p => {
@@ -420,6 +467,8 @@ impl Instruction {
                     saddr: (self.encoding != Encoding::Flat)
                         .then(|| scalar(saddr, 1 + u8::from(self.encoding == Encoding::Global))),
                     offset: match self.encoding {
+                        // GFX10 FLAT offsets are 11-bit and unsigned: the
+                        // hardware ignores bit 11.
                         Encoding::Flat => (w0 & 0x7FF) as i16,
                         _ => ((w0 << 4) as i16) >> 4,
                     },

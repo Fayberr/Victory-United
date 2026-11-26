@@ -162,13 +162,19 @@ fn build(
     wide: bool,
     descriptor: Descriptor,
 ) -> Result<(HostShader, resource::Resources), ShaderError> {
-    let native = native(&program(wide, descriptor));
+    build_compute_shader(&native(&program(wide, descriptor)))
+}
+
+/// `native`, a compute program, translated (the tests' own way: no container).
+pub(super) fn build_compute_shader(
+    native: &NativeProgram,
+) -> Result<(HostShader, resource::Resources), ShaderError> {
     let p = ir::build(&native.code, native.wave64, native.vgprs).expect("ir::build");
     let st = structure::structure(&p).expect("structure");
     let res = resource::track(&p, &native.layout, native.stage, Some(&st))?;
-    let io = io::raise(&p, &native).expect("io::raise");
+    let io = io::raise(&p, native).expect("io::raise");
     let lowered = lower::lower(&lower::Parts {
-        native: &native,
+        native,
         p: &p,
         st: &st,
         io: &io,
@@ -295,6 +301,7 @@ fn scene() -> (Scene, Vec<Vec<Case>>) {
     let ids2 = [8, bvh::NONE, 24, 0x1fff_fffc];
     box_nodes.push((s.add(nodes::box32(ids2, around), 32), 5));
     box_nodes.push((s.add(nodes::box16(ids2, around), 16), 4));
+<<<<<<< HEAD
     // A child that is not there whose box the ray enters first: the
     // reference's own test of it, in both widths, with its ray alone.
     let (missing, missing_boxes) = nodes::MISSING_FIRST;
@@ -302,6 +309,15 @@ fn scene() -> (Scene, Vec<Vec<Case>>) {
         (s.add(nodes::box32(missing, missing_boxes), 32), 5),
         (s.add(nodes::box16(missing, missing_boxes), 16), 4),
     ];
+||||||| a26859fc
+=======
+    // A child that is not there with inverted infinite bounds (the title's
+    // builder leaves such slots): every ray "enters" it at minus infinity.
+    let mut empty = lined;
+    empty[1] = [f32::INFINITY, f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+    let ids3 = [0x105, bvh::NONE, 0x304, 0x400];
+    box_nodes.push((s.add(nodes::box32(ids3, empty), 32), 5));
+>>>>>>> avatar/main
     // Random boxes.
     for n in 0..6 {
         let boxes: [[f32; 6]; 4] = std::array::from_fn(|_| {

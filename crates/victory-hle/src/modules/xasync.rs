@@ -728,11 +728,18 @@ pub fn XAsyncGetResultSize(block: *mut AsyncBlock, out: *mut usize) -> HRESULT {
 /// provider completed it first. A completed call is left alone.
 pub fn XAsyncCancel(block: *mut AsyncBlock) {
     if let Some(call) = call(block) {
+<<<<<<< HEAD
         // A completion that claimed the call may still be running its
         // cleanup, with the status not yet published: leave it alone too.
         if call.claimed.load(Ordering::Acquire) {
             return;
         }
+||||||| a26859fc
+=======
+        if *lock(&call.done) {
+            return;
+        }
+>>>>>>> avatar/main
         call.provider(OP_CANCEL, block, 0, std::ptr::null_mut());
         complete_call(&call, block, E_ABORT, 0);
     }
@@ -1644,6 +1651,7 @@ mod tests {
         );
         XTaskQueueCloseHandle(q);
     }
+<<<<<<< HEAD
 
     #[test]
     fn terminate_cancels_delayed_callbacks() {
@@ -1702,4 +1710,29 @@ mod tests {
         assert_eq!(XAsyncGetStatus(&mut block, true), E_ABORT);
         *CLEANED.lock().unwrap() = None;
     }
+||||||| a26859fc
+=======
+
+    #[test]
+    fn terminate_cancels_delayed_callbacks() {
+        static EVENTS: Mutex<Vec<&str>> = Mutex::new(Vec::new());
+        extern "system" fn delayed(_: *mut c_void, canceled: bool) {
+            lock(&EVENTS).push(if canceled { "canceled" } else { "ran" });
+        }
+        extern "system" fn terminated(_: *mut c_void) {
+            lock(&EVENTS).push("terminated");
+        }
+        let mut q = std::ptr::null();
+        assert_eq!(XTaskQueueCreate(1, 1, &mut q), S_OK);
+        let none = std::ptr::null_mut();
+        let hr = XTaskQueueSubmitDelayedCallback(q, WORK, 50, none, Some(delayed));
+        assert_eq!(hr, S_OK);
+        assert_eq!(XTaskQueueTerminate(q, true, none, Some(terminated)), S_OK);
+        assert_eq!(*lock(&EVENTS), ["canceled", "terminated"]);
+        // Its delay passes without it running.
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(*lock(&EVENTS), ["canceled", "terminated"]);
+        XTaskQueueCloseHandle(q);
+    }
+>>>>>>> avatar/main
 }

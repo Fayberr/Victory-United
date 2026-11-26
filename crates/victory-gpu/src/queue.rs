@@ -7,6 +7,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use crate::object::{self, E_INVALIDARG, HRESULT, Iid, Object, QUEUE, S_OK, Table, This, guid};
 use crate::resource::PAGEABLE_IIDS;
 
+#[cfg(windows)]
+mod behind;
+
 const QUEUE_IIDS: [Iid; 4] = [
     guid(
         0x0ec870a6,
@@ -455,6 +458,7 @@ fn hold(this: This, what: impl FnOnce() -> Held) -> bool {
 /// one.
 #[cfg(windows)]
 pub(crate) fn release_held(all: bool) {
+<<<<<<< HEAD
     if !all && behind() {
         // A thread of ours runs what is free to run ([`behind`]).
         wake();
@@ -743,11 +747,20 @@ pub(crate) fn before_sync() {
 
 #[cfg(windows)]
 fn release_held_now(all: bool) {
+||||||| a26859fc
+=======
+    if behind::on() {
+        // What queues stand at is looked at by the thread that runs them.
+        behind::wake();
+        return;
+    }
+>>>>>>> avatar/main
     // One caller at a time, so a queue's submissions keep their order.
     static RELEASING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     if lock(&WAITING).is_empty() {
         return;
     }
+    let _looking = crate::timeline::span("looking at what queues hold");
     let _one = lock(&RELEASING);
     let was_here = RELEASING_HERE.replace(true);
     struct Leave(bool);
@@ -946,6 +959,49 @@ fn release_held_now(all: bool) {
     }
 }
 
+/// Before a submission of ours that is waited for, or a wait for flights by
+/// a thread of the title's: what the title gave its queues before goes to the
+/// card first ([`behind`]).
+#[cfg(windows)]
+pub(crate) fn before_sync() {
+    if behind::on() {
+        behind::drain();
+    }
+}
+
+/// Whether submissions go into the line of a thread of ours ([`behind`]).
+#[cfg(windows)]
+pub(crate) fn line_on() -> bool {
+    behind::on()
+}
+
+/// Lists in the line may have been translated ([`crate::list::thin`]).
+#[cfg(windows)]
+pub(crate) fn line_moved() {
+    behind::wake();
+}
+
+/// This thread does work the line waits for: it does not wait for the line.
+#[cfg(windows)]
+pub(crate) fn no_drain_here() {
+    behind::no_drain_here();
+}
+
+/// Submissions the title made that the host has not begun ([`behind`]).
+#[cfg(windows)]
+pub(crate) fn queued() -> u64 {
+    behind::queued()
+}
+
+/// For the frame-rate line.
+#[cfg(windows)]
+pub(crate) fn behind_line(frames: f64) {
+    if behind::on() {
+        crate::list::thin::line(frames);
+        behind::line(frames);
+    }
+}
+
 /// Whether a queue may pass `wait`: memory holds the value, or, with
 /// submissions sent to the card without a wait (`crate::host::late`), it
 /// will once those in the air have run.
@@ -1052,10 +1108,17 @@ fn execute_now(this: This, count: u32, lists: *const This) {
     if lists.is_null() {
         return;
     }
+    let _called = crate::timeline::span("the title's ExecuteCommandLists");
+    #[cfg(all(windows, feature = "diagnostics"))]
+    crate::timeline::title_thread();
     #[cfg(windows)]
     if let Some(host) = crate::host::host() {
         // SAFETY: the title passes `count` lists.
         let lists = unsafe { std::slice::from_raw_parts(lists, count as usize) };
+        if behind::on() && !this.is_null() {
+            behind::submit(this, lists);
+            return;
+        }
         if cuts() && !this.is_null() {
             submit_cut(this, lists);
             return;
@@ -1149,8 +1212,18 @@ extern "system" fn signal(this: This, fence: This, value: u64) -> HRESULT {
     if fence.is_null() {
         return E_INVALIDARG;
     }
+<<<<<<< HEAD
     #[cfg(all(windows, feature = "diagnostics"))]
     crate::fence::pace::signal_called(fence as usize, value);
+||||||| a26859fc
+=======
+    let _called = crate::timeline::span("the title's queue Signal");
+    #[cfg(windows)]
+    if behind::on() && !this.is_null() {
+        behind::signal(this, fence, value);
+        return S_OK;
+    }
+>>>>>>> avatar/main
     // A queue that waits signals after what it holds.
     #[cfg(windows)]
     if hold(this, || Held::Signal(fence as usize, value)) {
@@ -1176,6 +1249,7 @@ extern "system" fn wait(this: This, fence: This, value: u64) -> HRESULT {
     if fence.is_null() {
         return E_INVALIDARG;
     }
+    let _called = crate::timeline::span("the title's queue Wait");
     #[cfg(windows)]
     if !this.is_null() {
         let now = crate::fence::completed(fence);
@@ -1188,6 +1262,10 @@ extern "system" fn wait(this: This, fence: This, value: u64) -> HRESULT {
         }
         #[cfg(feature = "diagnostics")]
         crate::capture::op(this as usize, || format!("WAIT queue kind {} for fence {fence:?} value {value} (now {now})", queue(this).kind));
+        if behind::on() && waits() {
+            behind::wait(this, fence, value);
+            return S_OK;
+        }
         let behind = {
             let mut held = lock(&queue(this).held);
             let behind = !held.is_empty() || now < value;
@@ -1252,10 +1330,15 @@ impl Written {
             Written::GpuTimestamp => {
                 static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
                 let elapsed = START.get_or_init(std::time::Instant::now).elapsed();
-                (elapsed.as_nanos() / (1_000_000_000 / u128::from(TIMESTAMP_FREQUENCY))) as u64
+                let now = (elapsed.as_nanos() / (1_000_000_000 / u128::from(TIMESTAMP_FREQUENCY))) as u64;
+                #[cfg(all(windows, feature = "diagnostics"))]
+                crate::host::spans::stamped(at as usize, now);
+                as_loaded(now, at as usize, gpu_load())
             }
             Written::SystemTimestamp => system_timestamp(),
         };
+        #[cfg(all(windows, feature = "diagnostics"))]
+        crate::timeline::told("written when its list had run", at as usize, value);
         // SAFETY: the title names writable GPU memory (unified with ours).
         unsafe {
             if bytes == 4 {
@@ -1264,6 +1347,31 @@ impl Written {
                 at.cast::<u64>().write_unaligned(value);
             }
         }
+    }
+}
+
+/// What the title's GPU time is made to look like, in ticks
+/// (`VICTORY_GPU_LOAD_MS`; unset: as it is).
+///
+/// The title asks for four GPU timestamps a frame, in pairs of 16 bytes, the
+/// start in the second eight and the end in the first. All of them are written
+/// when the frame's last submissions land, within microseconds, so every pair
+/// says the card did nothing.
+fn gpu_load() -> u64 {
+    static LOAD: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *LOAD.get_or_init(|| {
+        let ms = std::env::var("VICTORY_GPU_LOAD_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(0);
+        ms * (TIMESTAMP_FREQUENCY / 1000)
+    })
+}
+
+/// The timestamp written at `at` when the clock says `now`, if a pair's start
+/// is to lie `load` ticks before its end.
+fn as_loaded(now: u64, at: usize, load: u64) -> u64 {
+    if at & 8 != 0 {
+        now.saturating_sub(load).max(1)
+    } else {
+        now
     }
 }
 
@@ -1297,6 +1405,7 @@ extern "system" fn present(
     plane_parameters: *const Plane,
     _parameters: *const u8,
 ) -> HRESULT {
+<<<<<<< HEAD
     #[cfg(windows)]
     let presenting = std::time::Instant::now();
     let hr = present_now(this, planes, plane_parameters);
@@ -1313,8 +1422,14 @@ extern "system" fn present(
 fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESULT {
     #[cfg(windows)]
     let presenting = std::time::Instant::now();
+||||||| a26859fc
+=======
+    #[cfg(not(windows))]
+    let _ = this;
+>>>>>>> avatar/main
     #[cfg(all(windows, feature = "diagnostics"))]
     crate::copystat::present_begins();
+<<<<<<< HEAD
     #[cfg(all(windows, feature = "diagnostics"))]
     crate::profile::frame();
     // With `present_behind`: the frame is shown by our thread, behind what
@@ -1323,9 +1438,16 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
     let sent_behind = present_behind() && send_behind(this, planes, plane_parameters);
     #[cfg(not(windows))]
     let _ = this;
+||||||| a26859fc
+=======
+    let called = crate::timeline::span("the title's Present");
+    #[cfg(all(windows, feature = "diagnostics"))]
+    crate::timeline::title_thread();
+>>>>>>> avatar/main
     // Submissions sent to the card and not waited for are settled first,
     // and what that frees runs in its own order, before anything is forced.
     #[cfg(windows)]
+<<<<<<< HEAD
     if sent_behind {
     } else if crate::host::late() && !crate::host::late_free_present() {
         // (With `behind`: what the queues hold runs here first, and what
@@ -1333,6 +1455,13 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         if behind() {
             release_held_now(false);
         }
+||||||| a26859fc
+    if crate::host::late() && !crate::host::late_free_present() {
+=======
+    if behind::on() {
+        // The present goes into the line of what the queues were given.
+    } else if crate::host::late() && !crate::host::late_free_present() {
+>>>>>>> avatar/main
         crate::host::settle_for_present();
         release_held_now(false);
         crate::host::settle_for_present();
@@ -1344,11 +1473,19 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
     // shortcut: what a queue still holds at a present runs now, whatever
     // its fence: a wait is not kept across frames.
     #[cfg(windows)]
+<<<<<<< HEAD
     if !sent_behind {
         release_held(forces());
     }
     #[cfg(windows)]
     crate::framelog::add(crate::framelog::T::PresentLineUs, presenting.elapsed().as_micros() as u64);
+||||||| a26859fc
+    release_held(forces());
+=======
+    if !behind::on() {
+        release_held(forces());
+    }
+>>>>>>> avatar/main
     let frame = FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
     #[cfg(windows)]
     if sent_behind && PRESENTS_BEHIND.load(Ordering::Relaxed).is_multiple_of(512) {
@@ -1392,12 +1529,50 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         crate::renderdoc::frame_drew(frame, crate::draw::drawn());
         crate::shot::present(frame, crate::draw::drawn());
         if crate::capture::listed(frame) {
+            before_sync();
             crate::capture::dump_targets(frame);
         }
     }
     #[cfg(windows)]
+<<<<<<< HEAD
     if !sent_behind
         && planes > 0
+||||||| a26859fc
+    if planes > 0
+=======
+    if behind::on() && !this.is_null() {
+        const COPY_SOURCE: u32 = 0x800;
+        let texture = if planes > 0
+            // SAFETY: the title passes `planes` plane descriptions.
+            && let Some(plane) = unsafe { plane_parameters.as_ref() }
+            && plane.count > 0
+            && !plane.resources.is_null()
+        {
+            // SAFETY: the plane lists `count` resources.
+            let resource = unsafe { *plane.resources };
+            // The state the lists recorded so far leave it in (the next
+            // frame's, recorded before this is shown, go on from there).
+            crate::resource::host_copy(resource).map(|copy| {
+                let state = crate::resource::host_transition(resource, COPY_SOURCE).map_or(COPY_SOURCE, |(_, before)| before);
+                crate::resource::host_transition(resource, state);
+                // (Lists not translated yet leave it in no state yet: the
+                // one it is in when its turn in the line comes.)
+                let state = if crate::list::thin::wanted() { u32::MAX } else { state };
+                (resource as usize, copy, state)
+            })
+        } else {
+            None
+        };
+        let resource = texture.as_ref().map_or(0, |t| t.0);
+        behind::present(this, texture.map(|(_, copy, state)| (copy, state)), Shown { frame, resource });
+        called.end();
+        #[cfg(feature = "diagnostics")]
+        frame_ends();
+        return S_OK;
+    }
+    #[cfg(windows)]
+    if planes > 0
+>>>>>>> avatar/main
         // SAFETY: the title passes `planes` plane descriptions.
         && let Some(plane) = unsafe { plane_parameters.as_ref() }
         && plane.count > 0
@@ -1410,6 +1585,7 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         const COPY_SOURCE: u32 = 0x800;
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
+<<<<<<< HEAD
         // A second plane (the title's interface over its game image, in
         // its Series S mode) is drawn over the first: `crate::over`.
         const READABLE: u32 = 0x80;
@@ -1424,18 +1600,24 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         if let Some((r, _, was)) = over {
             crate::resource::host_transition(r, was);
         }
+||||||| a26859fc
+        let shown = host.present(texture, state, frame);
+=======
+        show(texture, state, Shown { frame, resource: resource as usize });
+>>>>>>> avatar/main
         crate::resource::host_transition(resource, state);
-        #[cfg(feature = "diagnostics")]
-        blinks(frame, resource, state, shown);
-        #[cfg(not(feature = "diagnostics"))]
-        let _ = shown;
+        let _ = host;
     }
     #[cfg(windows)]
     crate::pipeline::frame_drew(crate::draw::drawn());
     #[cfg(not(windows))]
     let _ = (planes, plane_parameters);
+    called.end();
+    #[cfg(all(windows, feature = "diagnostics"))]
+    frame_ends();
     S_OK
 }
+<<<<<<< HEAD
 
 /// The bytes from one plane's description to the next in a present.
 #[cfg(windows)]
@@ -1462,6 +1644,43 @@ unsafe fn second_plane(planes: u32, parameters: *const Plane, first: This) -> Op
     (!resource.is_null() && resource != first).then_some(resource)
 }
 
+||||||| a26859fc
+=======
+
+/// Diagnostics: the title's present is over.
+#[cfg(all(windows, feature = "diagnostics"))]
+fn frame_ends() {
+    crate::timeline::presented();
+    crate::faultbook::frame();
+    crate::ab::presented(|switch, was, will| {
+        if switch == "VICTORY_ASYNC_SUBMIT" && was && !will {
+            behind::leave();
+        }
+    });
+}
+
+/// The frame a present shows, and the title's resource it shows.
+#[cfg(windows)]
+#[derive(Clone, Copy)]
+struct Shown {
+    frame: u64,
+    resource: usize,
+}
+
+/// Shows `texture`, in host state `state`, in our window.
+#[cfg(windows)]
+fn show(texture: &windows::Win32::Graphics::Direct3D12::ID3D12Resource, state: u32, what: Shown) {
+    let Some(host) = crate::host::host() else {
+        return;
+    };
+    let shown = host.present(texture, state, what.frame);
+    #[cfg(feature = "diagnostics")]
+    blinks(what.frame, what.resource as This, state, shown);
+    #[cfg(not(feature = "diagnostics"))]
+    let _ = (shown, what.resource);
+}
+
+>>>>>>> avatar/main
 /// Diagnostics: logs a presented frame that is black after one that was
 /// not, with what was presented and how many draws ran since.
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -1537,11 +1756,21 @@ extern "system" fn copy_page_mappings(
     if batches.is_null() && count > 0 {
         return E_INVALIDARG;
     }
+    let _called = crate::timeline::span("the title's CopyPageMappings");
     let batches = (count > 0).then(|| {
         // SAFETY: the title passes `count` batches.
         unsafe { std::slice::from_raw_parts(batches, count as usize) }
     });
     let mut ok = true;
+    let many = crate::resource::many_page_mapper();
+    let mut gathered: Vec<(u64, u64, u64)> = Vec::new();
+    let mut map = |to: u64, from: u64, len: u64| match many {
+        Some(_) => {
+            gathered.push((to, from, len));
+            true
+        }
+        None => map(to, from, len),
+    };
     for b in batches.into_iter().flatten() {
         if b.ranges.is_null() {
             continue;
@@ -1562,6 +1791,9 @@ extern "system" fn copy_page_mappings(
             };
             at += len;
         }
+    }
+    if let Some(many) = many {
+        ok &= many(&gathered);
     }
     if !ok {
         static ONCE: std::sync::Once = std::sync::Once::new();
@@ -1708,6 +1940,14 @@ mod tests {
         assert_eq!(old[14], new[16]); // signal 0x70 → 0x80
         assert_eq!(old[30], new[32]); // present 0xf0 → 0x100
         assert_eq!(new[35], execute_x as *const ()); // 0x118
+    }
+
+    #[test]
+    fn a_pair_of_timestamps_shows_the_load_it_is_given() {
+        let (start, end) = (0xd0419_6698, 0xd0419_6690);
+        assert_eq!(as_loaded(5_000_000, end, 4_000_000) - as_loaded(5_000_000, start, 4_000_000), 4_000_000);
+        assert_eq!(as_loaded(5_000_000, start, 0), 5_000_000);
+        assert_eq!(as_loaded(5, start, 100), 1);
     }
 
     #[test]

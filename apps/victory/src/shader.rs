@@ -108,7 +108,7 @@ pub fn run(paths: Vec<PathBuf>, verbose: bool, disasm: bool) -> Result<()> {
                 };
                 found_here += 1;
                 t.containers += 1;
-                let dxil = container.part(FourCC::DXIL);
+                let dxil = container.part(FourCC::DXIL).or(container.part(FourCC::ACCC));
                 t.with_dxil_part += usize::from(dxil.is_some());
                 let program = dxil.and_then(|p| DxilProgram::parse(p.data).ok());
                 let mut listing = Vec::new();
@@ -178,7 +178,9 @@ pub fn run(paths: Vec<PathBuf>, verbose: bool, disasm: bool) -> Result<()> {
                     None => "no parsable DXIL program".to_owned(),
                 } + &native;
                 if verbose {
-                    println!("{}{}: {line}", path.display(), source.label());
+                    // As a run's log and a replay name it (`hash=`).
+                    let hash = blake3::hash(&bytes).to_hex();
+                    println!("{}{} #{}: {line}", path.display(), source.label(), &hash[..16]);
                     for l in &listing {
                         println!("{l}");
                     }
