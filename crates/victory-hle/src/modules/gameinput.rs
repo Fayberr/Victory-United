@@ -550,15 +550,15 @@ impl Hub {
         };
         let events = {
             let mut state = self.state();
-<<<<<<< HEAD
-            let events =
-                state.poll(&self.devices, self.one_pad, pads, keys, &buttons, &self.counts);
-||||||| c7daeea5
-            let events = state.poll(&self.devices, pads, keys, &buttons, &self.counts);
-=======
-            let events =
-                state.poll(&self.devices, pads, keys, &buttons, &mouse, &self.counts);
->>>>>>> integ/vertex
+            let events = state.poll(
+                &self.devices,
+                self.one_pad,
+                pads,
+                keys,
+                &buttons,
+                &mouse,
+                &self.counts,
+            );
             if let Some(c) = &mut state.controls
                 && std::mem::take(&mut c.release_cursor)
             {
