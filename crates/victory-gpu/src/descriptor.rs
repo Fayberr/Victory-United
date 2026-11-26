@@ -1689,22 +1689,22 @@ fn kind_index(view: &View) -> usize {
 /// The second element is the same table, by [`kind_index`]: for each of the
 /// six `View` kinds, how many of its entries are occupied (named in
 /// [`Views::index`] right now) versus sitting on [`Views::free`] (a freed
-/// slot keeps its *last* occupant's kind — [`Views::entry`] only overwrites
-/// `list[i].0` when the slot is reused — so a freed entry is counted by
+/// slot keeps its *last* occupant's kind ; [`Views::entry`] only overwrites
+/// `list[i].0` when the slot is reused ; so a freed entry is counted by
 /// what it last held, never by a "current" kind it no longer has), and that
 /// kind's flat share of bytes: one `list` slot each, nothing more. That
 /// share deliberately does **not** include: any spare `Vec` capacity beyond
-/// `list.len()`, or `index`/`shapes`/`shape_index`'s own tree overhead —
+/// `list.len()`, or `index`/`shapes`/`shape_index`'s own tree overhead ;
 /// none of those three are attributable to one kind, since the index does
 /// not record which kind a key belongs to; **the first element's byte
 /// estimate above folds those three in, undivided, on top of the same flat
 /// per-entry share this breakdown also counts.** `by_resource`'s own
-/// memory is not in either number — the first element's formula never
+/// memory is not in either number ; the first element's formula never
 /// accounted for it either, so this breakdown is not omitting something
 /// the original estimate had; neither number has ever included it.
 /// Nothing the GPU/driver itself holds is in either number. **The six
 /// kinds' third column does not sum to the first element's byte estimate
-/// above, and is not meant to** — it answers "how many slots, of which
+/// above, and is not meant to** ; it answers "how many slots, of which
 /// kind, and their flat share," not "where did every byte go." This
 /// identifies which kinds hold entries; it says nothing about which
 /// specific entries are still meaningful to the title, only how many there
@@ -1712,13 +1712,13 @@ fn kind_index(view: &View) -> usize {
 ///
 /// One pass over `Views::list`, plus one over the normally much smaller
 /// `Views::free` (no separate scan, no temporary allocation sized by
-/// `list.len()`, no second lock acquisition) — the same order of work the
+/// `list.len()`, no second lock acquisition) ; the same order of work the
 /// first element alone already did. [`crate::copystat::log_memory`] calls
 /// this once and logs both parts; nothing on the write path
 /// ([`Views::entry`], [`forget`], [`words_for`]) is touched. `log_memory`
 /// itself runs no more than once every 5 seconds
 /// (`Host`'s `self.logged.elapsed() >= Duration::from_secs(5)` gate in
-/// `host.rs`) — not "every sixth line," which is a different, unrelated
+/// `host.rs`) ; not "every sixth line," which is a different, unrelated
 /// cadence belonging to [`log_memory_map`](crate::copystat) alone.
 #[cfg(all(windows, feature = "diagnostics"))]
 pub(crate) fn views_kept() -> ([u64; 8], [[u64; 3]; 6]) {
@@ -2924,11 +2924,11 @@ mod tests {
     // round 3" for the full reasoning.
 
     /// [`kept`]'s per-kind arithmetic, checked against a `Views` value this
-    /// test builds and owns — no shared state, nothing to race against.
+    /// test builds and owns ; no shared state, nothing to race against.
     /// Three `Shader` entries (one on the free list), one `Sampler`, two
     /// `Placed`, and one freed slot whose last occupant was a `Constant`
     /// (freed slots keep their last view's word until reused, so they are
-    /// still classified by it — see [`kept`]'s doc comment).
+    /// still classified by it ; see [`kept`]'s doc comment).
     #[cfg(all(windows, feature = "diagnostics"))]
     #[test]
     fn kind_breakdown_is_exact_for_a_known_table() {
@@ -2981,8 +2981,8 @@ mod tests {
     /// of the six kinds a real occupied entry (not just a zero case), then
     /// exercises the exact property the now-removed "a kind's entry count
     /// never shrinks" assertion got wrong: reusing a freed index for a
-    /// *different* kind — exactly what [`Views::entry`]'s `free.pop()`
-    /// path does, overwriting `list[i].0` in place — moves one unit from
+    /// *different* kind ; exactly what [`Views::entry`]'s `free.pop()`
+    /// path does, overwriting `list[i].0` in place ; moves one unit from
     /// the old kind's total to the new kind's, with nothing actually
     /// removed from the table as a whole.
     #[cfg(all(windows, feature = "diagnostics"))]

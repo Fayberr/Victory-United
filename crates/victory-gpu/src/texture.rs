@@ -2441,10 +2441,10 @@ mod prelude_upload_tests {
         // Second list in the same submission skips redundant copy.
         assert_eq!(claim_upload(&uploaded, &dirty), None);
 
-        // Frame 2: texture unchanged — refresh() does not detile, prelude skips.
+        // Frame 2: texture unchanged ; refresh() does not detile, prelude skips.
         assert_eq!(claim_upload(&uploaded, &dirty), None);
 
-        // Frame 3: texture changed — refresh()/detile() runs BEFORE claim_upload,
+        // Frame 3: texture changed ; refresh()/detile() runs BEFORE claim_upload,
         // so upload is claimed on the exact same frame (0 frames late).
         dirty.store(true, Release);
         assert_eq!(claim_upload(&uploaded, &dirty), Some(false));
