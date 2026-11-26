@@ -992,10 +992,10 @@ fn parse_skip_hashes(value: &str) -> Vec<String> {
 fn skipped_shader(shaders: &[Arc<Shader>]) -> Option<&str> {
     static HASHES: OnceLock<Vec<String>> = OnceLock::new();
     let hashes = HASHES.get_or_init(|| {
-        // ponytail: built-in list of shaders whose host-driver compile never ends on AMD RDNA4
-        // (driver memory grows ~240 MB/s while it runs); set VICTORY_SKIP_PIPELINES to override.
-        let value = std::env::var("VICTORY_SKIP_PIPELINES")
-            .unwrap_or_else(|_| "39f0e9aeb156a61c".to_owned());
+        // Nothing is skipped unless asked: `VICTORY_SKIP_PIPELINES` lists shader hashes whose
+        // host-driver compile never ends on a card (39f0e9aeb156a61c does on AMD RDNA4, where
+        // the driver's memory grows ~240 MB/s while it runs).
+        let value = std::env::var("VICTORY_SKIP_PIPELINES").unwrap_or_default();
         parse_skip_hashes(&value)
     });
     if hashes.is_empty() {
