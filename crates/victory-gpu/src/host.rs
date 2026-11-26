@@ -9844,14 +9844,6 @@ impl HostList {
                 }
                 Step::Texture(staging) => {
                     if batch.texture_due(staging) {
-<<<<<<< HEAD
-                        batch.due.push(staging.clone());
-                        if !wide_textures() {
-                            batch.refresh_textures();
-                        }
-||||||| 9c184b35b
-                        staging.refresh();
-=======
                         if near_writes() {
                             // Where it lies, for a write of ours at a known
                             // place to leave it checked ([`Batch::title_wrote_near`]).
@@ -9859,15 +9851,10 @@ impl HostList {
                                 .texture_spans
                                 .insert(std::sync::Arc::as_ptr(staging) as *const () as usize, staging.memory());
                         }
-                        if parallel_refresh() {
-                            // Checked with the others of the batch, several
-                            // at a time, before the next step that writes
-                            // title memory ([`Batch::check_textures`]).
-                            batch.due_textures.push(staging.clone());
-                        } else {
-                            staging.refresh();
+                        batch.due.push(staging.clone());
+                        if !wide_textures() {
+                            batch.refresh_textures();
                         }
->>>>>>> origin/exp/fork-head
                     }
                     continue;
                 }
@@ -10111,7 +10098,6 @@ struct Batch {
     /// Staging buffers (by address) refreshed since the last title write,
     /// or due to be.
     textures: std::collections::HashSet<usize>,
-<<<<<<< HEAD
     /// Those due ([`Batch::refresh_textures`]).
     due: Vec<std::sync::Arc<crate::texture::Staging>>,
     /// What copies at their place in the submission's lists put into title
@@ -10125,6 +10111,14 @@ struct Batch {
     /// `ahead` holds everything the submission refreshes
     /// ([`Batch::refresh_front`]).
     front: bool,
+    /// With [`parallel_refresh`]: textures due a check, not checked yet
+    /// ([`Batch::check_textures`], before any write of ours and at every
+    /// flush).
+    due_textures: Vec<std::sync::Arc<crate::texture::Staging>>,
+    /// With [`near_writes`]: the title memory (address, bytes) of the
+    /// staging buffers in `textures`, by the same key. A texture without
+    /// an entry is checked again after any write of ours.
+    texture_spans: std::collections::HashMap<usize, (usize, usize)>,
 }
 
 /// Whether the copies that a submission's shaders write are brought up to
@@ -10344,17 +10338,6 @@ fn wide_fills() -> bool {
 fn wide_textures() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_WIDE_TEXTURES").is_none_or(|v| v != "0") && wide_refresh())
-||||||| 9c184b35b
-=======
-    /// With [`parallel_refresh`]: textures due a check, not checked yet
-    /// ([`Batch::check_textures`], before any write of ours and at every
-    /// flush).
-    due_textures: Vec<std::sync::Arc<crate::texture::Staging>>,
-    /// With [`near_writes`]: the title memory (address, bytes) of the
-    /// staging buffers in `textures`, by the same key. A texture without
-    /// an entry is checked again after any write of ours.
-    texture_spans: std::collections::HashMap<usize, (usize, usize)>,
->>>>>>> origin/exp/fork-head
 }
 
 impl Batch {
@@ -10431,41 +10414,11 @@ impl Batch {
         self.flush();
         self.ahead.clear();
         self.textures.clear();
-<<<<<<< HEAD
-||||||| 9c184b35b
-        // Where it writes is not known: no copy counts as up to date.
-        self.current.clear();
-=======
         self.texture_spans.clear();
         // Where it writes is not known: no copy counts as up to date.
         self.current.clear();
->>>>>>> origin/exp/fork-head
     }
 
-<<<<<<< HEAD
-    /// Before the steps of `runs` ([`refresh_front`]), a new part of the
-    /// submission beginning at each of `parts`.
-    fn refresh_front(&mut self, runs: &[&HostList], parts: &[usize]) {
-        let mut copies: ByCopy<std::sync::Arc<crate::shadow::Shadow>> = ByCopy::default();
-        let mut due = Vec::new();
-        let mut touches = Vec::new();
-        for (n, list) in runs.iter().enumerate() {
-            if parts.contains(&n) {
-                touches.push(Touch::Part);
-||||||| 9c184b35b
-    /// [`Batch::title_written`] for a write of ours whose place is known
-    /// (a title buffer copy into `[at, at + len)`): of a copy up to date
-    /// in this submission that holds some of those bytes, the larger part
-    /// beside them stays so.
-    fn title_wrote(&mut self, at: usize, len: usize) {
-        self.flush();
-        self.textures.clear();
-        let end = at + len;
-        self.current.retain(|_, entry| {
-            let (from, to) = (entry.1, entry.2);
-            if end <= from || to <= at {
-                return true;
-=======
     /// [`Batch::title_written`] for a write of ours whose place is known
     /// (a title buffer copy into `[at, at + len)`): of a copy up to date
     /// in this submission that holds some of those bytes, the larger part
@@ -10480,7 +10433,26 @@ impl Batch {
             let (from, to) = (entry.1, entry.2);
             if end <= from || to <= at {
                 return true;
->>>>>>> origin/exp/fork-head
+            }
+            let (left, right) = (at.saturating_sub(from), to.saturating_sub(end));
+            if left >= right {
+                entry.2 = from + left;
+            } else {
+                entry.1 = end;
+            }
+            entry.1 < entry.2
+        });
+    }
+
+    /// Before the steps of `runs` ([`refresh_front`]), a new part of the
+    /// submission beginning at each of `parts`.
+    fn refresh_front(&mut self, runs: &[&HostList], parts: &[usize]) {
+        let mut copies: ByCopy<std::sync::Arc<crate::shadow::Shadow>> = ByCopy::default();
+        let mut due = Vec::new();
+        let mut touches = Vec::new();
+        for (n, list) in runs.iter().enumerate() {
+            if parts.contains(&n) {
+                touches.push(Touch::Part);
             }
             let mut last = 0;
             for step in &list.deferred().copies {
@@ -10786,12 +10758,7 @@ impl Batch {
     }
 
     fn flush(&mut self) {
-<<<<<<< HEAD
         self.refresh_textures();
-||||||| 9c184b35b
-=======
-        self.check_textures();
->>>>>>> origin/exp/fork-head
         self.index.clear();
         if self.refreshes.is_empty() {
             return;
@@ -11588,18 +11555,12 @@ impl Meter {
         let refused = BUDGET_NOTES[0].swap(0, Ordering::Relaxed) as f64 / frames;
         let biggest = BUDGET_NOTES[1].swap(0, Ordering::Relaxed);
         tracing::info!(
-<<<<<<< HEAD
-            "indirect mesh dispatches: the largest group count asked for {mesh_largest} (run: at most 65535), {mesh_groups:.0} groups asked per frame; {refused:.2} indirect records a frame ran empty for want of their list's budget (2^27), the largest cost of one {biggest} (0: under 2^22)"
-||||||| 9c184b35b
-            "indirect mesh dispatches: the largest group count asked for {mesh_largest} (run: at most 65535), {mesh_groups:.0} groups asked per frame"
-=======
-            "indirect mesh and compute dispatches: the largest group count asked for {mesh_largest} (run: at most 65535 a dimension), {mesh_groups:.0} groups asked per frame"
+            "indirect mesh and compute dispatches: the largest group count asked for {mesh_largest} (run: at most 65535 a dimension), {mesh_groups:.0} groups asked per frame; {refused:.2} indirect records a frame ran empty for want of their list's budget (2^27), the largest cost of one {biggest} (0: under 2^22)"
         );
         let [spread_direct, spread_indirect] =
             [0, 1].map(|i| crate::draw::SPREAD[i].swap(0, Ordering::Relaxed) as f64 / frames);
         tracing::info!(
             "dispatches spread across z past 65,535 groups in x (USER_DISPATCH_SPREAD), per frame: {spread_direct:.2} direct, {spread_indirect:.2} indirect run through the spread signature (programs that read no group id x, and the builder's stages, are not spread)"
->>>>>>> origin/exp/fork-head
         );
         crate::shadow::exact_line(frames);
         crate::descriptor::sync_line(frames);
@@ -12136,17 +12097,9 @@ impl Host {
             if let Some((buffer, footprint)) = capture {
                 crate::capture::save_read_back(frame, &buffer, &footprint);
             }
-<<<<<<< HEAD
             #[cfg(feature = "diagnostics")]
             crate::replay::record::present(texture, state);
             let mut showing = crate::timeline::span("the host's Present");
-            let _ = p.swap_chain.Present(0, DXGI_PRESENT(0));
-            showing.next("the frame meter");
-            #[cfg(feature = "diagnostics")]
-            p.panel.frame(p.meter.line_due());
-||||||| 9c184b35b
-            let _ = p.swap_chain.Present(0, DXGI_PRESENT(0));
-=======
             // What Present answers was thrown away: a removal it is the
             // first to report then looked as if the next call found it.
             // Said once (a status that is no error, as "occluded", is not).
@@ -12157,7 +12110,9 @@ impl Host {
                     tracing::error!("Present answered {:#010x} (said once): the first call to report it, frame {frame}", shown.0 as u32);
                 });
             }
->>>>>>> origin/exp/fork-head
+            showing.next("the frame meter");
+            #[cfg(feature = "diagnostics")]
+            p.panel.frame(p.meter.line_due());
             p.meter.frame(p.hwnd);
             showing.end();
             #[cfg(feature = "diagnostics")]
