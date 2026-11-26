@@ -11218,15 +11218,14 @@ impl<'a> Lower<'a> {
                     self.float_of(v)?
                 });
             }
-<<<<<<< HEAD
-            let vals: Vec<V> = vals.into_iter().map(|v| self.nan_guard(v, false)).collect();
-||||||| 0a4356653
-=======
-            // LOCAL: `VICTORY_NAN_SCRUB=1` (see `scrub_nan`).
-            for v in &mut vals {
-                *v = self.scrub_nan(*v);
-            }
->>>>>>> nvidia/main
+            let vals: Vec<V> = vals
+                .into_iter()
+                .map(|v| {
+                    let v = self.nan_guard(v, false);
+                    // LOCAL: `VICTORY_NAN_SCRUB=1` (see `scrub_nan`).
+                    self.scrub_nan(v)
+                })
+                .collect();
             let h = self.handle(site, src, false, props)?;
             let at = self.begin_guarded(guard);
             let mut args = vec![h];
@@ -12179,24 +12178,12 @@ impl<'a> Lower<'a> {
                 // through a view of an integer format it is a 16-bit
                 // integer, zero- or sign-extended (VIctory 4243a96a: the face
                 // network keeps its halves in UINT views; its output was
-<<<<<<< HEAD
                 // noise). Both `ResourceHeap` (`SLOT_STRIDES`) and `Table`
                 // (`SLOT_TABLE_STRIDES`, dynamic table snapshots included)
                 // populate the view-kind bits, while the handle stays a float
                 // one (`0x409`), whose raw bits RTX and WARP pass bit-exact
                 // without extra CFG blocks or touching non-d16 shaders.
                 let integer = if typed { self.integer_view(src)? } else { None };
-||||||| 0a4356653
-                // noise). shortcut: that is known of the views a program
-                // picks from the heap, not of those in its tables; and the
-                // handle stays a float one, whose bits the drivers pass.
-                let integer = if typed { self.integer_view(src)? } else { None };
-=======
-                // noise). shortcut: that is known of the views a program
-                // picks from the heap; and the handle stays a float one,
-                // whose bits the drivers pass.
-                let integer = if typed && !halves { self.integer_view(src)? } else { None };
->>>>>>> nvidia/main
                 let mut wide = Vec::new();
                 for k in 0..count {
                     let mut x = vals[(k / 2) as usize];
@@ -12238,14 +12225,12 @@ impl<'a> Lower<'a> {
                 args.push(self.handle(site, src, false, (10 | u, component))?);
                 args.extend([index.unwrap_or(self.s.m.i32(0)), iu]);
                 for x in vals {
-<<<<<<< HEAD
-                    let f = self.as_float(x);
-                    args.push(self.nan_guard(f, false));
-||||||| 0a4356653
-                    args.push(self.as_float(x));
-=======
-                    args.push(if halves { x } else { self.as_float(x) });
->>>>>>> nvidia/main
+                    if halves {
+                        args.push(x);
+                    } else {
+                        let f = self.as_float(x);
+                        args.push(self.nan_guard(f, false));
+                    }
                 }
                 (
                     69,
@@ -12660,21 +12645,13 @@ impl<'a> Lower<'a> {
             let pixel = self.s.pixel;
             let el = &mut elements(self, primitive)[id];
             el.usage |= 1 << col;
-<<<<<<< HEAD
             let (kind, comp) = (el.kind, el.comp);
             let target = !mesh && pixel && kind == 16 && comp == 9;
             let (suffix, x) = match comp {
-                9 if half.is_some() => (".f32", self.as_float(x)),
-||||||| 0a4356653
-            let (suffix, x) = match el.comp {
-                9 if half.is_some() => (".f32", self.as_float(x)),
-=======
-            let (suffix, x) = match el.comp {
                 9 if half.is_some() => {
                     let f = self.as_float(x);
                     (".f32", if colour { self.scrub_nan(f) } else { f })
                 }
->>>>>>> nvidia/main
                 9 => {
                     let f = match self.floats.get(&value) {
                         Some(&f) => f,
