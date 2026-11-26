@@ -2785,7 +2785,6 @@ fn v_mul_legacy_f32_treats_denormals_as_zero() {
         );
     });
 }
-<<<<<<< HEAD
 
 /// Whether the hardware adapter is an AMD RDNA card's: what the translator
 /// writes for one ([`super::rdna`]) holds there.
@@ -2871,8 +2870,6 @@ fn rdna_forms_give_what_the_spelled_out_ones_give() {
         }
     }
 }
-||||||| c7daeea5
-=======
 
 /// A program that moves a typed buffer's 16-bit channels
 /// (`buffer_load_format_d16_xyzw` from the table's first view,
@@ -3358,4 +3355,3 @@ fn a_format_load_read_as_halves_loads_the_integer() {
     }
     assert!(ran > 0, "no SM 6.6 device available");
 }
->>>>>>> integ/vertex
