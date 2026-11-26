@@ -8009,14 +8009,8 @@ impl Host {
             }
             Ok(HostList {
                 allocator,
-<<<<<<< HEAD
                 list: rec::Rec::new(list),
-||||||| a66ac212
-                list,
-=======
-                list,
                 changes: std::sync::atomic::AtomicU64::new(1),
->>>>>>> klbf/beta-2
                 deferred: Mutex::default(),
                 scratch: Mutex::default(),
                 states: Mutex::default(),
@@ -8024,20 +8018,8 @@ impl Host {
                 aliases: Mutex::default(),
                 written: Mutex::default(),
                 prelude,
-<<<<<<< HEAD
                 pipelines,
-||||||| a66ac212
-                pipelines: Mutex::default(),
-                budget: OnceLock::new(),
-                indirect_args: Mutex::default(),
-                _alive: Counted::new(),
-=======
-                pipelines: Mutex::default(),
-                budget: OnceLock::new(),
-                indirect_args: Mutex::default(),
                 ahead_chunks: Mutex::default(),
-                _alive: Counted::new(),
->>>>>>> klbf/beta-2
                 #[cfg(feature = "diagnostics")]
                 indirects,
                 budget: OnceLock::new(),
@@ -8189,14 +8171,10 @@ impl Host {
                 },
                 ..Default::default()
             })?;
-<<<<<<< HEAD
             #[cfg(feature = "diagnostics")]
             name(&pso, || crate::replay::play::COMPARE.into());
-||||||| a66ac212
-=======
             let snap = relay_own_queue().then(|| self.make_card_snap()).flatten();
             let patch = under_writes_masks().then(|| self.make_card_patch()).flatten();
->>>>>>> klbf/beta-2
             Ok(CardWork {
                 sync: vec![list()?],
                 check: vec![list()?],
@@ -8211,48 +8189,15 @@ impl Host {
                 merge_scratch: Vec::new(),
                 taken: 0,
                 out: 0,
-<<<<<<< HEAD
-                inflight: if inflight_fetch() { self.make_card_inflight(RESULTS) } else { None },
-                merge: if crate::shadow::merge_on_card_wanted() { self.make_card_merge() } else { None },
-||||||| a66ac212
-=======
                 snap,
                 patch,
                 masks: Vec::new(),
                 inflight: if inflight_fetch() { self.make_card_inflight(RESULTS) } else { None },
->>>>>>> klbf/beta-2
+                merge: if crate::shadow::merge_on_card_wanted() { self.make_card_merge() } else { None },
             })
         }
     }
 
-<<<<<<< HEAD
-    /// [`CardMerge`]; `None` (and the title's bytes put in under flights'
-    /// writes go up as copies, as without the switch) if the shader cannot
-    /// be had.
-    fn make_card_merge(&self) -> Option<CardMerge> {
-        use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
-        use windows::Win32::Graphics::Direct3D::ID3DBlob;
-        let made = (|| -> windows::core::Result<CardMerge> {
-            let mut code: Option<ID3DBlob> = None;
-            // SAFETY: the source and names live through the call; the out
-            // pointer is ours.
-            unsafe {
-                D3DCompile(
-                    CARD_MERGE.as_ptr().cast(),
-                    CARD_MERGE.len(),
-                    windows::core::s!("card merge"),
-                    None,
-                    None,
-                    windows::core::s!("main"),
-                    windows::core::s!("cs_5_1"),
-                    0,
-                    0,
-                    &mut code,
-                    None,
-                )?;
-            }
-            let code = code.ok_or_else(windows::core::Error::empty)?;
-            // SAFETY: the blob's own bytes; the root signature is inside
             // the shader.
             unsafe {
                 let bytes = std::slice::from_raw_parts(code.GetBufferPointer().cast::<u8>(), code.GetBufferSize());
@@ -8311,80 +8256,6 @@ impl Host {
         Some((buffer, data as usize))
     }
 
-    /// [`CardInflight`] for `results` bytes of the compare's results; `None`
-    /// (and the old fetch) if the shader or the memory cannot be had.
-    fn make_card_inflight(&self, results: u64) -> Option<CardInflight> {
-        use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
-        use windows::Win32::Graphics::Direct3D::ID3DBlob;
-        let made = (|| -> windows::core::Result<CardInflight> {
-            let mut code: Option<ID3DBlob> = None;
-            // SAFETY: the source and names live through the call; the out
-            // pointer is ours.
-            unsafe {
-                D3DCompile(
-                    CARD_FETCH.as_ptr().cast(),
-                    CARD_FETCH.len(),
-                    windows::core::s!("card fetch in flight"),
-                    None,
-                    None,
-                    windows::core::s!("main"),
-                    windows::core::s!("cs_5_1"),
-                    0,
-                    0,
-                    &mut code,
-                    None,
-                )?;
-            }
-            let code = code.ok_or_else(windows::core::Error::empty)?;
-            let slots = inflight_slots(inflight_fetch_bytes());
-            let (table, table_data) = self.shared_buffer(4 + results).ok_or_else(windows::core::Error::empty)?;
-            name(&table, || "card fetch in flight: tickets".into());
-            let fetched_bytes = u64::from(slots) * INFLIGHT_SLOT;
-            let (fetched, fetched_data) = self.shared_buffer(fetched_bytes).ok_or_else(windows::core::Error::empty)?;
-            name(&fetched, || "card fetch in flight: pieces".into());
-            // SAFETY: the mapping holds the counter; nothing of ours ran
-            // on the card with it yet.
-            unsafe { table_data.cast::<u32>().write_volatile(0) };
-            // SAFETY: the blob's own bytes; the root signature is inside
-            // the shader.
-            unsafe {
-                let bytes = std::slice::from_raw_parts(code.GetBufferPointer().cast::<u8>(), code.GetBufferSize());
-                let root: ID3D12RootSignature = self.device.CreateRootSignature(0, bytes)?;
-                let pso: ID3D12PipelineState = self.device.CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
-                    pRootSignature: std::mem::transmute_copy(&root),
-                    CS: D3D12_SHADER_BYTECODE {
-                        pShaderBytecode: bytes.as_ptr().cast(),
-                        BytecodeLength: bytes.len(),
-                    },
-                    ..Default::default()
-                })?;
-                Ok(CardInflight {
-                    root,
-                    pso,
-                    table: (table, table_data as usize, 4 + results),
-                    fetched: (fetched, fetched_data as usize, slots),
-                    landed: 0,
-                    brought: Vec::new(),
-                })
-            }
-        })();
-        match made {
-            Ok(inflight) => {
-                tracing::info!(
-                    slots = inflight.fetched.2,
-                    "card copies' flagged pieces come down inside their flights (VICTORY_CARD_FETCH_INFLIGHT=1)"
-                );
-                Some(inflight)
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "no fetch inside flights (VICTORY_CARD_FETCH_INFLIGHT=1): pieces are fetched the old way");
-                None
-            }
-        }
-    }
-
-||||||| a66ac212
-=======
     /// [`CardInflight`] for `results` bytes of the compare's results; `None`
     /// (and the old fetch) if the shader or the memory cannot be had.
     fn make_card_inflight(&self, results: u64) -> Option<CardInflight> {
@@ -8569,8 +8440,6 @@ impl Host {
             }
         }
     }
-
->>>>>>> klbf/beta-2
     /// Before a submission's lists run, for copies in the card's memory
     /// ([`crate::shadow::cards`]): what changed on their CPU side since
     /// the last submission goes to their card side (a list of ours, run
@@ -8619,7 +8488,6 @@ impl Host {
             for step in &list.deferred().copies {
                 if let Step::GpuWrite(shadow, address, len) = step
                     && shadow.carded()
-                    && !shadow.transient()
                 {
                     let range = (*address, *address + *len);
                     let key = Arc::as_ptr(shadow) as usize;
@@ -8663,13 +8531,9 @@ impl Host {
             }
             None => 0,
         };
-<<<<<<< HEAD
         let gathering = crate::timeline::span("copies in the card's memory: what changed");
         let mut dirty = crate::shadow::card_dirty(sent_as);
         gathering.end();
-        // The title's bytes put in under flights' shader writes that go up
-        // through the merge on the card (`shadow::merge_on_card`).
-        let masked = crate::shadow::card_masked(sent_as);
         // With fetches on a copy queue (`crate::queue2`, bit 1 of
         // `VICTORY_QUEUE2`): the send's number is signalled on the direct
         // queue behind the send, so that a fetch knows which sends the card
@@ -8681,82 +8545,12 @@ impl Host {
                 second.sent_up(&self.queue, sent_as);
             }
         };
-        if declared.is_empty() && dirty.is_empty() && looked.is_empty() && owed.is_empty() && masked.is_empty() {
+        if declared.is_empty() && dirty.is_empty() && looked.is_empty() && owed.is_empty() {
             numbered();
-||||||| a66ac212
-        let mut dirty = crate::shadow::card_dirty(sent_as);
-        if declared.is_empty() && dirty.is_empty() {
-=======
-        let (mut dirty, uploads) = crate::shadow::card_dirty(sent_as);
-        if declared.is_empty() && dirty.is_empty() && uploads.is_empty() {
->>>>>>> klbf/beta-2
             return None;
         }
         let mut work = CARD_WORK.lock().unwrap_or_else(|e| e.into_inner());
         let work = work.as_mut()?;
-        // The merges on the card of this submission, per copy the
-        // stretches they go over, and the buffer their masks are in. A
-        // copy whose bytes cannot go that way (no shader, no mask buffer
-        // free, a buffer that is not whole blocks) gets them as copies of
-        // the runs, as without the switch.
-        let mut merges: Vec<(Arc<crate::shadow::Shadow>, Vec<crate::shadow::MaskStretch>)> = Vec::new();
-        let mut mask: Option<ID3D12Resource> = None;
-        if !masked.is_empty() {
-            let whole_blocks = |shadow: &crate::shadow::Shadow| {
-                shadow.card_sides().is_some_and(|(_, _, size)| size % crate::shadow::MASK_BLOCK as u64 == 0)
-            };
-            let mut bytes = 0usize;
-            let laid: Vec<Vec<crate::shadow::MaskStretch>> = masked
-                .iter()
-                .map(|(shadow, blocks)| {
-                    if !whole_blocks(shadow) {
-                        return Vec::new();
-                    }
-                    let (stretches, end) = crate::shadow::mask_stretches(blocks, bytes);
-                    bytes = end;
-                    stretches
-                })
-                .collect();
-            // SAFETY: a plain query.
-            let completed = unsafe { self.fence.GetCompletedValue() };
-            // Held until the card has passed this submission's signal: the
-            // merges run ahead of that.
-            let buffer = match work.merge.as_mut() {
-                Some(merge) if bytes > 0 => self.card_mask(merge, bytes as u64, completed, sent + 1),
-                _ => None,
-            };
-            if buffer.is_none() {
-                CARD_MERGES[3].fetch_add(1, Ordering::Relaxed);
-            } else {
-                CARD_MERGES[0].fetch_add(1, Ordering::Relaxed);
-                CARD_MERGES[2].fetch_add(bytes as u64, Ordering::Relaxed);
-            }
-            for ((shadow, blocks), stretches) in masked.into_iter().zip(laid) {
-                match &buffer {
-                    Some((_, data)) if !stretches.is_empty() => {
-                        // SAFETY: the mapping holds `bytes` bytes and more,
-                        // and nothing on the card reads it (`card_mask`).
-                        let all = unsafe { std::slice::from_raw_parts_mut(*data as *mut u8, bytes) };
-                        crate::shadow::mask_fill(all, &stretches, &blocks);
-                        if !dirty.iter().any(|(s, _)| Arc::ptr_eq(s, &shadow)) {
-                            dirty.push((shadow.clone(), Vec::new()));
-                        }
-                        merges.push((shadow, stretches));
-                    }
-                    _ => {
-                        let runs = crate::shadow::mask_runs(&blocks);
-                        match dirty.iter_mut().find(|(s, _)| Arc::ptr_eq(s, &shadow)) {
-                            Some((_, ranges)) => {
-                                ranges.extend(runs);
-                                *ranges = crate::shadow::joined(std::mem::take(ranges));
-                            }
-                            None => dirty.push((shadow, runs)),
-                        }
-                    }
-                }
-            }
-            mask = buffer.map(|(buffer, _)| buffer);
-        }
         // A copy whose shader writes are declared for the first time gets
         // its bytes from before, whole.
         let mut whole: Vec<Arc<crate::shadow::Shadow>> = Vec::new();
@@ -8773,7 +8567,6 @@ impl Host {
             }
         }
         let mut used: Vec<(bool, Prelude)> = Vec::new();
-<<<<<<< HEAD
         // The changed bytes through the copy queue (`VICTORY_QUEUE2` bit
         // 2): the landing buffer they are in, in the order of `dirty`'s
         // ranges, once the direct queue has waited. `None`: straight from
@@ -8822,80 +8615,16 @@ impl Host {
             }
         }
         let mut looks = None;
-        let mut up = None;
         // The bytes as they are now, whatever later submissions put there.
         let taking = crate::timeline::span("copies in the card's memory: taken");
         let own = if send::own() { send::take(self, &dirty) } else { None };
         taking.end();
         if !dirty.is_empty() {
-||||||| a66ac212
-        if !dirty.is_empty() {
-=======
-        // (Neptune) The masks this plan's send reads (`under_writes_masks`).
-        let mut masks: Option<(ID3D12Resource, usize, u64)> = None;
-        if !dirty.is_empty() || !uploads.is_empty() {
->>>>>>> klbf/beta-2
             let Some(sync) = work.sync.pop().or_else(|| self.make_prelude()) else {
                 fail(format_args!("no host list to bring host copies in the card's memory up to date"));
             };
             let _recording = crate::timeline::span("copies in the card's memory: the list");
             let (allocator, list) = &sync;
-            // (Neptune) Per copy, what goes up as copies and what by mask
-            // (`under_writes_masks`): the blocks in runs that follow one
-            // another (first block, blocks, where their masks begin), the
-            // masks written one after the other into a buffer of the plan's.
-            type Sends = (Vec<(usize, usize)>, Vec<(usize, usize, usize)>);
-            let mut sends: Vec<Sends> = dirty.iter().map(|(_, ranges)| (ranges.clone(), Vec::new())).collect();
-            if let Some(patch) = work.patch.as_ref() {
-                let split: Vec<_> = dirty.iter().map(|(_, ranges)| masked_blocks(ranges, masks_least())).collect();
-                let blocks: usize = split.iter().map(|s| s.1.len()).sum();
-                if blocks > 0 {
-                    // A mask and a table entry for each block.
-                    let need = (blocks as u64 * (512 + 8)).next_multiple_of(64 << 10);
-                    let have = match work.masks.iter().position(|m| m.2 >= need) {
-                        Some(i) => Some(work.masks.swap_remove(i)),
-                        None => self.shared_buffer(need).map(|(buffer, data)| {
-                            name(&buffer, || "card patch masks".into());
-                            (buffer, data as usize, need)
-                        }),
-                    };
-                    if let Some((buffer, data, bytes)) = have {
-                        let mut at = 0usize;
-                        for (send, (copies, masked)) in sends.iter_mut().zip(split) {
-                            // The masks one after the other, then the copy's
-                            // table: of each block where it begins in the copy
-                            // and where its mask is. A pass takes up to 4,000
-                            // blocks: (its table's place, blocks, 0).
-                            let mut entries: Vec<[u32; 2]> = Vec::with_capacity(masked.len());
-                            for (block, ranges) in &masked {
-                                let mask = block_mask(*block, ranges);
-                                // SAFETY: the mapping holds `bytes`, and
-                                // `blocks` masks and table entries fit in it
-                                // (`need`); no list on the card reads this
-                                // buffer (it came back with `card_done`, or
-                                // is new).
-                                unsafe { std::ptr::copy_nonoverlapping(mask.as_ptr(), (data + at) as *mut u8, 512) };
-                                entries.push([(*block * 4096) as u32, at as u32]);
-                                at += 512;
-                                CARD_MASKED[1].fetch_add(ranges.len() as u64, Ordering::Relaxed);
-                            }
-                            let mut runs: Vec<(usize, usize, usize)> = Vec::new();
-                            for pass in entries.chunks(4000) {
-                                // SAFETY: as above; the entries are plain words.
-                                unsafe { std::ptr::copy_nonoverlapping(pass.as_ptr().cast::<u8>(), (data + at) as *mut u8, pass.len() * 8) };
-                                runs.push((at, pass.len(), 0));
-                                at += pass.len() * 8;
-                            }
-                            CARD_MASKED[0].fetch_add(masked.len() as u64, Ordering::Relaxed);
-                            CARD_MASKED_PASSES.fetch_add(runs.len() as u64, Ordering::Relaxed);
-                            *send = (copies, runs);
-                        }
-                        debug_assert!(at as u64 <= bytes);
-                        masks = Some((buffer, data, bytes));
-                    }
-                }
-                let _ = patch;
-            }
             // SAFETY: the list's last run finished (it ran ahead of a
             // submission that was waited for, and came back after that);
             // live buffers, and the ranges lie in them.
@@ -8903,7 +8632,6 @@ impl Host {
                 (|| -> windows::core::Result<()> {
                     allocator.Reset()?;
                     list.Reset(allocator, None)?;
-<<<<<<< HEAD
                     let timed = crate::cardmeter::begin(list, crate::cardmeter::Kind::Sync);
                     #[cfg(feature = "diagnostics")]
                     let shot_span = crate::shot::span_begin(list);
@@ -8917,137 +8645,26 @@ impl Host {
                     // card do them one after the other.
                     let mut sent = Vec::new();
                     if let Some(own) = &own {
-                        // With `upq`: the submission's own memory (the PC's)
-                        // comes whole into a buffer of ours in the card's on
-                        // the copy queue; the sends come from there.
-                        if looks.is_none() && upq::on() {
-                            let (memory, used) = own.source();
-                            up = upq::send(self, &self.queue, &[(memory, 0, memory, used)], |_, _, _| {});
-||||||| a66ac212
-                    for (shadow, ranges) in &dirty {
-                        let Some((staging, before, size)) = shadow.card_sides() else {
-                            continue;
-                        };
-                        for &(a, b) in ranges {
-                            list.CopyBufferRegion(&shadow.buffer, a as u64, staging, a as u64, (b - a) as u64);
-                            crate::shadow::CARD_STATS[0].fetch_add((b - a) as u64, Ordering::Relaxed);
-=======
-                    for ((shadow, ranges), (copies, masked)) in dirty.iter().zip(&sends) {
-                        let Some((Some(staging), before, size)) = shadow.card_sides() else {
-                            continue;
-                        };
-                        for &(a, b) in copies {
-                            list.CopyBufferRegion(&shadow.buffer, a as u64, staging, a as u64, (b - a) as u64);
->>>>>>> klbf/beta-2
-                        }
-<<<<<<< HEAD
-                        let from = up.as_ref().and_then(upq::Slot::bounce);
-                        own.record(self, list, &dirty, |shadow| looks.as_ref().is_some_and(|l| l.hold(shadow)), from);
-                    }
-                    // With `upq`: the PC's bytes come into a buffer of ours
-                    // on the copy queue, and this list copies them from
-                    // there (the card's memory), after a wait for that.
-                    if own.is_none() && looks.is_none() && upq::on() {
-                        let sides: Vec<_> = dirty.iter().map(|(shadow, _)| shadow.card_sides()).collect();
-                        let mut ranges: Vec<upq::Range<'_>> = Vec::new();
-                        for ((shadow, rs), side) in dirty.iter().zip(&sides) {
-                            if let Some((staging, _, _)) = side {
-                                ranges.extend(rs.iter().map(|&(a, b)| (&shadow.buffer, a as u64, *staging, (b - a) as u64)));
-                            }
-                        }
-                        up = upq::send(self, &self.queue, &ranges, |i, bounce, at| {
-                            let (card, offset, _, bytes) = ranges[i];
-                            list.CopyBufferRegion(card, offset, bounce, at, bytes);
-                        });
+                        own.record(self, list, &dirty, |shadow| looks.as_ref().is_some_and(|l| l.hold(shadow)));
                     }
                     for (shadow, ranges) in &dirty {
                         let Some((staging, before, _)) = shadow.card_sides() else {
-||||||| a66ac212
-                        crate::shadow::CARD_STATS[1].fetch_add(ranges.len() as u64, Ordering::Relaxed);
-                        let Some(before) = before else {
-=======
-                        crate::shadow::CARD_STATS[0].fetch_add(ranges.iter().map(|&(a, b)| (b - a) as u64).sum::<u64>(), Ordering::Relaxed);
-                        crate::shadow::CARD_STATS[1].fetch_add(ranges.len() as u64, Ordering::Relaxed);
-                        // (Neptune) The card side's state from here on: a
-                        // copy's destination, written by the masked pass, or
-                        // as the list found it.
-                        let mut state = (!copies.is_empty()).then_some(D3D12_RESOURCE_STATE_COPY_DEST);
-                        if let (false, Some((root, pso)), Some((mask_buffer, _, _))) = (masked.is_empty(), work.patch.as_ref(), masks.as_ref()) {
-                            if let Some(from) = state {
-                                list.ResourceBarrier(&[transition(&shadow.buffer, from, D3D12_RESOURCE_STATE_UNORDERED_ACCESS)]);
-                            }
-                            state = Some(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                            list.SetComputeRootSignature(root);
-                            list.SetPipelineState(pso);
-                            list.SetComputeRootShaderResourceView(1, staging.GetGPUVirtualAddress());
-                            list.SetComputeRootShaderResourceView(2, mask_buffer.GetGPUVirtualAddress());
-                            list.SetComputeRootUnorderedAccessView(3, shadow.buffer.GetGPUVirtualAddress());
-                            for &(table_at, blocks, _) in masked {
-                                let constants = [table_at as u32, blocks as u32];
-                                list.SetComputeRoot32BitConstants(0, 2, constants.as_ptr().cast(), 0);
-                                list.Dispatch(16 * blocks as u32, 1, 1);
-                            }
-                        }
-                        let Some(before) = before else {
->>>>>>> klbf/beta-2
                             continue;
                         };
-                        // (With `upq` the bytes are already copied from the
-                        // bounce buffer by `upq::send`'s callback.)
-                        if up.is_none() {
-                            for &(a, b) in ranges {
-                                match &landed {
-                                    Some(landing) => list.CopyBufferRegion(&shadow.buffer, a as u64, landing, at, (b - a) as u64),
-                                    None => list.CopyBufferRegion(&shadow.buffer, a as u64, staging, a as u64, (b - a) as u64),
-                                }
-                                at += (b - a) as u64;
-                                crate::shadow::CARD_STATS[0].fetch_add((b - a) as u64, Ordering::Relaxed);
+                        for &(a, b) in ranges {
+                            match &landed {
+                                Some(landing) => list.CopyBufferRegion(&shadow.buffer, a as u64, landing, at, (b - a) as u64),
+                                None => list.CopyBufferRegion(&shadow.buffer, a as u64, staging, a as u64, (b - a) as u64),
                             }
+                            at += (b - a) as u64;
+                            crate::shadow::CARD_STATS[0].fetch_add((b - a) as u64, Ordering::Relaxed);
                         }
                         let bytes: u64 = ranges.iter().map(|&(a, b)| (b - a) as u64).sum();
                         crate::shadow::CARD_STATS[0].fetch_add(bytes, Ordering::Relaxed);
                         crate::shadow::CARD_STATS[1].fetch_add(ranges.len() as u64, Ordering::Relaxed);
                         #[cfg(feature = "diagnostics")]
                         traffic::moved(traffic::UP, shadow.span(), ranges.iter().copied());
-                        // The merge on the card, behind the copies: both
-                        // take their bytes from the CPU's side.
-                        let merged = match (merges.iter().find(|(s, _)| Arc::ptr_eq(s, shadow)), &work.merge, &mask) {
-                            (Some((_, stretches)), Some(merge), Some(mask)) => {
-                                if !ranges.is_empty() {
-                                    list.ResourceBarrier(&[transition(
-                                        &shadow.buffer,
-                                        D3D12_RESOURCE_STATE_COPY_DEST,
-                                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                                    )]);
-                                }
-                                list.SetComputeRootSignature(&merge.root);
-                                list.SetPipelineState(&merge.pso);
-                                list.SetComputeRootShaderResourceView(1, staging.GetGPUVirtualAddress());
-                                list.SetComputeRootShaderResourceView(2, mask.GetGPUVirtualAddress());
-                                list.SetComputeRootUnorderedAccessView(3, shadow.buffer.GetGPUVirtualAddress());
-                                for stretch in stretches {
-                                    let mut done = 0;
-                                    while done < stretch.bytes {
-                                        let n = (stretch.bytes - done).min(CARD_MERGE_MOST);
-                                        let words = (n / 32) as u32;
-                                        let constants = [(stretch.at + done) as u32, (stretch.mask_at + done / 8) as u32, words];
-                                        list.SetComputeRoot32BitConstants(0, 3, constants.as_ptr().cast(), 0);
-                                        list.Dispatch(words.div_ceil(64), 1, 1);
-                                        CARD_MERGES[1].fetch_add(1, Ordering::Relaxed);
-                                        done += n;
-                                    }
-                                }
-                                Some(stretches)
-                            }
-                            _ => None,
-                        };
-                        if merged.is_some() {
-                            sent.push(transition(
-                                &shadow.buffer,
-                                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                            ));
-                        } else if own.is_none() && before.is_some() && !ranges.is_empty() {
+                        if own.is_none() && before.is_some() && !ranges.is_empty() {
                             sent.push(transition(
                                 &shadow.buffer,
                                 D3D12_RESOURCE_STATE_COPY_DEST,
@@ -9072,24 +8689,6 @@ impl Host {
                         // hashed again, all of them the first time; the
                         // compare after the lists hashes the declared
                         // pieces and flags those whose hash is another.
-<<<<<<< HEAD
-||||||| a66ac212
-                        if !ranges.is_empty() {
-                            list.ResourceBarrier(&[transition(
-                                &shadow.buffer,
-                                D3D12_RESOURCE_STATE_COPY_DEST,
-                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                            )]);
-                        }
-                        list.SetComputeRootSignature(&work.root);
-                        list.SetPipelineState(&work.pso);
-=======
-                        if let Some(from) = state {
-                            list.ResourceBarrier(&[transition(&shadow.buffer, from, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)]);
-                        }
-                        list.SetComputeRootSignature(&work.root);
-                        list.SetPipelineState(&work.pso);
->>>>>>> klbf/beta-2
                         list.SetComputeRootShaderResourceView(1, shadow.buffer.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(2, before.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(3, work.differs.0.GetGPUVirtualAddress());
@@ -9107,13 +8706,6 @@ impl Host {
                                     _ => runs.push(run),
                                 }
                             }
-                            // What the merge went over, each piece once.
-                            if let Some((_, stretches)) = merges.iter().find(|(s, _)| Arc::ptr_eq(s, shadow)) {
-                                runs.extend(crate::shadow::joined_piece_runs_within(
-                                    stretches.iter().map(|s| shadow.card_run(s.at, s.at + s.bytes)).collect(),
-                                    0,
-                                ));
-                            }
                             runs
                         };
                         // The same pieces in fewer passes (`rehash_runs` + `rehash_gap`).
@@ -9122,53 +8714,18 @@ impl Host {
                         } else {
                             runs
                         };
-<<<<<<< HEAD
-||||||| a66ac212
-                        // The same pieces in fewer passes (`rehash_runs`).
-                        let runs = if rehash_runs() { crate::shadow::joined_piece_runs(runs) } else { runs };
-=======
-                        // The same pieces in fewer passes (`rehash_runs`).
-                        // (Neptune) Also with more runs under shader writes
-                        // than before (`under_writes_runs`): thousands of
-                        // two-byte ranges would each have a pass of their own.
-                        let runs = if rehash_runs() || under_writes_runs() > 512 { crate::shadow::joined_piece_runs(runs) } else { runs };
->>>>>>> klbf/beta-2
                         CARD_PASSES[0].fetch_add(runs.len() as u64, Ordering::Relaxed);
                         CARD_PASSES[1].fetch_add(runs.iter().map(|r| u64::from(r.pieces)).sum::<u64>(), Ordering::Relaxed);
                         for run in runs {
-<<<<<<< HEAD
                             if run.pieces == 0 {
                                 continue;
                             }
                             dispatch_card_compare(list, run.first, run.skew, size as u32, run.pieces, 0, 0, 0);
-||||||| a66ac212
-                            let constants = [run.first, run.skew, size as u32, run.pieces, 0, 0];
-                            list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
-                            list.Dispatch(run.pieces.div_ceil(64), 1, 1);
-=======
-                            let constants = [run.first, run.skew, size as u32, run.pieces, 0, 0];
-                            list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
-                            list.Dispatch(run.pieces.min(65_535), 1, 1);
->>>>>>> klbf/beta-2
                         }
                     }
-<<<<<<< HEAD
                     crate::cardmeter::end(list, timed);
                     #[cfg(feature = "diagnostics")]
                     crate::shot::span_end(list, shot_span, 0, || "SYNC LIST (changed bytes go up to the card's copies and are hashed)".to_string());
-||||||| a66ac212
-=======
-                    // (Neptune) Transient windows: from their chunks, in the order copied. No
-                    // masks, no compare, nothing hashed: shaders do not write them.
-                    for (shadow, parts) in &uploads {
-                        for (a, b, chunk) in parts {
-                            list.CopyBufferRegion(&shadow.buffer, *a as u64, chunk.buffer(), chunk.offset, (b - a) as u64);
-                            crate::windowup::SENT.fetch_add((b - a) as u64, Ordering::Relaxed);
-                        }
-                        crate::shadow::CARD_STATS[0].fetch_add(parts.iter().map(|&(a, b, _)| (b - a) as u64).sum::<u64>(), Ordering::Relaxed);
-                        crate::shadow::CARD_STATS[1].fetch_add(parts.len() as u64, Ordering::Relaxed);
-                    }
->>>>>>> klbf/beta-2
                     list.Close()?;
                     self.queue.ExecuteCommandLists(&[Some(list.cast()?)]);
                     Ok(())
@@ -9184,35 +8741,13 @@ impl Host {
         let mut plan = CardPlan {
             ranges: Vec::new(),
             check: None,
-<<<<<<< HEAD
             _synced: dirty.into_iter().map(|(shadow, _)| shadow).collect(),
-            _mask: mask,
-||||||| a66ac212
-            _synced: dirty.into_iter().map(|(shadow, _)| shadow).collect(),
-=======
-            _synced: dirty
-                .into_iter()
-                .map(|(shadow, _)| shadow)
-                .chain(uploads.iter().map(|(shadow, _)| shadow.clone()))
-                .collect(),
-            _uploads: uploads.into_iter().flat_map(|(_, parts)| parts.into_iter().map(|p| p.2)).collect(),
->>>>>>> klbf/beta-2
             lists: used,
-<<<<<<< HEAD
             sent_as,
             inflight: false,
             inflight_landed: 0,
             looks,
             sends: own.map(send::Own::memory),
-            up,
-||||||| a66ac212
-=======
-            sent_as,
-            snap: None,
-            masks,
-            inflight: false,
-            inflight_landed: 0,
->>>>>>> klbf/beta-2
         };
         // Each byte once, as the copy-back joins the declared ranges. The
         // results go behind those of plans still in the air.
@@ -9282,15 +8817,6 @@ impl Host {
             };
             let inline_limit = work.inline_tail.wrapping_add(work.inline_slots);
             let (allocator, list) = &check;
-            // (Neptune) Sent ahead, with a queue of the fetch's own: the
-            // compare that keeps what it flags, told which slots are free
-            // (`relay_own_queue`). The count of slots done with only grows,
-            // so one read a moment ago is on the safe side.
-            let keep = work
-                .snap
-                .as_ref()
-                .filter(|_| flown && !SNAP_OFF.load(Ordering::Acquire))
-                .map(|snap| (snap, SNAP_DONE.load(Ordering::Acquire)));
             // SAFETY: the list's last run finished (its submission was
             // waited for, and it came back after that); live buffers; the
             // compare's own root signature.
@@ -9311,18 +8837,8 @@ impl Host {
                             }),
                         },
                     }]);
-                    match keep {
-                        Some((snap, _)) => {
-                            list.SetComputeRootSignature(&snap.root);
-                            list.SetPipelineState(&snap.pso);
-                            list.SetComputeRootUnorderedAccessView(4, snap.buffer.GetGPUVirtualAddress());
-                        }
-                        None => {
-                            list.SetComputeRootSignature(&work.root);
-                            list.SetPipelineState(&work.pso);
-                        }
-                    }
-                    let (snap_base, snap_slots, words) = keep.map_or((0, 0, 6), |(snap, base)| (base, snap.slots, 8));
+                    list.SetComputeRootSignature(&work.root);
+                    list.SetPipelineState(&work.pso);
                     list.SetComputeRootUnorderedAccessView(3, work.differs.0.GetGPUVirtualAddress());
                     list.SetComputeRootUnorderedAccessView(4, work.inline_buf.0.GetGPUVirtualAddress());
                     for r in plan.ranges.iter().filter(|r| r.compared) {
@@ -9332,23 +8848,13 @@ impl Host {
                         let Some((_, Some(before), _)) = r.shadow.card_sides() else {
                             continue;
                         };
-<<<<<<< HEAD
                         let size = r.shadow.card_hash_size();
                         let hashed = size as u32;
                         // (What is only looked at keeps its hashes: what
                         // changed there is the next declared range's to land.)
                         let m = if r.picked { 1 } else { mode };
-||||||| a66ac212
-                        let constants = [r.span.first, r.span.skew, size as u32, r.span.pieces, r.at * 4, if flown { 2 } else { 1 }];
-                        list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
-=======
-                        let constants =
-                            [r.span.first, r.span.skew, size as u32, r.span.pieces, r.at * 4, if flown { 2 } else { 1 }, snap_base, snap_slots];
-                        list.SetComputeRoot32BitConstants(0, words, constants.as_ptr().cast(), 0);
->>>>>>> klbf/beta-2
                         list.SetComputeRootShaderResourceView(1, r.shadow.buffer.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(2, before.GetGPUVirtualAddress());
-<<<<<<< HEAD
                         dispatch_card_compare(
                             list,
                             r.span.first,
@@ -9359,14 +8865,8 @@ impl Host {
                             m,
                             inline_limit,
                         );
-||||||| a66ac212
-                        list.Dispatch(r.span.pieces.div_ceil(64), 1, 1);
-=======
-                        list.Dispatch(r.span.pieces.min(65_535), 1, 1);
->>>>>>> klbf/beta-2
                         CARD_PASSES[2].fetch_add(1, Ordering::Relaxed);
                     }
-<<<<<<< HEAD
                     // The fetch inside the flight (`inflight_fetch`): behind
                     // every compare of the list, the pieces they flagged go
                     // to slots in the PC's memory.
@@ -9404,43 +8904,6 @@ impl Host {
                     crate::cardmeter::end(list, timed);
                     #[cfg(feature = "diagnostics")]
                     crate::shot::span_end(list, shot_span, 0, || "CHECK LIST (the card compares the pieces shaders may have written)".to_string());
-||||||| a66ac212
-=======
-                    // The fetch inside the flight (`inflight_fetch`): behind
-                    // every compare of the list, the pieces they flagged go
-                    // to slots in the PC's memory.
-                    if flown && let Some(inflight) = &work.inflight {
-                        list.ResourceBarrier(&[D3D12_RESOURCE_BARRIER {
-                            Type: D3D12_RESOURCE_BARRIER_TYPE_UAV,
-                            Flags: D3D12_RESOURCE_BARRIER_FLAG_NONE,
-                            Anonymous: D3D12_RESOURCE_BARRIER_0 {
-                                UAV: std::mem::ManuallyDrop::new(D3D12_RESOURCE_UAV_BARRIER {
-                                    pResource: std::mem::ManuallyDrop::new(None),
-                                }),
-                            },
-                        }]);
-                        list.SetComputeRootSignature(&inflight.root);
-                        list.SetPipelineState(&inflight.pso);
-                        list.SetComputeRootUnorderedAccessView(2, work.differs.0.GetGPUVirtualAddress());
-                        list.SetComputeRootUnorderedAccessView(3, inflight.table.0.GetGPUVirtualAddress());
-                        list.SetComputeRootUnorderedAccessView(4, inflight.fetched.0.GetGPUVirtualAddress());
-                        let mut every = true;
-                        for r in plan.ranges.iter().filter(|r| r.compared) {
-                            let Some((_, Some(_), size)) = r.shadow.card_sides() else {
-                                every = false;
-                                continue;
-                            };
-                            let groups = r.span.pieces.clamp(1, 65535);
-                            let constants =
-                                [r.span.first, r.span.skew, size as u32, r.span.pieces, r.at * 4, inflight.landed, inflight.fetched.2, groups];
-                            list.SetComputeRoot32BitConstants(0, 8, constants.as_ptr().cast(), 0);
-                            list.SetComputeRootShaderResourceView(1, r.shadow.buffer.GetGPUVirtualAddress());
-                            list.Dispatch(groups, 1, 1);
-                        }
-                        plan.inflight = every;
-                        plan.inflight_landed = inflight.landed;
-                    }
->>>>>>> klbf/beta-2
                     list.Close()?;
                     list.cast()
                 })()
@@ -9449,7 +8912,6 @@ impl Host {
                 Ok(list) => plan.check = Some(list),
                 Err(e) => fail(format_args!("the compare of host copies in the card's memory could not be recorded ({e})")),
             }
-            plan.snap = keep.map(|(_, base)| base);
             plan.lists.push((true, check));
         }
         work.out += 1;
@@ -9597,13 +9059,8 @@ impl Host {
                 event,
                 sent: 0,
                 buffer: None,
-<<<<<<< HEAD
                 suspects: torn::Suspects::default(),
                 had: crate::land::Had::default(),
-||||||| a66ac212
-=======
-                own: relay_own_queue().then(|| self.make_own_queue()).flatten(),
->>>>>>> klbf/beta-2
             })
         }
     }
@@ -9654,7 +9111,6 @@ impl Host {
     /// fetched under all ([`flagged_pieces`]); the fetch runs behind
     /// whatever was sent meanwhile, so it may bring a later flight's
     /// bytes, which that flight's landing then finds merged already; and
-<<<<<<< HEAD
     /// nothing is sent back up. `plans` come with the value signalled behind
     /// their flight and the flight's number among the submissions started.
     /// `meanwhile` is called while the fetch is on its way, if there is one.
@@ -9676,56 +9132,11 @@ impl Host {
         let mut numbers: Vec<(usize, u32)> = Vec::new();
         let last_flight = plans.iter().map(|p| p.2).max().unwrap_or(0);
         let differs = {
-||||||| a66ac212
-    /// nothing is sent back up.
-    fn relay_card_back(&self, plans: &[&CardPlan], fetch: &mut Option<RelayFetch>) {
-        let differs = {
-=======
-    /// nothing is sent back up.
-    ///
-    /// (Neptune) With [`relay_own_queue`] a piece its compare kept is
-    /// fetched from the kept copy, on the queue of this thread's own, and
-    /// merged with that plan's send number: it is the card's bytes right
-    /// behind that flight, whatever the first queue has run since. Of
-    /// several landed plans that flagged a piece the last one's copy is
-    /// taken (it holds what the earlier flights wrote and what was sent up
-    /// between them). A piece whose last compare found no slot comes from
-    /// the live buffer on the first queue, as before.
-    ///
-    /// With [`inflight_fetch`] the pieces are first looked for where the
-    /// flights' own compare lists put them ([`Host::relay_card_inflight`]);
-    /// only a landing that cannot take them from there fetches, as here.
-    fn relay_card_back(&self, plans: &[&CardPlan], fetch: &mut Option<RelayFetch>) {
-        use std::sync::Arc;
-        if inflight_fetch() {
-            let landed = self.relay_card_inflight(plans);
-            inflight_tickets_landed(plans);
-            if landed {
-                return;
-            }
-        }
-        let (differs, snaps) = {
->>>>>>> klbf/beta-2
             let work = CARD_WORK.lock().unwrap_or_else(|e| e.into_inner());
-            match work.as_ref() {
-                Some(work) => (
-                    Some((work.differs.1, (work.differs.2 / 4) as usize)),
-                    work.snap.as_ref().map(|snap| (snap.buffer.clone(), snap.slots)),
-                ),
-                None => (None, None),
-            }
+            work.as_ref().map(|work| (work.differs.1, (work.differs.2 / 4) as usize))
         };
-        // (Neptune) Compares keep pieces: plans in the air may hold some,
-        // to be merged with their own send numbers.
-        let keeping = snaps.is_some();
-        if keeping && fetch.is_none() {
-            *fetch = self.make_relay_fetch();
-        }
-        let own = keeping && fetch.as_ref().is_some_and(|f| f.own.is_some()) && !SNAP_OFF.load(Ordering::Acquire);
-        // From the live buffers: copy, offsets, where the bytes come down.
-        let mut pieces: Vec<(Arc<crate::shadow::Shadow>, usize, usize, u64)> = Vec::new();
+        let mut pieces: Vec<(std::sync::Arc<crate::shadow::Shadow>, usize, usize, u64)> = Vec::new();
         let mut total = 0u64;
-<<<<<<< HEAD
         if let (Some(fetch), Some(first)) = (fetch.as_mut(), plans.iter().map(|p| p.1).min()) {
             fetch.had.landing(first);
         }
@@ -9766,107 +9177,11 @@ impl Host {
                     if upcheck::on() {
                         upcheck::declared(r.shadow.id(), r.span.from as usize, r.span.to as usize);
                     }
-||||||| a66ac212
-        if let Some((differs, dwords)) = differs {
-            // SAFETY: the mapping of the results. The compares of these
-            // plans have run, and their dwords are given to no other plan
-            // before these are done with (`card_done`).
-            let differs = unsafe { std::slice::from_raw_parts(differs as *const u32, dwords) };
-            let mut seen = std::collections::HashSet::new();
-            for plan in plans {
-                let flags: Vec<(usize, u32, bool)> = plan
-                    .ranges
-                    .iter()
-                    .flat_map(|r| {
-                        (0..r.span.pieces).map(move |p| {
-                            let flagged = !r.compared || differs.get((r.at + p) as usize).is_none_or(|&d| d != 0);
-                            (std::sync::Arc::as_ptr(&r.shadow) as usize, r.span.first + p, flagged)
-                        })
-                    })
-                    .collect();
-                let fetched = flagged_pieces(&flags);
-                for r in &plan.ranges {
-                    let copy = std::sync::Arc::as_ptr(&r.shadow) as usize;
-=======
-        // (Neptune) From the compare's kept copies: copy, offsets, where the
-        // bytes come down, where they are kept, their plan's send number.
-        let mut kept: Vec<(Arc<crate::shadow::Shadow>, usize, usize, u64, u64, u64)> = Vec::new();
-        let mut kept_total = 0u64;
-        // (Neptune) The slots these plans' compares asked for.
-        let mut handed = 0u32;
-        if let Some((differs, dwords)) = differs {
-            // SAFETY: the mapping of the results. The compares of these
-            // plans have run, and their dwords are given to no other plan
-            // before these are done with (`card_done`).
-            let differs = unsafe { std::slice::from_raw_parts(differs as *const u32, dwords) };
-            // Per plan, the pieces to fetch; and for each piece the last
-            // plan that flagged it, with the number of the slot its compare
-            // kept it in, if it did.
-            let mut flagged: Vec<std::collections::HashSet<(usize, u32)>> = Vec::with_capacity(plans.len());
-            let mut last: std::collections::HashMap<(usize, u32), (usize, Option<u32>)> = std::collections::HashMap::new();
-            let mut done = SNAP_DONE.load(Ordering::Acquire);
-            let mut adds_up = true;
-            for (k, plan) in plans.iter().enumerate() {
-                let mut flags: Vec<(usize, u32, bool)> = Vec::new();
-                let mut numbers: Vec<((usize, u32), u32)> = Vec::new();
-                let mut count = 0u32;
-                for r in &plan.ranges {
-                    let copy = Arc::as_ptr(&r.shadow) as usize;
->>>>>>> klbf/beta-2
                     for p in 0..r.span.pieces {
-<<<<<<< HEAD
                         if fetched.binary_search(&(copy, r.span.first + p)).is_err() {
-||||||| a66ac212
-                        if !fetched.contains(&(copy, r.span.first + p)) {
-=======
-                        let d = if r.compared { differs.get((r.at + p) as usize).copied().unwrap_or(1) } else { 1 };
-                        flags.push((copy, r.span.first + p, d != 0));
-                        if let Some(base) = plan.snap
-                            && r.compared
-                            && d != 0
-                        {
-                            count = count.wrapping_add(1);
-                            if d >= 2 {
-                                numbers.push(((copy, r.span.first + p), base.wrapping_add(d - 2)));
-                            }
-                        }
-                    }
-                }
-                let fetched = flagged_pieces(&flags);
-                for key in &fetched {
-                    last.insert(*key, (k, None));
-                }
-                // The card counts one for each piece a keeping compare
-                // flags, in the queue's order, which is the order flights
-                // land in: this plan's numbers are the `count` from `done`.
-                adds_up &= numbers.iter().all(|(_, number)| number.wrapping_sub(done) < count);
-                for (key, number) in numbers {
-                    last.insert(key, (k, Some(number)));
-                }
-                done = done.wrapping_add(count);
-                handed = handed.wrapping_add(count);
-                flagged.push(fetched);
-            }
-            if !adds_up && !SNAP_OFF.swap(true, Ordering::AcqRel) {
-                tracing::warn!(
-                    "VICTORY_RELAY_OWN_QUEUE=1: the numbers of the compare's kept pieces do not add up; \
-                     no compare keeps pieces from here on, and pieces are fetched as before"
-                );
-            }
-            let own = own && adds_up;
-            let slots = snaps.as_ref().map_or(0, |s| s.1);
-            let mut seen = std::collections::HashSet::new();
-            for (plan, fetched) in plans.iter().zip(&flagged) {
-                for r in &plan.ranges {
-                    let copy = Arc::as_ptr(&r.shadow) as usize;
-                    for p in 0..r.span.pieces {
-                        let key = (copy, r.span.first + p);
-                        if !fetched.contains(&key) {
->>>>>>> klbf/beta-2
                             continue;
                         }
                         let (lo, hi) = r.shadow.card_piece(&r.span, p);
-<<<<<<< HEAD
                         if lo < hi && !seen.contains(&(copy, lo, hi)) {
                             let key = (r.shadow.id(), r.shadow.span().0 as usize + lo, hi - lo);
                             if fetch.as_ref().is_some_and(|f| f.had.holds(behind, key)) {
@@ -9882,32 +9197,6 @@ impl Host {
                             seen.insert((copy, lo, hi));
                             pieces.push((r.shadow.clone(), lo, hi, total));
                             total += (hi - lo) as u64;
-||||||| a66ac212
-                        if lo < hi && seen.insert((copy, lo, hi)) {
-                            pieces.push((r.shadow.clone(), lo, hi, total));
-                            total += (hi - lo) as u64;
-=======
-                        if lo >= hi || !seen.insert((copy, lo, hi)) {
-                            continue;
-                        }
-                        // Where the piece's last compare kept these bytes,
-                        // and the send number of that compare's plan.
-                        let slot = last.get(&key).and_then(|&(k, number)| {
-                            let number = number.filter(|_| own)?;
-                            let within = lo.checked_sub(snap_piece_from(key.1, r.span.skew))? as u64;
-                            (within + (hi - lo) as u64 <= SNAP_SLOT)
-                                .then(|| (SNAP_AT + u64::from(number & slots.wrapping_sub(1)) * SNAP_SLOT + within, plans[k].sent_as))
-                        });
-                        match slot {
-                            Some((from, after)) => {
-                                kept.push((r.shadow.clone(), lo, hi, kept_total, from, after));
-                                kept_total += (hi - lo) as u64;
-                            }
-                            None => {
-                                pieces.push((r.shadow.clone(), lo, hi, total));
-                                total += (hi - lo) as u64;
-                            }
->>>>>>> klbf/beta-2
                         }
                     }
                     crate::shadow::CARD_STATS[2].fetch_add(u64::from(r.span.pieces), Ordering::Relaxed);
@@ -9915,7 +9204,6 @@ impl Host {
                 }
             }
         }
-<<<<<<< HEAD
         if land::on() {
             // In the order they are landed, each byte of a copy once.
             let keys: Vec<land::Piece> =
@@ -9931,38 +9219,9 @@ impl Host {
                     (shadow.clone(), lo, lo + len, at)
                 })
                 .collect();
-||||||| a66ac212
-        if pieces.is_empty() {
-            // Nothing to fetch: every send so far is older than the next fetch.
-            crate::shadow::relay_fetched(*QUEUE_ORDER.lock().unwrap_or_else(|e| e.into_inner()));
-            return;
-=======
-        // (Neptune) With kept pieces about, the notes of the sends behind
-        // the last flight landed stay: the flights in the air merge their
-        // kept pieces with their own send numbers (`relay_own_queue`, 4).
-        let last_sent = plans.iter().map(|plan| plan.sent_as).max();
-        if pieces.is_empty() && kept.is_empty() {
-            if keeping || inflight_fetch() {
-                if let Some(sent) = last_sent {
-                    crate::shadow::relay_fetched(sent);
-                }
-            } else {
-                // Nothing to fetch: every send so far is older than the next fetch.
-                crate::shadow::relay_fetched(*QUEUE_ORDER.lock().unwrap_or_else(|e| e.into_inner()));
-            }
-            SNAP_DONE.fetch_add(handed, Ordering::AcqRel);
-            return;
->>>>>>> klbf/beta-2
         }
-<<<<<<< HEAD
         land::spent(land::stat::GATHER, gathering);
         BESIDE_STATS[0].fetch_add(again, Ordering::Relaxed);
-||||||| a66ac212
-=======
-        if inflight_fetch() {
-            INFLIGHT_STATS[3].fetch_add(1, Ordering::Relaxed);
-        }
->>>>>>> klbf/beta-2
         if fetch.is_none() {
             *fetch = self.make_relay_fetch();
         }
@@ -9998,7 +9257,6 @@ impl Host {
         let Some(f) = fetch.as_mut() else {
             fail(format_args!("no list, fence or event to fetch what shaders wrote to the card's memory (VICTORY_RELAY=1)"));
         };
-<<<<<<< HEAD
         if f.buffer.as_ref().is_none_or(|b| b.2 < total) {
             let size = total.next_multiple_of(16 << 20);
             f.buffer = self.shared_buffer(size).map(|(buffer, data)| (buffer, data as usize, size));
@@ -10009,20 +9267,7 @@ impl Host {
         f.sent += 1;
         let ((allocator, list), fence, event, sent) = (f.list.clone(), f.fence.clone(), f.event, f.sent);
         let copy_queue = f.queue.clone();
-||||||| a66ac212
-        if f.buffer.as_ref().is_none_or(|b| b.2 < total) {
-            let size = total.next_multiple_of(16 << 20);
-            f.buffer = self.shared_buffer(size).map(|(buffer, data)| (buffer, data as usize, size));
-        }
-        let Some((buffer, data, _)) = f.buffer.clone() else {
-            fail(format_args!("no memory to fetch what shaders wrote to the card's memory ({total} bytes, VICTORY_RELAY=1)"));
-        };
-        f.sent += 1;
-        let ((allocator, list), fence, event, sent) = (f.list.clone(), f.fence.clone(), f.event, f.sent);
-=======
->>>>>>> klbf/beta-2
         let waiting = std::time::Instant::now();
-<<<<<<< HEAD
         // The flights the fetch runs behind: those in the line by now have
         // been given to the queue. On the copy queue, those landed here.
         let ahead = match copy_queue {
@@ -10117,147 +9362,12 @@ impl Host {
         {
             inflight.brought.extend(pieces.iter().map(|(shadow, lo, hi, _)| (shadow.clone(), *lo, *hi, after - 1)));
         }
-||||||| a66ac212
-        // SAFETY: the list's last run was waited for by this thread; live
-        // buffers (the copies are held by the plans); the fence and the
-        // event are this thread's.
-        let ran = unsafe {
-            (|| -> windows::core::Result<u64> {
-                allocator.Reset()?;
-                list.Reset(&allocator, None)?;
-                for (shadow, lo, hi, at) in &pieces {
-                    list.CopyBufferRegion(&buffer, *at, &shadow.buffer, *lo as u64, (*hi - *lo) as u64);
-                }
-                list.Close()?;
-                let lists = [Some(list.cast::<ID3D12CommandList>()?)];
-                // In the order of the queue: the sends of title bytes so
-                // far are ahead of this fetch, every later one behind it.
-                let order = QUEUE_ORDER.lock().unwrap_or_else(|e| e.into_inner());
-                self.queue.ExecuteCommandLists(&lists);
-                let after = *order;
-                drop(order);
-                self.card_sent();
-                self.queue.Signal(&fence, sent)?;
-                fence.SetEventOnCompletion(sent, event)?;
-                WaitForSingleObject(event, INFINITE);
-                Ok(after)
-            })()
-        };
-        let after = match ran {
-            Ok(after) => after,
-            Err(e) => fail(format_args!("what shaders wrote to the card's memory could not be fetched ({e}, VICTORY_RELAY=1)")),
-        };
-=======
-        // (Neptune) The kept pieces, on the queue of their own: nothing of
-        // the first queue is waited for, and no order is taken (the slots
-        // are written by nothing until `SNAP_DONE` passes them, below).
-        let mut kept_down: Option<(usize, HANDLE)> = None;
-        if !kept.is_empty() {
-            let (Some((snaps, _)), Some(own)) = (snaps.as_ref(), f.own.as_mut()) else {
-                fail(format_args!("pieces kept by the compare and no queue to fetch them with (VICTORY_RELAY_OWN_QUEUE=1)"));
-            };
-            if own.buffer.as_ref().is_none_or(|b| b.2 < kept_total) {
-                let size = kept_total.next_multiple_of(16 << 20);
-                own.buffer = self.shared_buffer(size).map(|(buffer, data)| (buffer, data as usize, size));
-            }
-            let Some((buffer, data, _)) = own.buffer.clone() else {
-                fail(format_args!("no memory to fetch the pieces the compare kept ({kept_total} bytes, VICTORY_RELAY_OWN_QUEUE=1)"));
-            };
-            own.sent += 1;
-            let (allocator, list) = &own.list;
-            // SAFETY: the list's last run was waited for by this thread;
-            // live buffers; the queue, the fence and the event are this
-            // thread's.
-            let ran = unsafe {
-                (|| -> windows::core::Result<()> {
-                    allocator.Reset()?;
-                    list.Reset(allocator, None)?;
-                    for (_, lo, hi, at, from, _) in &kept {
-                        list.CopyBufferRegion(&buffer, *at, snaps, *from, (*hi - *lo) as u64);
-                    }
-                    list.Close()?;
-                    own.queue.ExecuteCommandLists(&[Some(list.cast::<ID3D12CommandList>()?)]);
-                    own.queue.Signal(&own.fence, own.sent)?;
-                    own.fence.SetEventOnCompletion(own.sent, own.event)
-                })()
-            };
-            if let Err(e) = ran {
-                fail(format_args!("the pieces the compare kept could not be fetched ({e}, VICTORY_RELAY_OWN_QUEUE=1)"));
-            }
-            kept_down = Some((data, own.event));
-        }
-        let mut live_down: Option<(usize, HANDLE, u64)> = None;
-        if !pieces.is_empty() {
-            if f.buffer.as_ref().is_none_or(|b| b.2 < total) {
-                let size = total.next_multiple_of(16 << 20);
-                f.buffer = self.shared_buffer(size).map(|(buffer, data)| (buffer, data as usize, size));
-            }
-            let Some((buffer, data, _)) = f.buffer.clone() else {
-                fail(format_args!("no memory to fetch what shaders wrote to the card's memory ({total} bytes, VICTORY_RELAY=1)"));
-            };
-            f.sent += 1;
-            let ((allocator, list), fence, event, sent) = (f.list.clone(), f.fence.clone(), f.event, f.sent);
-            // SAFETY: the list's last run was waited for by this thread; live
-            // buffers (the copies are held by the plans); the fence and the
-            // event are this thread's.
-            let ran = unsafe {
-                (|| -> windows::core::Result<u64> {
-                    allocator.Reset()?;
-                    list.Reset(&allocator, None)?;
-                    for (shadow, lo, hi, at) in &pieces {
-                        list.CopyBufferRegion(&buffer, *at, &shadow.buffer, *lo as u64, (*hi - *lo) as u64);
-                    }
-                    list.Close()?;
-                    let lists = [Some(list.cast::<ID3D12CommandList>()?)];
-                    // In the order of the queue: the sends of title bytes so
-                    // far are ahead of this fetch, every later one behind it.
-                    let order = QUEUE_ORDER.lock().unwrap_or_else(|e| e.into_inner());
-                    self.queue.ExecuteCommandLists(&lists);
-                    let after = *order;
-                    drop(order);
-                    self.card_sent();
-                    self.queue.Signal(&fence, sent)?;
-                    fence.SetEventOnCompletion(sent, event)?;
-                    Ok(after)
-                })()
-            };
-            match ran {
-                Ok(after) => live_down = Some((data, event, after)),
-                Err(e) => fail(format_args!("what shaders wrote to the card's memory could not be fetched ({e}, VICTORY_RELAY=1)")),
-            }
-        }
-        let mut kept_us = 0;
-        if let Some((_, event)) = kept_down {
-            // SAFETY: this thread's event, set by its fence above.
-            unsafe { WaitForSingleObject(event, INFINITE) };
-            kept_us = waiting.elapsed().as_micros() as u64;
-        }
-        if let Some((_, event, _)) = live_down {
-            // SAFETY: this thread's event, set by its fence above.
-            unsafe { WaitForSingleObject(event, INFINITE) };
-        }
-        // This fetch may bring bytes of flights in the air now: their own
-        // slots are older than what it puts in the CPU's side there
-        // (`relay_card_inflight`). Sends up to `after` are numbered, and the
-        // submission numbered `after` may not have its lists on the queue
-        // yet; every one before it has (the submission lock).
-        if inflight_fetch()
-            && let Some((_, _, after)) = live_down
-            && after > 1
-            && let Some(inflight) = CARD_WORK.lock().unwrap_or_else(|e| e.into_inner()).as_mut().and_then(|w| w.inflight.as_mut())
-        {
-            inflight.brought.extend(pieces.iter().map(|(shadow, lo, hi, _)| (shadow.clone(), *lo, *hi, after - 1)));
-        }
->>>>>>> klbf/beta-2
         let us = waiting.elapsed().as_micros() as u64;
         RELAY_STATS[3].fetch_add(us, Ordering::Relaxed);
-        RELAY_STATS[5].fetch_add(kept_us, Ordering::Relaxed);
-        RELAY_STATS[6].fetch_add(kept.len() as u64, Ordering::Relaxed);
-        RELAY_STATS[7].fetch_add(pieces.len() as u64, Ordering::Relaxed);
         {
             use crate::shadow::CARD_STATS;
-            CARD_STATS[3].fetch_add((pieces.len() + kept.len()) as u64, Ordering::Relaxed);
-            CARD_STATS[4].fetch_add(total + kept_total, Ordering::Relaxed);
+            CARD_STATS[3].fetch_add(pieces.len() as u64, Ordering::Relaxed);
+            CARD_STATS[4].fetch_add(total, Ordering::Relaxed);
             CARD_STATS[5].fetch_add(1, Ordering::Relaxed);
             CARD_STATS[6].fetch_add(us, Ordering::Relaxed);
             if crate::census::on() {
@@ -10269,7 +9379,6 @@ impl Host {
         let merging = std::time::Instant::now();
         let _merging = crate::timeline::span("landing: merging fetched pieces");
         let mut written = 0;
-<<<<<<< HEAD
         if land::on() {
             let titles: Vec<(usize, usize)> =
                 pieces.iter().map(|(shadow, lo, hi, _)| (shadow.span().0 as usize + lo, hi - lo)).collect();
@@ -10322,204 +9431,9 @@ impl Host {
                 ahead,
                 pieces.iter().map(|(shadow, lo, hi, _)| (shadow.id(), shadow.span().0 as usize + lo, hi - lo)),
             );
-||||||| a66ac212
-        for (shadow, lo, hi, at) in &pieces {
-            // SAFETY: the mapping of the fetched bytes, `total` of them;
-            // the copy into it has run.
-            let gpu = unsafe { std::slice::from_raw_parts((data + *at as usize) as *const u8, hi - lo) };
-            written += shadow.card_merge_relay(*lo, gpu, after, &mut title);
-=======
-        if let Some((data, _)) = kept_down {
-            for (shadow, lo, hi, at, _, after) in &kept {
-                // SAFETY: the mapping of the fetched bytes, `kept_total` of
-                // them; the copy into it has run.
-                let gpu = unsafe { std::slice::from_raw_parts((data + *at as usize) as *const u8, hi - lo) };
-                let merged = shadow.card_merge_relay(*lo, gpu, *after, &mut title);
-                shadow.walls_merged(gpu.len(), merged);
-                written += merged;
-            }
         }
-        if let Some((data, _, after)) = live_down {
-            for (shadow, lo, hi, at) in &pieces {
-                // SAFETY: the mapping of the fetched bytes, `total` of them;
-                // the copy into it has run.
-                let gpu = unsafe { std::slice::from_raw_parts((data + *at as usize) as *const u8, hi - lo) };
-                let merged = shadow.card_merge_relay(*lo, gpu, after, &mut title);
-                shadow.walls_merged(gpu.len(), merged);
-                written += merged;
-            }
->>>>>>> klbf/beta-2
-        }
-<<<<<<< HEAD
         // Sends up to `after` are of no use to any later merge.
         crate::shadow::relay_fetched(after);
-||||||| a66ac212
-        COPY_BACK[1].fetch_add(written as u64, Ordering::Relaxed);
-        // Sends up to `after` are of no use to any later merge.
-        crate::shadow::relay_fetched(after);
-=======
-        COPY_BACK[1].fetch_add(written as u64, Ordering::Relaxed);
-        match (keeping, last_sent, live_down) {
-            (true, Some(sent), _) => crate::shadow::relay_fetched(sent),
-            (true, None, _) => {}
-            // Sends up to `after` are of no use to any later merge.
-            (false, _, Some((_, _, after))) => crate::shadow::relay_fetched(fallback_fetched_mark(inflight_fetch(), after, last_sent)),
-            (false, _, None) => {}
-        }
-        // (Neptune) Only now, with the kept pieces down: their slots are
-        // free for the compares recorded from here on.
-        SNAP_DONE.fetch_add(handed, Ordering::AcqRel);
-    }
-
-    /// [`Host::relay_card_back`] with [`inflight_fetch`]: the pieces these
-    /// plans' compares flagged are taken from the slots their own compare
-    /// lists copied them to ([`CARD_FETCH`]) and merged, plan by plan in the
-    /// line's order, with no list or wait of ours. `false` (nothing merged)
-    /// if any plan cannot land so; the caller then lands them all the old
-    /// way, as without the switch.
-    ///
-    /// The merge's "fetched after" (`Shadow::card_merge_relay`) is the
-    /// plan's own `sent_as`. `QUEUE_ORDER` is raised only in
-    /// `Host::card_before`, under the submission lock, and that lock is held
-    /// until the submission's lists and its compare's list are on the queue
-    /// behind its sync list: so when the compare's list ran, the card had
-    /// received exactly the sends 1..=`sent_as` of title bytes and no later
-    /// one, which is what the merge's skip of later sends asks. (The old
-    /// fetch, by contrast, ran whenever it reached the queue, and took the
-    /// count at its own ExecuteCommandLists.)
-    ///
-    /// When a landing goes the old way instead, all of it does: a fetch the
-    /// old way brings the card's bytes as they are now, newer than the slots
-    /// of plans in the air then, and merging an older slot after it would
-    /// put a flight's bytes back over a later flight's. For the same reason
-    /// the bytes such a fetch brought (`CardInflight::brought`) are left
-    /// out of the slots of flights whose lists were on the queue ahead of
-    /// it: the CPU's side holds what the card held after them there. The
-    /// rest of their slots is merged, newer than anything merged there
-    /// before. (Left out whole, a flight sent before such a fetch would have
-    /// had to land the old way, its fetch taking a later count still: one
-    /// overflow kept every landing on the old way while flights were in
-    /// the air.) Plans land in the line's order, each plan's slot as it was
-    /// right behind its own lists, so every merge here is of bytes at least
-    /// as new as the CPU's side holds.
-    ///
-    /// shortcut: all or nothing per landing, and a plan whose pieces overflow
-    /// the slots lands the old way for all its pieces, not only the ones
-    /// left out.
-    fn relay_card_inflight(&self, plans: &[&CardPlan]) -> bool {
-        use std::sync::Arc;
-        type Piece = (Arc<crate::shadow::Shadow>, usize, usize, usize, u64);
-        let mut pieces: Vec<Piece> = Vec::new();
-        {
-            let work = CARD_WORK.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(work) = work.as_ref() else {
-                return false;
-            };
-            let Some(inflight) = &work.inflight else {
-                return false;
-            };
-            let dwords = (work.differs.2 / 4) as usize;
-            // SAFETY: the mappings of the results and the tickets. The
-            // compares and fetches of these plans have run, and their dwords
-            // are given to no other plan before these are done with
-            // (`card_done`).
-            let (differs, table) = unsafe {
-                (
-                    std::slice::from_raw_parts(work.differs.1 as *const u32, dwords),
-                    std::slice::from_raw_parts((inflight.table.1 as *const u32).add(1), dwords),
-                )
-            };
-            let slots = inflight.fetched.2;
-            for plan in plans {
-                if plan.ranges.is_empty() {
-                    continue;
-                }
-                if !plan.inflight || plan.ranges.iter().any(|r| !r.compared) {
-                    return false;
-                }
-                // Pieces (copy, number) the compare flagged, with their ticket.
-                let mut tickets: std::collections::HashMap<(usize, u32), u32> = std::collections::HashMap::new();
-                let mut flags: Vec<(usize, u32, bool)> = Vec::new();
-                for r in &plan.ranges {
-                    let copy = Arc::as_ptr(&r.shadow) as usize;
-                    for p in 0..r.span.pieces {
-                        let at = (r.at + p) as usize;
-                        let (Some(&flag), Some(&entry)) = (differs.get(at), table.get(at)) else {
-                            return false;
-                        };
-                        if flag != 0 {
-                            if entry == INFLIGHT_NONE {
-                                return false;
-                            }
-                            if !inflight_gets_slot(entry, plan.inflight_landed, slots) {
-                                INFLIGHT_STATS[2].fetch_add(1, Ordering::Relaxed);
-                                return false;
-                            }
-                            tickets.insert((copy, r.span.first + p), entry);
-                        }
-                        flags.push((copy, r.span.first + p, flag != 0));
-                    }
-                }
-                let fetched = flagged_pieces(&flags);
-                let mut seen = std::collections::HashSet::new();
-                for r in &plan.ranges {
-                    let copy = Arc::as_ptr(&r.shadow) as usize;
-                    for p in 0..r.span.pieces {
-                        let piece = r.span.first + p;
-                        if !fetched.contains(&(copy, piece)) {
-                            continue;
-                        }
-                        let (lo, hi) = r.shadow.card_piece(&r.span, p);
-                        if lo >= hi || !seen.insert((copy, lo, hi)) {
-                            continue;
-                        }
-                        let from = inflight_piece_from(&r.span, p);
-                        let Some(&k) = tickets.get(&(copy, piece)) else {
-                            return false;
-                        };
-                        if lo < from || (hi - from) as u64 > INFLIGHT_SLOT {
-                            return false;
-                        }
-                        let slot = inflight.fetched.1 + (k % slots) as usize * INFLIGHT_SLOT as usize;
-                        // Bytes a fetch the old way brought after this flight ran.
-                        let newer: Vec<(usize, usize)> = inflight
-                            .brought
-                            .iter()
-                            .filter(|b| b.3 >= plan.sent_as && Arc::ptr_eq(&b.0, &r.shadow) && b.1 < hi && b.2 > lo)
-                            .map(|b| (b.1, b.2))
-                            .collect();
-                        for (a, b) in crate::shadow::outside(lo, hi, newer) {
-                            pieces.push((r.shadow.clone(), a, b, slot + (a - from), plan.sent_as));
-                        }
-                    }
-                }
-            }
-        }
-        // Outside the lock: no slot of these plans is written over before
-        // their tickets are landed (`inflight_tickets_landed`, after this).
-        let mut title = Vec::new();
-        let (mut written, mut bytes) = (0, 0u64);
-        for (shadow, lo, hi, at, after) in &pieces {
-            // SAFETY: inside the mapping of the slots (checked above); the
-            // copy into it ran in the plan's flight, which the card has run.
-            let gpu = unsafe { std::slice::from_raw_parts(*at as *const u8, hi - lo) };
-            written += shadow.card_merge_relay(*lo, gpu, *after, &mut title);
-            bytes += (hi - lo) as u64;
-        }
-        for plan in plans {
-            for r in &plan.ranges {
-                crate::shadow::CARD_STATS[2].fetch_add(u64::from(r.span.pieces), Ordering::Relaxed);
-            }
-        }
-        COPY_BACK[1].fetch_add(written as u64, Ordering::Relaxed);
-        INFLIGHT_STATS[0].fetch_add(pieces.len() as u64, Ordering::Relaxed);
-        INFLIGHT_STATS[1].fetch_add(bytes, Ordering::Relaxed);
-        // The next merge is of a later plan, or a fetch the old way sent now.
-        if let Some(last) = plans.iter().map(|p| p.sent_as).max() {
-            crate::shadow::relay_fetched(last);
-        }
-        true
->>>>>>> klbf/beta-2
     }
 
     /// [`relay`], on the thread that lands flights: `items` are the first
@@ -10553,22 +9467,10 @@ impl Host {
                         last_notes(&runs)
                     ));
                 }
-<<<<<<< HEAD
                 fill_ahead::landing(flights.iter().map(|f| f.number).min().unwrap_or(0));
                 let plans: Vec<(&CardPlan, u64, u64)> =
                     flights.iter().filter_map(|f| Some((f.card.as_ref()?, f.fence, f.number))).collect();
                 // (Each byte once: the ranges are joined.)
-||||||| a66ac212
-                let plans: Vec<&CardPlan> = flights.iter().filter_map(|f| f.card.as_ref()).collect();
-                self.relay_card_back(&plans, fetch);
-=======
-                let plans: Vec<&CardPlan> = flights.iter().filter_map(|f| f.card.as_ref()).collect();
-                if !no_copy_back() {
-                    self.relay_card_back(&plans, fetch);
-                    // (Neptune) The kernel forgets the writes of these merges together.
-                    crate::watch::ours_flush();
-                }
->>>>>>> klbf/beta-2
                 let mut back: Vec<Declared> = Vec::new();
                 for flight in &flights {
                     for (shadow, ranges) in flight.back.iter().filter(|(shadow, _)| !shadow.carded()) {
@@ -10578,30 +9480,12 @@ impl Host {
                         }
                     }
                 }
-<<<<<<< HEAD
                 let mut hand_back = relay_hand_back(&back);
                 stage.next("landing: copies in the card's memory");
                 self.relay_card_back(&plans, fetch, &mut || {
                     if crate::land::on() {
                         let _looking = crate::timeline::span("landing: looking through copies, beside the fetch");
                         hand_back.look(crate::land::stat::SCAN_BESIDE);
-||||||| a66ac212
-                relay_hand_back(&back);
-                // Only now, and flight by flight: a range another flight
-                // in the air declared too stays closed to refreshes.
-                for flight in &flights {
-                    for (shadow, ranges) in &flight.back {
-                        shadow.copy_back_done(ranges);
-=======
-                if !no_copy_back() {
-                    relay_hand_back(&back);
-                }
-                // Only now, and flight by flight: a range another flight
-                // in the air declared too stays closed to refreshes.
-                for flight in &flights {
-                    for (shadow, ranges) in &flight.back {
-                        shadow.copy_back_done(ranges);
->>>>>>> klbf/beta-2
                     }
                 });
                 stage.next("landing: copies in the PC's memory");
@@ -10889,17 +9773,9 @@ impl Host {
                     // SAFETY: the mapping of the fetched bytes, `total` of
                     // them; the copy into it has run.
                     let gpu = unsafe { std::slice::from_raw_parts((*data + at as usize) as *const u8, hi - lo) };
-<<<<<<< HEAD
                     let merged = plan.ranges[i].shadow.card_merge(lo, gpu, &mut work.merge_scratch);
                     plan.ranges[i].shadow.walls_merged(gpu.len(), merged);
                     written[i] += merged;
-||||||| a66ac212
-                    written[i] += plan.ranges[i].shadow.card_merge(lo, gpu, &mut title);
-=======
-                    let merged = plan.ranges[i].shadow.card_merge(lo, gpu, &mut title);
-                    plan.ranges[i].shadow.walls_merged(gpu.len(), merged);
-                    written[i] += merged;
->>>>>>> klbf/beta-2
                 }
             }
         }
@@ -10928,17 +9804,12 @@ impl Host {
     /// ([`late`] lists those points); their host lists are reset and kept
     /// for reuse then, as a queue does for the lists it ran.
     pub(crate) fn execute_late(&self, lists: Vec<crate::list::Detached>, order: Vec<usize>) {
-<<<<<<< HEAD
         self.execute_parts(lists, order, &[]);
     }
 
     /// [`Host::execute_late`] of parts of submissions in one: another begins
     /// at each place of `order` in `parts` ([`joins`]).
     pub(crate) fn execute_parts(&self, mut lists: Vec<crate::list::Detached>, mut order: Vec<usize>, parts: &[usize]) {
-||||||| a66ac212
-=======
-        tick();
->>>>>>> klbf/beta-2
         if order.is_empty() {
             crate::list::recycle(lists, &order);
             return;
@@ -11350,7 +10221,6 @@ impl Host {
                 self.settle(&mut submitted, why);
             }
         }
-<<<<<<< HEAD
         #[cfg(feature = "diagnostics")]
         ahead.part(13);
         // Descriptors the title copied into placed heaps directly, before
@@ -11367,12 +10237,6 @@ impl Host {
         };
         let parts: Vec<usize> = parts.iter().map(|&n| n + usize::from(own.is_some())).collect();
         stage.next("submit: the sweep");
-||||||| a66ac212
-=======
-        // Descriptors the title copied into placed heaps directly, before
-        // command lists that index those slots are submitted.
-        crate::descriptor::sync_heaps();
->>>>>>> klbf/beta-2
         let behind = late && flying();
         // Before this submission counts as started: what the sweep lets go
         // of is named by no list, and nothing runs now (behind flights the
@@ -12273,7 +11137,6 @@ impl HostList {
     pub(crate) fn close(&self) {
         let _closing = crate::timeline::span("closing a host list");
         self.twins_to_depth();
-<<<<<<< HEAD
         self.textures_back();
         let scratch = self.indirect_args.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if let Some((scratch, _)) = scratch {
@@ -12302,10 +11165,6 @@ impl HostList {
         );
         #[cfg(feature = "diagnostics")]
         crate::shot::close(self);
-||||||| a66ac212
-=======
-        self.textures_back();
->>>>>>> klbf/beta-2
         #[cfg(feature = "diagnostics")]
         if let Some((heap, back)) = self.stamps() {
             let count = (self.notes.lock().unwrap_or_else(|e| e.into_inner()).len() as u32).min(LIST_STAMPS - 1);
@@ -12364,7 +11223,9 @@ impl HostList {
         let started = std::time::Instant::now();
         let _resetting = crate::timeline::span("resetting a host list");
         self._alive.used();
-<<<<<<< HEAD
+        // (Neptune) A table made ready in this list is not ready any more
+        // (`crate::draw`, the tables made afresh).
+        self.changes.fetch_add(1, Ordering::Relaxed);
         *self.coming.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let mut deferred = self.deferred();
         let pooled = std::mem::take(&mut deferred.pooled_uploads);
@@ -12376,12 +11237,6 @@ impl HostList {
         if let Some((_, _, taken)) = &mut *self.indirect_ring.lock().unwrap_or_else(|e| e.into_inner()) {
             *taken = 0;
         }
-||||||| a66ac212
-        *self.deferred() = Deferred::default();
-=======
-        self.changes.fetch_add(1, Ordering::Relaxed);
-        *self.deferred() = Deferred::default();
->>>>>>> klbf/beta-2
         self.states.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.twins.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.aliases.lock().unwrap_or_else(|e| e.into_inner()).clear();
@@ -12488,7 +11343,6 @@ impl HostList {
         wanted: u32,
     ) -> Option<(&'static ID3D12Resource, u32)> {
         let copy = crate::resource::host_copy(resource)?;
-<<<<<<< HEAD
         // SAFETY: as in `crate::resource::host_resource`; the list's states
         // hold the copy from here on.
         let texture: &'static ID3D12Resource = unsafe { &*std::ptr::from_ref(&copy.texture) };
@@ -12499,9 +11353,6 @@ impl HostList {
             crate::shot::known(std::sync::Arc::as_ptr(&copy) as usize, resource as usize);
         }
         self.note_write(std::sync::Arc::as_ptr(&copy) as usize, wanted);
-||||||| a66ac212
-        let wanted = legal_state(texture, wanted);
-=======
         self.transition_copy(&copy, wanted).map(|before| (texture, before))
     }
 
@@ -12512,36 +11363,20 @@ impl HostList {
         copy: &std::sync::Arc<crate::resource::HostTexture>,
         wanted: u32,
     ) -> Option<u32> {
-        let wanted = legal_state(&copy.texture, wanted);
->>>>>>> klbf/beta-2
+        let wanted = legal_for(copy.flags(), wanted);
         let mut states = self.states.lock().unwrap_or_else(|e| e.into_inner());
         match states.entry(std::sync::Arc::as_ptr(copy) as usize) {
             std::collections::hash_map::Entry::Vacant(v) => {
-<<<<<<< HEAD
-                v.insert((wanted, wanted, copy));
-                self.changed_something();
-||||||| a66ac212
-                v.insert((wanted, wanted, copy));
-=======
                 v.insert((wanted, wanted, copy.clone()));
->>>>>>> klbf/beta-2
+                self.changed_something();
                 None
             }
             std::collections::hash_map::Entry::Occupied(mut o) => {
                 let before = std::mem::replace(&mut o.get_mut().1, wanted);
-<<<<<<< HEAD
                 if before != wanted {
                     self.changed_something();
                 }
-                (before != wanted).then_some((texture, before))
-||||||| a66ac212
-                (before != wanted).then_some((texture, before))
-=======
-                if before != wanted {
-                    self.changes.fetch_add(1, Ordering::Relaxed);
-                }
                 (before != wanted).then_some(before)
->>>>>>> klbf/beta-2
             }
         }
     }
@@ -12740,7 +11575,6 @@ impl HostList {
         }
     }
 
-<<<<<<< HEAD
     /// A draw or dispatch being prepared writes title texture `resource`
     /// through unordered access: if it is of a kind copied back
     /// ([`crate::texback`]), the list copies it when it closes.
@@ -12786,39 +11620,6 @@ impl HostList {
         }
     }
 
-||||||| a66ac212
-=======
-    /// A draw or dispatch being prepared writes title texture `resource`
-    /// through unordered access: if it is of a kind copied back
-    /// ([`crate::texback`]), the list copies it when it closes.
-    pub(crate) fn texture_written(&self, resource: crate::object::This) {
-        if !crate::texback::wanted(resource) {
-            return;
-        }
-        let mut deferred = self.deferred();
-        if !deferred.back_wanted.contains(&(resource as usize)) {
-            deferred.back_wanted.push(resource as usize);
-        }
-    }
-
-    /// Before the list closes: the textures its shaders wrote that are copied
-    /// back go into read-back buffers ([`crate::texback::record`]).
-    fn textures_back(&self) {
-        const COPY_SOURCE: u32 = 0x800;
-        let wanted = std::mem::take(&mut self.deferred().back_wanted);
-        for resource in wanted {
-            let resource = resource as crate::object::This;
-            let Some(copy) = crate::resource::host_copy(resource) else {
-                continue;
-            };
-            self.settle(&copy, COPY_SOURCE);
-            if let Some(back) = crate::texback::record(&self.list, resource, &copy.texture) {
-                self.deferred().texture_backs.push(back);
-            }
-        }
-    }
-
->>>>>>> klbf/beta-2
     /// The draw or dispatch just prepared is recorded: the twins it writes
     /// now hold what their depth textures lack.
     pub(crate) fn twins_written(&self) {
@@ -12826,12 +11627,10 @@ impl HostList {
         for u in twins.values_mut().filter(|u| u.writing) {
             u.writing = false;
             u.behind[0] = Some(true);
-<<<<<<< HEAD
             self.changed_something();
-||||||| a66ac212
-=======
+            // (Neptune) The twins a table's views name changed too
+            // (`crate::draw`, the tables made afresh).
             self.changes.fetch_add(1, Ordering::Relaxed);
->>>>>>> klbf/beta-2
         }
     }
 
@@ -12912,7 +11711,10 @@ impl HostList {
             (real != *first)
                 .then(|| transition(&copy.texture, host_state(real), host_state(*first)))
         }));
-<<<<<<< HEAD
+        // (Neptune) The records the list's draws read clamped
+        // (`HostList::clamp_ahead`), and the budget they are charged to.
+        let ahead: Vec<crate::indirect::Ahead> = self.deferred().ahead.clone();
+        let ahead_budget = (!ahead.is_empty()).then(|| self.budget()).flatten();
         // (The same order in every frame, whatever order the map gives.)
         #[cfg(feature = "diagnostics")]
         leaving.sort_by_key(|l| std::sync::Arc::as_ptr(&l.0) as usize);
@@ -12954,16 +11756,13 @@ impl HostList {
         let deferred = self.deferred();
         #[cfg(feature = "diagnostics")]
         let ours = !deferred.early.is_empty();
-        if barriers.is_empty() && syncs.is_empty() && !gathered && aliases.is_empty() && deferred.early.is_empty() {
-||||||| a66ac212
-        if barriers.is_empty() && syncs.is_empty() {
-=======
-        // (Neptune) The records the list's draws read clamped
-        // (`HostList::clamp_ahead`).
-        let ahead: Vec<crate::indirect::Ahead> = self.deferred().ahead.clone();
-        let budget = (!ahead.is_empty()).then(|| self.budget()).flatten();
-        if barriers.is_empty() && syncs.is_empty() && ahead.is_empty() {
->>>>>>> klbf/beta-2
+        if barriers.is_empty()
+            && syncs.is_empty()
+            && !gathered
+            && aliases.is_empty()
+            && deferred.early.is_empty()
+            && ahead.is_empty()
+        {
             return None;
         }
         let Some((allocator, list)) = self
@@ -13001,7 +11800,6 @@ impl HostList {
                 if !barriers.is_empty() {
                     list.ResourceBarrier(&barriers);
                 }
-<<<<<<< HEAD
                 if gathered {
                     // The slots must hold clamped records before a draw
                     // reads them: a prelude that cannot record the passes
@@ -13013,6 +11811,12 @@ impl HostList {
                     if !filled {
                         fail(format_args!("a list's gathered indirect records could not be clamped in its prelude"));
                     }
+                }
+                // (Neptune) The single records clamped ahead
+                // (`HostList::clamp_ahead`), charged in the prelude's budget.
+                if let Some(budget) = ahead_budget {
+                    let mut chunks = self.ahead_chunks.lock().unwrap_or_else(|e| e.into_inner());
+                    crate::indirect::record_ahead(list, budget, &mut chunks, &ahead);
                 }
                 for (from, to, through) in &aliases {
                     crate::texture::record_alias(list, from, to, through);
@@ -13035,13 +11839,6 @@ impl HostList {
                     list.EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, LIST_STAMPS + 1);
                     list.ResolveQueryData(heap, D3D12_QUERY_TYPE_TIMESTAMP, LIST_STAMPS, 2, back, u64::from(LIST_STAMPS) * 8);
                 }
-||||||| a66ac212
-=======
-                if let Some(budget) = budget {
-                    let mut chunks = self.ahead_chunks.lock().unwrap_or_else(|e| e.into_inner());
-                    crate::indirect::record_ahead(list, budget, &mut chunks, &ahead);
-                }
->>>>>>> klbf/beta-2
                 list.Close()
             })
         };
@@ -13295,15 +12092,9 @@ impl HostList {
         deferred
             .copies
             .push(Step::Copy(dst as usize, src as usize, len));
-<<<<<<< HEAD
         deferred.title_written();
         deferred.memory_read_seen = 0;
         self.changed_something();
-||||||| a66ac212
-        deferred.refreshed.clear();
-=======
-        deferred.title_written();
->>>>>>> klbf/beta-2
     }
 
     /// Copies `len` bytes of title memory at `src` into the list's upload
@@ -13311,7 +12102,6 @@ impl HostList {
     pub(crate) fn defer_fill(&self, dst: *mut u8, src: *const u8, len: usize) {
         self.deferred()
             .copies
-<<<<<<< HEAD
             .push(Step::Fill(dst as usize, src as usize, len, None));
     }
 
@@ -13328,30 +12118,6 @@ impl HostList {
     pub(crate) fn defer_fill_buffer(&self, buffer: &ID3D12Resource, dst: *mut u8, src: *const u8, len: usize) {
         let to = (card_steps::stage() > 1).then(|| card_steps::FillTo::Buffer(buffer.clone()));
         self.deferred().copies.push(Step::Fill(dst as usize, src as usize, len, to));
-||||||| a66ac212
-            .push(Step::Fill(dst as usize, src as usize, len));
-=======
-            .push(Step::Fill(dst as usize, src as usize, len, false));
-    }
-
-    /// (Neptune) As [`HostList::defer_fill`], for the bytes of a constant
-    /// buffer. A constant buffer the title binds by its address has no
-    /// size, so 64 KiB from there on are copied; in the title's big heaps
-    /// that reaches memory shaders write, and the copy was taken as a read
-    /// of what the flights in the air may have written: once a frame they
-    /// were all waited for before the submission went on (the settle "by a
-    /// fill of upload memory", 30 to 115 ms a frame). The constants
-    /// themselves are the title's CPU side's, written before it recorded
-    /// the draw, so the copy takes them as they are now.
-    /// shortcut: constants a shader of this frame writes (none seen) are
-    /// read a frame late; `VICTORY_CONSTANTS_WAIT=1` waits as before.
-    pub(crate) fn defer_constants(&self, dst: *mut u8, src: *const u8, len: usize) {
-        static WAIT: OnceLock<bool> = OnceLock::new();
-        let wait = *WAIT.get_or_init(|| std::env::var_os("VICTORY_CONSTANTS_WAIT").is_some_and(|v| v == "1"));
-        self.deferred()
-            .copies
-            .push(Step::Fill(dst as usize, src as usize, len, !wait));
->>>>>>> klbf/beta-2
     }
 
     /// Brings `[address, address + len)` of a buffer's host copy up to date
@@ -13374,7 +12140,6 @@ impl HostList {
         }
     }
 
-<<<<<<< HEAD
     /// Batches multiple [`HostList::defer_refresh`] insertions under one lock.
     pub(crate) fn defer_refreshes<'a>(
         &self,
@@ -13391,8 +12156,6 @@ impl HostList {
         }
     }
 
-||||||| a66ac212
-=======
     /// (Neptune) The list's draws read what the list ahead of their frame makes ready
     /// (`crate::draw::passes_ahead`): its submission goes behind that list.
     pub(crate) fn wants_ahead(&self) {
@@ -13404,7 +12167,6 @@ impl HostList {
         self.deferred().wants_ahead
     }
 
->>>>>>> klbf/beta-2
     /// Shaders of the list write `[address, address + len)` of a buffer's
     /// host copy: copied back into title memory once the list has run.
     /// Declared once until the list next writes title memory (but with
@@ -13416,16 +12178,20 @@ impl HostList {
         address: usize,
         len: usize,
     ) {
-<<<<<<< HEAD
         let mut deferred = self.deferred();
         let key = (std::sync::Arc::as_ptr(shadow) as usize, address, len);
         if deferred.gpu_written.insert(key) || !declare_once() {
+            deferred.gpu_ranges.push((address, address.saturating_add(len)));
             deferred.copies.push(Step::GpuWrite(shadow.clone(), address, len));
         }
         let range = (address, address.saturating_add(len));
         if crate::indirect::early() && deferred.written_once.insert(range) {
             deferred.written.push(range);
         }
+        drop(deferred);
+        // (Neptune) The title's own copies must not read these bytes on the
+        // CPU without waiting for the flights in the air (`crate::list`).
+        shader_writes(address, len);
     }
 
     /// Whether the list's shaders recorded so far may write a byte of
@@ -13451,67 +12217,6 @@ impl HostList {
     #[cfg(test)]
     pub(crate) fn deferred_early(&self) -> usize {
         self.deferred().early.len()
-||||||| a66ac212
-        self.deferred()
-            .copies
-            .push(Step::GpuWrite(shadow.clone(), address, len));
-=======
-        // (Neptune, from avatarmanz/VIctory-7900XTX b32fb997, itself from Belobug dd799aad)
-        // Declared once until the list next writes title memory (`VICTORY_DECLARE_ONCE=0`:
-        // every time): the dispatches of a frame declare the same few ranges thousands of
-        // times, each a step of its own for the thread that submits (a flush of its copy's
-        // pending refreshes and a snapshot), a look at every step for the plans made of
-        // them, and here the lock all lists share.
-        let key = (std::sync::Arc::as_ptr(shadow) as usize, address, len);
-        {
-            let mut deferred = self.deferred();
-            if !deferred.gpu_written.insert(key) && declare_once() {
-                SAID_ONCE[0].fetch_add(1, Ordering::Relaxed);
-                return;
-            }
-            deferred.gpu_ranges.push((address, address + len));
-            deferred.copies.push(Step::GpuWrite(shadow.clone(), address, len));
-        }
-        shader_writes(address, len);
-    }
-
-    /// (Neptune, from avatarmanz/VIctory-7900XTX c96525db, itself from Belobug 84ea9c12)
-    /// The host address of `len` bytes of scratch memory that hold a constant buffer's
-    /// title memory at `src` as of the list's submission: one fill for every ask until the
-    /// list next writes title memory (up to 64 KiB of fill less for every repeat).
-    pub(crate) fn fill_scratch(&self, src: *const u8, len: u64) -> Option<u64> {
-        let key = (src as usize, len as usize);
-        let known = self.deferred().filled.get(&key).copied();
-        if known.is_some() {
-            SAID_ONCE[1].fetch_add(1, Ordering::Relaxed);
-            return known;
-        }
-        let (gpu, to) = self.scratch(len)?;
-        self.defer_constants(to, src, len as usize);
-        self.deferred().filled.insert(key, gpu);
-        Some(gpu)
-    }
-
-    /// (Neptune, from avatarmanz/VIctory-7900XTX ab86ef7f, itself from Belobug 92d353f8)
-    /// The list binds a pipeline: it and its root signature are kept until the list is
-    /// reset, and its name noted, the first time only (a kept pipeline's address names no
-    /// other).
-    pub(crate) fn bind_pipeline(&self, name: &str, pso: &ID3D12PipelineState, root: &ID3D12RootSignature) {
-        {
-            let mut deferred = self.deferred();
-            if !deferred.bound.insert(pso.as_raw() as usize) {
-                drop(deferred);
-                SAID_ONCE[3].fetch_add(1, Ordering::Relaxed);
-                // The census counts every bind.
-                if census_on() {
-                    self.used_pipeline(name);
-                }
-                return;
-            }
-            deferred.kept.push(pso.clone().into());
-            deferred.kept.push(root.clone().into());
-        }
-        self.used_pipeline(name);
     }
 
     /// (Neptune) The list's record of which indirect records are clean (`crate::indirect::San`).
@@ -13522,7 +12227,7 @@ impl HostList {
     /// (Neptune) Whether shaders of the list, as recorded so far, may write
     /// title memory in `[address, address + len)`.
     pub(crate) fn gpu_written(&self, address: usize, len: usize) -> bool {
-        let end = address + len;
+        let end = address.saturating_add(len);
         self.deferred().gpu_ranges.iter().any(|&(from, to)| from < end && address < to)
     }
 
@@ -13559,7 +12264,6 @@ impl HostList {
         let buffer = chunks[chunk as usize].0.clone();
         deferred.ahead.push((src.clone(), offset, kind, stride));
         Some((buffer, at))
->>>>>>> klbf/beta-2
     }
 
     /// A read back: once the list has run, `rows` rows of `row` bytes go
