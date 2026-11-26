@@ -1329,7 +1329,6 @@ mod tests {
         );
         XTaskQueueCloseHandle(q);
     }
-<<<<<<< HEAD
 
     #[test]
     fn terminate_cancels_delayed_callbacks() {
@@ -1388,29 +1387,4 @@ mod tests {
         assert_eq!(XAsyncGetStatus(&mut block, true), E_ABORT);
         *CLEANED.lock().unwrap() = None;
     }
-||||||| merged common ancestors
-
-    #[test]
-    fn terminate_cancels_delayed_callbacks() {
-        static EVENTS: Mutex<Vec<&str>> = Mutex::new(Vec::new());
-        extern "system" fn delayed(_: *mut c_void, canceled: bool) {
-            lock(&EVENTS).push(if canceled { "canceled" } else { "ran" });
-        }
-        extern "system" fn terminated(_: *mut c_void) {
-            lock(&EVENTS).push("terminated");
-        }
-        let mut q = std::ptr::null();
-        assert_eq!(XTaskQueueCreate(1, 1, &mut q), S_OK);
-        let none = std::ptr::null_mut();
-        let hr = XTaskQueueSubmitDelayedCallback(q, WORK, 50, none, Some(delayed));
-        assert_eq!(hr, S_OK);
-        assert_eq!(XTaskQueueTerminate(q, true, none, Some(terminated)), S_OK);
-        assert_eq!(*lock(&EVENTS), ["canceled", "terminated"]);
-        // Its delay passes without it running.
-        std::thread::sleep(Duration::from_millis(200));
-        assert_eq!(*lock(&EVENTS), ["canceled", "terminated"]);
-        XTaskQueueCloseHandle(q);
-    }
-=======
->>>>>>> belobug/main
 }
