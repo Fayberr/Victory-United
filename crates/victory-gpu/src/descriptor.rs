@@ -390,7 +390,6 @@ pub(crate) fn sync_heaps() {
         return;
     }
     let started = std::time::Instant::now();
-<<<<<<< HEAD
     let (mut pages, mut looked, mut mirrored, mut tabled, mut later) = (0u64, 0u64, 0u64, 0u64, 0u64);
     let (mut views, mut bytes) = (0u64, 0u64);
     let mut spent = [0u64; 3];
@@ -398,16 +397,7 @@ pub(crate) fn sync_heaps() {
     let mut kinds = [0u64; 5];
     let mut wait: Vec<u32> = Vec::new();
     let frame = crate::frame::current();
-||||||| c7daeea5
-    let (mut pages, mut looked, mut mirrored) = (0u64, 0u64, 0u64);
-    let mut page_bytes: Vec<u8> = Vec::new();
-    let mut straddle = [0u8; 32];
-=======
-    let (mut pages, mut looked, mut mirrored) = (0u64, 0u64, 0u64);
     let mut due: Vec<host::Due> = Vec::new();
-    let mut page_bytes: Vec<u8> = Vec::new();
-    let mut straddle = [0u8; 32];
->>>>>>> integ/vertex
     let _one = SYNCING.lock().unwrap_or_else(|e| e.into_inner());
     // Alone where it is to be exact: a look-up of a recording thread that
     // mirrors a record (under the list's shared side) never comes between
@@ -500,122 +490,6 @@ pub(crate) fn sync_heaps() {
                         store.clear();
                         store.extend_from_slice(&page_bytes);
                         seen.insert(from, (cur_gen, store));
-<<<<<<< HEAD
-||||||| c7daeea5
-                        moved
-                    };
-                    let mut slots = changed_slots(
-                        from + moved_from,
-                        from + moved_to,
-                        start as usize,
-                        step,
-                        mirrored_count,
-                    )
-                    .collect::<Vec<u64>>();
-                    if moved_from != 0 || moved_to != page_bytes.len() {
-                        let all = changed_slots(from, to, start as usize, step, mirrored_count);
-                        for index in all {
-                            if !slots.contains(&index) && host.needs_mirror(index as u32) {
-                                slots.push(index);
-                            }
-                        }
-                        slots.sort_unstable();
-                    }
-                    let step_len = step as usize;
-                    // The page's records in one go, under one lock
-                    // (`HostHeap::mirror_copied_page`); one by one below
-                    // with `VICTORY_HEAP_SYNC_PAGE=0`.
-                    let slots = if page_at_once() {
-                        let (seen, made) = host.mirror_copied_page(slots, (start, step), from, &page_bytes);
-                        looked += seen;
-                        mirrored += made;
-                        Vec::new()
-                    } else {
-                        slots
-                    };
-                    for index in slots {
-                        let handle = start + index * step;
-                        let record = match (handle as usize)
-                            .checked_sub(from)
-                            .and_then(|at| page_bytes.get(at..at + step_len))
-                        {
-                            Some(record) => record,
-                            None => {
-                                // A record straddling a 64 KiB page boundary (either
-                                // at `from` or `to`) is read whole through the kernel.
-                                if handle + step > end || step_len > straddle.len() {
-                                    continue;
-                                }
-                                if !crate::host::read_into(
-                                    handle as *const u8,
-                                    &mut straddle[..step_len],
-                                ) {
-                                    continue;
-                                }
-                                &straddle[..step_len]
-                            }
-                        };
-                        looked += 1;
-                        // Only a record that is not the one last seen there
-                        // (`HostHeap::mirror_copied`).
-                        if host.mirror_copied(index as u32, handle, record) {
-                            mirrored += 1;
-                        }
-=======
-                        moved
-                    };
-                    let mut slots = changed_slots(
-                        from + moved_from,
-                        from + moved_to,
-                        start as usize,
-                        step,
-                        mirrored_count,
-                    )
-                    .collect::<Vec<u64>>();
-                    if moved_from != 0 || moved_to != page_bytes.len() {
-                        let all = changed_slots(from, to, start as usize, step, mirrored_count);
-                        for index in all {
-                            if !slots.contains(&index) && host.needs_mirror(index as u32) {
-                                slots.push(index);
-                            }
-                        }
-                        slots.sort_unstable();
-                    }
-                    let step_len = step as usize;
-                    let straddling = |handle: u64, into: &mut [u8; 32]| {
-                        handle + step <= end && crate::host::read_into(handle as *const u8, &mut into[..step as usize])
-                    };
-                    // The page's records in one go, under one lock
-                    // (`HostHeap::mirror_copied_page`); one by one below
-                    // with `VICTORY_HEAP_SYNC_PAGE=0`.
-                    let slots = if page_at_once() {
-                        looked += host.mirror_copied_page(slots, (start, step), from, &page_bytes, straddling, &mut due);
-                        Vec::new()
-                    } else {
-                        slots
-                    };
-                    for index in slots {
-                        let handle = start + index * step;
-                        let record = match (handle as usize)
-                            .checked_sub(from)
-                            .and_then(|at| page_bytes.get(at..at + step_len))
-                        {
-                            Some(record) => record,
-                            None => {
-                                // A record over the page's ends is read whole.
-                                if step_len > straddle.len() || !straddling(handle, &mut straddle) {
-                                    continue;
-                                }
-                                &straddle[..step_len]
-                            }
-                        };
-                        looked += 1;
-                        // Only a record that is not the one last seen there
-                        // (`HostHeap::mirror_copied`).
-                        if host.mirror_copied(index as u32, handle, record) {
-                            mirrored += 1;
-                        }
->>>>>>> integ/vertex
                     }
                     same
                 };
@@ -717,8 +591,7 @@ pub(crate) fn sync_heaps() {
         host.mirror_all(&due, exact);
         due.clear();
     }
-<<<<<<< HEAD
-    drop(heaps);
+    drop((alone, shared));
     let micros = started.elapsed().as_micros() as u64;
     for (count, n) in SYNCED.iter().zip([pages, looked, mirrored, micros, tabled, later]) {
         count.fetch_add(n, Relaxed);
@@ -728,13 +601,6 @@ pub(crate) fn sync_heaps() {
         count.fetch_add(n, Relaxed);
     }
     for (count, n) in SYNCED_KINDS.iter().zip(kinds) {
-||||||| c7daeea5
-    drop(heaps);
-    for (count, n) in SYNCED.iter().zip([pages, looked, mirrored, started.elapsed().as_micros() as u64]) {
-=======
-    drop((alone, shared));
-    for (count, n) in SYNCED.iter().zip([pages, looked, mirrored, started.elapsed().as_micros() as u64]) {
->>>>>>> integ/vertex
         count.fetch_add(n, Relaxed);
     }
 }
