@@ -32,7 +32,6 @@
 //! stage, so before one of its dispatches the host makes ready what it can
 //! see the dispatch name:
 //!
-<<<<<<< HEAD
 //! - 256 KiB from each root view outside buffers, and where title memory has a
 //!   packed ("dehydrated") structure there, all of it: the title ships its
 //!   structures packed, and the builder's rehydration stages unpack each in
@@ -63,17 +62,6 @@
 //! A packed structure is gone when title memory has no header of it any more
 //! (looked at over [`SWEEP`] frames); the pages it alone has are given back.
 //!
-//! shortcut: a page held for anything else is kept for the rest of the run.
-//! shortcut: pages a list does not name are looked at again in turn, over
-//! [`SWEEP`] frames.
-||||||| c7daeea5
-//! shortcut: a copy that is numbered is kept for the rest of the run, and
-//! there are at most [`COPIES`] of them (4 MiB windows mostly: 4 GiB at
-//! most). Every dispatch of such a shader brings all numbered copies up to
-//! date and, if it can store, declares all of them written (the bytes are
-//! compared on the CPU afterwards, as for any unordered access view): a
-//! dirty-page mask written by the shader would bound both.
-=======
 //! **While the structure builder is off** (`pipeline::builder_live`) the
 //! structures are not built, and what lies at their addresses is whatever
 //! the title's memory held before. The programs that walk them get
@@ -85,13 +73,15 @@
 //! for it either (no copy is numbered, brought up to date or compared).
 //! `VICTORY_RT_WALK_UNBUILT=1` has them read title memory as before.
 //!
+//! shortcut: a page held for anything else is kept for the rest of the run.
+//! shortcut: pages a list does not name are looked at again in turn, over
+//! [`SWEEP`] frames.
 //! shortcut: a copy that is numbered is kept for the rest of the run, and
 //! there are at most [`COPIES`] of them (4 MiB windows mostly: 4 GiB at
 //! most). Every dispatch of such a shader brings all numbered copies up to
 //! date and, if it can store, declares all of them written (the bytes are
 //! compared on the CPU afterwards, as for any unordered access view): a
 //! dirty-page mask written by the shader would bound both.
->>>>>>> integ/vertex
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -205,18 +195,14 @@ struct Memory {
     frame: u64,
     /// Pages asked for this frame that are not the title's memory.
     refused: std::collections::HashSet<u64>,
-<<<<<<< HEAD
     stats: Stats,
     #[cfg(feature = "diagnostics")]
     dump: dump::Dump,
     #[cfg(feature = "diagnostics")]
     trace: trace::Trace,
-||||||| c7daeea5
-=======
     /// For [`empty`]: a directory without entries and the fault notes
     /// nothing reads, made at its first use.
     unbuilt: Option<[(ID3D12Resource, *mut u32, u64); 2]>,
->>>>>>> integ/vertex
 }
 
 /// Since the last report.
@@ -267,7 +253,6 @@ pub(crate) struct Ready {
 
 impl Memory {
     fn new() -> Option<Memory> {
-<<<<<<< HEAD
         let host = host()?;
         let bytes = u64::from(MEMORY_PAGES) * 8;
         // Zeroed, and watched for writes as the title's memory is.
@@ -280,31 +265,10 @@ impl Memory {
         unsafe { std::ptr::write_bytes(data, 0, MEMORY_FAULTS as usize * 4) };
         // SAFETY: a live buffer.
         let gpu = unsafe { faults.GetGPUVirtualAddress() };
-||||||| c7daeea5
-        let host = host()?;
-        let make = |dwords: u64, what: &str| {
-            let (buffer, data) = host.shared_buffer(dwords * 4)?;
-            crate::host::name(&buffer, || format!("title memory by address: {what}"));
-            // SAFETY: a fresh mapping of at least that many bytes.
-            unsafe { std::ptr::write_bytes(data, 0, (dwords * 4) as usize) };
-            // SAFETY: a live buffer.
-            let gpu = unsafe { buffer.GetGPUVirtualAddress() };
-            Some((buffer, data.cast::<u32>(), gpu))
-        };
-=======
->>>>>>> integ/vertex
         tracing::info!("title memory by address: a shader reads or writes through raw addresses");
         Some(Memory {
-<<<<<<< HEAD
             directory: (entries as *mut u32, directory),
             faults: (faults, data.cast::<u32>(), gpu),
-||||||| c7daeea5
-            directory: make(u64::from(MEMORY_PAGES) * 2, "directory")?,
-            faults: make(u64::from(MEMORY_FAULTS), "faults")?,
-=======
-            directory: zeroed(u64::from(MEMORY_PAGES) * 2, "directory")?,
-            faults: zeroed(u64::from(MEMORY_FAULTS), "faults")?,
->>>>>>> integ/vertex
             copies: Vec::new(),
             numbers: HashMap::new(),
             arenas: Vec::new(),
@@ -321,20 +285,32 @@ impl Memory {
             heaps: HashMap::new(),
             frame: u64::MAX,
             refused: Default::default(),
-<<<<<<< HEAD
             stats: Stats::default(),
             #[cfg(feature = "diagnostics")]
             dump: Default::default(),
             #[cfg(feature = "diagnostics")]
             trace: Default::default(),
-||||||| c7daeea5
-=======
             unbuilt: None,
->>>>>>> integ/vertex
         })
     }
 
-<<<<<<< HEAD
+    /// `heap`'s run of slots for the copies' views (its first slot and how
+    /// many copies have their view there), taken at its first use.
+    fn run(&mut self, heap: &HostHeap) -> Option<(u32, u32)> {
+        let key = std::ptr::from_ref(heap) as usize;
+        if let Some(&run) = self.heaps.get(&key) {
+            return Some(run);
+        }
+        // Held for the heap's life: not given back with a list's slots.
+        let base = heap.dynamic(COPIES + 1)?;
+        // Every slot of the run: a number shows no view of another kind.
+        for n in 0..=COPIES {
+            heap.null_raw_uav_at(base + n);
+        }
+        self.heaps.insert(key, (base, 0));
+        Some((base, 0))
+    }
+
     /// The directory's entry of `page`.
     fn entry(&self, page: u64) -> *mut u32 {
         debug_assert!(page < u64::from(MEMORY_PAGES));
@@ -346,37 +322,6 @@ impl Memory {
     fn copy_of(&self, page: u64) -> Option<usize> {
         if page >= u64::from(MEMORY_PAGES) {
             return None;
-||||||| c7daeea5
-    /// Gives the page of `address` its copy, if it has none and the memory
-    /// is the title's.
-    fn map(&mut self, address: u64) {
-        let page = address / PAGE;
-        // The last entry stays empty: addresses past the directory read it.
-        if page >= u64::from(MEMORY_PAGES) - 1 {
-            return;
-=======
-    /// `heap`'s run of slots for the copies' views (its first slot and how
-    /// many copies have their view there), taken at its first use.
-    fn run(&mut self, heap: &HostHeap) -> Option<(u32, u32)> {
-        let key = std::ptr::from_ref(heap) as usize;
-        if let Some(&run) = self.heaps.get(&key) {
-            return Some(run);
-        }
-        // Held for the heap's life: not given back with a list's slots.
-        let base = heap.dynamic(COPIES + 1)?;
-        heap.null_raw_uav_at(base);
-        self.heaps.insert(key, (base, 0));
-        Some((base, 0))
-    }
-
-    /// Gives the page of `address` its copy, if it has none and the memory
-    /// is the title's.
-    fn map(&mut self, address: u64) {
-        let page = address / PAGE;
-        // The last entry stays empty: addresses past the directory read it.
-        if page >= u64::from(MEMORY_PAGES) - 1 {
-            return;
->>>>>>> integ/vertex
         }
         // SAFETY: an entry of the directory.
         ((unsafe { self.entry(page).read() } & !MEMORY_READ_ONLY) as usize).checked_sub(1)
@@ -1005,15 +950,8 @@ pub(crate) fn ready(
     addresses: &[u64],
     written: &[u64],
     constants: &[u32],
-<<<<<<< HEAD
     use_: Use,
     threads: Option<[u32; 3]>,
-||||||| c7daeea5
-    writes: bool,
-=======
-    writes: bool,
-    builder: bool,
->>>>>>> integ/vertex
 ) -> Option<Ready> {
     let mut guard = MEMORY.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
@@ -1030,18 +968,9 @@ pub(crate) fn ready(
         #[cfg(feature = "diagnostics")]
         m.trace.look(frame);
     }
-<<<<<<< HEAD
     #[cfg(feature = "diagnostics")]
     if use_ != Use::Reads {
         m.trace.dispatch(frame, list, addresses, written, constants, threads);
-||||||| c7daeea5
-    let numbered = m.copies.len();
-    for &address in addresses {
-        m.name(address);
-=======
-    for &address in addresses {
-        m.name(address);
->>>>>>> integ/vertex
     }
     let builds = use_ != Use::Reads;
     if builds && sizes_wait() && asks_size(written, constants, threads) {
@@ -1147,38 +1076,12 @@ pub(crate) fn ready(
         *sum += n;
     }
     let key = std::ptr::from_ref(heap) as usize;
-<<<<<<< HEAD
-    let (base, made) = match m.heaps.get(&key) {
-        Some(&run) => run,
-        None => {
-            // Held for the heap's life: not given back with a list's slots.
-            let base = heap.dynamic(COPIES + 1)?;
-            // Every slot of the run: a number shows no view of another kind.
-            for n in 0..=COPIES {
-                heap.null_raw_uav_at(base + n);
-            }
-            (base, 0)
-        }
-    };
-||||||| c7daeea5
-    let (base, made) = match m.heaps.get(&key) {
-        Some(&run) => run,
-        None => {
-            // Held for the heap's life: not given back with a list's slots.
-            let base = heap.dynamic(COPIES + 1)?;
-            heap.null_raw_uav_at(base);
-            (base, 0)
-        }
-    };
-=======
     let (base, made) = m.run(heap)?;
->>>>>>> integ/vertex
     for (n, shadow) in m.copies.iter().enumerate().skip(made as usize) {
         let (_, len) = shadow.span();
         heap.raw_uav_at(base + 1 + n as u32, &shadow.buffer, 0, len);
     }
     m.heaps.insert(key, (base, m.copies.len() as u32));
-<<<<<<< HEAD
     // Every copy by every list that has come to by-address memory, whoever
     // numbered it: an arena another list made while this one was being
     // recorded was brought up to date by that list's submission alone, which
@@ -1188,53 +1091,8 @@ pub(crate) fn ready(
     let first_read = list.first_use(READ);
     if list.first_use(usize::MAX - (6 << 33) - m.copies.len()) {
         m.bring_up(list);
-||||||| c7daeea5
-    // Once per list, and for copies numbered since: the builder alone
-    // dispatches hundreds of times a frame.
-    // shortcut: a copy another list numbers meanwhile is brought up to date
-    // by that list's submission, which may run after this one's.
-    const READ: usize = usize::MAX - 0x6d;
-    const WRITE: usize = usize::MAX - 0x6e;
-    let first_read = list.first_use(READ);
-    let first_write = writes && list.first_use(WRITE);
-    for (n, shadow) in m.copies.iter().enumerate() {
-        let (start, len) = shadow.span();
-        if first_read || n >= numbered {
-            shadow.refresh(list, start, len);
-        }
-        if writes && (first_write || n >= numbered) {
-            shadow.gpu_writes(list, start, len);
-        }
-=======
-    // Bring up to date (and, with `writes`, declare for write-back) every
-    // numbered copy this list has not covered yet, including copies numbered
-    // by another command list since this list's previous dispatch.
-    const KEEP: usize = usize::MAX - 0x6d;
-    let (read_from, write_from) = list.memory_sync_range(m.copies.len(), writes);
-    for shadow in &m.copies[read_from..] {
-        let (start, len) = shadow.span();
-        shadow.refresh(list, start, len);
     }
-    if writes {
-        for shadow in &m.copies[write_from..] {
-            let (start, len) = shadow.span();
-            // Bounded for the structure builder (`crate::pipeline::bvh_bound`).
-            // shortcut: a list's copies are declared once, by whichever
-            // program that can store comes first; a list mixing the builder
-            // with another such program follows the first.
-            crate::pipeline::builder_writes(list, shadow, start, len, builder);
-        }
->>>>>>> integ/vertex
-    }
-<<<<<<< HEAD
     if first_read {
-||||||| c7daeea5
-    if first_read {
-        list.keep(&m.directory.0);
-=======
-    if list.first_use(KEEP) {
-        list.keep(&m.directory.0);
->>>>>>> integ/vertex
         list.keep(&m.faults.0);
         #[cfg(feature = "diagnostics")]
         m.dump(list, addresses);
@@ -1262,7 +1120,6 @@ pub(crate) fn forget_heap(heap: &HostHeap) {
     }
 }
 
-<<<<<<< HEAD
 /// `VICTORY_BVH_TRACE=1`: the sizes the builder is asked for (its program of
 /// one thread that stores a structure's compacted size) and when title memory
 /// has them, and the copies to a place of that size.
@@ -1466,8 +1323,6 @@ mod dump {
     }
 }
 
-||||||| c7daeea5
-=======
 /// `VICTORY_RT_WALK_UNBUILT=1`: the programs that walk the ray-tracing
 /// structures read title memory while the structure builder is off too
 /// (what they did before [`empty`]; for comparing runs).
@@ -1520,7 +1375,6 @@ pub(crate) fn empty(list: &HostList, heap: &HostHeap) -> Option<Ready> {
     })
 }
 
->>>>>>> integ/vertex
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1550,13 +1404,7 @@ mod tests {
         let host_heap = heap(h).host().expect("host view heap");
         let key = std::ptr::from_ref(host_heap) as usize;
 
-<<<<<<< HEAD
         assert!(ready(&list, host_heap, &[], &[], &[], Use::Reads, None).is_some());
-||||||| c7daeea5
-        assert!(ready(&list, host_heap, &[], &[], false).is_some());
-=======
-        assert!(ready(&list, host_heap, &[], &[], false, false).is_some());
->>>>>>> integ/vertex
         {
             let guard = MEMORY.lock().unwrap();
             assert!(guard.as_ref().unwrap().heaps.contains_key(&key));
@@ -1574,7 +1422,6 @@ mod tests {
             "MEMORY.heaps retained dropped HostHeap key {key:#x}"
         );
     }
-<<<<<<< HEAD
 
     #[test]
     fn a_piece_takes_what_changed() {
@@ -1600,8 +1447,6 @@ mod tests {
         assert_eq!(packed_len(header(0x8102_0006, 0)), None);
         assert_eq!(packed_len(header(0x8102_0006, 1 << 21)), None);
     }
-||||||| c7daeea5
-=======
 
     use victory_shader::bvh::{MISS, NONE, Ray, intersect};
 
@@ -1634,5 +1479,4 @@ mod tests {
             }
         }
     }
->>>>>>> integ/vertex
 }
