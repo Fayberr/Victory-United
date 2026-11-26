@@ -3026,7 +3026,6 @@ void main(uint3 id : SV_GroupID, uint thread : SV_GroupIndex) {
 }
 "#;
 
-<<<<<<< HEAD
 /// The hash [`CARD_COMPARE`] gives of a piece with its flag.
 #[cfg(test)]
 pub(crate) fn piece_hash(bytes: &[u8]) -> u32 {
@@ -3036,11 +3035,6 @@ pub(crate) fn piece_hash(bytes: &[u8]) -> u32 {
 /// One pass of [`CARD_COMPARE`] over a span's pieces, into `differs` from
 /// dword `at` on (`mode` as the shader's `compare`): a group per piece, in
 /// parts a dispatch can hold.
-||||||| 9c184b35b
-/// Whether the pieces a flight's compare flags come down to the PC inside
-/// the flight itself (`VICTORY_CARD_FETCH_INFLIGHT=1`; off by default, and
-/// only with [`relay`]).
-=======
 /// [`CARD_COMPARE`] with a group of 64 threads to a piece
 /// (`VICTORY_CARD_HASH_WIDE=1`; the thread a piece unless asked). After fork
 /// pull request #1014 by martindevbr.
@@ -3252,25 +3246,13 @@ enum Step {
     /// once per submission, whichever lists ask, until a `Copy` or `Run`
     /// intervenes.
     Refresh(std::sync::Arc<crate::shadow::Shadow>, usize, usize),
-<<<<<<< HEAD
-    /// Work that may write title memory.
-    Run(Box<dyn Fn() + Send>),
-    /// Work that writes host memory only, and the title memory it reads
-    /// (from, to; empty for none).
-    Host(Box<dyn Fn() + Send>, (usize, usize)),
-||||||| 9c184b35b
-    /// Work that may write title memory.
-    Run(Box<dyn Fn() + Send>),
-    /// Work that writes host memory only.
-    Host(Box<dyn Fn() + Send>),
-=======
     /// Work that may write title memory; with the place it writes
     /// (address, bytes) when that is known (the title's memory-to-memory
     /// copies, `crate::list` `copy_memory`): [`near_writes`].
     Run(Box<dyn Fn() + Send>, Option<(usize, usize)>),
-    /// Work that writes host memory only.
-    Host(Box<dyn Fn() + Send>),
->>>>>>> origin/exp/fork-head
+    /// Work that writes host memory only, and the title memory it reads
+    /// (from, to; empty for none).
+    Host(Box<dyn Fn() + Send>, (usize, usize)),
     /// Shaders write a range (address, bytes) of a buffer's host copy.
     GpuWrite(std::sync::Arc<crate::shadow::Shadow>, usize, usize),
     /// Brings a texture's staging buffer up to date: once per submission,
@@ -3303,7 +3285,6 @@ struct Deferred {
     bound: std::collections::HashSet<usize, std::hash::BuildHasherDefault<AddressHash>>,
     /// Buffer ranges refreshed since the last title copy (host copy,
     /// address, bytes): refreshing them again would find the same bytes.
-<<<<<<< HEAD
     refreshed: std::collections::HashSet<(usize, usize, usize), std::hash::BuildHasherDefault<AddressHash>>,
     /// Ranges declared written by shaders since the list last wrote title
     /// memory (host copy, address, bytes): declaring them again would
@@ -3312,19 +3293,6 @@ struct Deferred {
     /// Scratch memory [`HostList::fill_scratch`] fills since the list last
     /// wrote title memory (source, bytes): its host address.
     filled: std::collections::HashMap<(usize, usize), u64, std::hash::BuildHasherDefault<AddressHash>>,
-||||||| 9c184b35b
-    refreshed: std::collections::HashSet<(usize, usize, usize)>,
-=======
-    refreshed: std::collections::HashSet<(usize, usize, usize)>,
-    /// With [`list_reuse`]: the host pipelines the list has kept, by
-    /// address ([`HostList::first_bind`]).
-    bound: std::collections::HashSet<usize>,
-    /// With [`list_reuse`]: upload memory filled from title memory since
-    /// the last title copy (source, bytes): its host GPU address, which a
-    /// second fill would find holding the same bytes
-    /// ([`HostList::fill_scratch`]).
-    filled: std::collections::HashMap<(usize, usize), u64>,
->>>>>>> origin/exp/fork-head
     /// Textures whose contents the list brings up to date.
     textures: std::collections::HashSet<usize>,
     /// Last GPU source copied into each aliased host texture in this list.
