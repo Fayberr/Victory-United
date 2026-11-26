@@ -70,22 +70,10 @@ impl Fields {
             } else {
                 1
             },
-<<<<<<< HEAD
-            ComparisonFunc: if reduction == 1 {
-                D3D12_COMPARISON_FUNC(self.compare as i32)
-||||||| 465b94f5
-            ComparisonFunc: D3D12_COMPARISON_FUNC(self.compare.max(1) as i32),
-            BorderColor: self.border,
-            MinLOD: self.min_lod,
-            // Without a mip filter the console samples mip 0 only.
-            MaxLOD: if self.mip == 0 {
-                self.min_lod
-=======
             // (kept beside a minimum or maximum filter too: the comparison
             // sampler made of this one, [`comparison`], has it)
             ComparisonFunc: if reduction == 1 || compares {
                 D3D12_COMPARISON_FUNC(self.compare as i32)
->>>>>>> vertex/main
             } else {
                 D3D12_COMPARISON_FUNC_NEVER
             },

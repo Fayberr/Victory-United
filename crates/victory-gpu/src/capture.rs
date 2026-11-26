@@ -57,8 +57,15 @@ pub(crate) fn listed(n: u64) -> bool {
 /// says which pass writes which target, to find the pass whose output
 /// stays empty.
 #[cfg(feature = "diagnostics")]
-<<<<<<< HEAD
-pub(crate) fn op(list: usize, what: impl FnOnce() -> String) {
+pub(crate) fn op<F: FnOnce() -> String>(list: usize, what: F) {
+    let what: Box<dyn FnOnce() -> String + '_> =
+        if light_log() && WORLD.load(std::sync::atomic::Ordering::Relaxed) != u64::MAX {
+            let text = what();
+            light_op(crate::queue::presented() + 1, &text);
+            Box::new(move || text)
+        } else {
+            Box::new(what)
+        };
     // A frame shot (`crate::shot`) keeps every line of its frame.
     if crate::shot::keeping_lines() {
         let text = what();
@@ -70,22 +77,9 @@ pub(crate) fn op(list: usize, what: impl FnOnce() -> String) {
 
 /// [`op`] for the frames [`listed`] and the lines before the world.
 #[cfg(feature = "diagnostics")]
-fn op_listed(list: usize, what: impl FnOnce() -> String) {
-||||||| 465b94f5
-pub(crate) fn op(list: usize, what: impl FnOnce() -> String) {
-=======
-pub(crate) fn op<F: FnOnce() -> String>(list: usize, what: F) {
->>>>>>> vertex/main
+fn op_listed<F: FnOnce() -> String>(list: usize, what: F) {
     use std::io::Write;
     let frame = crate::queue::presented() + 1;
-    let what: Box<dyn FnOnce() -> String + '_> =
-        if light_log() && WORLD.load(std::sync::atomic::Ordering::Relaxed) != u64::MAX {
-            let text = what();
-            light_op(frame, &text);
-            Box::new(move || text)
-        } else {
-            Box::new(what)
-        };
     if !listed(frame) {
         // Before the world: the last lines are kept, and written out when
         // it starts (`before-world-ops.txt`): what the title drew just
