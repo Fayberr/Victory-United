@@ -241,7 +241,6 @@ impl Host {
         }
     }
 
-<<<<<<< HEAD
     /// The device's wave sizes (`WaveLaneCountMin`, `WaveLaneCountMax`); `None` if it does not
     /// say.
     pub fn wave_lanes(&self) -> Option<(u32, u32)> {
@@ -265,8 +264,6 @@ impl Host {
         self.wave_lanes().is_none_or(|(min, max)| (min..=max).contains(&lanes))
     }
 
-||||||| 85d564167
-=======
     /// The name of the adapter that actually created the device.
     pub fn adapter_name(&self) -> Option<String> {
         let desc = adapter_desc(&self.device).ok()?;
@@ -291,8 +288,6 @@ impl Host {
             && adapter_desc(&self.device).is_ok_and(|desc| desc.VendorId == 0x1002);
         Some((waves.WaveLaneCountMax, rdna))
     }
-
->>>>>>> avatar/main
     /// The root signature translated shaders expect: user data per stage
     /// at `b0`, immediate samplers per stage at `s<n>`, heaps directly
     /// indexed.
