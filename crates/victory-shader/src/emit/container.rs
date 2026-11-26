@@ -106,7 +106,6 @@ impl SigElement {
     }
 }
 
-<<<<<<< HEAD
 /// Read the mesh shader's declared interpolation instead of deriving it from the value type.
 /// The vertex outputs follow the input records in PSV0. OSG1 can list the same elements
 /// in a different order, so apply the modes only after matching the two descriptions.
@@ -210,15 +209,10 @@ pub(super) fn mesh_output_modes(psv: &[u8], osg: &[u8], outputs: &[SigElement]) 
     Some(modes)
 }
 
-/// `ISG1`/`OSG1`: 32-byte rows, then the names.
-||||||| merged common ancestors
-/// `ISG1`/`OSG1`: 32-byte rows, then the names.
-=======
 /// `ISG1`/`OSG1`/`PSG1`: 32-byte rows, then the names, byte for byte as
 /// the validator rebuilds them from the module's signature metadata
 /// (`DxilProgramSignatureWriter` with validator version 1.6), so every
 /// field derives from the same [`SigElement`] the metadata does.
->>>>>>> belobug/main
 pub(crate) fn signature(elements: &[SigElement], input: bool) -> Vec<u8> {
     let listed: Vec<usize> = (0..elements.len())
         .filter(|&i| elements[i].in_part(input))
@@ -228,20 +222,13 @@ pub(crate) fn signature(elements: &[SigElement], input: bool) -> Vec<u8> {
     out.extend(8u32.to_le_bytes());
     // Validator 1.6 writes one name per element in element order, repeats
     // included, except that system values share theirs (it keys names by
-<<<<<<< HEAD
-    // the semantic's string, which is one static string per system value);
-    // the rows sorted by register (unallocated last), then by name offset:
-    // of two elements packed into one register, the one first in element
-    // order comes first whatever its columns (a sort by column made the
-    // validator refuse 72 of the title's vertex, mesh and pixel programs:
-    // "does not match expected for module").
-||||||| merged common ancestors
-    // the semantic's string, which is one static string per system value);
-    // the rows sorted by register (unallocated last).
-=======
     // the name's pointer, which is one static string per system value).
-    // Elements left out of the rows still get a name.
->>>>>>> belobug/main
+    // Elements left out of the rows still get a name. The rows are sorted
+    // by register (unallocated last), then by name offset: of two elements
+    // packed into one register, the one first in element order comes first
+    // whatever its columns (a sort by column made the validator refuse 72
+    // of the title's vertex, mesh and pixel programs: "does not match
+    // expected for module").
     let mut offsets: Vec<u32> = Vec::new();
     let mut next = 8 + 32 * listed.len() as u32;
     let mut names = Vec::new();
@@ -258,19 +245,11 @@ pub(crate) fn signature(elements: &[SigElement], input: bool) -> Vec<u8> {
             }
         }
     }
-<<<<<<< HEAD
-    let mut order: Vec<usize> = (0..elements.len()).collect();
-    order.sort_by_key(|&i| (elements[i].row.unwrap_or(u32::MAX), offsets[i]));
-||||||| merged common ancestors
-    let mut order: Vec<usize> = (0..elements.len()).collect();
-    order.sort_by_key(|&i| (elements[i].row.unwrap_or(u32::MAX), elements[i].col));
-=======
     // Rows by register (unallocated last, as register -1), then by name
     // offset (DXC's `sort_sig`); the sort is stable on ties, as DXC's
     // insertion sort is on signatures this small.
     let mut order = listed;
     order.sort_by_key(|&i| (elements[i].row.unwrap_or(u32::MAX), offsets[i]));
->>>>>>> belobug/main
     for i in order {
         let (e, offset) = (&elements[i], offsets[i]);
         let used = e.usage << e.start_col();
@@ -380,15 +359,11 @@ pub(crate) struct Psv<'a> {
     pub prims: &'a [SigElement],
     /// Mesh: its state and the group-shared bytes it declares.
     pub mesh: Option<(super::shader::Mesh, u32)>,
-<<<<<<< HEAD
     /// Geometry (triangles in, triangle strips out on stream 0): its
     /// maximum vertex count. `flag`: writes `SV_Position`.
     pub geometry: Option<u32>,
-||||||| merged common ancestors
-=======
     /// Geometry: triangles to strips (see `Shader::rectangles`).
     pub rectangles: bool,
->>>>>>> belobug/main
     pub bindings: &'a [Binding],
     /// Compute: thread-group size and required wave size.
     pub threads: [u32; 3],
@@ -442,7 +417,6 @@ pub(crate) fn psv(p: &Psv) -> Vec<u8> {
         info[27] = mesh.topology;
         info[30] = p.prims.len() as u8;
     }
-<<<<<<< HEAD
     if let Some(max_vertices) = p.geometry {
         // Input primitive (3: triangles), output topology (5: triangle
         // strips), stream mask, position written; the vertex maximum.
@@ -451,10 +425,7 @@ pub(crate) fn psv(p: &Psv) -> Vec<u8> {
         info[8..12].copy_from_slice(&1u32.to_le_bytes());
         info[12] = u8::from(p.flag);
         info[26..28].copy_from_slice(&(max_vertices as u16).to_le_bytes());
-    }
-||||||| merged common ancestors
-=======
-    if p.rectangles {
+    } else if p.rectangles {
         // Triangles in, triangle strips out, stream 0, a position.
         for (k, n) in [3u32, 5, 1].into_iter().enumerate() {
             info[4 * k..4 * k + 4].copy_from_slice(&n.to_le_bytes());
@@ -462,7 +433,6 @@ pub(crate) fn psv(p: &Psv) -> Vec<u8> {
         info[12] = 1;
         info[26..28].copy_from_slice(&(super::shader::RECTANGLE_VERTICES as u16).to_le_bytes());
     }
->>>>>>> belobug/main
     out.extend(info);
     u32s(&mut out, &[p.bindings.len() as u32]);
     if !p.bindings.is_empty() {
@@ -663,7 +633,6 @@ fn md5_block(state: &mut [u32; 4], block: &[u8; 64]) {
 mod tests {
     use super::*;
 
-<<<<<<< HEAD
     /// Two elements packed into one register are written in element order, not by column
     /// (the title's packed pedestrian outputs: TEXCOORD22 in columns 1-2 of the register
     /// whose column 0 is COLOR0, listed after it).
@@ -774,6 +743,7 @@ mod tests {
             prims: &[],
             mesh: None,
             geometry: None,
+            rectangles: false,
             bindings: &[Binding {
                 kind: 2,
                 space: 0,
@@ -850,6 +820,7 @@ mod tests {
             prims: &[],
             mesh: None,
             geometry: None,
+            rectangles: false,
             bindings: &[],
             threads: [0; 3],
             wave_size: None,
@@ -861,8 +832,6 @@ mod tests {
             .is_err());
     }
 
-||||||| merged common ancestors
-=======
     fn el(name: &str, kind: u8, row: Option<u32>, col: u8, cols: u8, usage: u8) -> SigElement {
         SigElement {
             name: name.into(),
@@ -896,22 +865,6 @@ mod tests {
             .collect()
     }
 
-    /// Elements sharing a row are listed by name offset (element order),
-    /// not by column, as the validator's rebuilt part lists them.
-    #[test]
-    fn a_shared_row_keeps_element_order() {
-        let els = [
-            el("TEXCOORD", 0, Some(1), 2, 2, 0b11),
-            el("COLOR", 0, Some(1), 0, 2, 0b01),
-            el("NORMAL", 0, Some(0), 0, 3, 0b111),
-        ];
-        let r = rows(&signature(&els, true));
-        let names: Vec<_> = r.iter().map(|r| r.0.as_str()).collect();
-        assert_eq!(names, ["NORMAL", "TEXCOORD", "COLOR"]);
-        assert_eq!((r[1].2, r[1].3), (0b1100, 0b1100));
-        assert_eq!((r[2].2, r[2].3), (0b0011, 0b0001));
-    }
-
     /// An unallocated element counts its mask and usage from column 0,
     /// whatever column it carries; outputs mark the unwritten channels.
     #[test]
@@ -942,7 +895,6 @@ mod tests {
         assert_eq!(part.len(), 8 + 32 + 12 + 12);
     }
 
->>>>>>> belobug/main
     #[test]
     fn md5_core_matches_the_standard() {
         // Standard MD5 of "abc" with standard padding, through md5_block.
