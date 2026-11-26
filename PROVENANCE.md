@@ -12,9 +12,8 @@ The tree this repository had before (`6757b6eff`, tagged `archive/main-2026-11-2
 merging pull requests and branches from [fxceless/victory-fork](https://github.com/fxceless/victory-fork),
 [Marvisak/VIctory](https://github.com/Marvisak/VIctory), [avatarmanz/VIctory-7900XTX](https://github.com/avatarmanz/VIctory-7900XTX),
 Belobug, vitutu1/victory-perf and others (the list that was here is kept in the archive tag's
-`PROVENANCE.md`). On the test machine (RTX 3080 Ti) that tree ran at 8.5 frames a second with a
-blocky picture, while Vice-Tay's own head ran at about 11 frames a second with a clean picture,
-so the tree was switched and the other work is folded in again one piece at a time, checking the
+`PROVENANCE.md`). On the test machine (RTX 3080 Ti) that tree ran at 8.5 frames a second in the first room, while
+Vice-Tay's own head ran at about 11 frames a second there, so the tree was switched and the other work is folded in again one piece at a time, checking the
 picture after each.
 
 ## What has been taken since
