@@ -51,7 +51,6 @@ pub(crate) struct IndexView {
     format: u32,
 }
 
-<<<<<<< HEAD
 /// Host states of a depth target, and of a texture shaders read.
 const DEPTH_WRITE: u32 = 0x10;
 const DEPTH_READ: u32 = 0x20;
@@ -638,20 +637,6 @@ fn argument_copies(first: &std::sync::Arc<crate::shadow::Shadow>) -> Vec<(u64, I
     live.iter().map(|s| (s.id(), s.buffer.clone())).collect()
 }
 
-||||||| merged common ancestors
-=======
-/// Fixed-function state and the views bound for output.
-#[derive(Default)]
-struct Fixed {
-    viewports: Vec<D3D12_VIEWPORT>,
-    scissors: Vec<RECT>,
-    blend: Option<Option<[f32; 4]>>,
-    stencil: Option<u32>,
-    views: Option<(Vec<crate::descriptor::RtvRecord>, Option<crate::descriptor::RtvRecord>)>,
-}
-
-// SAFETY: the views only name title resources.
-unsafe impl Send for Fixed {}
 
 /// Where the clamps of a run of indirect draws go: the list `clamps`, open,
 /// that runs before the host list at `into`, as long as that one has
@@ -661,8 +646,6 @@ pub(crate) struct Hoist {
     pub(crate) into: usize,
     pub(crate) writes: u64,
 }
-
->>>>>>> belobug/main
 /// What one title list has set, and what its host list was last given.
 #[derive(Default)]
 pub(crate) struct State {
@@ -679,17 +662,10 @@ pub(crate) struct State {
     /// Bound render target and depth resources, for their host states.
     targets: Vec<usize>,
     depth: usize,
-<<<<<<< HEAD
     /// The host state the bound depth view needs ([`depth_state`]).
     depth_state: u32,
-||||||| merged common ancestors
-=======
-    /// None leaves the host list's default bounds (0..1) in place.
-    depth_bounds: Option<(f32, f32)>,
->>>>>>> belobug/main
     /// The title's primitive topology (the host's may differ).
     topology: u32,
-<<<<<<< HEAD
     /// What the title set that goes straight onto the host list, kept for
     /// the host list that continues this one after a cut ([`State::replay`]):
     /// whether a topology was set, the render target and depth handles, the
@@ -741,42 +717,17 @@ pub(crate) struct State {
     /// the indirect light follows (`crate::ambient`): root parameter, bytes
     /// into the view heap.
     ambient_tables: Vec<(u8, u32)>,
-||||||| merged common ancestors
-=======
-    /// What was set on the host list at once, for the one a cut list goes on
-    /// in.
-    fixed: Fixed,
->>>>>>> belobug/main
     /// What the host list has: pipeline, root signature, heaps.
     host_pipeline: usize,
     /// Graphics, compute.
     host_roots: [usize; 2],
     host_heaps: [usize; 2],
-<<<<<<< HEAD
     /// Tables made afresh in this list, keyed by their address, entry count
     /// and record hash.
     fresh_tables: std::collections::HashMap<(u64, u32, u64), FreshTable, std::hash::BuildHasherDefault<crate::host::AddressHash>>,
-||||||| merged common ancestors
-    /// Tables made afresh in this list: (table, what it holds) → first
-    /// dynamic slot.
-    fresh_tables: std::collections::HashMap<(u64, u64), u32>,
-=======
-    /// Tables made afresh in this list, by a hash of the table and what it
-    /// holds ([`table_hash`]).
-    fresh_tables: std::collections::HashMap<u64, Fresh, std::hash::BuildHasherDefault<Plain>>,
-    /// The record words of [`Fresh`] tables, one after the other.
-    fresh_records: Vec<[u32; 3]>,
-    /// Of them, large ones by table: the records it was made from and the
-    /// first dynamic slot. A shader that reads less of one takes the same.
-    large_tables: std::collections::HashMap<u64, Vec<(Vec<[u32; 3]>, u32)>>,
-    /// What [`State::tables`] made for the stage being bound: root slot, byte
-    /// offset of its fresh table. Kept to reuse its storage across draws.
-    made: Vec<(u8, u32)>,
->>>>>>> belobug/main
     /// The dynamic slots the list holds: title heap, first, count; given
     /// back when the list has run, is reset or released.
     dynamic: Vec<(usize, u32, u32)>,
-<<<<<<< HEAD
     /// Root SRVs bound as one-view tables in this list: (title heap, title
     /// address; 0 for none) → dynamic slot, and the host copy the slot
     /// shows: later draws of the list bring that one up to date, whatever
@@ -793,14 +744,9 @@ pub(crate) struct State {
     /// Raw thread counts `[x, y, z]` for a partial `DispatchX` call with
     /// `USE_THREAD_DIMENSIONS` (`0` along an axis means full groups / no cap).
     dispatch_threads: [u32; 3],
-||||||| merged common ancestors
-    /// A fresh table of the stage being bound could not be made.
-    table_failed: bool,
-=======
     /// Whether the last [`State::bind`] left a used unordered access view
     /// with nothing behind it (a null view).
     null_uav: bool,
->>>>>>> belobug/main
 }
 
 impl Drop for State {
@@ -1556,13 +1502,6 @@ pub(crate) static HEAP_TEXTURES_QUEUE: [AtomicU64; 5] = [const { AtomicU64::new(
 pub(crate) static HEAP_TEXTURES_PARTLY: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 static DROPPED: AtomicU64 = AtomicU64::new(0);
 
-<<<<<<< HEAD
-/// Counts a draw not run on the host by its reason, and marks the last
-/// traced draw (diagnostics).
-||||||| merged common ancestors
-/// Marks the last traced draw as not run on the host.
-#[cfg(feature = "diagnostics")]
-=======
 /// Groups the host runs per dimension of a dispatch (and of a mesh
 /// dispatch). A count past it is undefined behaviour on the host; drivers
 /// may run it for seconds and reset the display driver.
@@ -1598,9 +1537,8 @@ fn dispatch_fits(x: u32, y: u32, z: u32) -> bool {
     x <= MAX_GROUPS && y <= MAX_GROUPS && z <= MAX_GROUPS
 }
 
-/// Marks the last traced draw as not run on the host.
-#[cfg(feature = "diagnostics")]
->>>>>>> belobug/main
+/// Counts a draw not run on the host by its reason, and marks the last
+/// traced draw (diagnostics).
 fn dropped(pipeline: usize) {
     crate::pipeline::note_drop(pipeline as This);
     #[cfg(feature = "diagnostics")]
@@ -1641,7 +1579,6 @@ type TargetKey = (usize, (usize, [u32; 7]));
 /// The host address of a root view: its buffer's host copy, or for a
 /// constant buffer not 256-byte aligned there (the console needs 16) a
 /// copy in upload memory.
-<<<<<<< HEAD
 /// shortcut: a root view has no size; constant buffers are taken as 64 KiB
 /// (cut at their buffer's end), other views as all that is left of their
 /// buffer. (They were taken as 1 MiB: 1,452 of the 2,021 mesh vertex
@@ -1657,36 +1594,19 @@ fn root_view(list: &HostList, address: u64, srv: bool) -> Option<u64> {
             .map_or(u64::MAX, |mb| mb << 20)
     });
     let shadow = crate::shadow::find(address, 1)?;
-    let len = shadow
+    let mut len = shadow
         .left(address)
         .min(if srv { limit } else { 1 << 16 });
-||||||| merged common ancestors
-/// shortcut: a root view has no size; constant buffers are taken as 64 KiB,
-/// other views as 1 MiB (both cut at their buffer's end).
-fn root_view(list: &HostList, address: u64, srv: bool) -> Option<u64> {
-    let shadow = crate::shadow::find(address, 1)?;
-    let len = shadow
-        .left(address)
-        .min(if srv { 1 << 20 } else { 1 << 16 });
-=======
-/// shortcut: a root view has no size; constant buffers are taken as 64 KiB,
-/// other views as 1 MiB (both cut at their buffer's end).
-fn root_view(list: &HostList, address: u64, kind: u8) -> Option<u64> {
-    let reach = if kind == 0 { 1 << 16 } else { 1 << 20 };
-    let shadow = crate::shadow::find_reaching(address, reach)?;
-    let mut len = shadow.left(address).min(reach);
     // In a sparse copy only the tiles asked for are there, and a shader that
-    // reads a root view past them faults (the structure builders' views have
-    // no length: Radeon GPU Detective, run rt10, a read at an address of no
-    // resource). To the end of the title's buffer then, within reason.
+    // reads a root view past them faults: to the end of the title's buffer
+    // then, within reason.
     // shortcut: 64 MiB at most; a longer buffer is cut there.
-    if kind != 0
+    if srv
         && shadow.is_sparse()
         && let Some(end) = crate::shadow::buffer_end(address)
     {
         len = len.max((end - address).min(64 << 20)).min(shadow.left(address));
     }
->>>>>>> belobug/main
     let gpu = shadow.gpu(address);
     if kind != 0 || gpu % 256 == 0 {
         // The list holds the copy it gives the address of: the title may
@@ -1699,24 +1619,13 @@ fn root_view(list: &HostList, address: u64, kind: u8) -> Option<u64> {
             list.keep(&shadow.buffer);
         }
         shadow.refresh(list, address, len);
-<<<<<<< HEAD
         #[cfg(feature = "diagnostics")]
         crate::book::root(gpu, len);
-||||||| merged common ancestors
-=======
         if kind == 2 {
             shadow.gpu_writes(list, address, len);
         }
->>>>>>> belobug/main
         return Some(gpu);
     }
-<<<<<<< HEAD
-    list.fill_scratch(address as *const u8, len)
-||||||| merged common ancestors
-    let (gpu, to) = list.scratch(len)?;
-    list.defer_fill(to, address as *const u8, len as usize);
-    Some(gpu)
-=======
     list.fill_scratch(address as *const u8, len)
 }
 
@@ -1753,51 +1662,6 @@ impl Slots {
     }
 }
 
-/// A table made afresh: what it was made from (the `n` records at `at` in
-/// [`State::fresh_records`]) and its first dynamic slot.
-struct Fresh {
-    table: u64,
-    n: u32,
-    at: usize,
-    first: u32,
-}
-
-/// A hash that is mixed already, used as it is.
-#[derive(Default)]
-struct Plain(u64);
-
-impl std::hash::Hasher for Plain {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 = self.0 << 8 | u64::from(b);
-        }
-    }
-    fn write_u64(&mut self, x: u64) {
-        self.0 = x;
-    }
-}
-
-/// A quick hash of `table` and its `n` records. It only finds the table
-/// made before: the records are compared too, so a collision costs a copy,
-/// not wrong descriptors.
-fn table_hash(table: u64, n: u32) -> u64 {
-    let mix = |h: u64, x: u64| (h.rotate_left(5) ^ x).wrapping_mul(0x517c_c1b7_2722_0a95);
-    let h = (0..n).fold(table, |h, k| {
-        let [a, b, c] = record(table, k);
-        mix(mix(h, u64::from(a) | u64::from(b) << 32), u64::from(c))
-    });
-    h ^ h >> 32
-}
-
-/// The words of entry `k` of `table`.
-fn record(table: u64, k: u32) -> [u32; 3] {
-    // SAFETY: a descriptor slot in title memory.
-    unsafe { ((table + u64::from(k) * 32) as *const [u32; 3]).read_unaligned() }
-}
-
 /// The longest `table` of `heap` was asked for, now for `n` entries.
 fn longest(heap: &crate::descriptor::Heap, table: u64, n: u32) -> u32 {
     static LONGEST: std::sync::Mutex<Option<std::collections::HashMap<u64, u32>>> =
@@ -1827,7 +1691,6 @@ static WHY_NOT: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
 fn no(reason: &'static str) -> bool {
     *WHY_NOT.lock().unwrap_or_else(|e| e.into_inner()) = reason;
     false
->>>>>>> belobug/main
 }
 
 macro_rules! once {
@@ -2107,15 +1970,11 @@ impl State {
         self.index = view.copied().unwrap_or_default();
     }
 
-<<<<<<< HEAD
     /// Render targets and depth, set on the host list at once, unless it has
     /// the same ones already: the title sets the same targets again and
     /// again, each time a host view per target and a call of the driver
     /// (25,662 times in a frame of another fork). `VICTORY_BIND_CACHE=0`
     /// sets them every time.
-||||||| merged common ancestors
-    /// Render targets and depth, set on the host list at once.
-=======
     /// Whether the clamps of indirect draws recorded in `list` now go to
     /// the list before it.
     pub(crate) fn hoists_into(&self, list: &HostList) -> bool {
@@ -2151,70 +2010,32 @@ impl State {
         self.host_heaps = [0; 2];
         // Making one refreshes what it names, which is each list's own work.
         self.fresh_tables.clear();
-        self.fresh_records.clear();
-        self.large_tables.clear();
         if self.topology != 0 {
             self.set_topology(list, self.topology);
         }
-        if !self.fixed.viewports.is_empty() {
-            viewports(list, &self.fixed.viewports);
+        self.host_targets = None;
+        if self.targets_set {
+            let handles = std::mem::take(&mut self.target_handles);
+            self.set_targets(list, &handles, self.depth_handle);
         }
-        if !self.fixed.scissors.is_empty() {
-            scissors(list, &self.fixed.scissors);
+        if !self.viewports.is_empty() {
+            crate::draw::viewports(list, &self.viewports);
         }
-        if let Some(factor) = &self.fixed.blend {
-            blend_factor(list, factor.as_ref());
+        if !self.scissors.is_empty() {
+            let rects = std::mem::take(&mut self.scissors);
+            self.set_scissors(list, &rects);
         }
-        if let Some(reference) = self.fixed.stencil {
-            stencil_ref(list, reference);
+        if let Some(factor) = self.blend {
+            crate::draw::blend_factor(list, Some(&factor));
         }
-        if let Some((targets, depth)) = self.fixed.views.take() {
-            self.bind_targets(list, targets, depth);
+        if let Some(reference) = self.stencil {
+            crate::draw::stencil_ref(list, reference);
+        }
+        if let Some([min, max]) = self.depth_bounds {
+            crate::draw::depth_bounds(list, min, max);
         }
     }
-
-    pub(crate) fn set_viewports(&mut self, list: &HostList, items: &[D3D12_VIEWPORT]) {
-        self.fixed.viewports = items.to_vec();
-        viewports(list, items);
-    }
-
-    pub(crate) fn set_scissors(&mut self, list: &HostList, rects: &[RECT]) {
-        self.fixed.scissors = rects.to_vec();
-        scissors(list, rects);
-    }
-
-    pub(crate) fn set_blend_factor(&mut self, list: &HostList, factor: Option<&[f32; 4]>) {
-        self.fixed.blend = Some(factor.copied());
-        blend_factor(list, factor);
-    }
-
-    pub(crate) fn set_stencil_ref(&mut self, list: &HostList, reference: u32) {
-        self.fixed.stencil = Some(reference);
-        stencil_ref(list, reference);
-    }
-
-    /// Render targets and depth, set on the host list at once.
->>>>>>> belobug/main
     pub(crate) fn set_targets(&mut self, list: &HostList, handles: &[u64], depth: u64) {
-        let mut targets = Vec::new();
-        for &h in handles {
-            match crate::descriptor::rtv_record(h) {
-                Some(record) => targets.push(record),
-                None => once!(
-                    handle = format_args!("{h:#x}"),
-                    "render target without a recorded view"
-                ),
-            }
-        }
-        self.bind_targets(list, targets, crate::descriptor::dsv_record(depth));
-    }
-
-    fn bind_targets(
-        &mut self,
-        list: &HostList,
-        targets: Vec<crate::descriptor::RtvRecord>,
-        depth: Option<crate::descriptor::RtvRecord>,
-    ) {
         let Some(host) = crate::host::host() else {
             return;
         };
@@ -2223,7 +2044,6 @@ impl State {
         self.depth_handle = depth;
         self.targets_set = true;
         self.targets.clear();
-<<<<<<< HEAD
         let mut views = Vec::with_capacity(handles.len());
         let mut keys = Vec::with_capacity(handles.len());
         // The formats of the host views, for the draws' pipelines.
@@ -2236,20 +2056,6 @@ impl State {
                 );
                 continue;
             };
-||||||| merged common ancestors
-        let mut rtvs = Vec::new();
-        for &h in handles {
-            let Some(record) = crate::descriptor::rtv_record(h) else {
-                once!(
-                    handle = format_args!("{h:#x}"),
-                    "render target without a recorded view"
-                );
-                continue;
-            };
-=======
-        let mut rtvs = Vec::new();
-        for record in &targets {
->>>>>>> belobug/main
             let Some(texture) = crate::resource::host_resource(record.resource) else {
                 // A typed null view (or a target without a host copy) still
                 // takes its slot: left out, the next live target would move
@@ -2280,14 +2086,8 @@ impl State {
             keys.push((texture.as_raw() as usize, record.key()));
         }
         self.depth = 0;
-<<<<<<< HEAD
         self.depth_state = DEPTH_WRITE;
         let dsv = crate::descriptor::dsv_record(depth).and_then(|record| {
-||||||| merged common ancestors
-        let dsv = crate::descriptor::dsv_record(depth).and_then(|record| {
-=======
-        let dsv = depth.and_then(|record| {
->>>>>>> belobug/main
             let texture = crate::resource::host_resource(record.resource)?;
             self.depth = record.resource as usize;
             let desc = record.depth_desc();
@@ -2320,7 +2120,6 @@ impl State {
                 dsv.as_ref().map(std::ptr::from_ref),
             )
         };
-        self.fixed.views = Some((targets, depth));
     }
 
     /// Viewports, scissors, the blend factor and the stencil reference: set
@@ -2442,7 +2241,6 @@ impl State {
         }
     }
 
-<<<<<<< HEAD
     /// A user-data dword the host computes for a translated shader
     /// (`victory_shader::emit::USER_MEMORY_BASE`, `USER_VIEW_ADDRESS`).
     fn host_word(
@@ -2577,8 +2375,7 @@ impl State {
         crate::memory::ready(list, heap, &addresses, written, &constants, use_, t.threads)
     }
 
-||||||| merged common ancestors
-=======
+
     /// For shaders that reach memory by its address: the memory the roots
     /// lead to made reachable, and the bound heap's first slot of it (a
     /// heap of ours bound if the title bound none).
@@ -2622,72 +2419,6 @@ impl State {
         }
         Some(heap.memory())
     }
-
-    /// After a dispatch of `p`: the least indirect light, if it is the
-    /// program that resolves that.
-    fn ambient(&self, list: &HostList, p: &crate::pipeline::host::HostPipeline) -> bool {
-        let Some(stage) = p
-            .stages
-            .first()
-            .filter(|s| s.shader.resolves_light || s.shader.ends_reflections)
-        else {
-            return false;
-        };
-        let view = |kind: ResourceType, (slot, offset): (u8, u32)| {
-            let u = stage.translated().used.iter().find(|u| {
-                u.kind == kind
-                    && u.root == RootType::Table
-                    && (u.slot, u.table_offset_dwords) == (slot, offset)
-            })?;
-            let Some(Root::Table(table)) = self.roots_ref(true).get(usize::from(u.slot)) else {
-                return None;
-            };
-            crate::descriptor::view(table + u64::from(u.table_offset_dwords) * 4)
-        };
-        #[cfg(feature = "diagnostics")]
-        {
-            static LISTED: std::sync::Once = std::sync::Once::new();
-            LISTED.call_once(|| {
-                for u in stage.translated().used.iter().filter(|u| u.root == RootType::Table) {
-                    let r = match view(u.kind, (u.slot, u.table_offset_dwords)) {
-                        Some(View::Shader(r, _)) | Some(View::Unordered(r, ..)) => r,
-                        _ => continue,
-                    };
-                    let Some(t) = crate::resource::host_resource(r as This) else { continue };
-                    // SAFETY: a live resource.
-                    let d = unsafe { t.GetDesc() };
-                    tracing::info!(
-                        kind = ?u.kind, slot = u.slot, offset = u.table_offset_dwords,
-                        format = d.Format.0, width = d.Width, height = d.Height,
-                        depth = d.DepthOrArraySize, flags = d.Flags.0,
-                        "the light resolve reads"
-                    );
-                }
-            });
-        }
-        if !stage.shader.resolves_light {
-            // The reflections, held to the light around.
-            return match view(ResourceType::Uav, crate::ambient::REFLECTIONS) {
-                Some(View::Unordered(r, ..)) if r != 0 => crate::ambient::hold(list, r as This),
-                _ => false,
-            };
-        }
-        let light = match view(ResourceType::Uav, crate::ambient::LIGHT) {
-            Some(View::Unordered(r, ..)) => r,
-            _ => 0,
-        };
-        if light == 0 {
-            once!("no ambient light: other tables");
-            return false;
-        }
-        let depth = match view(ResourceType::Srv, crate::ambient::DEPTH) {
-            Some(View::Shader(r, _)) => Some(r as This),
-            _ => None,
-        };
-        crate::ambient::raise(list, light as This, depth)
-    }
-
->>>>>>> belobug/main
     /// The bound heap holding `handle`.
     fn heap_of(&self, handle: u64) -> Option<&'static crate::descriptor::Heap> {
         self.heaps
@@ -2724,16 +2455,8 @@ impl State {
         if crate::pipeline::is_skipped(self.pipeline as This) {
             return no("skipped by name");
         }
-<<<<<<< HEAD
         let Some(p) = crate::pipeline::host_pipeline_for(self.pipeline as This, &self.target_formats) else {
             return false;
-||||||| merged common ancestors
-        let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) else {
-            return false;
-=======
-        let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) else {
-            return no("no host pipeline");
->>>>>>> belobug/main
         };
         if p.compute || p.mesh != mesh {
             once!(
@@ -2784,16 +2507,8 @@ impl State {
         }
         if indexed {
             let v = self.index;
-<<<<<<< HEAD
             let Some(shadow) = crate::shadow::find_any(v.address, u64::from(v.size)) else {
                 return false;
-||||||| merged common ancestors
-            let Some(shadow) = crate::shadow::find(v.address, u64::from(v.size)) else {
-                return false;
-=======
-            let Some(shadow) = crate::shadow::find(v.address, u64::from(v.size)) else {
-                return no("no index buffer");
->>>>>>> belobug/main
             };
             shadow.refresh(list, v.address, u64::from(v.size));
             let view = D3D12_INDEX_BUFFER_VIEW {
@@ -2836,20 +2551,9 @@ impl State {
     /// What draws and dispatches share: heaps, our root signature, the
     /// pipeline, and per stage the user data, root views and the
     /// descriptors its tables hold.
-<<<<<<< HEAD
-    /// False if the draw or dispatch must not run: a root SRV it reads
-    /// could not be given a view.
     pub(crate) fn bind(&mut self, list: &HostList, p: &HostPipeline, compute: bool) -> bool {
-||||||| merged common ancestors
-    /// False if the draw or dispatch must not run: a table it reads could
-    /// not be made.
-    fn bind(&mut self, list: &HostList, p: &HostPipeline, compute: bool) -> bool {
-=======
-    fn bind(&mut self, list: &HostList, p: &HostPipeline, compute: bool) -> bool {
         self.null_uav = false;
->>>>>>> belobug/main
         let l = &list.list;
-<<<<<<< HEAD
         // Textures picked by index, before anything asks for them.
         self.early_textures(list, p, compute);
         if crate::host::walls_trace() {
@@ -2864,8 +2568,6 @@ impl State {
             once!("a dispatch without a view heap that needs one gets the title's");
             self.heaps[0] = heap;
         }
-||||||| merged common ancestors
-=======
         let by_address = p.stages.iter().any(|s| {
             s.translated()
                 .host
@@ -2873,7 +2575,6 @@ impl State {
                 .iter()
                 .any(|u| u.root == RootType::MEMORY)
         });
->>>>>>> belobug/main
         // Heaps first: a root signature with directly indexed heaps must be
         // set after them.
         let memory = by_address.then(|| self.memory(list, compute)).flatten();
@@ -2925,13 +2626,7 @@ impl State {
             }
             self.host_pipeline = p.pso.as_raw() as usize;
             // The title may release the pipeline before it submits the list.
-<<<<<<< HEAD
             list.bind_pipeline(&p.name, &p.pso, &p.root);
-||||||| merged common ancestors
-            list.keep(&p.pso);
-            list.keep(&p.root);
-=======
-            list.bind_pipeline(p);
         }
         if p.stages.iter().any(|s| s.translated().resource_heap)
             && self.heaps[0] != 0
@@ -2940,11 +2635,9 @@ impl State {
             host_heap.prepare_bindless_record(list);
             let writes = p.stages.iter().any(|s| s.translated().writes_memory);
             list.defer_bindless(&host_heap, writes);
->>>>>>> belobug/main
         }
         for stage in &p.stages {
             let t = stage.translated();
-<<<<<<< HEAD
             STORES.set(t.stores);
             if t.stores && crate::picked::on() && crate::picked::picks(&stage.shader, &t.picks) {
                 crate::picked::runs_in(list);
@@ -2964,23 +2657,6 @@ impl State {
             if made.iter().any(|m| m.1 == u32::MAX) {
                 once!("a draw whose descriptor table found no free slots is dropped");
                 return false;
-||||||| merged common ancestors
-            self.table_failed = false;
-            let made = self.tables(list, &t.used, compute);
-            if self.table_failed {
-                static DROPPED_TABLES: AtomicU64 = AtomicU64::new(0);
-                let n = DROPPED_TABLES.fetch_add(1, Ordering::Relaxed) + 1;
-                if n.is_power_of_two() {
-                    tracing::warn!(
-                        dropped = n,
-                        "a draw or dispatch dropped: no dynamic slots for its tables"
-                    );
-                }
-                return false;
-=======
-            if !self.tables(list, &t.used, compute) {
-                return no("a table not made");
->>>>>>> belobug/main
             }
             if stage.shader.ambient.is_some() {
                 self.ambient_tables.clear();
@@ -3023,7 +2699,6 @@ impl State {
                 None
             };
             if let Some((param, dwords)) = stage.user_data {
-<<<<<<< HEAD
                 // (A root signature holds 64 dwords.)
                 let mut room = [0u32; 64];
                 let mut more = Vec::new();
@@ -3034,27 +2709,13 @@ impl State {
                         &mut more
                     }
                 };
-||||||| merged common ancestors
-                let mut values = vec![0u32; dwords as usize];
-=======
-                // A root signature holds at most 64 dwords, constants included.
-                let mut stack = [0u32; 64];
-                let values = &mut stack[..dwords as usize];
->>>>>>> belobug/main
                 for u in &t.host.user_data {
-<<<<<<< HEAD
                     if let RootType::Other(kind) = u.root {
                         values[u.index as usize] =
                             self.host_word(compute, kind, u.slot, u.dword, memory.as_ref());
                         continue;
                     }
                     let fresh = made
-||||||| merged common ancestors
-                    let fresh = made
-=======
-                    let fresh = self
-                        .made
->>>>>>> belobug/main
                         .iter()
                         .find(|m| m.0 == u.slot && u.root == RootType::Table);
                     if u.root == RootType::MEMORY {
@@ -3153,22 +2814,13 @@ impl State {
                     let tabled = srv && crate::pipeline::host::bounded_root_srvs();
                     let Some(&Root::View(address)) = self.roots_ref(compute).get(usize::from(slot))
                     else {
-<<<<<<< HEAD
                         once!(slot, "a shader reads a root view the title did not set");
                         // A table left unset is undefined: a null view.
                         if tabled && !self.root_srv_table(list, None, param, compute, false) {
                             return false;
                         }
                         continue;
-||||||| merged common ancestors
-                        once!(slot, "a shader reads a root view the title did not set");
-                        continue;
-=======
-                        once!(slot, kind, "a shader reads a root view the title did not set");
-                        return no("a root view not set");
->>>>>>> belobug/main
                     };
-<<<<<<< HEAD
                     // The shader adds the bytes a raw view begins early by.
                     let biased = srv
                         && t.host.user_data.iter().any(|u| {
@@ -3183,19 +2835,6 @@ impl State {
                     }
                     let Some(mut gpu) = root_view(list, address, srv) else {
                         continue;
-||||||| merged common ancestors
-                    let Some(gpu) = root_view(list, *address, srv) else {
-                        continue;
-=======
-                    let Some(gpu) = root_view(list, *address, kind) else {
-                        once!(
-                            slot,
-                            kind,
-                            address = format_args!("{address:#x}"),
-                            "a shader reads a root view outside title buffers"
-                        );
-                        return no("a root view outside title buffers");
->>>>>>> belobug/main
                     };
                     if biased {
                         gpu -= u64::from(self.host_word(
@@ -3219,7 +2858,6 @@ impl State {
                     }
                 }
             }
-<<<<<<< HEAD
             for &(slot, param) in &stage.root_uavs {
                 if slot == victory_shader::emit::SLOT_FAULTS {
                     // Ours: where shaders note the pages they found empty.
@@ -3362,17 +3000,6 @@ impl State {
         };
         if let Some((a, s)) = &shadow {
             ready(*a, s);
-        }
-        let handle = host.gpu_handle(index);
-        // SAFETY: an open list; the slot is in the bound view heap.
-        unsafe {
-            if compute {
-                list.list.SetComputeRootDescriptorTable(param, handle);
-            } else {
-                list.list.SetGraphicsRootDescriptorTable(param, handle);
-            }
-||||||| merged common ancestors
-=======
             if let Some(param) = stage.stride_table {
                 let gpu = (self.heaps[0] != 0)
                     .then(|| crate::descriptor::heap(self.heaps[0] as This).host())
@@ -3391,7 +3018,15 @@ impl State {
                     once!("a shader reads the runtime stride table without a host view heap");
                 }
             }
->>>>>>> belobug/main
+        }
+        let handle = host.gpu_handle(index);
+        // SAFETY: an open list; the slot is in the bound view heap.
+        unsafe {
+            if compute {
+                list.list.SetComputeRootDescriptorTable(param, handle);
+            } else {
+                list.list.SetGraphicsRootDescriptorTable(param, handle);
+            }
         }
         true
     }
@@ -4665,19 +4300,10 @@ impl State {
     }
 
     /// Runs a dispatch on the host.
-<<<<<<< HEAD
     pub(crate) fn dispatch(&mut self, list: &HostList, x: u32, y: u32, z: u32, flags: u32) {
         // It may write the arguments a window holds clamped.
         self.end_window(list);
         self.gather_ends(list, true);
-||||||| merged common ancestors
-    pub(crate) fn dispatch(&mut self, list: &HostList, x: u32, y: u32, z: u32) {
-=======
-    /// With `threads`, `x` counts threads, not groups (the console's
-    /// `USE_THREAD_DIMENSIONS`).
-    // shortcut: y and z stay groups; such dispatches are one-dimensional.
-    pub(crate) fn dispatch(&mut self, list: &HostList, x: u32, y: u32, z: u32, threads: bool) {
->>>>>>> belobug/main
         #[cfg(feature = "diagnostics")]
         if crate::pipeline::is_skipped(self.pipeline as This) {
             DROPPED.fetch_add(1, Ordering::Relaxed);
@@ -4705,21 +4331,14 @@ impl State {
             );
             DROPPED.fetch_add(1, Ordering::Relaxed);
             crate::pipeline::note_drop(self.pipeline as This);
-<<<<<<< HEAD
             #[cfg(feature = "diagnostics")]
             self.list_dropped_roots([x, y, z]);
-||||||| merged common ancestors
-=======
-            #[cfg(feature = "diagnostics")]
-            self.note_dropped(x, y, z);
->>>>>>> belobug/main
             return;
         };
         if !p.compute {
             once!("a dispatch with a graphics pipeline");
             return;
         }
-<<<<<<< HEAD
         let t = p.stages[0].translated();
         let Some(([gx, gy, gz], partial)) = dispatch_dimensions([x, y, z], t.threads.unwrap_or([0; 3]), flags) else {
             return;
@@ -4736,33 +4355,8 @@ impl State {
                 "partial DispatchX(USE_THREAD_DIMENSIONS) on a compute shader without thread-count masking"
             );
         }
-        self.dispatch_threads = partial;
-        let bound = self.bind(list, p, true);
-        self.dispatch_threads = [0; 3];
-        if !bound {
-||||||| merged common ancestors
-        if !self.bind(list, p, true) {
-=======
-        let limit = p.stages.first().and_then(|s| {
-            let data = &s.translated().host.user_data;
-            let t = data.iter().find(|u| u.root == RootType::THREADS)?;
-            Some((s.user_data?.0, t.index, t.dword))
-        });
-        let (x, most) = match limit {
-            Some((_, _, group)) if threads => (x.div_ceil(group.max(1)), Some(x)),
-            _ => (x, None),
-        };
-        if threads && limit.is_none() {
-            once!(name = p.name, x, y, z, "a dispatch of threads runs as groups: dropped");
-            DROPPED.fetch_add(1, Ordering::Relaxed);
-            return;
-        }
-        // Programs that take their groups' start from us run in parts.
-        let start = p.stages.first().and_then(|s| {
-            let groups = s.translated().host.user_data.iter().find(|u| u.root == RootType::GROUPS);
-            Some((s.user_data?.0, groups?.index))
-        });
-        if !dispatch_fits(if start.is_some() { 1 } else { x }, y, z) {
+        // (A dispatch the host runs in parts, `group_base`, may be longer.)
+        if group_base(p).is_none() && !dispatch_fits(gx, gy, gz) {
             #[cfg(feature = "diagnostics")]
             tracing::info!(name = p.name, x, "past the group limits");
             once!(x, y, z, "a dispatch past the host's group limits dropped");
@@ -4770,8 +4364,10 @@ impl State {
             return;
         }
         crate::twin::begin();
-        if !self.bind(list, p, true) {
->>>>>>> belobug/main
+        self.dispatch_threads = partial;
+        let bound = self.bind(list, p, true);
+        self.dispatch_threads = [0; 3];
+        if !bound {
             DROPPED.fetch_add(1, Ordering::Relaxed);
             // A stage of the structure builder that cannot be bound is a
             // dropped stage: the others stop too.
@@ -4786,8 +4382,9 @@ impl State {
             return;
         }
         #[cfg(feature = "diagnostics")]
-<<<<<<< HEAD
-        list.note_op(|| self.op_text(format!("dispatch {gx}x{gy}x{gz}"), true));
+        list.note_op(|| self.op_text(format!("dispatch {gx}x{gy}x{gz}"), true, false));
+        #[cfg(feature = "diagnostics")]
+        crate::capture::pass(list, self.targets.first().copied().unwrap_or(0), || self.op_text(format!("dispatch {x}x{y}x{z}"), true, true));
         #[cfg(feature = "diagnostics")]
         if crate::pipeline::is_builder(self.pipeline as This) {
             crate::capture::op(list as *const _ as usize, || format!("builder {}", p.name));
@@ -4822,48 +4419,27 @@ impl State {
         }
         self.note_writes(list);
         self.buffers_written();
-||||||| merged common ancestors
-        list.note_op(|| self.op_text(format!("dispatch {x}x{y}x{z}"), true));
-        // SAFETY: an open list with everything set.
-        unsafe { list.list.Dispatch(x, y, z) };
-=======
-        list.note_op(|| self.op_text(format!("dispatch {x}x{y}x{z}"), true, false));
-        #[cfg(feature = "diagnostics")]
-        crate::capture::pass(list, self.targets.first().copied().unwrap_or(0), || self.op_text(format!("dispatch {x}x{y}x{z}"), true, true));
-        if let (Some((param, index, _)), Some(most)) = (limit, most) {
-            // SAFETY: an open list; a dword of the program's user data.
-            unsafe { list.list.SetComputeRoot32BitConstant(param, most, index) };
-        }
-        // SAFETY: an open list with everything set.
-        unsafe { list.list.Dispatch(x.min(MAX_GROUPS), y, z) };
-        if let Some((param, index)) = start {
-            let mut at = MAX_GROUPS;
-            while at < x {
-                // SAFETY: as before; a dword of the program's user data.
-                unsafe {
-                    list.list.SetComputeRoot32BitConstant(param, at, index);
-                    list.list.Dispatch((x - at).min(MAX_GROUPS), y, z);
-                }
-                at += MAX_GROUPS;
-            }
-        }
-        list.count_write();
-        list.count_work();
->>>>>>> belobug/main
         DISPATCHED.fetch_add(1, Ordering::Relaxed);
-<<<<<<< HEAD
-        if let Some(role) = p.stages.first().and_then(|s| s.shader.ambient)
-            && crate::ambient::on()
-            && self.ambient(list, p, role)
-        {
-            self.host_pipeline = 0;
-            self.host_roots[1] = 0;
+        // Depth textures it wrote as images get what it wrote; then the
+        // title's state goes back on the list.
+        let lit = self.ambient(list, p);
+        if crate::twin::resolve(list) | lit {
+            self.continue_in(list);
         }
     }
 
     /// The stand-in for the indirect light after a dispatch of `p`
     /// (`crate::ambient`). Whether it recorded anything.
-    fn ambient(&self, list: &HostList, p: &HostPipeline, role: crate::ambient::Role) -> bool {
+    fn ambient(&self, list: &HostList, p: &HostPipeline) -> bool {
+        let Some(role) = p.stages.first().and_then(|s| s.shader.ambient) else {
+            return false;
+        };
+        crate::ambient::on() && self.ambient_role(list, p, role)
+    }
+
+    /// The stand-in for the indirect light after a dispatch of `p` with
+    /// `role` (`crate::ambient`). Whether it recorded anything.
+    fn ambient_role(&self, list: &HostList, p: &HostPipeline, role: crate::ambient::Role) -> bool {
         use crate::ambient::{AIR, DEPTH, LIGHT, RADIANCE, Role, Views};
         let Some(t) = p.stages.first().map(|s| s.translated()) else {
             return false;
@@ -4933,14 +4509,6 @@ impl State {
         if writes {
             list.set_uav_pending(true);
         }
-||||||| merged common ancestors
-=======
-        // Depth textures it wrote as images get what it wrote; then the
-        // title's state goes back on the list.
-        let lit = self.ambient(list, p);
-        if crate::twin::resolve(list) | lit {
-            self.continue_in(list);
-        }
     }
 
     /// Diagnostics (`VICTORY_DROPPED=<n>`): the roots of the first dispatches
@@ -4977,7 +4545,6 @@ impl State {
             }
         }
         tracing::info!("dropped {} {x}x{y}x{z}{text}", crate::pipeline::names(self.pipeline as This));
->>>>>>> belobug/main
     }
 
     /// What a draw or dispatch runs, for the device-removed report
@@ -4991,7 +4558,6 @@ impl State {
             return kind;
         };
         let mut text = format!("{kind} {}", p.name);
-<<<<<<< HEAD
         // What it draws into (a dispatch writes through its views below).
         if !compute {
             let described = |t: usize| {
@@ -5018,14 +4584,11 @@ impl State {
                 );
             }
         }
-||||||| merged common ancestors
-=======
         // What it reads takes far longer to write down than the draw.
         static FULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if !full && !*FULL.get_or_init(|| std::env::var_os("VICTORY_OP_TEXT").is_some()) {
             return text;
         }
->>>>>>> belobug/main
         let views = (self.heaps[0] != 0)
             .then(|| crate::descriptor::heap(self.heaps[0] as This).host())
             .flatten();
@@ -5044,18 +4607,7 @@ impl State {
                     let _ = write!(text, " [heap {index}: {slot}]");
                 }
             }
-<<<<<<< HEAD
             for &(slot, _) in stage.root_cbvs.iter().chain(&stage.root_srvs).chain(&stage.root_uavs) {
-||||||| merged common ancestors
-            for &(slot, _) in stage.root_cbvs.iter().chain(&stage.root_srvs) {
-=======
-            for &(slot, _) in stage
-                .root_cbvs
-                .iter()
-                .chain(&stage.root_srvs)
-                .chain(&stage.root_uavs)
-            {
->>>>>>> belobug/main
                 if let Some(Root::View(address)) = self.roots_ref(compute).get(usize::from(slot)) {
                     let host = crate::shadow::find(*address, 1)
                         .map(|s| {
@@ -5085,16 +4637,9 @@ impl State {
             );
         }
         let _ = write!(text, " tables {:?}", self.reads(compute));
-<<<<<<< HEAD
         if !compute && !list_slots().is_empty() {
             text.push_str(&self.slots_text());
         }
-||||||| merged common ancestors
-=======
-        if !compute {
-            let _ = write!(text, " targets {:#x?} depth {:#x}", self.targets, self.depth);
-        }
->>>>>>> belobug/main
         text
     }
 
@@ -5334,20 +4879,14 @@ impl State {
         self.gather_ends(list, self.may_store());
         #[cfg(feature = "diagnostics")]
         self.trace("mesh", x, 0);
-<<<<<<< HEAD
-        let ran = mesh_test() != 1
-            && mesh_kept(self.pipeline)
-            && self.prepare_for(list, false, true)
-||||||| merged common ancestors
-        let ran = self.prepare_for(list, false, true)
-=======
         if x > MAX_GROUPS {
             once!(x, "a mesh dispatch past the host's group limit dropped");
             DROPPED.fetch_add(1, Ordering::Relaxed);
             return;
         }
-        let ran = self.prepare_for(list, false, true)
->>>>>>> belobug/main
+        let ran = mesh_test() != 1
+            && mesh_kept(self.pipeline)
+            && self.prepare_for(list, false, true)
             && match list.list.cast::<ID3D12GraphicsCommandList6>() {
                 Ok(l6) => {
                     #[cfg(feature = "diagnostics")]
