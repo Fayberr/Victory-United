@@ -59,6 +59,9 @@ pub(crate) struct GraphicsState {
     /// [`GraphicsState::describe`].
     pub(super) blend_as_given: Option<D3D12_BLEND_DESC>,
     pub(super) sample_mask: u32,
+    pub(super) rasterizer: D3D12_RASTERIZER_DESC,
+    pub(super) depth: D3D12_DEPTH_STENCIL_DESC,
+    pub(super) depth_bounds: bool,
     /// Input elements, their names pointing into `names`.
     pub(super) inputs: Vec<D3D12_INPUT_ELEMENT_DESC>,
     pub(super) names: Vec<CString>,
@@ -1691,7 +1694,7 @@ mod tests {
     /// Blending goes off for integer targets only, and a state without
     /// one that blends is left bit for bit.
     #[test]
-    fn integer_targets_do_not_blend() {
+    fn integer_targets_do_not_blend_in_place() {
         let mut g = GraphicsState::default();
         g.targets.NumRenderTargets = 3;
         g.targets.RTFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
