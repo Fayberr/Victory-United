@@ -3535,17 +3535,13 @@ fn unguard(g: &mut Guards, blocks: &[usize]) {
 /// [`open`] for one range, without the other views of its pages.
 fn open_here(g: &mut Guards, start: usize, end: usize) -> bool {
     use windows_sys::Win32::System::Memory::{PAGE_READWRITE, VirtualProtect};
-    let blocks: Vec<usize> = g
-        .protected
-        .range(start / BLOCK..end.div_ceil(BLOCK))
-        .copied()
-        .collect();
+    let blocks: Vec<usize> = g.protected.range(start / BLOCK..end.div_ceil(BLOCK)).collect();
     if blocks.is_empty() {
         return false;
     }
     for &block in &blocks {
-        g.protected.remove(&block);
-        g.clean.remove(&block);
+        g.protected.remove(block);
+        g.clean.remove(block);
     }
     // Runs of blocks next to each other in one call (fewer kernel
     // transitions and TLB shootdowns). One call cannot span two views: the
