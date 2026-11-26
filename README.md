@@ -26,7 +26,7 @@ real save (a fresh copy of the throwaway test data), measured in the first playa
 at the window. These switches were set (a switch this tree
 does not know has no effect): internal render scale 0.5 with an own upscaler, relay mode 2, late
 wait 3, 2 GB card buffers, and stubs for exposure, ambient light and the shadow
-mask. The diagnostics build logs every frame and saves every 16th frame.
+mask.
 
 - **Speed:** 10.6, 10.8, 11.0 and 11.1 frames per second in minutes 3 to 6 of a 7 minute run,
   measured from the frame counter in the log. Minute 1 ran at 5.2 and minute 2 at 8.4 fps while the
@@ -39,9 +39,15 @@ mask. The diagnostics build logs every frame and saves every 16th frame.
   character, with no white or black blocks. Some detail is missing: the game's ray-traced light is
   not built by default, and [Vice-Tay's list of known problems](https://github.com/TaynanGT/Vice-Tay#known-problems)
   was not checked here.
-- **Stability:** not shown yet. The 7 minute run ended normally and the 10 minute run (stopped by us at about
-  10 minutes) had no crash or GPU hang up to then. A longer session has not been shown to hold yet. Vice-Tay
-  reports memory growing in long sessions and the frame rate falling with it.
+- **Stability:** on this tree a longer session has not been shown to hold yet; the 7 minute run ended normally and
+  the 10 minute run (stopped by us at about 10 minutes) had no crash or GPU hang up to then. On the earlier tree
+  below, a session played by hand for 34.7 minutes ended normally. Vice-Tay reports memory growing in long
+  sessions and the frame rate falling with it.
+- **Earlier tree, played by hand:** on commit `3588725d` (before this tree moved to Vice-Tay's code) a person played
+  for 34.7 minutes, launch to close, about 33.6 minutes of it in the room after the intro, and moved the
+  character. That is the player's observation, not something the log measures. From the log: median 8.5 fps
+  over 361 five-second reports in the room. The session ended when the window was closed normally, with no crash,
+  panic or device-removed line. This is a different tree from the one measured above.
 
 ## Build
 
