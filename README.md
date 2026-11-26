@@ -44,6 +44,14 @@ cabelo e luz bem melhores. Por cima dela vieram os ajustes para NVIDIA de 8 GB.
   deixava texturas com bytes velhos depois de a memória mudar.
 - **Composição de planos do present** (Series S: o mundo e a interface em planos separados),
   enviada à frente como o present de um plano só, sem esperar a placa.
+- **Boca e expressões dos rostos**: a rede que anima os rostos guarda os valores em buffers
+  de 16 bits e a tradução os lia como zero nas tabelas de descritores; agora são movidos
+  como inteiros de 16 bits e a boca abre e fecha nas falas.
+- **Sombras em cascata exatas em placas de 32 lanes** (NVIDIA) e **views de textura
+  escritas pela placa** copiadas da própria textura.
+- **Janela "Brazil | VIctory"** com a logo do fork (`VICTORY_ICON`) e
+  **`VICTORY_KEYS_FILE`**: uma tecla escrita num arquivo é apertada no jogo sem precisar
+  de foco (para scripts que passam pelos termos e pelo seletor de conta).
 - **Vídeo da abertura sem voltar quadros**: cada lista tem o seu próprio buffer de upload
   para os planos de vídeo escritos pela CPU; com vários quadros em voo, um quadro
   sobrescrevia o anterior e os letreiros da abertura voltavam no meio do fade.
