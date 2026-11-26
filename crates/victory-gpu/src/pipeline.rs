@@ -1106,7 +1106,6 @@ fn read_stream(
         }
         at += size;
     }
-<<<<<<< HEAD
     // The stream can declare its view locations before its shaders.
     #[cfg(windows)]
     if let Some(at) = view_instancing
@@ -1117,16 +1116,6 @@ fn read_stream(
         // its referenced locations alive through this call.
         unsafe { graphics.read_view_instancing(stream.as_ptr().add(at)) };
     }
-    (shaders, graphics)
-||||||| 9c184b35
-    hand_out(
-        shaders,
-        #[cfg(windows)]
-        Some(Box::new(graphics)),
-        iid,
-        out,
-    )
-=======
     // The whole state is read: integer targets do not blend on the host
     // (`GraphicsState::integer_targets_do_not_blend`).
     #[cfg(windows)]
@@ -1138,14 +1127,7 @@ fn read_stream(
             );
         });
     }
-    hand_out(
-        shaders,
-        #[cfg(windows)]
-        Some(Box::new(graphics)),
-        iid,
-        out,
-    )
->>>>>>> fork/main
+    (shaders, graphics)
 }
 
 extern "system" fn query(this: This, iid: *const Iid, out: *mut This) -> HRESULT {
