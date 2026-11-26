@@ -115,8 +115,6 @@ fn program(body: &[u32], image: &[u32]) -> Vec<u32> {
 /// views at s0: the image (an SRV, or a UAV with `uav_image`) at entry 0,
 /// the raw UAV at entry 1.
 fn build(words: &[u32], threads: u32, uav_image: bool) -> HostShader {
-    written_root_uavs: Vec::new(),
-    writes_guest_memory: false,
     let range = |kind, table_offset_dwords, dwords| UsedResource {
         kind,
         root: RootType::Table,

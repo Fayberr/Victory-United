@@ -81,9 +81,6 @@ fn native_of(body: &[u32], dwords: u8, stride: u32) -> NativeProgram {
 
 /// `native` translated as the title's programs are, and validated.
 fn translate(native: &NativeProgram) -> HostShader {
-    written_root_uavs: Vec::new(),
-    writes_guest_memory: false,
-    half_views: Vec::new(),
     let container = dxbc::build(&[]);
     let c = Container::parse(&container).expect("container");
     let p = ir::build(&native.code, native.wave64, native.vgprs).expect("ir::build");
