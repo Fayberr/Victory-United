@@ -20,12 +20,11 @@ playable yet. Shadows are missing some light, because the game's ray tracing doe
 
 Measured on one machine: Windows 11 Pro (build 26300), NVIDIA GeForce RTX 3080 Ti with 12 GB
 (driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `db89ba3b`, Series S profile, no frame
-generation, no real save (a fresh copy of the throwaway test data), run in a hidden desktop
-session by a script that presses the same keys every time to reach the first playable room.
-Settings that differ from a plain start: internal render scale 0.5 with the project's own
-upscaler, relay mode 2, late wait 3, 2 GB card buffers, diagnostics logging on (frame log and
-profile), and a few shader stubs (exposure, ambient, shadow mask). Full list in
-`docs/measurements.md`.
+generation, no real save (a fresh copy of the throwaway test data), measured in the first
+playable room. Settings that differ from a plain start: internal render scale 0.5 with the
+project's own upscaler, relay mode 2, late wait 3, 2 GB card buffers, diagnostics logging on
+(frame log and profile), and a few shader stubs (exposure, ambient, shadow mask). The full list
+of settings and how each run is done are in `docs/measurements.md`.
 
 - **Speed:** 4.8 frames per second in the first playable room, standing at the window (median of
   346 five-second intervals over 31 minutes of play in the room; middle 80 percent between 4.3 and
@@ -38,6 +37,9 @@ profile), and a few shader stubs (exposure, ambient, shadow mask). Full list in
 - **Picture:** lit by daylight through the window, with the character and the window glass drawn.
   Two frames (from the middle and the end of the run) were looked at and showed no bright blocks.
   Shadows still miss some light.
+- **Input:** controller buttons work in the start screens and menus (A and X take the title from
+  there to the first playable room). Moving the character with the stick has not been tested
+  yet, so the figures above are for standing in the room, not for a play session.
 
 Earlier, on commit `33f3c35` with the diagnostics build, the same room measured 4.9 to 5.2 frames
 per second over two 6 minute runs.
