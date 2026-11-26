@@ -5396,9 +5396,29 @@ impl HostHeap {
                 if forget && self_changed {
                     self.forget_copied(index);
                 }
+                // Not a view of ours any more: the bindless pass has none
+                // to make for the slot.
+                if !self.sampler {
+                    self.untrack_bindless(index);
+                }
                 return None;
             };
-            if shown != key {
+            // A buffer view whose host copy is a window gone since
+            // (`crate::shadow::gone`) is made again: the slot would read
+            // freed memory.
+            let gone = for_draw
+                && !self.sampler
+                && view.is_buffer()
+                && self
+                    .kept
+                    .get(index as usize)
+                    .is_some_and(|slot| {
+                        slot.lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .as_ref()
+                            .is_some_and(crate::shadow::gone)
+                    });
+            if shown != key || gone {
                 #[cfg(feature = "diagnostics")]
                 held.slot_changed();
                 // Views of other textures in the memory this one describes
@@ -5554,8 +5574,9 @@ impl HostHeap {
         }
         // The bindless pass makes and refreshes the slots of buffer views
         // (and of placed textures) from the record they are made from, and
-        // forgets those of other views.
-        if !self.sampler {
+        // forgets those of other views. Only when the slot changed: the
+        // record it is made from says the same as before otherwise.
+        if self_changed && !self.sampler {
             match (tag == VIEW_TAG).then(|| view_at(i, generation)).flatten() {
                 Some(view) if view.is_buffer() => {
                     let placed = matches!(&view, View::Placed(false, r, _) if r[0] != 1);
