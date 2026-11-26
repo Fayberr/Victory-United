@@ -152,19 +152,16 @@ pub(super) fn read_by(runs: &[&HostList], written: &[(usize, usize)]) -> bool {
             if read {
                 READERS[kind].fetch_add(1, Ordering::Relaxed);
             }
-<<<<<<< HEAD
             let _ = kind;
+            if !read && !ranges.is_empty()
+                && let &Step::Plane((at, len), _) = step
+                && touches(&ranges, at, at.saturating_add(len))
+            {
+                #[cfg(feature = "diagnostics")]
+                READERS[3].fetch_add(1, Ordering::Relaxed);
+                return true;
+            }
             read
-||||||| 0a4356653
-            Step::Host(_, (from, to)) => touches(&ranges, *from, *to),
-            Step::Placed(p) => p.from.is_some() && touches(&ranges, p.src, p.src + p.len),
-            _ => false,
-=======
-            &Step::Plane((at, len), _) => touches(&ranges, at, at.saturating_add(len)),
-            Step::Host(_, (from, to)) => touches(&ranges, *from, *to),
-            Step::Placed(p) => p.from.is_some() && touches(&ranges, p.src, p.src + p.len),
-            _ => false,
->>>>>>> vicetay/main
         })
     })
 }

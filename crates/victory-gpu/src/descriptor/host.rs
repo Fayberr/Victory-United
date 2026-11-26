@@ -3489,12 +3489,8 @@ impl HostHeap {
         }
         self.put(index);
         self.clear_twin(index);
-<<<<<<< HEAD
         self.forget_tiled(index);
-||||||| 0a4356653
-=======
         self.write_stride(index, 0);
->>>>>>> vicetay/main
         self.keep(index, None);
     }
 
@@ -3749,16 +3745,8 @@ impl HostHeap {
                 textures.remove(slot);
             }
         }
-<<<<<<< HEAD
-        let stride = view.and_then(view_stride);
-        let kind = view.map_or(0, view_kind);
-        if let Some((_, _, data)) = &self.strides
-            && index < victory_shader::emit::SLOT_STRIDES_COUNT
-        {
-            // SAFETY: inside the mapping; shaders read it while we write (a
-            // dword, either value is one the slot had).
-            unsafe { (*data as *mut u32).add(index as usize).write_volatile(stride.unwrap_or(0) | kind) };
-        }
+        let (stride, kind) = view.map_or((None, 0), view_stride_and_kind);
+        self.write_stride(index, stride.unwrap_or(0) | kind);
         let range = view.and_then(buffer_range);
         if let Some((_, _, data)) = &self.views
             && index < victory_shader::emit::SLOT_VIEWS_COUNT
@@ -3774,20 +3762,6 @@ impl HostHeap {
                 at.add(3).write_volatile(stride.unwrap_or(0));
             };
         }
-||||||| 0a4356653
-        let stride = view.and_then(view_stride);
-        let kind = view.map_or(0, view_kind);
-        if let Some((_, _, data)) = &self.strides
-            && index < victory_shader::emit::SLOT_STRIDES_COUNT
-        {
-            // SAFETY: inside the mapping; shaders read it while we write (a
-            // dword, either value is one the slot had).
-            unsafe { (*data as *mut u32).add(index as usize).write_volatile(stride.unwrap_or(0) | kind) };
-        }
-=======
-        let (stride, kind) = view.map_or((None, 0), view_stride_and_kind);
-        self.write_stride(index, stride.unwrap_or(0) | kind);
->>>>>>> vicetay/main
         let was = if stride.is_some() {
             self.buffers.put(index);
             true
@@ -3839,18 +3813,8 @@ impl HostHeap {
         if made.is_none() {
             null_for(view, self.cpu(index));
         }
-<<<<<<< HEAD
+        self.write_stride(index, if made.is_some() { view_stride_word(view) } else { 0 });
         self.keep(index, made.and_then(|m| m.kept));
-||||||| 0a4356653
-        self.put(index);
-        self.twin_made(index, kept.is_some() && twinned(view));
-        self.keep(index, kept.flatten());
-=======
-        self.put(index);
-        self.twin_made(index, kept.is_some() && twinned(view));
-        self.write_stride(index, if kept.is_some() { view_stride_word(view) } else { 0 });
-        self.keep(index, kept.flatten());
->>>>>>> vicetay/main
     }
 
     /// Makes slot `index` (a dynamic one) the view the record `words` names,
@@ -3881,14 +3845,8 @@ impl HostHeap {
                     return None;
                 }
                 let twin = twinned(&view);
-<<<<<<< HEAD
                 let kept = make_twinned(&view, views.slot(at), Some(views.slot(at + 1)))?.kept;
-||||||| 0a4356653
-                let kept = make_twinned(&view, views.slot(at), Some(views.slot(at + 1)))?;
-=======
-                let kept = make_twinned(&view, views.slot(at), Some(views.slot(at + 1)))?;
                 let stride_word = view_stride_word(&view);
->>>>>>> vicetay/main
                 let listed = Listed {
                     kind: crate::draw::view_kind(&view),
                     texture: is_texture_view(&view),
@@ -9260,7 +9218,6 @@ mod own_copy_tests {
         heap.release(last, 1);
         assert_eq!(heap.dynamic(2), None);
     }
-<<<<<<< HEAD
 
     /// Placed unordered texture views (2D and 3D) mirror onto host unordered
     /// access textures when written into a shader-visible heap, reuse an
@@ -9458,11 +9415,10 @@ mod own_copy_tests {
         // SAFETY: plain device query.
         assert!(unsafe { host.device.GetDeviceRemovedReason() }.is_ok());
     }
-||||||| 0a4356653
-=======
 
     #[test]
     fn dynamic_slots_populate_and_clear_stride_table() {
+        use super::View;
         use victory_shader::emit::{VIEW_INTEGER, VIEW_SIGNED};
         let Some(heap) = HostHeap::new(false, 4) else {
             return; // no host GPU
@@ -9525,7 +9481,6 @@ mod own_copy_tests {
         assert!(heap.make_listed(0x1234, rec, s0 + 3).is_some());
         assert_eq!(read_stride(s0 + 3), 8 | VIEW_INTEGER);
     }
->>>>>>> vicetay/main
 }
 
 /// What is known of a record a list's tables hold, in that recording of the
@@ -9625,14 +9580,12 @@ pub(crate) fn note_listed(recording: u64, words: [u32; 3], listed: Listed) {
 pub(crate) fn list_views() -> bool {
     crate::toggled!("VICTORY_LIST_VIEWS")
 }
-<<<<<<< HEAD
 
 /// Vertex's name for [`constant_bytes`] (its tests use it).
+#[cfg(test)]
 fn cbv_size(size: u32) -> u32 {
     constant_bytes(size)
 }
-||||||| 0a4356653
-=======
 
 #[cfg(test)]
 mod bake_flip_tests {
@@ -9704,4 +9657,3 @@ mod bake_flip_tests {
         assert!(take_pending_list_flip(id2).is_none(), "dropping uncalled closure cleans up entry");
     }
 }
->>>>>>> vicetay/main

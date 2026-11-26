@@ -2616,7 +2616,6 @@ fn give_chunks(chunks: Vec<(Chunk, u64)>) {
     drop(freed);
 }
 
-<<<<<<< HEAD
 /// Byte offset of slot 0 in `CardWork::inline_buf` (the first 64 KiB holds
 /// the 32-bit atomic ticket counter at offset 0).
 pub(crate) const CARD_INLINE_HEADER: usize = 65536;
@@ -2640,8 +2639,6 @@ fn card_inline_fetch() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_CARD_INLINE_FETCH").is_none_or(|v| v != "0"))
 }
 
-||||||| 0a4356653
-=======
 /// Drops spare scratch chunks kept idle when host memory is pressured.
 fn trim_spare_chunks() {
     let freed: Vec<(Chunk, u64)> = {
@@ -2661,7 +2658,6 @@ fn trim_spare_chunks() {
     drop(freed);
 }
 
->>>>>>> vicetay/main
 /// What the host keeps for copies in the card's own memory
 /// ([`crate::shadow::cards`]): three lists of ours and the compare.
 struct CardWork {
@@ -3380,18 +3376,12 @@ enum Step {
     GpuWrite(std::sync::Arc<crate::shadow::Shadow>, usize, usize),
     /// Brings a texture's staging buffer up to date: once per submission,
     /// whichever lists sample it, until a `Copy` or `Run` intervenes.
-<<<<<<< HEAD
     Texture {
         staging: std::sync::Arc<crate::texture::Staging>,
         uploads: bool,
     },
-||||||| 0a4356653
-    Texture(std::sync::Arc<crate::texture::Staging>),
-=======
-    Texture(std::sync::Arc<crate::texture::Staging>),
     /// Reads a CPU-written linear movie plane into a per-list upload buffer.
     Plane((usize, usize), Box<dyn Fn() + Send>),
->>>>>>> vicetay/main
     /// A title buffer copy that the list does on the card ([`place`]): what
     /// is done on the CPU for it.
     Placed(place::Placed),
@@ -3418,13 +3408,9 @@ struct Deferred {
     /// Destination, source, bytes.
     copies: Vec<Step>,
     uploads: Vec<ID3D12Resource>,
-<<<<<<< HEAD
     pooled_uploads: Vec<MappedUpload>,
-||||||| 0a4356653
-=======
     /// Standalone upload footprints kept through this list's fence (movie planes).
     plane_uploads: Vec<(Chunk, u64)>,
->>>>>>> vicetay/main
     /// The bytes of `uploads` (counted in [`ALIVE`] while they are held).
     upload_bytes: u64,
     /// Host objects the list's commands name (pipelines, root signatures,
@@ -4434,7 +4420,16 @@ fn blocked_by(written: &[(usize, usize)], runs: &[&HostList], count: bool) -> Op
                         return Some(WHY_READ);
                     }
                 }
-<<<<<<< HEAD
+                &Step::Plane((at, len), _) => {
+                    if touches(written, at, at.saturating_add(len)) {
+                        if count {
+                            LATE_STATS[17].fetch_add(1, Ordering::Relaxed);
+                            #[cfg(feature = "diagnostics")]
+                            blame("a movie plane", written, at, len);
+                        }
+                        return Some(WHY_READ);
+                    }
+                }
                 &Step::Run(_, Some((dst, src, len))) if crate::memcopy::known_writes() => {
                     if touches(written, src, src.saturating_add(len)) || touches(written, dst, dst.saturating_add(len)) {
                         if count {
@@ -4447,21 +4442,6 @@ fn blocked_by(written: &[(usize, usize)], runs: &[&HostList], count: bool) -> Op
                     }
                 }
                 Step::Run(..) => return Some(WHY_RUN),
-||||||| 0a4356653
-                Step::Run(_) => return Some(WHY_RUN),
-=======
-                &Step::Plane((at, len), _) => {
-                    if touches(written, at, at.saturating_add(len)) {
-                        if count {
-                            LATE_STATS[17].fetch_add(1, Ordering::Relaxed);
-                            #[cfg(feature = "diagnostics")]
-                            blame("a movie plane", written, at, len);
-                        }
-                        return Some(WHY_READ);
-                    }
-                }
-                Step::Run(_) => return Some(WHY_RUN),
->>>>>>> vicetay/main
                 Step::Placed(p) => match p.waits(written) {
                     place::Waits::No => {}
                     place::Waits::ForReaders => placed = true,
@@ -7113,7 +7093,6 @@ impl Host {
                         crate::shadow::CARD_STATS[1].fetch_add(ranges.len() as u64, Ordering::Relaxed);
                         #[cfg(feature = "diagnostics")]
                         traffic::moved(traffic::UP, shadow.span(), ranges.iter().copied());
-<<<<<<< HEAD
                         // The merge on the card, behind the copies: both
                         // take their bytes from the CPU's side.
                         let merged = match (merges.iter().find(|(s, _)| Arc::ptr_eq(s, shadow)), &work.merge, &mask) {
@@ -7153,20 +7132,6 @@ impl Host {
                                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                             ));
                         } else if own.is_none() && before.is_some() && !ranges.is_empty() {
-                            sent.push(transition(
-                                &shadow.buffer,
-                                D3D12_RESOURCE_STATE_COPY_DEST,
-                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                            ));
-||||||| 0a4356653
-                        if own.is_none() && before.is_some() && !ranges.is_empty() {
-                            sent.push(transition(
-                                &shadow.buffer,
-                                D3D12_RESOURCE_STATE_COPY_DEST,
-                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                            ));
-=======
-                        if own.is_none() && before.is_some() && !ranges.is_empty() {
                             let raw = shadow.buffer.as_raw();
                             if !transitioned.contains(&raw) {
                                 transitioned.push(raw);
@@ -7176,7 +7141,6 @@ impl Host {
                                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                                 ));
                             }
->>>>>>> vicetay/main
                         }
                     }
                     if !sent.is_empty() {
@@ -9861,7 +9825,6 @@ impl HostList {
         self.epoch.load(Ordering::Relaxed)
     }
 
-<<<<<<< HEAD
     /// With [`crate::texture::alias_once`]: notes that the list writes host
     /// copy `key` if `state` is one that writes.
     fn note_write(&self, key: usize, state: u32) {
@@ -9888,8 +9851,6 @@ impl HostList {
         self.aliases.lock().unwrap_or_else(|e| e.into_inner()).push(copy);
     }
 
-||||||| 0a4356653
-=======
     /// Whether any deferred steps or texture state transitions have been
     /// recorded into this list since creation or its last [`HostList::reset`].
     pub(crate) fn has_recorded_work(&self) -> bool {
@@ -9897,7 +9858,6 @@ impl HostList {
             || !self.states.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
     }
 
->>>>>>> vicetay/main
     /// Moves a title texture's host copy to `wanted` (a host state) in this
     /// list: the host texture and the state it leaves, if that is a change.
     /// The list's first use of a texture records nothing: its prelude brings
@@ -13707,7 +13667,6 @@ impl Host {
     /// Shows `texture`, which is in `state` (a host state) and stays in it,
     /// as frame `frame` (saved if captures are on). `None` if nothing was
     /// shown; else, in diagnostics builds, whether the frame was black.
-<<<<<<< HEAD
     pub(crate) fn present(
         &self,
         texture: &ID3D12Resource,
@@ -13715,8 +13674,19 @@ impl Host {
         frame: u64,
         over: Option<(&ID3D12Resource, u32)>,
     ) -> Option<bool> {
+        self.present_planes(texture, state, over, frame)
+    }
+
+    /// Presents a base plane and an optional overlay.
+    pub(crate) fn present_planes(
+        &self,
+        texture: &ID3D12Resource,
+        state: u32,
+        overlay: Option<(&ID3D12Resource, u32)>,
+        frame: u64,
+    ) -> Option<bool> {
         let showing = std::time::Instant::now();
-        let shown = self.present_now(texture, state, frame, over);
+        let shown = self.present_now(texture, state, overlay, frame);
         crate::framelog::add(crate::framelog::T::PresentShowUs, showing.elapsed().as_micros() as u64);
         shown
     }
@@ -13725,27 +13695,9 @@ impl Host {
         &self,
         texture: &ID3D12Resource,
         state: u32,
-        frame: u64,
-        over: Option<(&ID3D12Resource, u32)>,
-    ) -> Option<bool> {
-||||||| 0a4356653
-    pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-=======
-    #[allow(dead_code)]
-    pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-        self.present_planes(texture, state, None, frame)
-    }
-
-    /// Shows `texture`, optionally alpha-compositing a second `overlay` plane
-    /// over it (Series S two-plane presentation), and returns them to their states.
-    pub(crate) fn present_planes(
-        &self,
-        texture: &ID3D12Resource,
-        state: u32,
         overlay: Option<(&ID3D12Resource, u32)>,
         frame: u64,
     ) -> Option<bool> {
->>>>>>> vicetay/main
         // SAFETY: a live resource.
         let desc = unsafe { texture.GetDesc() };
         let planes = overlay.and_then(|(over, over_state)| {
@@ -13861,21 +13813,6 @@ impl Host {
             copy.reset();
             copy.keep(texture);
             let list = &copy.list;
-<<<<<<< HEAD
-            let laid = over.and_then(|(ui, ui_state)| {
-                crate::compose::record(&self.device, list, texture, ui, ui_state)
-            });
-            if let Some(laid) = &laid {
-                copy.keep(laid);
-            }
-            list.ResourceBarrier(&[
-                transition(texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE),
-                transition(
-||||||| 0a4356653
-            list.ResourceBarrier(&[
-                transition(texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE),
-                transition(
-=======
             let composed = if let Some((over, over_state, base_fmt, over_fmt)) = planes {
                 copy.keep(over);
                 if let Some(composer) = p.composer.as_mut() {
@@ -13935,35 +13872,30 @@ impl Host {
                 false
             };
             if !composed {
-                let mut pre = Vec::with_capacity(2);
-                if state != D3D12_RESOURCE_STATE_COPY_SOURCE {
-                    pre.push(transition(texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE));
-                }
-                pre.push(transition(
->>>>>>> vicetay/main
+                let base_to_copy = transition(texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE);
+                let back_to_copy = transition(
                     &back,
                     D3D12_RESOURCE_STATE_PRESENT,
                     D3D12_RESOURCE_STATE_COPY_DEST,
-<<<<<<< HEAD
-                ),
-            ]);
-            list.CopyResource(&back, laid.as_ref().unwrap_or(texture));
-            // The frame rate, into the corner of what is shown (not of the
-            // title's own frame, which the lines below read back).
-            crate::fpsbox::draw(self, list, &back, (width, height, format));
-            let traced = crate::present_trace::on()
-                .then(|| crate::present_trace::record(&self.device, list, texture))
-                .flatten();
-||||||| 0a4356653
-                ),
-            ]);
-            list.CopyResource(&back, texture);
-=======
-                ));
-                list.ResourceBarrier(&pre);
+                );
+                let pre = [base_to_copy, back_to_copy];
+                list.ResourceBarrier(&pre[usize::from(state == D3D12_RESOURCE_STATE_COPY_SOURCE)..]);
                 list.CopyResource(&back, texture);
             }
->>>>>>> vicetay/main
+            // Draw the frame rate on the back buffer, leaving the title's plane intact.
+            crate::fpsbox::draw(self, list, &back, (width, height, format));
+            let traced = crate::present_trace::on().then(|| {
+                let copy_source = D3D12_RESOURCE_STATE_COPY_SOURCE;
+                let moved = composed && !state.contains(copy_source);
+                if moved {
+                    list.ResourceBarrier(&[transition(texture, state, copy_source)]);
+                }
+                let trace = crate::present_trace::record(&self.device, list, texture);
+                if moved {
+                    list.ResourceBarrier(&[transition(texture, copy_source, state)]);
+                }
+                trace
+            }).flatten();
             #[cfg(feature = "diagnostics")]
             let capture = crate::capture::wanted(frame)
                 .then(|| {
@@ -14001,42 +13933,32 @@ impl Host {
             p.panel.draw(self, copy, &back, (width, height), format);
             #[cfg(not(feature = "diagnostics"))]
             let _ = frame;
-<<<<<<< HEAD
-            // The present's second plane, if it has one (e.g. Series S HUD
-            // plane over game plane), goes over the copy (`crate::over`):
-            // the back buffer is a target meanwhile.
+            // The overlay can still be drawn over the copy when the base
+            // plane cannot be sampled by the two-plane compositor.
             let readable = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-            let over = over.and_then(|(plane, was)| {
-                // SAFETY: a live resource.
-                let format = swap_format(plane.GetDesc().Format)?;
+            let over = overlay.filter(|_| !composed).and_then(|(plane, was)| {
+                let format = crate::compose::view(&plane.GetDesc())?;
                 Some((plane, D3D12_RESOURCE_STATES(was as i32), format))
             });
-            let mut drawn = false;
             if let Some((plane, was, plane_format)) = over {
-                let mut barriers = vec![
-                    transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state),
-                    transition(
-                        &back,
-                        D3D12_RESOURCE_STATE_COPY_DEST,
-                        D3D12_RESOURCE_STATE_RENDER_TARGET,
-                    ),
-                ];
-                let moved = was.0 & readable.0 == 0;
+                copy.keep(plane);
+                let mut barriers = Vec::with_capacity(3);
+                if state != D3D12_RESOURCE_STATE_COPY_SOURCE {
+                    barriers.push(transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state));
+                }
+                barriers.push(transition(
+                    &back,
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET,
+                ));
+                let moved = !was.contains(readable);
                 if moved {
                     barriers.push(transition(plane, was, readable));
                 }
                 list.ResourceBarrier(&barriers);
-                drawn = crate::over::record(
+                crate::over::record(
                     &self.device,
                     list,
-||||||| 0a4356653
-            list.ResourceBarrier(&[
-                transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state),
-                transition(
-=======
-            if composed {
-                list.ResourceBarrier(&[transition(
->>>>>>> vicetay/main
                     &back,
                     format,
                     (width, height),
@@ -14047,41 +13969,23 @@ impl Host {
                     &back,
                     D3D12_RESOURCE_STATE_RENDER_TARGET,
                     D3D12_RESOURCE_STATE_PRESENT,
-<<<<<<< HEAD
                 )];
                 if moved {
                     barriers.push(transition(plane, readable, was));
                 }
                 list.ResourceBarrier(&barriers);
             } else {
-                list.ResourceBarrier(&[
+                let barriers = [
                     transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state),
                     transition(
                         &back,
                         D3D12_RESOURCE_STATE_COPY_DEST,
                         D3D12_RESOURCE_STATE_PRESENT,
                     ),
-                ]);
+                ];
+                let base_restored = composed || state == D3D12_RESOURCE_STATE_COPY_SOURCE;
+                list.ResourceBarrier(&barriers[usize::from(base_restored)..]);
             }
-            let _ = drawn;
-||||||| 0a4356653
-                ),
-            ]);
-=======
-                )]);
-            } else {
-                let mut post = Vec::with_capacity(2);
-                if state != D3D12_RESOURCE_STATE_COPY_SOURCE {
-                    post.push(transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state));
-                }
-                post.push(transition(
-                    &back,
-                    D3D12_RESOURCE_STATE_COPY_DEST,
-                    D3D12_RESOURCE_STATE_PRESENT,
-                ));
-                list.ResourceBarrier(&post);
-            }
->>>>>>> vicetay/main
             copy.close();
             let mut sent = 0;
             let flown = match slot {
