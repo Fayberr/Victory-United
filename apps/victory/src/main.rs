@@ -16,13 +16,9 @@ mod replay;
 mod run;
 mod shader;
 mod translate;
-<<<<<<< HEAD
 #[cfg(windows)]
 mod warm;
-||||||| c7daeea5
-=======
 mod work;
->>>>>>> integ/vertex
 
 use std::path::PathBuf;
 
@@ -287,14 +283,8 @@ fn main() -> Result<()> {
             strict,
             execute,
             console,
-<<<<<<< HEAD
-            title_args,
-||||||| c7daeea5
-            title_args: _,
-=======
             work: _,
-            title_args: _,
->>>>>>> integ/vertex
+            title_args,
         } => {
             victory_hle::runtime::set_title_args(title_args);
             let code = run::run(&exe, unimplemented, strict, execute, console)?;
