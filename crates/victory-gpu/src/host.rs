@@ -589,6 +589,26 @@ pub(crate) static PREPARING: [std::sync::atomic::AtomicU64; 4] = [
     std::sync::atomic::AtomicU64::new(0),
 ];
 
+/// Whether a submission-time step's time is summed, so that the clock is
+/// read for it ([`HostList::run_deferred`]): the title memory copies
+/// ([`PREPARING`]), and with diagnostics the title's work run at submission.
+/// The others only note what to do or hand off to timings of their own;
+/// read for every step, the clock was 2.8 % of the submitting thread's time
+/// in a profile of the world (30 s, 263 frames), most of a submission's
+/// steps being refreshes and textures.
+fn timed(step: &Step) -> bool {
+    match step {
+        Step::Copy(..) | Step::Fill(..) => true,
+        Step::Run(..) | Step::Host(_) => cfg!(feature = "diagnostics"),
+        Step::Refresh(..) | Step::GpuWrite(..) | Step::Texture { .. } | Step::Tiles(_) => false,
+    }
+}
+
+/// Microseconds since `started`, if the clock was read ([`timed`]).
+fn micros_since(started: Option<std::time::Instant>) -> u64 {
+    started.map_or(0, |s| s.elapsed().as_micros() as u64)
+}
+
 /// Host buffers made since the start, as (count, bytes): in the upload heap
 /// (staging, list scratch), shared with the processor (host copies of title
 /// memory) and the graphics card's own (indirect arguments, twins' copies).
@@ -864,6 +884,22 @@ pub(crate) fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
 
 #[cfg(test)]
 mod tests {
+    /// The steps whose time goes into the preparing's sums read the clock;
+    /// the title's work run at submission only with diagnostics, which sum
+    /// it. (Refreshes, shader writes, tile mappings and textures, which need
+    /// host objects to be made, take the `false` arm of the same match.)
+    #[test]
+    fn only_summed_steps_read_the_clock() {
+        use super::{Step, micros_since, timed};
+        assert!(timed(&Step::Copy(0, 0, 0)));
+        assert!(timed(&Step::Fill(0, 0, 0)));
+        assert_eq!(timed(&Step::Host(Box::new(|| {}))), cfg!(feature = "diagnostics"));
+        assert_eq!(timed(&Step::Run(Box::new(|| {}), None)), cfg!(feature = "diagnostics"));
+        assert_eq!(micros_since(None), 0);
+        let started = std::time::Instant::now() - std::time::Duration::from_millis(3);
+        assert!(micros_since(Some(started)) >= 3000);
+    }
+
     #[test]
     fn sparse_copies_preserve_islands_and_observe_remaps() {
         use windows_sys::Win32::System::Memory::*;
@@ -8032,7 +8068,8 @@ impl HostList {
         let mut next = 0;
         while let Some(step) = steps.get(next) {
             next += 1;
-            let started = std::time::Instant::now();
+            // The clock only for the steps whose time is summed ([`timed`]).
+            let started = timed(step).then(std::time::Instant::now);
             let copied = match step {
                 &Step::Copy(dst, src, len) => {
                     #[cfg(feature = "diagnostics")]
@@ -8106,7 +8143,7 @@ impl HostList {
                     #[cfg(feature = "diagnostics")]
                     {
                         add(C::Runs, 1);
-                        add(C::RunUs, started.elapsed().as_micros() as u64);
+                        add(C::RunUs, micros_since(started));
                     }
                     continue;
                 }
@@ -8150,7 +8187,7 @@ impl HostList {
                     continue;
                 }
             };
-            preparing(0, started.elapsed().as_micros() as u64);
+            preparing(0, micros_since(started));
             preparing(1, copied as u64);
         }
     }
