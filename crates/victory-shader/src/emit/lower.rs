@@ -20,25 +20,11 @@ use crate::native::{HwStage, NativeProgram, ResourceType, RootType, StageIo, Usa
 use crate::resource::{Address, CODE, MEMORY, Resources, Role, Site, Source};
 use crate::structure::{Atom, Bool, LaneExit, Structured};
 
-<<<<<<< HEAD
 /// Packed dot-product lowering (`v_dot*`), a child module so it shares the
 /// emitter's state without growing this file.
 #[path = "dot.rs"]
 mod dot;
 
-||||||| 085ee7c4
-=======
-/// Packed dot-product lowering (`v_dot*`), a child module so it shares the
-/// emitter's state without growing this file.
-#[path = "dot.rs"]
-mod dot;
-
-/// GFX10 `MIMG` image lowering, a child module so it shares the emitter's
-/// state without growing this file.
-#[path = "image.rs"]
-mod image;
-
->>>>>>> vitoriabr/main
 /// The ray-tracing node test (`image_bvh_intersect_ray`), a child module so
 /// it shares the emitter's state.
 #[path = "intersect.rs"]
@@ -92,15 +78,11 @@ pub(crate) struct Lowered {
     pub root_cbvs: Vec<u8>,
     pub root_srvs: Vec<u8>,
     pub root_uavs: Vec<u8>,
-<<<<<<< HEAD
     /// See [`super::HostShader::half_views`].
     pub half_views: Vec<(u8, u32)>,
-||||||| 085ee7c4
-=======
     pub written_root_uavs: Vec<u8>,
     /// A translated store or atomic can write through the guest page directory.
     pub writes_guest_memory: bool,
->>>>>>> vitoriabr/main
     pub user_data: Vec<UserData>,
     pub samplers: Vec<[u32; 4]>,
     /// The wave size the shader requires of the host, if any.
@@ -136,7 +118,6 @@ enum Stop {
 
 #[cfg(test)]
 pub(crate) fn lower(parts: &Parts) -> Result<Lowered, ShaderError> {
-<<<<<<< HEAD
     lower_counted(parts, counted_in_threads(parts))
 }
 
@@ -161,25 +142,9 @@ fn counted_in_threads(parts: &Parts) -> bool {
 /// at once (`shader.rs` `USER_DISPATCH_THREADS_X`; after DexNom/VIctory
 /// bc3cd4b0, which does so for two of the programs by their digests).
 pub(super) fn lower_counted(parts: &Parts, counted: bool) -> Result<Lowered, ShaderError> {
-||||||| 085ee7c4
-=======
-    lower_with_thread_limit(parts, false)
-}
-
-pub(super) fn lower_with_thread_limit(
-    parts: &Parts,
-    partial: bool,
-) -> Result<Lowered, ShaderError> {
->>>>>>> vitoriabr/main
     let mut bad = HashMap::new();
     loop {
-<<<<<<< HEAD
-        match Lower::new(parts, &bad).run(counted) {
-||||||| 085ee7c4
-        match Lower::new(parts, &bad).run() {
-=======
-        match Lower::new(parts, &bad, partial).run(partial) {
->>>>>>> vitoriabr/main
+        match Lower::new(parts, &bad, counted).run(counted) {
             Ok(l) => return Ok(l),
             Err(Stop::Retry(v, why)) => {
                 if bad.insert(v, why).is_some() {
@@ -192,6 +157,16 @@ pub(super) fn lower_with_thread_limit(
             Err(Stop::Fail(e)) => return Err(e),
         }
     }
+}
+
+/// [`lower_counted`] under the new project's name: their callers pass whether
+/// the last group may be short, and ours also counts the programs whose lanes
+/// past a dispatch's count of threads must not run.
+pub(super) fn lower_with_thread_limit(
+    parts: &Parts,
+    partial: bool,
+) -> Result<Lowered, ShaderError> {
+    lower_counted(parts, partial || counted_in_threads(parts))
 }
 
 const TWO_PI: f32 = std::f32::consts::TAU;
@@ -769,7 +744,6 @@ fn lane_uniform(p: &Program, st: &Structured, all: &[bool]) -> HashSet<Value> {
     same
 }
 
-<<<<<<< HEAD
 /// The paired form: scalar values each console lane has its own of in the lowering, a waterfall
 /// loop's first-lane reads (the lane's own dword, `resource::Waterfall`) and what scalar code
 /// and joins make of them.
@@ -777,46 +751,31 @@ fn lane_scalars(p: &Program, res: &Resources) -> HashSet<Value> {
     let mut own: HashSet<Value> = res.waterfall.reads.iter().copied().collect();
     if own.is_empty() {
         return own;
-||||||| 085ee7c4
-/// What a register value holds, for [`wave_local`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Wave {
-    /// Nothing that depends on how the threads are divided into waves.
-    Plain,
-    /// The number of the wave's first lane in a mask (`s_ff1`).
-    First,
-    /// A reduction over the wave's lanes: a count, a sum, a minimum...
-    Total(super::wave::Op),
-    /// A count or sum over the lanes below this one.
-    Prefix,
-    /// Derived from what a first-lane atomic returned: the slots the wave reserved.
-    Base,
-    /// A mix the idiom does not make.
-    Mixed,
+    }
+    let order = crate::ir::reverse_postorder(&p.blocks);
+    loop {
+        let before = own.len();
+        for &b in &order {
+            let block = &p.blocks[b];
+            for phi in &block.phis {
+                if !matches!(phi.reg, Reg::V(_)) && phi.args.iter().any(|a| own.contains(a)) {
+                    own.insert(phi.value);
+                }
+            }
+            for inst in &block.insts {
+                if matches!(inst.fields, Fields::Sop { .. } | Fields::Smem { .. })
+                    && inst.reads.iter().any(|r| own.contains(&r.1))
+                {
+                    own.extend(inst.writes.iter().map(|w| w.1));
+                }
+            }
+        }
+        if own.len() == before {
+            return own;
+        }
+    }
 }
 
-/// Whether a console wave64 program may run with each host wave as a wave of its own
-/// ([`with_local_waves`]): its wave-wide values are used only as the allocation idiom uses
-/// them, which does not care how the threads are divided into waves. A first-lane number only
-/// picks the first lane; a count or sum only goes into that lane's atomic on a shared counter;
-/// a prefix only goes onto the base that atomic returned; the first lane does nothing else.
-/// Anything else done with them takes one wave to be the whole thread group (a tile's result,
-/// say) and is refused, with the offset and what was found.
-/// Lane masks read as numbers by other instructions and lane reads outside whole-wave sections
-/// are stopped by the lowering itself.
-// shortcut: `v_readfirstlane` of a value that differs between lanes is taken as it is (this
-// host wave's first lane), and a guarded write of a plain value over a wave-dependent one is
-// the only mix of old and new lanes that is looked at.
-pub(super) fn wave_local(p: &Program, st: &Structured) -> Result<(), (usize, &'static str)> {
-    use super::wave::{Op, Shape};
-    const FIRST: Why = "a wave's first-lane number used as data";
-    const TOTAL: Why = "a count or sum over the wave used as data";
-    const PREFIX: Why = "a count or sum over the lanes below used without a reserved base";
-    const MIXED: Why = "a value that depends on the wave on some paths only";
-    const EFFECT: Why = "a write by the wave's first lane other than its reservation";
-    fn of(kind: &HashMap<Value, Wave>, v: Option<Value>) -> Wave {
-        v.and_then(|v| kind.get(&v).copied()).unwrap_or(Wave::Plain)
-=======
 /// Whether `v` is the same in every lane of its console wave in the
 /// surrounding control flow: constants, scalar reads, and lane operations
 /// whose inputs all are, through loop-carried phis. An LDS read at a
@@ -957,70 +916,6 @@ fn value_uniform(
     }
     path.remove(&v);
     result
-}
-
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Wave {
-    /// Nothing that depends on how the threads are divided into waves.
-    Plain,
-    /// The number of the wave's first lane in a mask (`s_ff1`).
-    First,
-    /// A reduction over the wave's lanes: a count, a sum, a minimum...
-    Total(super::wave::Op),
-    /// A count or sum over the lanes below this one.
-    Prefix,
-    /// Derived from what a first-lane atomic returned: the slots the wave reserved.
-    Base,
-    /// A mix the idiom does not make.
-    Mixed,
-}
-
-/// Whether a console wave64 program may run with each host wave as a wave of its own
-/// ([`with_local_waves`]): its wave-wide values are used only as the allocation idiom uses
-/// them, which does not care how the threads are divided into waves. A first-lane number only
-/// picks the first lane; a count or sum only goes into that lane's atomic on a shared counter;
-/// a prefix only goes onto the base that atomic returned; the first lane does nothing else.
-/// Anything else done with them takes one wave to be the whole thread group (a tile's result,
-/// say) and is refused, with the offset and what was found.
-/// Lane masks read as numbers by other instructions and lane reads outside whole-wave sections
-/// are stopped by the lowering itself.
-// shortcut: `v_readfirstlane` of a value that differs between lanes is taken as it is (this
-// host wave's first lane), and a guarded write of a plain value over a wave-dependent one is
-// the only mix of old and new lanes that is looked at.
-pub(super) fn wave_local(p: &Program, st: &Structured) -> Result<(), (usize, &'static str)> {
-    use super::wave::{Op, Shape};
-    const FIRST: Why = "a wave's first-lane number used as data";
-    const TOTAL: Why = "a count or sum over the wave used as data";
-    const PREFIX: Why = "a count or sum over the lanes below used without a reserved base";
-    const MIXED: Why = "a value that depends on the wave on some paths only";
-    const EFFECT: Why = "a write by the wave's first lane other than its reservation";
-    fn of(kind: &HashMap<Value, Wave>, v: Option<Value>) -> Wave {
-        v.and_then(|v| kind.get(&v).copied()).unwrap_or(Wave::Plain)
->>>>>>> vitoriabr/main
-    }
-    let order = crate::ir::reverse_postorder(&p.blocks);
-    loop {
-        let before = own.len();
-        for &b in &order {
-            let block = &p.blocks[b];
-            for phi in &block.phis {
-                if !matches!(phi.reg, Reg::V(_)) && phi.args.iter().any(|a| own.contains(a)) {
-                    own.insert(phi.value);
-                }
-            }
-            for inst in &block.insts {
-                if matches!(inst.fields, Fields::Sop { .. } | Fields::Smem { .. })
-                    && inst.reads.iter().any(|r| own.contains(&r.1))
-                {
-                    own.extend(inst.writes.iter().map(|w| w.1));
-                }
-            }
-        }
-        if own.len() == before {
-            return own;
-        }
-    }
 }
 
 /// The mode of a group barrier the translation adds (host waves meeting):
@@ -1568,17 +1463,8 @@ pub(super) fn with_first_half_pairs<R>(translate: impl FnOnce() -> R) -> R {
     result
 }
 
-<<<<<<< HEAD
 /// What [`set_host_max_wave`] was told (0: nothing).
 pub fn host_max_wave() -> u32 {
-||||||| 085ee7c4
-pub(super) fn host_max_wave() -> u32 {
-=======
-/// The host's widest wave, as [`set_host_max_wave`] gave it (0: not known).
-/// Part of the translation (wave64 programs on a 32-lane host), so the
-/// shader cache's key holds it too.
-pub fn host_max_wave() -> u32 {
->>>>>>> vitoriabr/main
     #[cfg(test)]
     if let Some(lanes) = TEST_HOST_WAVE.get() {
         return lanes;
@@ -1831,7 +1717,6 @@ fn half_input_partners(io: &StageIo, inputs: &[SigElement]) -> HashMap<u8, u8> {
     partners
 }
 
-<<<<<<< HEAD
 /// `s_setreg*` of `HW_REG_POPS_PACKER` (hardware register 25): how a pixel program takes part
 /// in POPS, the console's ordering of the view accesses of overlapping pixels by primitive.
 fn sets_pops_packer(i: &Inst) -> bool {
@@ -1839,8 +1724,6 @@ fn sets_pops_packer(i: &Inst) -> bool {
         && matches!(i.fields, Fields::Sop { imm: Some(imm), .. } if imm & 0x3F == 25)
 }
 
-||||||| 085ee7c4
-=======
 /// The title's barrier retains its memory fences even when group sync
 /// would wait for a host wave that never visits it. Explicit overrides
 /// keep their old meanings; automatic mode is a targeted compatibility
@@ -1865,7 +1748,6 @@ fn barrier_mode(
     8 | if writes_uavs { 2 } else { 0 } | u32::from(waits)
 }
 
->>>>>>> vitoriabr/main
 fn unsupported(offset: usize, what: Why) -> Stop {
     Stop::Fail(ShaderError::Unsupported { offset, what })
 }
@@ -1926,7 +1808,8 @@ impl<'a> Lower<'a> {
         let mut bpermute_slot: Option<u32> = None;
         // a console wave64 program in host waves of 32: the LDS dword of `wave_base`'s counter
         let mut halves: Option<u32> = None;
-<<<<<<< HEAD
+        // (the mesh stage below assigns it before reading)
+        let mut lds_dwords = 0;
         let paired = PAIRED.get() && x.native.wave64 && host_max_wave() == 32;
         if let StageIo::Cs(cs) = x.native.io
             && paired
@@ -1946,12 +1829,6 @@ impl<'a> Lower<'a> {
             console_lanes = true;
             s.wave_size = Some(32);
         } else if let StageIo::Cs(cs) = x.native.io {
-||||||| 085ee7c4
-        if let StageIo::Cs(cs) = x.native.io {
-=======
-        let mut lds_dwords = 0;
-        if let StageIo::Cs(cs) = x.native.io {
->>>>>>> vitoriabr/main
             s.threads = Some(cs.threads);
             lds_dwords = cs.lds_bytes() / 4;
             s.lds_dwords = lds_dwords;
@@ -2998,7 +2875,6 @@ impl<'a> Lower<'a> {
         self.s.m.bin(c, Bin::Or, first, sum)
     }
 
-<<<<<<< HEAD
     /// The last addition of [`Self::half_sum`]'s tree: the sums of a console wave's two halves
     /// (from [`Self::half_tree`]), with the high half of the lower one's (lane 0's).
     fn join_half_sums(&mut self, lo: V, hi: V) -> V {
@@ -3011,41 +2887,6 @@ impl<'a> Lower<'a> {
     }
 
     fn run(mut self, counted: bool) -> Result<Lowered, Stop> {
-||||||| 085ee7c4
-    fn run(mut self) -> Result<Lowered, Stop> {
-=======
-    fn run(mut self, partial: bool) -> Result<Lowered, Stop> {
-        if partial {
-            // Keep inactive threads out of wave counts, packed-header
-            // reads, and stores. Wave64 emulation through group barriers
-            // requires full participation and cannot run this prologue.
-            let original = self.s.entry;
-            let width = self.s.threads.expect("compute thread count")[0];
-            let limit = self.host_word(
-                RootType::Other(super::shader::USER_DISPATCH_THREADS_X),
-                0,
-                width,
-            );
-            let Val::I32(group) = self.compute_id("groupId.i32", 94, 0) else {
-                unreachable!()
-            };
-            let Val::I32(thread) = self.thread_id(0) else {
-                unreachable!()
-            };
-            let width = self.s.m.i32(width);
-            let first = self.s.m.bin(original, Bin::Mul, group, width);
-            let x = self.s.m.bin(original, Bin::Add, first, thread);
-            let zero = self.s.m.i32(0);
-            let unlimited = self.s.m.cmp(original, pred::EQ, limit, zero);
-            let inside = self.s.m.cmp(original, pred::IULT, x, limit);
-            let active = self.s.m.bin(original, Bin::Or, unlimited, inside);
-            let body = self.s.m.new_block();
-            let done = self.s.m.new_block();
-            self.s.m.terminate(original, Term::CondBr(active, body, done));
-            self.s.m.terminate(done, Term::Ret);
-            self.s.entry = body;
-        }
->>>>>>> vitoriabr/main
         let p = self.x.p;
         self.halves_only = self.places_read_as_halves();
         if counted {
@@ -3216,13 +3057,9 @@ impl<'a> Lower<'a> {
             root_cbvs,
             root_srvs,
             root_uavs,
-<<<<<<< HEAD
             half_views,
-||||||| 085ee7c4
-=======
             written_root_uavs: std::mem::take(&mut self.s.written_root_uavs),
             writes_guest_memory: self.s.writes_guest_memory,
->>>>>>> vitoriabr/main
             #[cfg(test)]
             nonuniform_handles: self.s.nonuniform_handles,
             #[cfg(test)]
@@ -3292,15 +3129,11 @@ impl<'a> Lower<'a> {
                     // paths only seem to allow it before any save: the lane of a VGPR
                     // nobody wrote, and VGPRs nobody set read as zero.
                     None if n >= crate::ir::PARKED => Val::I32(self.s.m.i32(0)),
-<<<<<<< HEAD
                     // No wave overlaps this one (see `ordered_section`).
                     None if self.pops_collision(v) => Val::I32(self.s.m.i32(0)),
-||||||| 085ee7c4
-=======
                     // The primitive-ordered section's entry word (`enters_pops`):
                     // zero is "no earlier wave to wait for".
                     None if n == POPS_WAVE_SGPR && self.pops => Val::I32(self.s.m.i32(0)),
->>>>>>> vitoriabr/main
                     None => Val::Missing("a hardware SGPR input"),
                 },
                 Reg::Scc => Val::Missing("SCC on entry"),
@@ -3931,42 +3764,6 @@ impl<'a> Lower<'a> {
         Some((lo, hi))
     }
 
-    /// [`view_address`] for a table entry chosen at run time (a computed
-    /// index into a descriptor table or the resource heap): the host's table
-    /// of the buffer views' title addresses by heap slot
-    /// ([`shader::SLOT_VIEWS`]).
-    fn view_address_indexed(&mut self, site: Site, first: u8) -> Result<Option<(V, V, V, V)>, Why> {
-        let a = *self
-            .scalar
-            .get(&site)
-            .ok_or("an untracked descriptor load")?;
-        let root = self
-            .x
-            .native
-            .layout
-            .get(a.param)
-            .map(|p| p.root)
-            .ok_or("a descriptor outside the tables")?;
-        if !matches!(root, RootType::Table | RootType::ResourceHeap) || a.dynamic.is_none() {
-            return Ok(None);
-        }
-        let c = self.cur;
-        let slot = self.heap_index(site, first, false)?;
-        let r = self.s.read_view_slot(c, slot);
-        let lo = self.s.m.extract(c, r, 0);
-        let hi = self.s.m.extract(c, r, 1);
-        let len = self.s.m.extract(c, r, 2);
-        let stride = self.s.m.extract(c, r, 3);
-        let (lo, hi, len, stride) = (
-            self.as_int(lo),
-            self.as_int(hi),
-            self.as_int(len),
-            self.as_int(stride),
-        );
-        let off = a.offset as i32;
-        let (lo, hi) = self.address_plus(lo, hi, off);
-        Ok(Some((lo, hi, len, stride)))
-    }
 
     /// `lo`, `hi` plus the instruction's byte offset `off`, with the carry.
     fn address_plus(&mut self, lo: V, hi: V, off: i32) -> (V, V) {
@@ -3992,22 +3789,12 @@ impl<'a> Lower<'a> {
     /// `SLOT_MEMORY`): the handle of the raw view of the host copy holding
     /// it, the byte in that view, and whether the page is mapped. A page without a copy reads zeros
     /// (and drops writes) through the null view at the first slot, and its
-<<<<<<< HEAD
     /// number is left for the host, for lanes that run (`guard`). Goes on in
     /// another block.
     /// With `store`, a page that is not to be written ([`super::shader::MEMORY_READ_ONLY`])
     /// is the null view.
     fn memory(&mut self, lo: V, hi: V, guard: Option<V>, store: bool) -> (V, V) {
         use super::shader::{MEMORY_FAULTS, MEMORY_PAGES, MEMORY_READ_ONLY, SLOT_FAULTS, SLOT_MEMORY, USER_MEMORY_BASE};
-||||||| 085ee7c4
-    /// number is left for the host, for lanes that run (`guard`).
-    fn memory(&mut self, lo: V, hi: V, guard: Option<V>) -> (V, V) {
-        use super::shader::{MEMORY_FAULTS, MEMORY_PAGES, SLOT_FAULTS, SLOT_MEMORY, USER_MEMORY_BASE};
-=======
-    /// number is left for the host, for lanes that run (`guard`).
-    fn memory(&mut self, lo: V, hi: V, guard: Option<V>) -> (V, V, V) {
-        use super::shader::{MEMORY_FAULTS, MEMORY_PAGES, SLOT_FAULTS, SLOT_MEMORY, USER_MEMORY_BASE};
->>>>>>> vitoriabr/main
         let c = self.cur;
         let (i32t, res) = (self.s.t.i32, self.s.t.res_ret);
         let k = |l: &mut Self, v: u32| l.s.m.i32(v);
@@ -4304,43 +4091,11 @@ impl<'a> Lower<'a> {
             let Some(Operand::Vector { reg, .. }) = *dst else {
                 return Err("a global load result");
             };
-<<<<<<< HEAD
             let words = self.memory_transfer(lo, hi, guard, n, false, |l, h, byte, range| {
                 l.memory_load_words(h, byte, range.end - range.start)
             });
             for (k, word) in (0..n).zip(words) {
                 self.write(inst, Reg::V(reg + k), word, guard);
-||||||| 085ee7c4
-            let (h, byte) = self.memory(lo, hi, guard);
-            let mask = self.s.m.i8((1u8 << n) - 1);
-            let r = self.s.op(
-                c,
-                "rawBufferLoad.f32",
-                Attr::ReadOnly,
-                res,
-                139,
-                &[h, byte, iu, mask, align],
-            );
-            for k in 0..n {
-                let x = self.s.m.extract(c, r, u32::from(k));
-                let x = self.as_int(x);
-                self.write(inst, Reg::V(reg + k), x, guard);
-=======
-            let (h, byte, _) = self.memory(lo, hi, guard);
-            let mask = self.s.m.i8((1u8 << n) - 1);
-            let r = self.s.op(
-                c,
-                "rawBufferLoad.f32",
-                Attr::ReadOnly,
-                res,
-                139,
-                &[h, byte, iu, mask, align],
-            );
-            for k in 0..n {
-                let x = self.s.m.extract(c, r, u32::from(k));
-                let x = self.as_int(x);
-                self.write(inst, Reg::V(reg + k), x, guard);
->>>>>>> vitoriabr/main
             }
             return Ok(());
         }
@@ -4348,22 +4103,6 @@ impl<'a> Lower<'a> {
             let n = count(rest)?;
             let d = data.as_ref().ok_or("global store data")?;
             let vals = self.vgprs(inst, d, n)?;
-<<<<<<< HEAD
-||||||| 085ee7c4
-            let (h, byte) = self.memory(lo, hi, guard);
-            let mut args = vec![h, byte, iu];
-            args.extend(&vals);
-            args.resize(3 + 4, iu);
-            args.push(self.s.m.i8((1u8 << n) - 1));
-            args.push(align);
-=======
-            let (h, byte, _) = self.memory(lo, hi, guard);
-            let mut args = vec![h, byte, iu];
-            args.extend(&vals);
-            args.resize(3 + 4, iu);
-            args.push(self.s.m.i8((1u8 << n) - 1));
-            args.push(align);
->>>>>>> vitoriabr/main
             let at = self.begin_guarded(guard);
             self.memory_transfer(lo, hi, None, n, true, |l, h, byte, range| {
                 l.memory_store_words(h, byte, &vals[usize::from(range.start)..usize::from(range.end)])
@@ -4387,14 +4126,8 @@ impl<'a> Lower<'a> {
             Some(x) => self.i32_of(x)?,
             None => self.s.m.i32(0),
         };
-<<<<<<< HEAD
         let (h, byte) = self.memory(lo, hi, guard, true);
         let c = self.cur;
-||||||| 085ee7c4
-        let (h, byte) = self.memory(lo, hi, guard);
-=======
-        let (h, byte, _) = self.memory(lo, hi, guard);
->>>>>>> vitoriabr/main
         // DXIL's atomic operations: add 0, and 1, or 2, xor 3, signed
         // minimum 4 and maximum 5, unsigned 6 and 7, exchange 8.
         let simple = match op {
@@ -4528,43 +4261,11 @@ impl<'a> Lower<'a> {
         for first in (0..count).step_by(4) {
             let n = (count - first).min(4);
             let (lo, hi) = self.address_plus(lo, hi, offset + 4 * i32::from(first));
-<<<<<<< HEAD
             let words = self.memory_transfer(lo, hi, None, n, false, |l, h, byte, range| {
                 l.memory_load_words(h, byte, range.end - range.start)
             });
             for (k, word) in (0..n).zip(words) {
                 self.write(inst, Reg::S(code + first + k), word, None);
-||||||| 085ee7c4
-            let (h, byte) = self.memory(lo, hi, None);
-            let mask = self.s.m.i8((1u8 << n) - 1);
-            let r = self.s.op(
-                c,
-                "rawBufferLoad.f32",
-                Attr::ReadOnly,
-                res,
-                139,
-                &[h, byte, iu, mask, align],
-            );
-            for k in 0..n {
-                let x = self.s.m.extract(c, r, u32::from(k));
-                let x = self.as_int(x);
-                self.write(inst, Reg::S(code + first + k), x, None);
-=======
-            let (h, byte, _) = self.memory(lo, hi, None);
-            let mask = self.s.m.i8((1u8 << n) - 1);
-            let r = self.s.op(
-                c,
-                "rawBufferLoad.f32",
-                Attr::ReadOnly,
-                res,
-                139,
-                &[h, byte, iu, mask, align],
-            );
-            for k in 0..n {
-                let x = self.s.m.extract(c, r, u32::from(k));
-                let x = self.as_int(x);
-                self.write(inst, Reg::S(code + first + k), x, None);
->>>>>>> vitoriabr/main
             }
         }
         Ok(())
@@ -4660,7 +4361,6 @@ impl<'a> Lower<'a> {
                 let v = inst.read(Reg::V(reg)).ok_or("an unread operand")?;
                 self.i32_of(v)
             }
-<<<<<<< HEAD
             // src_scc: SCC as 0 or 1 (VIctory upstream 0b35b7f, as the dot
             // products and packed multiply-adds below).
             Operand::Const(253) => {
@@ -4669,11 +4369,8 @@ impl<'a> Lower<'a> {
             }
             // Nothing to wait for (see `ordered_section`).
             Operand::Const(POPS_EXITING) if !self.ordered.is_empty() => Ok(self.s.m.i32(0)),
-||||||| 085ee7c4
-=======
             // Read only by the wait that a zero entry word skips ([`enters_pops`]).
             Operand::Const(POPS_EXITING_WAVE_ID) if self.pops => Ok(self.s.m.i32(0)),
->>>>>>> vitoriabr/main
             Operand::Const(c) => crate::resource::inline(c)
                 .map(|x| self.s.m.i32(x))
                 .ok_or("a special operand (vccz, execz, scc, lds_direct)"),
@@ -6383,23 +6080,17 @@ impl<'a> Lower<'a> {
                 let t = self.s.m.bin(c, Bin::Or, t, or);
                 self.s.m.bin(c, Bin::Xor, t, xor)
             };
-<<<<<<< HEAD
-            let r = if mesh_quad {
-                self.quad_pick(x, src)
+            let r = if use_quad {
+                self.quad_pick(x, src, (offset & 0x8000 != 0).then_some(offset as u8))
             } else if self.helpers_read(quad) {
+                // A pixel program's helpers read across the triangle's edge
+                // by the host's quad operations.
                 let lanes = if offset & 0x8000 != 0 {
                     [0, 1, 2, 3].map(|i| (offset >> (2 * i) & 3) as u8)
                 } else {
                     [0, 1, 2, 3].map(|i| ((i & offset | offset >> 5 & 3) ^ offset >> 10 & 3) as u8 & 3)
                 };
                 self.quad_read(x, lanes)
-||||||| 085ee7c4
-            let r = if mesh_quad {
-                self.quad_pick(x, src)
-=======
-            let r = if use_quad {
-                self.quad_pick(x, src, (offset & 0x8000 != 0).then_some(offset as u8))
->>>>>>> vitoriabr/main
             } else {
                 self.read_lane(x, src)
             };
@@ -6715,8 +6406,7 @@ impl<'a> Lower<'a> {
             }
             return Ok(());
         }
-<<<<<<< HEAD
-        let at = self.begin_guarded(guard);
+        let at = self.begin_guarded(Some(g));
         // A subtraction of a value that is no constant, as `ds_add` of its negation (HLSL's
         // `InterlockedAdd(shared, -x)`) or as `ds_sub`, is a compare-exchange loop: NVIDIA's
         // compiler refuses `atomicrmw add` of `0 - x` and `atomicrmw sub` on group-shared
@@ -6730,11 +6420,6 @@ impl<'a> Lower<'a> {
             Some(Rmw::Sub) if !matches!(v0, V::Const(_)) => Some(v0),
             _ => None,
         };
-||||||| 085ee7c4
-        let at = self.begin_guarded(guard);
-=======
-        let at = self.begin_guarded(Some(g));
->>>>>>> vitoriabr/main
         let r = match rmw {
             _ if let Some(x) = take => self.lds_rmw_loop(p, |l, old| l.s.m.bin(l.cur, Bin::Sub, old, x)),
             Some(op) => self.s.m.atomic(self.cur, op, p, v0),
@@ -8042,730 +7727,6 @@ impl<'a> Lower<'a> {
         Ok(())
     }
 
-<<<<<<< HEAD
-||||||| 085ee7c4
-    /// A descriptor load (`s_load_dword*` from a table or heap) whose dwords
-    /// the code also reads as numbers: the console compiler computes sizes
-    /// from descriptor bits (an image's width, height, depth, levels; a
-    /// buffer's record count) instead of querying them. Those fields are
-    /// rebuilt from the host view's dimensions in the GFX10 layout (image
-    /// dword 1 bits 30-31 and dword 2 bits 0-13 width - 1, dword 2 bits
-    /// 14-29 height - 1, dword 3 identity swizzle, last level at 16, type at
-    /// 28, dword 4 depth or layers - 1; buffer dword 2 the record count).
-    // shortcut: the base level reads 0 (the host view starts at its own
-    // level 0, so sizes the code shifts by it come out right) and the other
-    // dwords (addresses, formats, tiling) have no host value: reading them
-    // stops the program.
-    fn descriptor_data(&mut self, inst: &Inst, site: Site) -> Result<(), Why> {
-        const OTHER: Why = "a descriptor's address or format read as data";
-        let Fields::Smem {
-            data: Some(Operand::Scalar { code, .. }),
-            ..
-        } = inst.fields
-        else {
-            return Err("a scalar memory read as data");
-        };
-        let count = match inst.name().strip_prefix("s_load_dword") {
-            Some("") => 1u32,
-            Some("x2") => 2,
-            Some("x4") => 4,
-            Some("x8") => 8,
-            Some("x16") => 16,
-            _ => return Err("a scalar memory read as data"),
-        };
-        // How the program uses the descriptor tells the view's kind: an image or buffer
-        // instruction before a scalar buffer load, which reads any buffer.
-        let x = self.x;
-        let uses = |of: Site| {
-            x.res
-                .descriptors
-                .iter()
-                .filter(|d| d.role == Role::Resource)
-                .filter_map(move |d| {
-                    d.source.leaves().into_iter().find_map(|l| match *l {
-                        Source::Loaded { load, first } if load == of => Some((d.site, first)),
-                        _ => None,
-                    })
-                })
-        };
-        let by_scalar_load = |u: &(Site, u8)| {
-            matches!(x.p.blocks[u.0.0].insts[u.0.1].fields, Fields::Smem { .. })
-        };
-        let use_of = |of: Site| uses(of).find(|u| !by_scalar_load(u)).or_else(|| uses(of).next());
-        // The console compiler loads a descriptor again wherever it needs it, and for a
-        // size it reads the dwords of a load that nothing uses as a descriptor (a texture
-        // picked from the heap by an index held per lane: one load for its width, one for
-        // its base level, one for each read of the image). Another load of as many dwords
-        // from the same address reads the same descriptor, so what uses that one tells
-        // this one's kind. The handle is still made from this load's own operands, which
-        // hold here.
-        let address = self.scalar.get(&site).copied();
-        let twin = || {
-            let a = address?;
-            let same = |s: Site| x.p.blocks[s.0].insts[s.1].name() == inst.name();
-            x.res
-                .scalar
-                .iter()
-                .filter(|(s, b)| *s != site && *b == a && same(*s))
-                .find_map(|(s, _)| use_of(*s))
-        };
-        let use_at = use_of(site).or_else(twin);
-        // A descriptor nothing uses as one, whose size the code reads all the same (a
-        // texture picked from the heap by an index in a constant buffer, its width and
-        // height turned into a texel size; a buffer tested for being empty by its record
-        // count): the kind from its dwords and its used-resource entry.
-        let unused = if use_at.is_none() {
-            self.unused_descriptor_kind(inst, site, code, count)
-        } else {
-            None
-        };
-        let (first, props, image, uav, used) = if let Some(kind) = unused {
-            kind
-        } else {
-        let Some((at, first)) = use_at else {
-            // A descriptor kept per lane in VGPRs (`Resources::lane_copied`): the code only
-            // copies its dwords and compares them, lane against first lane, and every load
-            // that reaches those lanes reads one address. Each dword stands in as its place
-            // in the table, so the lanes compare equal as they do on the console.
-            if self.x.res.lane_copied.contains(&site)
-                && let Some(a) = self.scalar.get(&site).copied()
-            {
-                for k in 0..count {
-                    let x = self.s.m.i32(a.offset / 4 + k);
-                    self.write(inst, Reg::S(code + k as u8), x, None);
-                }
-                return Ok(());
-            }
-            // A sampler's descriptor: no program reads its dwords as numbers, so where one
-            // meets numbers at a join the register is dead on that path (`dead`), as a
-            // descriptor's address or format is.
-            let sampler = x.res.descriptors.iter().any(|d| {
-                d.role == Role::Sampler
-                    && d.source.leaves().into_iter().any(
-                        |l| matches!(*l, Source::Loaded { load, .. } if load == site),
-                    )
-            });
-            if sampler {
-                self.stale.extend(inst.writes.iter().map(|w| w.1));
-                return Err("a sampler's descriptor read as data");
-            }
-            // A buffer view the code only takes the address of, to walk
-            // the memory behind it (a ray-tracing structure): the address
-            // from the host, the other dwords have no value.
-            if count <= 4
-                && let Some((lo, hi)) = self.view_address(site)
-            {
-                for k in 0..count {
-                    let reg = Reg::S(code + k as u8);
-                    match k {
-                        0 => self.write(inst, reg, lo, None),
-                        1 => self.write(inst, reg, hi, None),
-                        _ => {
-                            if let Some(v) = inst.write(reg) {
-                                self.vals.insert(v, Val::Missing(OTHER));
-                                self.stale.insert(v);
-                            }
-                        }
-                    }
-                }
-                return Ok(());
-            }
-            if std::env::var_os("VICTORY_DESC_WHY").is_some() {
-                eprintln!(
-                    "DESC-WHY {:#x} {} scalar={:?} lane_copied={}",
-                    inst.machine.offset,
-                    inst.name(),
-                    address,
-                    self.x.res.lane_copied.contains(&site)
-                );
-            }
-            return Err("a descriptor read only as data");
-        };
-        let src = Source::Loaded { load: site, first };
-        let used = self.used_kind(&src);
-        let ui: &Inst = &self.x.p.blocks[at.0].insts[at.1];
-        let un = ui.name();
-        let uav = un.contains("store")
-            || un.contains("atomic")
-            || used.is_some_and(|u| u.kind == ResourceType::Uav);
-        let u = if uav { 0x1000 } else { 0 };
-        let (props, image) = match &ui.fields {
-            // A ray-tracing structure in a buffer of the host: read raw.
-            Fields::Image { .. } if un.starts_with("image_bvh") => ((11, 0), None),
-            Fields::Image { dim, .. } => {
-                let kind = match dim {
-                    0 => 1,
-                    1 => 2,
-                    2 => 4,
-                    4 => 6,
-                    5 => 7,
-                    _ => return Err("an image dimension (cube or MSAA)"),
-                };
-                ((kind | u, 0x409), Some(kind))
-            }
-            Fields::Buffer { idxen, format, .. } => {
-                let stride = used.map_or(0, |u| u.stride);
-                let props = if un.starts_with("buffer_load_format")
-                    || un.starts_with("buffer_store_format")
-                {
-                    (10 | u, 0x409)
-                } else if *idxen && format.is_none() && stride >= 4 && stride.is_multiple_of(4) {
-                    (12 | u, stride)
-                } else {
-                    (11 | u, 0)
-                };
-                if used.is_some_and(|u| u.kind == ResourceType::Cbv) {
-                    self.stale.extend(inst.writes.iter().map(|w| w.1));
-                    return Err("a constant buffer's descriptor read as data");
-                }
-                (props, None)
-            }
-            // Read by scalar buffer loads alone: the raw view `smem` reads it through.
-            Fields::Smem { .. } if used.is_some_and(|u| u.kind == ResourceType::Srv) => {
-                ((11, 0), None)
-            }
-            // A constant buffer: nothing of its descriptor is a number.
-            Fields::Smem { .. } => {
-                self.stale.extend(inst.writes.iter().map(|w| w.1));
-                return Err("a constant buffer's descriptor read as data");
-            }
-            _ => return Err("a scalar memory read as data"),
-        };
-        (first, props, image, uav, used)
-        };
-        let src = Source::Loaded { load: site, first };
-        let h = self.handle(site, &src, false, props)?;
-        let c = self.cur;
-        let i32t = self.s.t.i32;
-        let dims = self.s.m.named_struct("dx.types.Dimensions", vec![i32t; 4]);
-        let mip = if image.is_some() && !uav {
-            self.s.m.i32(0)
-        } else {
-            self.s.m.undef(i32t)
-        };
-        let d = self
-            .s
-            .op(c, "getDimensions", Attr::ReadOnly, dims, 72, &[h, mip]);
-        let field = |l: &mut Self, k: u32| l.s.m.extract(c, d, k);
-        let words: Vec<(u32, V)> = match image {
-            Some(kind) => {
-                let one = self.s.m.i32(1);
-                let w = field(self, 0);
-                let (height, depth) = match kind {
-                    1 => (one, one),
-                    2 => (field(self, 1), one),
-                    6 => (one, field(self, 1)),
-                    _ => (field(self, 1), field(self, 2)),
-                };
-                let levels = if uav { one } else { field(self, 3) };
-                let less = |l: &mut Self, x: V| l.s.m.bin(c, Bin::Sub, x, one);
-                let (w, height, depth, levels) = (
-                    less(self, w),
-                    less(self, height),
-                    less(self, depth),
-                    less(self, levels),
-                );
-                let k = |l: &mut Self, v: u32| l.s.m.i32(v);
-                let (k30, k2, k14, k16, mask) = (
-                    k(self, 30),
-                    k(self, 2),
-                    k(self, 14),
-                    k(self, 16),
-                    k(self, 0x3FFF),
-                );
-                let d1 = self.s.m.bin(c, Bin::Shl, w, k30);
-                let hi = self.s.m.bin(c, Bin::LShr, w, k2);
-                let hi = self.s.m.bin(c, Bin::And, hi, mask);
-                let ht = self.s.m.bin(c, Bin::Shl, height, k14);
-                let d2 = self.s.m.bin(c, Bin::Or, hi, ht);
-                let ty = [0, 8, 9, 0, 10, 0, 12, 13][kind as usize];
-                let base = k(self, 0xFAC | ty << 28);
-                let last = self.s.m.bin(c, Bin::Shl, levels, k16);
-                let d3 = self.s.m.bin(c, Bin::Or, base, last);
-                vec![(1, d1), (2, d2), (3, d3), (4, depth)]
-            }
-            None => {
-                // A raw view counts bytes; the descriptor's record count is in elements.
-                let n = field(self, 0);
-                let stride = used.map_or(0, |u| u.stride);
-                let n = if props.0 & 0xFF == 11 && stride > 1 {
-                    let k = self.s.m.i32(stride);
-                    self.s.m.bin(c, Bin::UDiv, n, k)
-                } else {
-                    n
-                };
-                let mut words = vec![(2, n)];
-                // Its address too, where the code computes with it and the
-                // host can tell it.
-                let computed = (0..2u8).any(|k| {
-                    inst.write(Reg::S(code + first + k))
-                        .is_some_and(|v| self.computed_with(v, 6))
-                });
-                // (A descriptor nothing uses as one gets it whenever the host can tell it, as
-                // a buffer whose address alone is read does.)
-                if first == 0
-                    && (computed || unused.is_some())
-                    && let Some((lo, hi)) = self.view_address(site)
-                {
-                    words.extend([(0, lo), (1, hi)]);
-                }
-                words
-            }
-        };
-        for k in 0..count {
-            let rel = k.wrapping_sub(u32::from(first));
-            match words.iter().find(|w| w.0 == rel) {
-                Some(&(_, x)) => self.write(inst, Reg::S(code + k as u8), x, None),
-                None => {
-                    if let Some(v) = inst.write(Reg::S(code + k as u8)) {
-                        self.vals.insert(v, Val::Missing(OTHER));
-                        self.stale.insert(v);
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// What [`Self::descriptor_data`] makes of a descriptor load that nothing uses as a
-    /// descriptor but whose dwords the code reads: the first dword, the handle properties,
-    /// the image kind (none for a buffer), whether it is an unordered view, and its
-    /// used-resource entry. An image's eight dwords read as a 2D texture's, a buffer's four
-    /// as a raw view's where the code reads its record count (dword 2); none for anything
-    /// else (a constant buffer, a sampler, a buffer whose address alone is read).
-    // shortcut: an image whose kind nothing tells is taken for a 2D texture (the title's
-    // reads are texel sizes of 2D textures: puddle masks, shadow masks); a host view of
-    // another kind would answer its own sizes.
-    #[allow(clippy::type_complexity)]
-    fn unused_descriptor_kind(
-        &self,
-        inst: &Inst,
-        site: Site,
-        code: u8,
-        count: u32,
-    ) -> Option<(u8, (u32, u32), Option<u32>, bool, Option<&'a UsedResource>)> {
-        // Kept per lane and compared (`Resources::lane_copied`), or a sampler's: the cases
-        // `descriptor_data` handles on their own.
-        if self.x.res.lane_copied.contains(&site)
-            || self.x.res.descriptors.iter().any(|d| {
-                d.role == Role::Sampler
-                    && d.source.leaves().into_iter().any(
-                        |l| matches!(*l, Source::Loaded { load, .. } if load == site),
-                    )
-            })
-        {
-            return None;
-        }
-        let used = self.used_kind(&Source::Loaded {
-            load: site,
-            first: 0,
-        });
-        if used.is_some_and(|u| !matches!(u.kind, ResourceType::Srv | ResourceType::Uav)) {
-            return None;
-        }
-        let read = |k: u32| {
-            inst.write(Reg::S(code + k as u8)).is_some_and(|v| {
-                self.x
-                    .p
-                    .blocks
-                    .iter()
-                    .flat_map(|b| &b.insts)
-                    .any(|i| i.reads.iter().any(|r| r.1 == v))
-            })
-        };
-        let uav = used.is_some_and(|u| u.kind == ResourceType::Uav);
-        let u = if uav { 0x1000 } else { 0 };
-        match count {
-            // width (dwords 1-2), height (2), levels (3), depth (4)
-            8 if (1..5).any(read) && used.is_none_or(|u| u.dwords == 8) => {
-                Some((0, (2 | u, 0x409), Some(2), uav, used))
-            }
-            // the record count
-            4 if read(2) && used.is_none_or(|u| u.dwords == 4) => {
-                Some((0, (11 | u, 0), None, uav, used))
-            }
-            _ => None,
-        }
-    }
-
-=======
-    /// A descriptor load (`s_load_dword*` from a table or heap) whose dwords
-    /// the code also reads as numbers: the console compiler computes sizes
-    /// from descriptor bits (an image's width, height, depth, levels; a
-    /// buffer's record count) instead of querying them. Those fields are
-    /// rebuilt from the host view's dimensions in the GFX10 layout (image
-    /// dword 1 bits 30-31 and dword 2 bits 0-13 width - 1, dword 2 bits
-    /// 14-29 height - 1, dword 3 identity swizzle, last level at 16, type at
-    /// 28, dword 4 depth or layers - 1; buffer dword 2 the record count).
-    // shortcut: the base level reads 0 (the host view starts at its own
-    // level 0, so sizes the code shifts by it come out right) and the other
-    // dwords (addresses, formats, tiling) have no host value: reading them
-    // stops the program.
-    fn descriptor_data(&mut self, inst: &Inst, site: Site) -> Result<(), Why> {
-        const OTHER: Why = "a descriptor's address or format read as data";
-        let Fields::Smem {
-            data: Some(Operand::Scalar { code, .. }),
-            ..
-        } = inst.fields
-        else {
-            return Err("a scalar memory read as data");
-        };
-        let count = match inst.name().strip_prefix("s_load_dword") {
-            Some("") => 1u32,
-            Some("x2") => 2,
-            Some("x4") => 4,
-            Some("x8") => 8,
-            Some("x16") => 16,
-            _ => return Err("a scalar memory read as data"),
-        };
-        // How the program uses the descriptor tells the view's kind: an image or buffer
-        // instruction before a scalar buffer load, which reads any buffer.
-        let x = self.x;
-        let uses = |of: Site| {
-            x.res
-                .descriptors
-                .iter()
-                .filter(|d| d.role == Role::Resource)
-                .filter_map(move |d| {
-                    d.source.leaves().into_iter().find_map(|l| match *l {
-                        Source::Loaded { load, first } if load == of => Some((d.site, first)),
-                        _ => None,
-                    })
-                })
-        };
-        let by_scalar_load = |u: &(Site, u8)| {
-            matches!(x.p.blocks[u.0.0].insts[u.0.1].fields, Fields::Smem { .. })
-        };
-        let use_of = |of: Site| uses(of).find(|u| !by_scalar_load(u)).or_else(|| uses(of).next());
-        // The console compiler loads a descriptor again wherever it needs it, and for a
-        // size it reads the dwords of a load that nothing uses as a descriptor (a texture
-        // picked from the heap by an index held per lane: one load for its width, one for
-        // its base level, one for each read of the image). Another load of as many dwords
-        // from the same address reads the same descriptor, so what uses that one tells
-        // this one's kind. The handle is still made from this load's own operands, which
-        // hold here.
-        let address = self.scalar.get(&site).copied();
-        let twin = || {
-            let a = address?;
-            let same = |s: Site| x.p.blocks[s.0].insts[s.1].name() == inst.name();
-            x.res
-                .scalar
-                .iter()
-                .filter(|(s, b)| *s != site && *b == a && same(*s))
-                .find_map(|(s, _)| use_of(*s))
-        };
-        let use_at = use_of(site).or_else(twin);
-        // A descriptor nothing uses as one, whose size the code reads all the same (a
-        // texture picked from the heap by an index in a constant buffer, its width and
-        // height turned into a texel size; a buffer tested for being empty by its record
-        // count): the kind from its dwords and its used-resource entry.
-        let unused = if use_at.is_none() {
-            self.unused_descriptor_kind(inst, site, code, count)
-        } else {
-            None
-        };
-        let (first, props, image, uav, used) = if let Some(kind) = unused {
-            kind
-        } else {
-        let Some((at, first)) = use_at else {
-            // A descriptor kept per lane in VGPRs (`Resources::lane_copied`): the code only
-            // copies its dwords and compares them, lane against first lane, and every load
-            // that reaches those lanes reads one address. Each dword stands in as its place
-            // in the table, so the lanes compare equal as they do on the console.
-            if self.x.res.lane_copied.contains(&site)
-                && let Some(a) = self.scalar.get(&site).copied()
-            {
-                for k in 0..count {
-                    let x = self.s.m.i32(a.offset / 4 + k);
-                    self.write(inst, Reg::S(code + k as u8), x, None);
-                }
-                return Ok(());
-            }
-            // A sampler's descriptor: no program reads its dwords as numbers, so where one
-            // meets numbers at a join the register is dead on that path (`dead`), as a
-            // descriptor's address or format is.
-            let sampler = x.res.descriptors.iter().any(|d| {
-                d.role == Role::Sampler
-                    && d.source.leaves().into_iter().any(
-                        |l| matches!(*l, Source::Loaded { load, .. } if load == site),
-                    )
-            });
-            if sampler {
-                self.stale.extend(inst.writes.iter().map(|w| w.1));
-                return Err("a sampler's descriptor read as data");
-            }
-            // A buffer view the code only takes the address of, to walk
-            // the memory behind it (a ray-tracing structure): the address
-            // from the host, the other dwords have no value. A table entry
-            // chosen at run time asks the host's table of view addresses;
-            // one load may carry two descriptors (8 dwords).
-            if count <= 4
-                && let Some((lo, hi)) = self.view_address(site)
-            {
-                for k in 0..count {
-                    let reg = Reg::S(code + k as u8);
-                    match k {
-                        0 => self.write(inst, reg, lo, None),
-                        1 => self.write(inst, reg, hi, None),
-                        _ => {
-                            if let Some(v) = inst.write(reg) {
-                                self.vals.insert(v, Val::Missing(OTHER));
-                                self.stale.insert(v);
-                            }
-                        }
-                    }
-                }
-                return Ok(());
-            }
-            if count <= 8 && count % 4 == 0 {
-                let mut wrote = false;
-                for group in 0..count / 4 {
-                    let first = (4 * group) as u8;
-                    let Some((lo, hi, len, stride)) =
-                        self.view_address_indexed(site, first).ok().flatten()
-                    else {
-                        continue;
-                    };
-                    wrote = true;
-                    for k in 4 * group..4 * group + 4 {
-                        let reg = Reg::S(code + k as u8);
-                        let v = match k % 4 {
-                            0 => lo,
-                            1 => hi,
-                            2 => len,
-                            _ => stride,
-                        };
-                        self.write(inst, reg, v, None);
-                    }
-                }
-                if wrote {
-                    return Ok(());
-                }
-            }
-            if std::env::var_os("VICTORY_DESC_WHY").is_some() {
-                eprintln!(
-                    "DESC-WHY {:#x} {} scalar={:?} lane_copied={}",
-                    inst.machine.offset,
-                    inst.name(),
-                    address,
-                    self.x.res.lane_copied.contains(&site)
-                );
-            }
-            return Err("a descriptor read only as data");
-        };
-        let src = Source::Loaded { load: site, first };
-        let used = self.used_kind(&src);
-        let ui: &Inst = &self.x.p.blocks[at.0].insts[at.1];
-        let un = ui.name();
-        let uav = un.contains("store")
-            || un.contains("atomic")
-            || used.is_some_and(|u| u.kind == ResourceType::Uav);
-        let u = if uav { 0x1000 } else { 0 };
-        let (props, image) = match &ui.fields {
-            // A ray-tracing structure in a buffer of the host: read raw.
-            Fields::Image { .. } if un.starts_with("image_bvh") => ((11, 0), None),
-            Fields::Image { dim, .. } => {
-                let kind = match dim {
-                    0 => 1,
-                    1 => 2,
-                    2 => 4,
-                    4 => 6,
-                    5 => 7,
-                    _ => return Err("an image dimension (cube or MSAA)"),
-                };
-                ((kind | u, 0x409), Some(kind))
-            }
-            Fields::Buffer { idxen, format, .. } => {
-                let stride = used.map_or(0, |u| u.stride);
-                let props = if un.starts_with("buffer_load_format")
-                    || un.starts_with("buffer_store_format")
-                {
-                    (10 | u, 0x409)
-                } else if *idxen && format.is_none() && stride >= 4 && stride.is_multiple_of(4) {
-                    (12 | u, stride)
-                } else {
-                    (11 | u, 0)
-                };
-                if used.is_some_and(|u| u.kind == ResourceType::Cbv) {
-                    self.stale.extend(inst.writes.iter().map(|w| w.1));
-                    return Err("a constant buffer's descriptor read as data");
-                }
-                (props, None)
-            }
-            // Read by scalar buffer loads alone: the raw view `smem` reads it through.
-            Fields::Smem { .. } if used.is_some_and(|u| u.kind == ResourceType::Srv) => {
-                ((11, 0), None)
-            }
-            // A constant buffer: nothing of its descriptor is a number.
-            Fields::Smem { .. } => {
-                self.stale.extend(inst.writes.iter().map(|w| w.1));
-                return Err("a constant buffer's descriptor read as data");
-            }
-            _ => return Err("a scalar memory read as data"),
-        };
-        (first, props, image, uav, used)
-        };
-        let src = Source::Loaded { load: site, first };
-        let h = self.handle(site, &src, false, props)?;
-        let c = self.cur;
-        let i32t = self.s.t.i32;
-        let dims = self.s.m.named_struct("dx.types.Dimensions", vec![i32t; 4]);
-        let mip = if image.is_some() && !uav {
-            self.s.m.i32(0)
-        } else {
-            self.s.m.undef(i32t)
-        };
-        let d = self
-            .s
-            .op(c, "getDimensions", Attr::ReadOnly, dims, 72, &[h, mip]);
-        let field = |l: &mut Self, k: u32| l.s.m.extract(c, d, k);
-        let words: Vec<(u32, V)> = match image {
-            Some(kind) => {
-                let one = self.s.m.i32(1);
-                let w = field(self, 0);
-                let (height, depth) = match kind {
-                    1 => (one, one),
-                    2 => (field(self, 1), one),
-                    6 => (one, field(self, 1)),
-                    _ => (field(self, 1), field(self, 2)),
-                };
-                let levels = if uav { one } else { field(self, 3) };
-                let less = |l: &mut Self, x: V| l.s.m.bin(c, Bin::Sub, x, one);
-                let (w, height, depth, levels) = (
-                    less(self, w),
-                    less(self, height),
-                    less(self, depth),
-                    less(self, levels),
-                );
-                let k = |l: &mut Self, v: u32| l.s.m.i32(v);
-                let (k30, k2, k14, k16, mask) = (
-                    k(self, 30),
-                    k(self, 2),
-                    k(self, 14),
-                    k(self, 16),
-                    k(self, 0x3FFF),
-                );
-                let d1 = self.s.m.bin(c, Bin::Shl, w, k30);
-                let hi = self.s.m.bin(c, Bin::LShr, w, k2);
-                let hi = self.s.m.bin(c, Bin::And, hi, mask);
-                let ht = self.s.m.bin(c, Bin::Shl, height, k14);
-                let d2 = self.s.m.bin(c, Bin::Or, hi, ht);
-                let ty = [0, 8, 9, 0, 10, 0, 12, 13][kind as usize];
-                let base = k(self, 0xFAC | ty << 28);
-                let last = self.s.m.bin(c, Bin::Shl, levels, k16);
-                let d3 = self.s.m.bin(c, Bin::Or, base, last);
-                vec![(1, d1), (2, d2), (3, d3), (4, depth)]
-            }
-            None => {
-                // A raw view counts bytes; the descriptor's record count is in elements.
-                let n = field(self, 0);
-                let stride = used.map_or(0, |u| u.stride);
-                let n = if props.0 & 0xFF == 11 && stride > 1 {
-                    let k = self.s.m.i32(stride);
-                    self.s.m.bin(c, Bin::UDiv, n, k)
-                } else {
-                    n
-                };
-                let mut words = vec![(2, n)];
-                // Its address too, where the code computes with it and the
-                // host can tell it.
-                let computed = (0..2u8).any(|k| {
-                    inst.write(Reg::S(code + first + k))
-                        .is_some_and(|v| self.computed_with(v, 6))
-                });
-                // (A descriptor nothing uses as one gets it whenever the host can tell it, as
-                // a buffer whose address alone is read does.)
-                if first == 0
-                    && (computed || unused.is_some())
-                    && let Some((lo, hi)) = self.view_address(site).or_else(|| {
-                        self.view_address_indexed(site, 0)
-                            .ok()
-                            .flatten()
-                            .map(|(lo, hi, _, _)| (lo, hi))
-                    })
-                {
-                    words.extend([(0, lo), (1, hi)]);
-                }
-                words
-            }
-        };
-        for k in 0..count {
-            let rel = k.wrapping_sub(u32::from(first));
-            match words.iter().find(|w| w.0 == rel) {
-                Some(&(_, x)) => self.write(inst, Reg::S(code + k as u8), x, None),
-                None => {
-                    if let Some(v) = inst.write(Reg::S(code + k as u8)) {
-                        self.vals.insert(v, Val::Missing(OTHER));
-                        self.stale.insert(v);
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// What [`Self::descriptor_data`] makes of a descriptor load that nothing uses as a
-    /// descriptor but whose dwords the code reads: the first dword, the handle properties,
-    /// the image kind (none for a buffer), whether it is an unordered view, and its
-    /// used-resource entry. An image's eight dwords read as a 2D texture's, a buffer's four
-    /// as a raw view's where the code reads its record count (dword 2); none for anything
-    /// else (a constant buffer, a sampler, a buffer whose address alone is read).
-    // shortcut: an image whose kind nothing tells is taken for a 2D texture (the title's
-    // reads are texel sizes of 2D textures: puddle masks, shadow masks); a host view of
-    // another kind would answer its own sizes.
-    #[allow(clippy::type_complexity)]
-    fn unused_descriptor_kind(
-        &self,
-        inst: &Inst,
-        site: Site,
-        code: u8,
-        count: u32,
-    ) -> Option<(u8, (u32, u32), Option<u32>, bool, Option<&'a UsedResource>)> {
-        // Kept per lane and compared (`Resources::lane_copied`), or a sampler's: the cases
-        // `descriptor_data` handles on their own.
-        if self.x.res.lane_copied.contains(&site)
-            || self.x.res.descriptors.iter().any(|d| {
-                d.role == Role::Sampler
-                    && d.source.leaves().into_iter().any(
-                        |l| matches!(*l, Source::Loaded { load, .. } if load == site),
-                    )
-            })
-        {
-            return None;
-        }
-        let used = self.used_kind(&Source::Loaded {
-            load: site,
-            first: 0,
-        });
-        if used.is_some_and(|u| !matches!(u.kind, ResourceType::Srv | ResourceType::Uav)) {
-            return None;
-        }
-        let read = |k: u32| {
-            inst.write(Reg::S(code + k as u8)).is_some_and(|v| {
-                self.x
-                    .p
-                    .blocks
-                    .iter()
-                    .flat_map(|b| &b.insts)
-                    .any(|i| i.reads.iter().any(|r| r.1 == v))
-            })
-        };
-        let uav = used.is_some_and(|u| u.kind == ResourceType::Uav);
-        let u = if uav { 0x1000 } else { 0 };
-        match count {
-            // width (dwords 1-2), height (2), levels (3), depth (4)
-            8 if (1..5).any(read) && used.is_none_or(|u| u.dwords == 8) => {
-                Some((0, (2 | u, 0x409), Some(2), uav, used))
-            }
-            // the record count
-            4 if read(2) && used.is_none_or(|u| u.dwords == 4) => {
-                Some((0, (11 | u, 0), None, uav, used))
-            }
-            _ => None,
-        }
-    }
-
->>>>>>> vitoriabr/main
     /// `s_load_dword*` from the program's constant table.
     fn code_smem(&mut self, inst: &Inst, a: Address) -> Result<(), Why> {
         let Fields::Smem {
@@ -10015,24 +8976,18 @@ impl<'a> Lower<'a> {
                 (src, inside, masks, bound_ctrl)
             }
         };
-<<<<<<< HEAD
-        let mut r = if mesh_quad {
-            self.quad_pick(x, src)
-        } else if let Dpp::Row { ctrl, .. } = dpp
-            && self.helpers_read(quad)
-        {
-            self.quad_read(x, [0, 1, 2, 3].map(|i| (ctrl >> (2 * i) & 3) as u8))
-||||||| 085ee7c4
-        let mut r = if mesh_quad {
-            self.quad_pick(x, src)
-=======
         let mut r = if use_quad {
             let pattern = match dpp {
                 Dpp::Row { ctrl, .. } => Some(ctrl as u8),
                 Dpp::Lanes { .. } => None,
             };
             self.quad_pick(x, src, pattern)
->>>>>>> vitoriabr/main
+        } else if let Dpp::Row { ctrl, .. } = dpp
+            && self.helpers_read(quad)
+        {
+            // A pixel program's helpers read across the triangle's edge by
+            // the host's quad operations.
+            self.quad_read(x, [0, 1, 2, 3].map(|i| (ctrl >> (2 * i) & 3) as u8))
         } else {
             self.read_lane(x, src)
         };
@@ -10085,19 +9040,12 @@ impl<'a> Lower<'a> {
         if let Some(op) = name.strip_prefix("v_pk_") {
             return self.packed16(inst, op, guard);
         }
-<<<<<<< HEAD
         if name.starts_with("v_dot") {
             return self.dot_product(inst, name, guard);
         }
         if let Some(r) = self.valu_f64(inst, name, guard) {
             return r;
         }
-||||||| 085ee7c4
-=======
-        if name.starts_with("v_dot") {
-            return self.dot_product(inst, name, guard);
-        }
->>>>>>> vitoriabr/main
         match name {
             "v_mad_u64_u32" => {
                 // a * b + c, c and the result 64 bits wide; the carry out
@@ -11044,26 +9992,13 @@ impl<'a> Lower<'a> {
                 let (mine, any) = self.first_lane(a, in_exec);
                 // two host waves that exchange: the console's first lane may be in the other
                 // one, unless every lane holds the same value
-<<<<<<< HEAD
-                let alike = match v.src.first() {
-                    Some(&Operand::Vector { reg, .. }) => inst.read(Reg::V(reg)).is_some_and(|x| {
-                        self.uniform.contains(&x) || self.alike_running(x, 8)
-                    }),
-                    _ => true,
-||||||| 085ee7c4
-                let alike = match v.src.first() {
-                    Some(&Operand::Vector { reg, .. }) => {
-                        inst.read(Reg::V(reg)).is_some_and(|x| self.uniform.contains(&x))
-                    }
-                    _ => true,
-=======
                 let src = match v.src.first() {
                     Some(&Operand::Vector { reg, .. }) => inst.read(Reg::V(reg)),
                     _ => None,
->>>>>>> vitoriabr/main
                 };
                 let alike = src.is_some_and(|x| {
                     self.uniform.contains(&x)
+                        || self.alike_running(x, 8)
                         || value_uniform(
                             self.x.p,
                             self.x.st,
@@ -12643,8 +11578,8 @@ impl<'a> Lower<'a> {
                     let f = half(self, h)?.unwrap_or(z);
                     self.as_int(f)
                 } else if f16 {
-<<<<<<< HEAD
-                    let mut f = half(self, h)?.ok_or("a packed input half no element holds")?;
+                    let z = self.s.m.f32(0);
+                    let mut f = half(self, h)?.unwrap_or(z);
                     if let Fields::Valu(v) = &inst.fields {
                         // omod, then clamp, before the one rounding to 16 bits; op_sel[3]
                         // picks the destination half (VIctory e29391f: the low half was
@@ -12661,12 +11596,6 @@ impl<'a> Lower<'a> {
                         let lo = to_f16(self, f);
                         return self.write_half(inst, lo, None);
                     }
-||||||| 085ee7c4
-                    let f = half(self, h)?.ok_or("a packed input half no element holds")?;
-=======
-                    let z = self.s.m.f32(0);
-                    let f = half(self, h)?.unwrap_or(z);
->>>>>>> vitoriabr/main
                     let lo = to_f16(self, f);
                     self.low_half(inst, reg, lo)
                 } else if matches!(eval, Eval::Mode(1)) {
@@ -14273,7 +13202,6 @@ mod tests {
         assert_eq!(packed_half(&sig, &[(8, None)], 8, 0), None);
     }
 
-<<<<<<< HEAD
     /// A program's constant table starts after its instructions, unless a
     /// load at a fixed offset reads below that.
     #[test]
@@ -14299,8 +13227,6 @@ mod tests {
         assert_eq!(code_table_start(&p, &[&fixed_after], 12), 12);
     }
 
-||||||| 085ee7c4
-=======
     /// `v_dot8_i32_i4 v0, v1, v2, v3` decodes, and translates (clamped too)
     /// in a program that stores its result, so it is not dropped as dead.
     #[test]
@@ -14342,7 +13268,6 @@ mod tests {
         }
     }
 
->>>>>>> vitoriabr/main
     /// Whether a synthetic compute program translates with these input registers.
     fn lowers(words: &[u32], rsrc2: u32) -> Result<(), crate::ShaderError> {
         let code: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
@@ -14437,7 +13362,6 @@ mod tests {
         }
     }
 
-<<<<<<< HEAD
     /// Lowers a one-thread compute program that copies four root constants
     /// (s0..s3) into v1..v4, runs `body`, and stores v0 to a raw buffer from a
     /// descriptor table, so the vector instructions in `body` have an effect.
@@ -14487,8 +13411,6 @@ mod tests {
         }
     }
 
-||||||| 085ee7c4
-=======
     /// `v_permlane16_b32` / `v_permlanex16_b32` read other lanes, so a
     /// compute program using them runs in the console's lane order (here
     /// the only cross-lane instruction, which once went unnoticed: their
@@ -14557,7 +13479,6 @@ mod tests {
         }
     }
 
->>>>>>> vitoriabr/main
     #[test]
     fn buffer_cache_invalidations_lower_as_no_ops() {
         // MUBUF opcode 0x071/0x072 with no data operand: the title asks the
