@@ -63,6 +63,26 @@ pub fn packet(data: &[u8], index: usize) -> Option<Packet> {
     })
 }
 
+/// Bit offset of the first frame that starts in this input buffer.
+pub fn first_frame(data: &[u8]) -> Option<usize> {
+    first_frame_from(data, 0)
+}
+
+fn first_frame_from(data: &[u8], mut index: usize) -> Option<usize> {
+    loop {
+        let header = packet(data, index)?;
+        if header.frames != 0 {
+            let offset = HEADER_BITS + header.first_frame_bit as usize;
+            if offset >= PACKET_BITS {
+                return None;
+            }
+            let start = index.checked_mul(PACKET_BITS)?.checked_add(offset)?;
+            return (start / 8 < data.len()).then_some(start);
+        }
+        index += 1 + header.skip as usize;
+    }
+}
+
 /// One frame's bits gathered out of its packets.
 #[derive(Debug, Clone)]
 pub struct Frame {
@@ -226,7 +246,6 @@ fn next_frame(data: &[u8], start: usize, end: usize) -> Option<usize> {
         number += 1;
     }
     let last = number + 1 >= header.frames;
-    let mut end = end;
     // A frame that ends in a packet where no frame begins (the tail of a frame
     // that crossed packets, then padding) is the last one before the next
     // packet that has frames.
@@ -235,13 +254,8 @@ fn next_frame(data: &[u8], start: usize, end: usize) -> Option<usize> {
     if end.is_multiple_of(PACKET_BITS) || (last && end / PACKET_BITS == index) || ends_in_packet_without_frames {
         // The next frame begins in the next packet of this stream that has one;
         // a packet with none (a frame spans all of it) holds no start.
-        let mut next = (end - 1) / PACKET_BITS + 1 + packet(data, (end - 1) / PACKET_BITS)?.skip as usize;
-        let mut header = packet(data, next)?;
-        while header.frames == 0 {
-            next += 1 + header.skip as usize;
-            header = packet(data, next)?;
-        }
-        end = next * PACKET_BITS + HEADER_BITS + header.first_frame_bit as usize;
+        let last = (end - 1) / PACKET_BITS;
+        return first_frame_from(data, last + 1 + packet(data, last)?.skip as usize);
     }
     (end / 8 < data.len()).then_some(end)
 }
@@ -1655,6 +1669,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_first_frame_skips_continuation_and_interleaved_packets() {
+        let mut data = vec![0; 3 * PACKET_BYTES];
+        put_bits(&mut data, 0, 32, 1); // No new frames. Packet 1 is another stream.
+        put_bits(&mut data, PACKET_BITS, 32, 1 << 26);
+        put_bits(&mut data, 2 * PACKET_BITS, 32, (1 << 26) | (9 << 11));
+        let start = 2 * PACKET_BITS + HEADER_BITS + 9;
+        put_bits(&mut data, start, 15, 31);
+        assert_eq!(first_frame(&data), Some(start));
+        assert_eq!(read_frame(&data, start).unwrap().bits, 31);
+        assert_eq!(first_frame(&data[..2 * PACKET_BYTES]), None);
+    }
+
+    #[test]
+    fn announced_frame_starts_stay_inside_their_packet() {
+        let mut data = vec![0; 3 * PACKET_BYTES];
+        put_bits(&mut data, 0, 32, 1 << 26);
+        put_bits(&mut data, HEADER_BITS, 15, 16);
+        let payload = (PACKET_BITS - HEADER_BITS) as u32;
+        put_bits(&mut data, PACKET_BITS, 32, (1 << 26) | (payload << 11));
+        assert_eq!(read_frame(&data, HEADER_BITS).unwrap().next, None);
+        assert_eq!(first_frame(&data[PACKET_BYTES..]), None);
     }
 
     #[test]
