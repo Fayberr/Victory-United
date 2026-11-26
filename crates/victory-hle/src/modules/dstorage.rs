@@ -2083,7 +2083,6 @@ fn read_list(list: *const usize, offset: usize, len: usize) -> Vec<usize> {
         .collect()
 }
 
-
 /// Slots by the 2020 order, which the argument shapes at
 /// the title's call sites match (0x18, 0x20, 0x30 and 0x40 are called).
 static QUEUE_VTABLE: Methods<12> = Methods([
