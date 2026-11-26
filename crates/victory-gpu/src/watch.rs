@@ -1161,22 +1161,19 @@ fn guards_shared() -> std::sync::RwLockReadGuard<'static, Guards> {
     GUARDS.read().unwrap_or_else(|e| e.into_inner())
 }
 
-/// `[first, last)` added to `ranges` (in order, joined). For ranges seen
-/// rarely (the views, once per new range): it sorts the whole list.
+/// `[first, last)` added to `ranges` (in order, joined).
 fn add_range(ranges: &mut Vec<(usize, usize)>, first: usize, last: usize) {
     if first >= last {
         return;
     }
-    ranges.push((first, last));
-    ranges.sort_unstable();
-    let mut joined: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
-    for &(a, b) in ranges.iter() {
-        match joined.last_mut() {
-            Some(last) if a <= last.1 => last.1 = last.1.max(b),
-            _ => joined.push((a, b)),
-        }
+    let from = ranges.partition_point(|r| r.1 < first);
+    let mut to = from;
+    let (mut a, mut b) = (first, last);
+    while to < ranges.len() && ranges[to].0 <= b {
+        (a, b) = (a.min(ranges[to].0), b.max(ranges[to].1));
+        to += 1;
     }
-    *ranges = joined;
+    ranges.splice(from..to, [(a, b)]);
 }
 
 /// Removes `[first, last)` from sorted, coalesced `ranges`.
