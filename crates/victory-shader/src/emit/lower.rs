@@ -19504,300 +19504,18 @@ fn interp_mode(kind: Barycentric) -> Option<u8> {
 >>>>>>> belobug/main
 #[cfg(test)]
 mod tests {
-<<<<<<< HEAD
-    use super::{Lowered, Numeric, Parts, buffer_format, code_table_start, half_shift, lower};
-    use crate::native::{
-        ComputeIo, HwStage, NativeProgram, ResourceType, RootParam, RootType, StageIo, UsedResource,
-    };
-    use crate::{io, ir, resource, structure};
-||||||| merged common ancestors
-    use super::{Numeric, Parts, buffer_format, half_shift, lower};
-    use crate::native::{ComputeIo, HwStage, NativeProgram, StageIo};
-    use crate::{io, ir, resource, structure};
-=======
     use super::super::container::SigElement;
-    use super::{Lowered, Numeric, Parts, SubDword, buffer_format, half_shift, inline_f16, lower};
+    use super::{
+        Lowered, Numeric, Parts, SubDword, buffer_format, code_table_start, half_shift, inline_f16,
+        lower,
+    };
     use crate::native::{
         ComputeIo, HwStage, NativeProgram, ResourceType, RootParam, RootType, StageIo, UsedResource,
     };
     use crate::{ShaderError, io, ir, resource, structure};
->>>>>>> belobug/main
 
     const S_ENDPGM: u32 = 0xBF81_0000;
 
-<<<<<<< HEAD
-    #[test]
-    fn automatic_barriers_keep_fences_and_only_drop_unsafe_sync() {
-        for writes in [false, true] {
-            let fence = 8 | if writes { 2 } else { 0 };
-            for (host, console, threads, divergent, waits) in [
-                (32, 64, Some(64), true, false),
-                (32, 64, Some(64), false, true),
-                (32, 64, Some(128), true, true),
-                (32, 64, None, true, true),
-                (64, 64, Some(64), true, true),
-                (32, 32, Some(32), true, true),
-                (0, 64, Some(64), true, true),
-            ] {
-                assert_eq!(
-                    super::barrier_mode(3, host, console, threads, divergent, writes),
-                    fence | u32::from(waits),
-                );
-            }
-            assert_eq!(super::barrier_mode(0, 32, 64, Some(64), false, writes), fence);
-            assert_eq!(super::barrier_mode(1, 64, 64, Some(64), true, writes), fence);
-            assert_eq!(super::barrier_mode(1, 32, 64, Some(64), false, writes), fence | 1);
-            assert_eq!(super::barrier_mode(2, 32, 64, Some(64), true, writes), fence | 1);
-        }
-    }
-
-    #[test]
-    fn automatic_barrier_flags_reach_the_emitted_shader() {
-        let divergent = [
-            0x7D88_0090, // v_cmp_gt_u32 vcc, 16, v0
-            0xBE8C_246A, // s_and_saveexec_b64 s[12:13], vcc
-            0xBF88_0001, // s_cbranch_execz past the barrier
-            0xBF8A_0000, // s_barrier
-            0xBEFE_040C, // s_mov_b64 exec, s[12:13]
-        ];
-        let mut divergent32 = divergent;
-        divergent32[1] = 0xBE8C_3C6A; // s_and_saveexec_b32 s12, vcc_lo
-        divergent32[4] = 0xBEFE_030C; // s_mov_b32 exec_lo, s12
-        for (body, wave64, threads, host, expected) in [
-            (&divergent[..], true, 64, 32, 8),
-            (&divergent[..], true, 128, 32, 9),
-            (&divergent[..], true, 64, 64, 9),
-            (&divergent32[..], false, 64, 32, 9),
-            (&[0xBF8A_0000][..], true, 64, 32, 9),
-        ] {
-            let native = NativeProgram {
-                stage: HwStage::Cs,
-                wave64,
-                vgprs: 16,
-                layout: vec![],
-                used: vec![],
-                io: StageIo::Cs(ComputeIo { rsrc2: 0, threads: [threads, 1, 1] }),
-                code: body.iter().copied().chain([S_ENDPGM])
-                    .flat_map(u32::to_le_bytes).collect(),
-            };
-            let p = ir::build(&native.code, wave64, native.vgprs).expect("IR");
-            let st = structure::structure(&p).expect("structure");
-            let res = resource::track(&p, &[], native.stage, Some(&st)).expect("resources");
-            let io = io::raise(&p, &native).expect("IO");
-            let old_wave = super::TEST_HOST_WAVE.replace(Some(host));
-            let old_mode = super::super::TEST_GROUP_SYNC.replace(Some(3));
-            let shader = lower(&Parts {
-                native: &native,
-                p: &p,
-                st: &st,
-                io: &io,
-                res: &res,
-                inputs: vec![],
-                outputs: vec![],
-                prims: vec![],
-                mesh_stride: 0,
-            });
-            super::TEST_HOST_WAVE.set(old_wave);
-            super::super::TEST_GROUP_SYNC.set(old_mode);
-            let shader = shader.unwrap_or_else(|e| panic!("wave64={wave64}, host={host}: {e:?}"));
-            assert_eq!(shader.barrier_modes, vec![expected]);
-        }
-    }
-
-    #[test]
-    fn packed_pixel_inputs_find_their_second_row() {
-        use super::super::container::SigElement;
-        use super::half_input_partners;
-        use crate::native::{PsInput, Usage};
-        let entry = |row, row2, pack2| PsInput {
-            usage: Usage::Generic,
-            row,
-            mask: 0xF,
-            attr: row,
-            flat: false,
-            fp16: true,
-            pack2,
-            row2,
-        };
-        let element = |row| SigElement {
-            name: "TEXCOORD".into(),
-            index: row,
-            kind: 0,
-            comp: 9,
-            interp: 2,
-            row: Some(row),
-            col: 0,
-            cols: 4,
-            usage: 0,
-            half: true,
-        };
-        // Rows 0 and 3 pack and leave their second row out; 5 names its
-        // own (6). Unnamed 16-bit rows: 1, 4, 6, 7.
-        let io = StageIo::Ps {
-            inputs: vec![entry(0, 0, true), entry(3, 3, true), entry(5, 6, true)],
-            input_addr: 0,
-            db_shader_control: 0,
-            patches: vec![],
-        };
-        let sig: Vec<_> = [0, 1, 3, 4, 5, 6, 7].map(element).into();
-        let p = half_input_partners(&io, &sig);
-        assert_eq!(p.get(&0), Some(&1));
-        assert_eq!(p.get(&3), Some(&4));
-        assert_eq!(p.get(&5), None);
-    }
-
-    /// The packed pedestrian layouts of the title: an element
-    /// behind another one in its register follows in the first parameter
-    /// with a dword left, and is not a half of its register's row.
-    #[test]
-    fn packed_elements_behind_another_take_the_first_free_dword() {
-        use super::super::container::SigElement;
-        use super::packed_half;
-        let element = |index, row, col, cols| SigElement {
-            name: "TEXCOORD".into(),
-            index,
-            kind: 0,
-            comp: 9,
-            interp: 2,
-            row: Some(row),
-            col,
-            cols,
-            usage: 0,
-            half: true,
-        };
-        // MS_VS_PedTransformPreSkinD_Packed 005fe88ec1bdc0c7 and its pixel
-        // shader 93667197d3d05e1c: TEXCOORD6 is one value at register 4
-        // column 3; parameter 3 (rows 6 and 7) carries it in dword 3.
-        let sig = vec![
-            element(1, 2, 0, 4),
-            element(2, 3, 0, 4),
-            element(4, 4, 0, 3),
-            element(6, 4, 3, 1),
-            element(3, 5, 0, 4),
-            element(5, 6, 0, 4),
-            element(7, 7, 0, 2),
-            element(9, 9, 0, 3),
-            element(11, 10, 0, 3),
-            element(15, 12, 0, 4),
-        ];
-        let packs = [
-            (2, Some(3)),
-            (4, Some(5)),
-            (6, Some(7)),
-            (9, Some(10)),
-            (12, None),
-        ];
-        let at = |a, h| packed_half(&sig, &packs, a, h);
-        // Parameter 2: TEXCOORD4's three values, a zero half, TEXCOORD3.
-        assert_eq!(at(4, 2), Some((4, 2)));
-        assert_eq!(at(4, 3), None);
-        assert_eq!(at(4, 4), Some((5, 0)));
-        assert_eq!(at(4, 7), Some((5, 3)));
-        // Parameter 3: TEXCOORD5, TEXCOORD7, then TEXCOORD6 alone.
-        assert_eq!(at(6, 3), Some((6, 3)));
-        assert_eq!(at(6, 5), Some((7, 1)));
-        assert_eq!(at(6, 6), Some((4, 3)));
-        assert_eq!(at(6, 7), None);
-        // Parameters without such an element are as before.
-        assert_eq!(at(9, 3), None);
-        assert_eq!(at(9, 4), Some((10, 0)));
-        assert_eq!(at(12, 3), Some((12, 3)));
-        assert_eq!(at(12, 4), None);
-        // The common layout (29805d23a495cdf8): TEXCOORD7 is two values at
-        // register 1 columns 2-3; parameter 0 is TEXCOORD0, TEXCOORD1,
-        // TEXCOORD7.
-        let sig = vec![
-            element(0, 1, 0, 2),
-            element(7, 1, 2, 2),
-            element(1, 2, 0, 4),
-            element(2, 3, 0, 4),
-            element(4, 4, 0, 3),
-        ];
-        let packs = [(3, Some(4)), (1, Some(2))];
-        let at = |a, h| packed_half(&sig, &packs, a, h);
-        assert_eq!(at(1, 1), Some((1, 1)));
-        assert_eq!(at(1, 2), Some((2, 0)));
-        assert_eq!(at(1, 5), Some((2, 3)));
-        assert_eq!(at(1, 6), Some((1, 2)));
-        assert_eq!(at(1, 7), Some((1, 3)));
-        assert_eq!(at(3, 6), Some((4, 2)));
-        assert_eq!(at(3, 7), None);
-        // A row no element holds gives nothing, as before.
-        assert_eq!(packed_half(&sig, &[(8, None)], 8, 0), None);
-    }
-
-    /// A program's constant table starts after its instructions, unless a
-    /// load at a fixed offset reads below that.
-    #[test]
-    fn the_code_table_starts_after_the_instructions() {
-        // s_nop 0, s_endpgm, then 1,000 dwords of constants.
-        let mut words = vec![0xBF80_0000, S_ENDPGM];
-        words.extend(0..1000u32);
-        let code: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
-        let p = ir::build(&code, false, 256).unwrap();
-        let at = |offset: u32, dynamic: bool| resource::Address {
-            param: resource::CODE,
-            offset,
-            dynamic: dynamic.then_some(ir::Value(0)),
-        };
-        let (computed, fixed_after, fixed_inside) = (at(0, true), at(12, false), at(4, false));
-        // A load at a computed offset from the code's start: the table is
-        // the constants only, not the whole program.
-        assert_eq!(code_table_start(&p, &[&computed], 0), 8);
-        assert_eq!(code_table_start(&p, &[&computed, &fixed_after], 0), 8);
-        // A load at a fixed offset inside the instructions keeps the start.
-        assert_eq!(code_table_start(&p, &[&computed, &fixed_inside], 0), 0);
-        // Loads past the instructions only: from the lowest of them.
-        assert_eq!(code_table_start(&p, &[&fixed_after], 12), 12);
-    }
-
-    /// `v_dot8_i32_i4 v0, v1, v2, v3` decodes, and translates (clamped too)
-    /// in a program that stores its result, so it is not dropped as dead.
-    #[test]
-    fn signed_nibble_dot_product_translates() {
-        let dot = |clamp: u32| [0xCC18_4000 | clamp << 15, 0x101 | 0x102 << 9 | 0x103 << 18 | 3 << 27];
-        let program = |body: [u32; 2]| {
-            let mut words = vec![
-                0xBE85_0380, // s_mov_b32 s5, 0
-                0xF408_0202, // s_load_dwordx4 s[8:11], s[4:5], 0
-                0xFA00_0000,
-            ];
-            // v_mov_b32 v1..v4, s0..s3
-            words.extend((0..4u32).map(|i| 0x7E00_0200 | (i + 1) << 17 | i));
-            words.extend(body);
-            words.extend([0xE070_0000, 0x8002_0000, S_ENDPGM]); // buffer_store_dword v0
-            words
-        };
-        let code: Vec<u8> = program(dot(0)).iter().flat_map(|w| w.to_le_bytes()).collect();
-        let names: Vec<_> = crate::gfx10::decode(&code).unwrap().iter().map(|i| i.name()).collect();
-        assert!(names.contains(&Some("v_dot8_i32_i4")), "{names:?}");
-        let buffer = UsedResource {
-            kind: ResourceType::Uav,
-            root: RootType::Table,
-            table_offset_dwords: 0,
-            lower_bound: 0,
-            stride: 0,
-            dwords: 4,
-            user_data: 4,
-            slot: 1,
-        };
-        let constants = RootParam { sgprs: 4, ..root(RootType::Constants, 0, 0) };
-        for clamp in [0, 1] {
-            lower_with(
-                &program(dot(clamp)),
-                vec![constants, root(RootType::Table, 4, 1)],
-                vec![buffer],
-            )
-            .unwrap_or_else(|e| panic!("clamp {clamp}: {e}"));
-        }
-    }
-
-    /// Whether a synthetic compute program translates with these input registers.
-    fn lowers(words: &[u32], rsrc2: u32) -> Result<(), crate::ShaderError> {
-||||||| merged common ancestors
-    /// Whether a synthetic compute program translates with these input registers.
-    fn lowers(words: &[u32], rsrc2: u32) -> Result<(), crate::ShaderError> {
-=======
     /// Mesh output size as the validator counts it (53 programs were over
     /// the limit; they now fail as unsupported).
     #[test]
@@ -19862,7 +19580,6 @@ mod tests {
             0x0202_0202,
             0xBF81_0000, // s_endpgm
         ];
->>>>>>> belobug/main
         let code: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
         let p = ir::build(&code, false, 256)?;
         let native = NativeProgram {
@@ -19965,17 +19682,7 @@ mod tests {
             }),
             code,
         };
-<<<<<<< HEAD
         let p = ir::build(&native.code, false, 256).unwrap();
-||||||| merged common ancestors
-        let p = ir::build(&native.code, false, 256).unwrap();
-        let res = resource::track(&p, &native.layout, native.stage).unwrap();
-        let io = io::raise(&p, &native).unwrap();
-=======
-        let p = ir::build(&native.code, wave64, 256).unwrap();
-        let res = resource::track(&p, &native.layout, native.stage)?;
-        let io = io::raise(&p, &native).unwrap();
->>>>>>> belobug/main
         let st = structure::structure(&p).unwrap();
         let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
         let io = io::raise(&p, &native).unwrap();
@@ -20439,45 +20146,39 @@ mod tests {
         }
     }
 
-<<<<<<< HEAD
     fn perm_features(selector: u32) -> u64 {
         // Synthetic compute shader:
         // v0 is the thread ID and can supply a dynamic selector.
         // Store the result in LDS to keep the permutation live.
-||||||| merged common ancestors
-
-    fn perm_features(selector: u32) -> u64 {
-        // Synthetic compute shader:
-        // v0 is the thread ID and can supply a dynamic selector.
-        // Store the result in LDS to keep the permutation live.
-=======
-    /// A dword load by index through a descriptor built around the root
-    /// descriptor in s[0:1] with dword 1 bits `hi` and dword 3 `w3`, stored
-    /// to LDS so the load is needed.
-    fn indexed_root_load(hi: u32, w3: u32) -> Result<Lowered, crate::ShaderError> {
->>>>>>> belobug/main
         let words = [
-            0x8805_FF01,
-            hi,          // s_or_b32 s5, s1, hi
-            0xBE84_0300, // s_mov_b32 s4, s0
-            0xBE86_03C1, // s_mov_b32 s6, -1
-            0xBE87_03FF,
-            w3, // s_mov_b32 s7, w3
-            0xE030_2000,
-            0x8001_0100, // buffer_load_dword v1, v0, s[4:7], 0 idxen
+            0x7E02_02FFu32,
+            0x817F_34AB,
+            0x7E04_02FF,
+            0xFE01_56CD,
+            0xD744_0003,
+            257 | (258 << 9) | (selector << 18),
+            0x3408_0082,
             0xD834_0000,
-            0x0000_0100, // ds_write_b32 v0, v1
+            0x0000_0304,
             S_ENDPGM,
         ];
-        let root = RootParam {
-            root: RootType::Descriptor,
-            table_offset_dwords: 0,
-            sgprs: 2,
-            base_register: 0,
-            user_data: 0,
-            slot: 3,
+
+        let code: Vec<u8> = words.iter()
+            .flat_map(|w| w.to_le_bytes())
+            .collect();
+
+        let native = NativeProgram {
+            stage: HwStage::Cs,
+            wave64: false,
+            vgprs: 256,
+            layout: vec![],
+            used: vec![],
+            io: StageIo::Cs(ComputeIo {
+                rsrc2: 1 << 15,
+                threads: [64, 1, 1],
+            }),
+            code,
         };
-<<<<<<< HEAD
 
         let p = ir::build(&native.code, false, 256).unwrap();
 
@@ -20509,41 +20210,33 @@ mod tests {
             container.part(crate::FourCC::SFI0).unwrap();
 
         u64::from_le_bytes(features.data.try_into().unwrap())
-||||||| merged common ancestors
+    }
 
-        let p = ir::build(&native.code, false, 256).unwrap();
-
-        assert!(p.blocks.iter()
-            .flat_map(|b| &b.insts)
-            .any(|i| i.name() == "v_perm_b32"));
-
-        let res = resource::track(
-            &p, &native.layout, native.stage
-        ).unwrap();
-
-        let io = io::raise(&p, &native).unwrap();
-        let st = structure::structure(&p).unwrap();
-
-        let emitted = lower(&Parts {
-            native: &native,
-            p: &p,
-            st: &st,
-            io: &io,
-            res: &res,
-            inputs: vec![],
-            outputs: vec![],
-            prims: vec![],
-            mesh_stride: 0,
-        }).unwrap();
-
-        let container =
-            crate::Container::parse(&emitted.dxil).unwrap();
-
-        let features =
-            container.part(crate::FourCC::SFI0).unwrap();
-
-        u64::from_le_bytes(features.data.try_into().unwrap())
-=======
+    /// A dword load by index through a descriptor built around the root
+    /// descriptor in s[0:1] with dword 1 bits `hi` and dword 3 `w3`, stored
+    /// to LDS so the load is needed.
+    fn indexed_root_load(hi: u32, w3: u32) -> Result<Lowered, crate::ShaderError> {
+        let words = [
+            0x8805_FF01,
+            hi,          // s_or_b32 s5, s1, hi
+            0xBE84_0300, // s_mov_b32 s4, s0
+            0xBE86_03C1, // s_mov_b32 s6, -1
+            0xBE87_03FF,
+            w3, // s_mov_b32 s7, w3
+            0xE030_2000,
+            0x8001_0100, // buffer_load_dword v1, v0, s[4:7], 0 idxen
+            0xD834_0000,
+            0x0000_0100, // ds_write_b32 v0, v1
+            S_ENDPGM,
+        ];
+        let root = RootParam {
+            root: RootType::Descriptor,
+            table_offset_dwords: 0,
+            sgprs: 2,
+            base_register: 0,
+            user_data: 0,
+            slot: 3,
+        };
         // The container lists the root SRV without a stride.
         let used = UsedResource {
             kind: ResourceType::Srv,
@@ -20556,7 +20249,7 @@ mod tests {
             slot: 3,
         };
         lower_with(&words, vec![root], vec![used])
->>>>>>> belobug/main
+    }
     }
 
     #[test]
