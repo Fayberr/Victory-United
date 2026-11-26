@@ -280,20 +280,14 @@ pub fn build(code: &[u8], wave64: bool, vgprs: u16) -> Result<Program, ShaderErr
 /// A register pair parked in two neighbouring lanes (a lane mask, a 64-bit
 /// address) moves as a pair (`s_mov_b64`) when every save and every restore
 /// of the two lanes come together, so a parked lane mask comes back as the
-<<<<<<< HEAD
 /// mask it is; otherwise its halves come back as two scalars (with
 /// [`with_shared_slots`], the saves and restores that come together still
 /// move as pairs).
-||||||| a26859fc
-/// mask it is; otherwise its halves come back as two scalars.
-=======
-/// mask it is; otherwise its halves come back as two scalars.
 ///
 /// The compiler reuses a lane once what it held is dead, for a pair first and
 /// a scalar later, say. Where that keeps a pair from being one, each life of a
 /// lane (the saves that reach a restore in common, and those restores) is a
 /// store of its own.
->>>>>>> avatar/main
 fn unspill(
     list: &mut [gfx10::Instruction],
     flows: &[Flow],
@@ -331,16 +325,8 @@ fn unspill(
     // VGPRs used by parking alone, the scalar codes the program uses, and
     // per instruction the scalar codes it writes.
     let mut stores = [false; 256];
-<<<<<<< HEAD
-    let mut other = [false; 256];
-    let mut used = [false; 256];
-||||||| a26859fc
-    let mut other = [false; 256];
-    let mut used = [false; 128];
-=======
     let mut other: [Option<usize>; 256] = [None; 256]; // the last such use
-    let mut used = [false; 128];
->>>>>>> avatar/main
+    let mut used = [false; 256];
     let mut parks: Vec<Option<(bool, u8, u8, u32)>> = Vec::with_capacity(list.len());
     let mut written: Vec<Vec<u8>> = Vec::with_capacity(list.len());
     let mut read: Vec<Vec<u8>> = Vec::with_capacity(list.len());
@@ -462,20 +448,6 @@ fn unspill(
             None
         }
     };
-<<<<<<< HEAD
-    let mut pairs: Vec<(u8, u32)> = Vec::new();
-    // ([`with_shared_slots`]) the upper lanes' parks that move with a lower one
-    let mut taken: Vec<usize> = Vec::new();
-    let shared = SHARED_SLOTS.get();
-    for &(reg, lane) in &slots {
-        if !wave64 || pairs.iter().any(|&(r, l)| r == reg && l + 1 == lane) || !slots.contains(&(reg, lane + 1)) {
-            continue;
-||||||| a26859fc
-    let mut pairs: Vec<(u8, u32)> = Vec::new();
-    for &(reg, lane) in &slots {
-        if !wave64 || pairs.iter().any(|&(r, l)| r == reg && l + 1 == lane) || !slots.contains(&(reg, lane + 1)) {
-            continue;
-=======
     // The store each parking instruction uses, and what the stores are lanes
     // of: one per (VGPR, lane), or (`split`) one per life of it.
     let stores_of = |split: bool| -> (Vec<usize>, Vec<(u8, u32)>) {
@@ -532,31 +504,7 @@ fn unspill(
                     first[i] = *of.entry(s).or_insert(i);
                 }
             }
->>>>>>> avatar/main
         }
-<<<<<<< HEAD
-        let lower: Vec<usize> = (0..list.len()).filter(|&i| parks[i].is_some_and(|p| (p.1, p.3) == (reg, lane))).collect();
-        let upper = parks.iter().flatten().filter(|p| (p.1, p.3) == (reg, lane + 1)).count();
-        let partners: Vec<Option<usize>> = lower.iter().map(|&i| partner(i)).collect();
-        let mut distinct: Vec<usize> = partners.iter().flatten().copied().collect();
-        distinct.sort_unstable();
-        distinct.dedup();
-        let found = partners.iter().flatten().count();
-        if partners.iter().all(Option::is_some) && distinct.len() == lower.len() && upper == lower.len()
-            || shared && found > 0 && distinct.len() == found
-        {
-            pairs.push((reg, lane));
-            taken.extend(distinct);
-||||||| a26859fc
-        let lower: Vec<usize> = (0..list.len()).filter(|&i| parks[i].is_some_and(|p| (p.1, p.3) == (reg, lane))).collect();
-        let upper = parks.iter().flatten().filter(|p| (p.1, p.3) == (reg, lane + 1)).count();
-        let partners: Vec<Option<usize>> = lower.iter().map(|&i| partner(i)).collect();
-        let mut distinct: Vec<usize> = partners.iter().flatten().copied().collect();
-        distinct.sort_unstable();
-        distinct.dedup();
-        if partners.iter().all(Option::is_some) && distinct.len() == lower.len() && upper == lower.len() {
-            pairs.push((reg, lane));
-=======
         let mut stores: Vec<((u8, u32), usize)> = (0..list.len())
             .filter(|&i| first[i] == i)
             .filter_map(|i| Some((slot(i)?, i)))
@@ -570,6 +518,7 @@ fn unspill(
     };
     // The stores that move as pairs (lower, upper) and every store's code;
     // none if the spare codes do not suffice.
+    let shared = SHARED_SLOTS.get();
     let plan = |split: bool| -> Option<(Vec<usize>, Vec<(usize, usize)>, Vec<u8>)> {
         let (mut of, stores) = stores_of(split);
         let mut pairs: Vec<(usize, usize)> = Vec::new();
@@ -585,77 +534,24 @@ fn unspill(
             let Some(upper) = distinct.first().map(|&j| of[j]) else {
                 continue;
             };
-            if stores[upper] == (reg, lane + 1)
-                && partners.iter().all(Option::is_some)
+            // Every save and restore of the two lanes come together. With
+            // [`with_shared_slots`] a partner that comes together is enough: the
+            // lane's other lives are not asked about.
+            let found = partners.iter().flatten().count();
+            let together = distinct.iter().all(|&j| of[j] == upper);
+            let strict = partners.iter().all(Option::is_some)
                 && distinct.len() == lower.len()
-                && distinct.iter().all(|&j| of[j] == upper)
-                && of.iter().filter(|&&o| o == upper).count() == lower.len()
-            {
+                && together
+                && of.iter().filter(|&&o| o == upper).count() == lower.len();
+            let relaxed = shared && found > 0 && distinct.len() == found && together;
+            if stores[upper] == (reg, lane + 1) && (strict || relaxed) {
                 pairs.push((n, upper));
             }
->>>>>>> avatar/main
         }
-<<<<<<< HEAD
-    }
-    // Codes for the parked scalars: the trap temporaries (108..=123), then
-    // user SGPRs the program never names, from the top, then the codes past
-    // the machine's (`PARKED`..=254; 255 stays unused so that the code after a
-    // parked one always exists). A material resolve program parks up to 63
-    // scalars and leaves about 20 machine codes unused.
-    let past = usize::from(PARKED);
-    let mut free = [false; 256];
-    for c in (0..105).chain(108..=123).chain(past..255) {
-        free[c] = !used[c];
-    }
-    let mut codes: Vec<((u8, u32), u8)> = Vec::new();
-    for &(reg, lane) in &pairs {
-        let at = (108..123).chain((0..104).rev()).chain(past..254).find(|&c| free[c] && free[c + 1]);
-        // Not enough spare codes: leave the program as it is.
-        let Some(c) = at else { return Vec::new() };
-        (free[c], free[c + 1]) = (false, false);
-        codes.push(((reg, lane), c as u8));
-        codes.push(((reg, lane + 1), c as u8 + 1));
-    }
-    for &slot in &slots {
-        if codes.iter().any(|c| c.0 == slot) {
-            continue;
-        }
-        let Some(c) = (108..=123).chain((0..105).rev()).chain(past..255).find(|&c| free[c]) else {
-            return Vec::new();
-||||||| a26859fc
-    }
-    // Codes for the parked scalars: the trap temporaries (108..=123), then
-    // user SGPRs the program never names, from the top, then the codes past
-    // the machine's (`PARKED`..=254; 255 stays unused so that the code after a
-    // parked one always exists). A material resolve program parks up to 63
-    // scalars and leaves about 20 machine codes unused.
-    let past = usize::from(PARKED);
-    let mut free = [false; 256];
-    for c in (0..105).chain(108..=123) {
-        free[c] = !used[c];
-    }
-    free[past..255].fill(true);
-    let mut codes: Vec<((u8, u32), u8)> = Vec::new();
-    for &(reg, lane) in &pairs {
-        let at = (108..123).chain((0..104).rev()).chain(past..254).find(|&c| free[c] && free[c + 1]);
-        // Not enough spare codes: leave the program as it is.
-        let Some(c) = at else { return Vec::new() };
-        (free[c], free[c + 1]) = (false, false);
-        codes.push(((reg, lane), c as u8));
-        codes.push(((reg, lane + 1), c as u8 + 1));
-    }
-    for &slot in &slots {
-        if codes.iter().any(|c| c.0 == slot) {
-            continue;
-        }
-        let Some(c) = (108..=123).chain((0..105).rev()).chain(past..255).find(|&c| free[c]) else {
-            return Vec::new();
-=======
         // Lives of one lane that move alike share a code, as they share the lane.
         let role = |n: usize| {
             let (lower, upper) = (pairs.iter().any(|p| p.0 == n), pairs.iter().any(|p| p.1 == n));
             (stores[n], u8::from(lower) + 2 * u8::from(upper))
->>>>>>> avatar/main
         };
         let mut shared: Vec<_> = (0..stores.len()).map(role).collect();
         let place: Vec<usize> = {
@@ -679,10 +575,9 @@ fn unspill(
         // scalars and leaves about 20 machine codes unused.
         let past = usize::from(PARKED);
         let mut free = [false; 256];
-        for c in (0..105).chain(108..=123) {
+        for c in (0..105).chain(108..=123).chain(past..255) {
             free[c] = !used[c];
         }
-        free[past..255].fill(true);
         let mut codes: Vec<Option<u8>> = vec![None; shared.len()];
         for &(lower, upper) in &pairs {
             let at = (108..123).chain((0..104).rev()).chain(past..254).find(|&c| free[c] && free[c + 1]);
@@ -716,18 +611,7 @@ fn unspill(
     }
     let (store, pairs, codes) = chosen;
     let put = |list: &mut [gfx10::Instruction], i: usize, encoding, opcode: u16, word: u32| {
-<<<<<<< HEAD
         list[i] = gfx10::Instruction::synthetic(list[i].offset, encoding, opcode, word);
-||||||| a26859fc
-        list[i] = gfx10::Instruction {
-            offset: list[i].offset,
-            encoding,
-            opcode,
-            words: vec![word],
-        };
-=======
-        list[i] = gfx10::Instruction::new(list[i].offset, encoding, opcode, vec![word]);
->>>>>>> avatar/main
     };
     // `s_mov_b32` / `s_mov_b64 dst, src` (SOP1, opcodes 3 and 4); `s_nop`. A code
     // from `PARKED` up does not fit the word: s0 stands in for it there.
@@ -735,21 +619,27 @@ fn unspill(
     let mov = |wide: bool, dst: u8, src: u8| 0xBE80_0000 | field(dst) << 16 | (3 + u32::from(wide)) << 8 | field(src);
     const NOP: u32 = 0xBF80_0000;
     let mut edits: Vec<(usize, Option<(bool, u8, u8)>)> = Vec::new();
+    // ([`with_shared_slots`]) the parks a pair move takes as its second half: a
+    // park of a pair's lanes that no pair takes moves alone.
+    let mut taken: Vec<usize> = Vec::new();
+    if shared {
+        for i in 0..list.len() {
+            if pairs.iter().any(|p| p.0 == store[i])
+                && let Some(j) = partner(i)
+            {
+                taken.push(j);
+            }
+        }
+    }
     for i in 0..list.len() {
         let Some((save, _, code, _)) = parks[i] else {
             continue;
         };
-<<<<<<< HEAD
-        let Some(slot) = code_of(reg, lane) else { return Vec::new() };
-        let alone = shared && (pairs.contains(&(reg, lane)) && partner(i).is_none() || lane > 0 && pairs.contains(&(reg, lane - 1)) && !taken.contains(&i));
-        if pairs.contains(&(reg, lane)) && !alone {
-||||||| a26859fc
-        let Some(slot) = code_of(reg, lane) else { return Vec::new() };
-        if pairs.contains(&(reg, lane)) {
-=======
         let slot = codes[store[i]];
-        if pairs.iter().any(|p| p.0 == store[i]) {
->>>>>>> avatar/main
+        let lower = pairs.iter().any(|p| p.0 == store[i]);
+        let upper = pairs.iter().any(|p| p.1 == store[i]);
+        let alone = shared && (lower && partner(i).is_none() || upper && !taken.contains(&i));
+        if lower && !alone {
             let Some(j) = partner(i) else { return Vec::new() };
             // A save moves the pair where its second half is saved; a
             // restore where its first half is restored.
@@ -757,13 +647,7 @@ fn unspill(
             let (dst, src) = if save { (slot, code) } else { (code, slot) };
             edits.push((at, Some((true, dst, src))));
             edits.push((gone, None));
-<<<<<<< HEAD
-        } else if lane > 0 && pairs.contains(&(reg, lane - 1)) && !alone {
-||||||| a26859fc
-        } else if lane > 0 && pairs.contains(&(reg, lane - 1)) {
-=======
-        } else if pairs.iter().any(|p| p.1 == store[i]) {
->>>>>>> avatar/main
+        } else if upper && !alone {
             // the upper half of a pair: moved with the lower
         } else {
             let (dst, src) = if save { (slot, code) } else { (code, slot) };
@@ -2462,7 +2346,6 @@ mod tests {
         assert_eq!(movrels.read(Reg::V(4)), movreld.write(Reg::V(4)));
         assert!(build(&code, false, 4).is_err(), "v4 is past 4 VGPRs");
     }
-<<<<<<< HEAD
 
     #[test]
     fn unspill_tracks_the_full_scalar_destination_field() {
@@ -2519,8 +2402,6 @@ mod tests {
         assert!(opaque(&alone), "two scalars make an opaque mask");
         assert!(!opaque(&shared), "the pair is the compare's mask");
     }
-||||||| a26859fc
-=======
 
     const fn s_branch(simm16: i16) -> u32 {
         0xBF82_0000 | simm16 as u16 as u32
@@ -2721,5 +2602,4 @@ mod tests {
         assert_eq!(exit.insts[0].read(Reg::S(1)), Some(next_s1));
         assert_eq!(exit.insts[0].read(Reg::S(2)), Some(lp_s2));
     }
->>>>>>> avatar/main
 }

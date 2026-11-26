@@ -439,20 +439,12 @@ impl<'a> Lower<'a> {
             let on = self.s.m.bin(c, Bin::Xor, off, on);
             let hit = self.s.m.bin(c, Bin::And, through, before);
             let hit = self.s.m.bin(c, Bin::And, hit, on);
-<<<<<<< HEAD
-            // A child that is not there is a miss, whatever bytes its box
-            // holds: it must not sort before a child that is.
-            let there = self.s.m.cmp(c, pred::IULT, children[n], none);
-            let hit = self.s.m.bin(c, Bin::And, hit, there);
-||||||| a26859fc
-=======
             let child = self.s.m.cmp(c, pred::NE, children[n], none);
             let hit = self.s.m.bin(c, Bin::And, hit, child);
             let hit = match there {
                 Some(there) => self.s.m.bin(c, Bin::And, hit, there[n]),
                 None => hit,
             };
->>>>>>> avatar/main
             ids[n] = self.s.m.select(c, hit, children[n], none);
             distances[n] = self.s.m.select(c, hit, enter, infinity);
         }

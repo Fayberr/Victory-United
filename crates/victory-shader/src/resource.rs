@@ -2394,10 +2394,9 @@ fn copy_source(inst: &Inst, k: usize) -> Option<Moved> {
     if inst.name() == "s_movk_i32" {
         return Some(Moved::Const(i32::from((*imm)? as i16) as u32));
     }
-<<<<<<< HEAD
     // s_bfm_b32 d, width, offset: `width` ones from bit `offset` (the
     // console compiler builds sampler words this way).
-    if inst.name() == "s_bfm_b32" {
+    if inst.name() == "s_bfm_b32" && k == 0 {
         let constant = |o: &Operand| match *o {
             Operand::Const(c) => inline(c),
             Operand::Literal(x) => Some(x),
@@ -2407,15 +2406,6 @@ fn copy_source(inst: &Inst, k: usize) -> Option<Moved> {
         let offset = constant(src.get(1)?)? & 31;
         return Some(Moved::Const(((1u32 << width) - 1) << offset));
     }
-||||||| a26859fc
-=======
-    // A mask of S0 bits from bit S1, as the upscaler's compiler makes an
-    // immediate sampler's word.
-    if let ("s_bfm_b32", 0, [Operand::Const(w), Operand::Const(at)]) = (inst.name(), k, &src[..]) {
-        let (w, at) = (inline(*w)? & 31, inline(*at)? & 31);
-        return Some(Moved::Const(((1u32 << w) - 1) << at));
-    }
->>>>>>> avatar/main
     let src = src.first()?;
     match (inst.name(), *src) {
         // A 32-bit literal of a 64-bit integer move is zero-extended.
