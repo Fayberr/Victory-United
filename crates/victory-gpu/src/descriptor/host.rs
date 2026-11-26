@@ -2794,39 +2794,16 @@ impl HostHeap {
                 textures.remove(slot);
             }
         }
-<<<<<<< HEAD
         let (stride, kind) = view.map_or((None, 0), view_stride_and_kind);
-        self.write_stride(index, stride.unwrap_or(0) | kind);
-||||||| 0a4356653
-        let stride = view.and_then(view_stride);
-        let kind = view.map_or(0, view_kind);
-        if let Some((_, _, data)) = &self.strides
-            && index < victory_shader::emit::SLOT_STRIDES_COUNT
-        {
-            // SAFETY: inside the mapping; shaders read it while we write (a
-            // dword, either value is one the slot had).
-            unsafe { (*data as *mut u32).add(index as usize).write_volatile(stride.unwrap_or(0) | kind) };
-        }
-=======
-        let stride = view.and_then(view_stride);
-        let kind = view.map_or(0, view_kind);
-        if let Some((_, _, data)) = &self.strides
-            && index < victory_shader::emit::SLOT_STRIDES_COUNT
-        {
-            // LOCAL (port of fxceless #1216): constant buffer views marked;
-            // programs read no other non-buffer slot as one.
-            let entry = match (stride, view) {
-                (Some(s), _) => s | kind,
-                (None, Some(View::Constant(..))) if victory_shader::emit::constant_marks() => {
-                    victory_shader::emit::SLOT_STRIDE_CONSTANT
-                }
-                _ => kind,
-            };
-            // SAFETY: inside the mapping; shaders read it while we write (a
-            // dword, either value is one the slot had).
-            unsafe { (*data as *mut u32).add(index as usize).write_volatile(entry) };
-        }
->>>>>>> nvidia/main
+        // LOCAL (port of fxceless #1216): constant buffer views marked;
+        // programs read no other non-buffer slot as one.
+        let word = match (stride, view) {
+            (None, Some(View::Constant(..))) if victory_shader::emit::constant_marks() => {
+                victory_shader::emit::SLOT_STRIDE_CONSTANT
+            }
+            _ => stride.unwrap_or(0) | kind,
+        };
+        self.write_stride(index, word);
         let was = if stride.is_some() {
             self.buffers.put(index);
             true
