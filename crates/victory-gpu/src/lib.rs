@@ -109,16 +109,10 @@ pub mod replay;
 pub mod resource;
 pub mod root;
 #[cfg(windows)]
-<<<<<<< HEAD
 mod census;
 #[cfg(windows)]
 mod safecopy;
 #[cfg(windows)]
-||||||| merged common ancestors
-=======
-mod census;
-#[cfg(windows)]
->>>>>>> vibr/main
 mod sampler;
 #[cfg(windows)]
 pub mod shader_cache;
@@ -129,16 +123,11 @@ mod stamp;
 #[cfg(windows)]
 mod tiles;
 pub mod signature;
-<<<<<<< HEAD
 mod switch;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod ab;
 #[cfg(windows)]
 mod tdr;
-||||||| merged common ancestors
-=======
-mod switch;
->>>>>>> vibr/main
 #[cfg(windows)]
 mod texture;
 pub mod timeline;
@@ -153,7 +142,6 @@ mod texback;
 
 #[cfg(windows)]
 pub use host::on_failure;
-<<<<<<< HEAD
 
 /// Whether `switch` is on now, if it is one of those `VICTORY_AB` turns on and
 /// off while the title runs (`ab`).
@@ -167,14 +155,11 @@ pub fn switched(switch: &str) -> Option<bool> {
 pub fn frame_phase() -> u32 {
     copystat::phase()
 }
-||||||| merged common ancestors
-=======
+
+#[cfg(windows)]
 pub use host::set_title_dir;
 #[cfg(all(windows, target_arch = "x86_64"))]
 pub use host::write_title_memory;
-#[cfg(windows)]
-pub use census::title_memory_reserved;
->>>>>>> vibr/main
 #[cfg(windows)]
 pub use census::title_memory_reserved;
 #[cfg(windows)]
