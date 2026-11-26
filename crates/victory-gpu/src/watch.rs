@@ -876,7 +876,7 @@ fn failed_asking(start: usize, end: usize) {
     let (protected, clean, absent, viewed, aliased) = {
         let g = guards_shared();
         let b = start / BLOCK;
-        (g.protected.contains(&b), g.clean.contains(&b), g.absent.contains(&b), covered(&g.views, b, b + 1), g.aliased.contains(&b))
+        (g.protected.contains(&b), g.clean.contains(b), g.absent.contains(b), covered(&g.views, b, b + 1), g.aliased.contains(&b))
     };
     tracing::info!(
         "a failed write-watch asking (one in 2048): {start:#x}+{:#x}; Windows says (answered {n}): base {:#x} region {:#x} state {:#x} type {:#x} protect {:#x} allocation protect {:#x}; \
@@ -948,7 +948,7 @@ fn known_view(start: usize) -> bool {
     }
     let g = guards_shared();
     let first = start / BLOCK;
-    !g.absent.contains(&first) && (g.protected.contains(&first) || (view_set() && covered(&g.views, first, first + 1)))
+    !g.absent.contains(first) && (g.protected.contains(&first) || (view_set() && covered(&g.views, first, first + 1)))
 }
 
 /// A set of blocks, a bit each, 64 to a word, the words by their number.
@@ -1477,7 +1477,7 @@ fn guard_unclean(g: &mut Guards, first: usize, last: usize) -> Vec<usize> {
     unpark_committed(g);
     if !covered(&g.views, first, last) {
         let fresh: Vec<usize> = (first..last)
-            .filter(|b| !g.clean.contains(b) && !covered(&g.views, *b, *b + 1))
+            .filter(|&b| !g.clean.contains(b) && !covered(&g.views, b, b + 1))
             .collect();
         g.unclean.extend(fresh);
         add_range(&mut g.views, first, last);
@@ -2016,7 +2016,7 @@ fn open(g: &mut Guards, start: usize, end: usize) -> bool {
         g.aliased.remove(&block);
         for alias in crate::inplace::pages_of(block * BLOCK) {
             let alias = alias / BLOCK;
-            if alias != block && g.protected.contains(&alias) && g.clean.remove(&alias) {
+            if alias != block && g.protected.contains(&alias) && g.clean.remove(alias) {
                 if covered(&g.views, alias, alias + 1) {
                     g.unclean.insert(alias);
                 }
