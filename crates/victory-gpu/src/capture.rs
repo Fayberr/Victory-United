@@ -253,7 +253,6 @@ fn encode(w: u32, h: u32, raw: &[u8]) -> Vec<u8> {
     debug_assert_eq!(rc, zlib_rs::ReturnCode::Ok);
     chunk(&mut png, b"IDAT", idat);
     chunk(&mut png, b"IEND", &[]);
-<<<<<<< HEAD
     png
 }
 
@@ -273,19 +272,6 @@ pub(crate) fn png_rgb(w: u32, h: u32, raw: &[u8]) -> Vec<u8> {
     chunk(&mut png, b"IDAT", idat);
     chunk(&mut png, b"IEND", &[]);
     png
-||||||| merged common ancestors
-    let path = folder.join(format!("{name}.png"));
-    match std::fs::create_dir_all(folder).and_then(|()| std::fs::write(&path, png)) {
-        Ok(()) => tracing::info!(path = %path.display(), "frame saved"),
-        Err(e) => tracing::warn!(error = %e, path = %path.display(), "frame not saved"),
-    }
-=======
-    let path = folder.join(format!("{name}.png"));
-    match std::fs::write(&path, png) {
-        Ok(()) => tracing::info!(path = %path.display(), "frame saved"),
-        Err(e) => tracing::warn!(error = %e, path = %path.display(), "frame not saved"),
-    }
->>>>>>> vibr/main
 }
 
 fn chunk(png: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
@@ -488,7 +474,6 @@ static TARGETS: std::sync::Mutex<Vec<(usize, std::sync::Arc<crate::resource::Hos
 
 fn dump_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-<<<<<<< HEAD
     *ON.get_or_init(|| folder().is_some() && crate::switch::on("VICTORY_DUMP_TARGETS"))
 }
 
@@ -674,10 +659,6 @@ pub(crate) fn light_present(frame: u64) {
         let _ = std::fs::write(folder.join(format!("light-{frame}.txt")), list);
         let _ = std::fs::write(folder.join(format!("light-{frame}.bin")), bytes);
     }
-||||||| merged common ancestors
-    *ON.get_or_init(|| folder().is_some() && std::env::var_os("VICTORY_DUMP_TARGETS").is_some())
-=======
-    *ON.get_or_init(|| folder().is_some() && crate::switch::on("VICTORY_DUMP_TARGETS"))
 }
 
 /// `VICTORY_SHOW_TARGET=<w>x<h>-f<format>` (e.g. `2560x1440-f28`): the size and format of
@@ -762,17 +743,13 @@ pub(crate) fn show(list: &ID3D12GraphicsCommandList, back: &ID3D12Resource) -> b
         }
     }
     true
->>>>>>> vibr/main
 }
 
 /// Notes a title texture the frame being built renders to or writes.
 pub(crate) fn note_target(resource: crate::object::This) {
-<<<<<<< HEAD
     if !resource.is_null() && light_log() {
         note_texel(resource);
     }
-||||||| merged common ancestors
-=======
     if let Some((w, h, f)) = show_spec()
         && let Some(copy) = crate::resource::host_copy(resource)
     {
@@ -782,7 +759,6 @@ pub(crate) fn note_target(resource: crate::object::This) {
             *SHOWN.lock().unwrap_or_else(|e| e.into_inner()) = Some(copy);
         }
     }
->>>>>>> vibr/main
     if resource.is_null() || !dump_on() || !listed(crate::queue::presented() + 1) {
         return;
     }
@@ -1274,7 +1250,6 @@ pub(crate) fn recent_levels() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     #[test]
-<<<<<<< HEAD
     fn half_classifies_special_and_finite_values() {
         use super::half;
 
@@ -1325,8 +1300,6 @@ mod tests {
     }
 
     #[test]
-||||||| merged common ancestors
-=======
     fn queued_frames_are_saved_at_title_exit() {
         use super::*;
         const CHILD: &str = "VICTORY_TEST_CAPTURE_EXIT";
@@ -1390,7 +1363,6 @@ mod tests {
     }
 
     #[test]
->>>>>>> vibr/main
     fn crc_matches_the_png_check_value() {
         assert_eq!(super::crc32(b"IEND"), 0xae42_6082);
     }
