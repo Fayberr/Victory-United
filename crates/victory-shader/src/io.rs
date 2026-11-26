@@ -342,71 +342,9 @@ pub fn raise(p: &Program, native: &NativeProgram) -> Result<Io, ShaderError> {
         },
         ..Io::default()
     };
-<<<<<<< HEAD
-    let defs: std::collections::HashMap<Value, Site> = p
-        .blocks
-        .iter()
-        .enumerate()
-        .flat_map(|(b, block)| {
-            block
-                .insts
-                .iter()
-                .enumerate()
-                .flat_map(move |(i, inst)| inst.writes.iter().map(move |w| (w.1, (b, i))))
-        })
-        .collect();
-    let phis: std::collections::HashMap<Value, (usize, usize)> = p
-        .blocks
-        .iter()
-        .enumerate()
-        .flat_map(|(b, block)| {
-            block
-                .phis
-                .iter()
-                .enumerate()
-                .map(move |(i, phi)| (phi.value, (b, i)))
-        })
-        .collect();
-    let halves = Halves {
-        p,
-        defs: &defs,
-        phis: &phis,
-    };
-    let mut first_halves = Vec::new();
-||||||| merged common ancestors
-    let defs: std::collections::HashMap<Value, Site> = p
-        .blocks
-        .iter()
-        .enumerate()
-        .flat_map(|(b, block)| {
-            block
-                .insts
-                .iter()
-                .enumerate()
-                .flat_map(move |(i, inst)| inst.writes.iter().map(move |w| (w.1, (b, i))))
-        })
-        .collect();
-    let phis: std::collections::HashMap<Value, (usize, usize)> = p
-        .blocks
-        .iter()
-        .enumerate()
-        .flat_map(|(b, block)| {
-            block
-                .phis
-                .iter()
-                .enumerate()
-                .map(move |(i, phi)| (phi.value, (b, i)))
-        })
-        .collect();
-    let halves = Halves {
-        p,
-        defs: &defs,
-        phis: &phis,
-    };
-=======
     // Only a second interpolation half needs to trace SSA definitions.
     let mut halves = None;
->>>>>>> belobug/main
+    let mut first_halves = Vec::new();
     for (b, block) in p.blocks.iter().enumerate() {
         for (i, inst) in block.insts.iter().enumerate() {
             let site = (b, i);
@@ -439,7 +377,6 @@ pub fn raise(p: &Program, native: &NativeProgram) -> Result<Io, ShaderError> {
                         _ => return Err(unsupported(at, "an interpolation form")),
                     }
                 }
-<<<<<<< HEAD
                 Fields::Valu(v) if name.starts_with("v_interp_") => match name {
                     "v_interp_p1ll_f16" => {
                         first_halves.push((site, attribute(inst, &v.src[0])?));
@@ -451,41 +388,10 @@ pub fn raise(p: &Program, native: &NativeProgram) -> Result<Io, ShaderError> {
                             _ => None,
                         };
                         let interp = halves
+                            .get_or_insert_with(|| Halves::new(p))
                             .pair(&v.src[0], read(2), read(1), &barycentric)
                             .map_err(|what| unsupported(at, what))?;
                         push_pair(&mut io, site, interp, attribute);
-||||||| merged common ancestors
-                Fields::Valu(v) if name.starts_with("v_interp_") => match name {
-                    "v_interp_p1ll_f16" => {}
-                    "v_interp_p2_f16" => {
-                        let attribute = attribute(inst, &v.src[0])?;
-                        let read = |k: usize| match v.src.get(k) {
-                            Some(&Operand::Vector { reg, .. }) => inst.read(Reg::V(reg)),
-                            _ => None,
-                        };
-                        let interp = halves
-                            .pair(&v.src[0], read(2), read(1), &barycentric)
-                            .map_err(|what| unsupported(at, what))?;
-                        io.interps.push((site, interp.with(attribute)));
-=======
-                // Only interpolation has an attribute as a VALU source.
-                Fields::Valu(v) if matches!(v.src.first(), Some(Operand::Attr { .. })) => {
-                    match inst.name() {
-                        "v_interp_p1ll_f16" => {}
-                        "v_interp_p2_f16" => {
-                            let attribute = attribute(inst, &v.src[0])?;
-                            let read = |k: usize| match v.src.get(k) {
-                                Some(&Operand::Vector { reg, .. }) => inst.read(Reg::V(reg)),
-                                _ => None,
-                            };
-                            let interp = halves
-                                .get_or_insert_with(|| Halves::new(p))
-                                .pair(&v.src[0], read(2), read(1), &barycentric)
-                                .map_err(|what| unsupported(at, what))?;
-                            push_pair(&mut io, site, interp, attribute);
-                        }
-                        _ => return Err(unsupported(at, "an interpolation form")),
->>>>>>> belobug/main
                     }
                 }
                 Fields::Exp {
@@ -532,7 +438,6 @@ pub fn raise(p: &Program, native: &NativeProgram) -> Result<Io, ShaderError> {
             }
         }
     }
-<<<<<<< HEAD
     if first_halves.is_empty() {
         return Ok(io);
     }
@@ -579,66 +484,7 @@ pub fn raise(p: &Program, native: &NativeProgram) -> Result<Io, ShaderError> {
             io.interps.push((site, Interp::Weighted { attribute }));
         }
     }
-||||||| merged common ancestors
-=======
-    first_halves_read(p, &mut io);
->>>>>>> belobug/main
     Ok(io)
-}
-
-/// A first half some other instruction reads too (the compiler keeps
-/// P0 + i P10 for more than its second half) evaluates on its own as well.
-fn first_halves_read(p: &Program, io: &mut Io) {
-    if !io
-        .interps
-        .iter()
-        .any(|(_, i)| matches!(i, Interp::Interpolated { .. }))
-    {
-        return;
-    }
-    // What instructions other than second halves read, and through phis.
-    let mut read: std::collections::HashSet<Value> = p
-        .blocks
-        .iter()
-        .flat_map(|b| &b.insts)
-        .filter(|i| !i.name().starts_with("v_interp_p2"))
-        .flat_map(|i| i.reads.iter().map(|r| r.1))
-        .collect();
-    loop {
-        let before = read.len();
-        for phi in p.blocks.iter().flat_map(|b| &b.phis) {
-            if read.contains(&phi.value) {
-                read.extend(phi.args.iter().copied());
-            }
-        }
-        if read.len() == before {
-            break;
-        }
-    }
-    let mut more = Vec::new();
-    for (_, interp) in &io.interps {
-        let Interp::Interpolated {
-            attribute, first, ..
-        } = interp
-        else {
-            continue;
-        };
-        for &(b, i) in first {
-            let known = |all: &[(Site, Interp)]| all.iter().any(|(s, _)| *s == (b, i));
-            if p.blocks[b].insts[i].writes.iter().any(|w| read.contains(&w.1))
-                && !known(&io.interps)
-                && !known(&more)
-            {
-                more.push((
-                    (b, i),
-                    Interp::Weighted {
-                        attribute: *attribute,
-                    },
-                ));
-            }
-        }
-    }
-    io.interps.extend(more);
 }
 
 /// The pixel input VGPRs that `addr` enables, with their meaning.
@@ -905,7 +751,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn computed_barycentrics_evaluate_each_half() {
         // i scaled before the first half: both halves stand on their own.
         let p = program(&[
@@ -976,34 +821,6 @@ mod tests {
         assert!(matches!(&io.interps[..], [(_, Interp::Weighted { .. })]));
     }
 
-    #[test]
-||||||| merged common ancestors
-=======
-    fn computed_barycentrics_evaluate_each_half() {
-        // i scaled before the first half: both halves stand on their own.
-        let p = program(&[
-            0x1006_00F0, // v_mul_f32 v3, 0.5, v0
-            0xC808_0003, // v_interp_p1_f32 v2, v3, attr0.x
-            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
-            S_ENDPGM,
-        ]);
-        let io = raise(&p, &pixel(vec![TEXCOORD], 2)).unwrap();
-        let attribute = Attribute {
-            usage: Usage::Generic,
-            row: 1,
-            channel: 0,
-            high: false,
-        };
-        let mut interps = io.interps.clone();
-        interps.sort_by_key(|i| i.0);
-        assert_eq!(
-            interps,
-            [
-                ((0, 1), Interp::Weighted { attribute }),
-                ((0, 2), Interp::Weighted { attribute }),
-            ]
-        );
-    }
 
     #[test]
     fn interpolation_can_take_its_first_half_from_either_branch() {
@@ -1089,7 +906,6 @@ mod tests {
     }
 
     #[test]
->>>>>>> belobug/main
     fn mesh_inputs_and_primitive_export() {
         let mesh = |words: &[u32]| {
             let code: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
