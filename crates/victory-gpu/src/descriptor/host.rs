@@ -7419,11 +7419,13 @@ fn make_twinned(
                 }
                 // A host copy of a capped size (`VICTORY_TEXTURE_MAX_DIM`)
                 // starts later in the title's mip chain: the view is moved
-                // down by as many levels.
+                // down by as many levels (those `shift_view_levels` moved it
+                // already are not moved again).
                 if let Some(view) = desc.as_mut()
                     && let Some((dropped, levels)) = crate::resource::first_host_mip(resource, texture)
                 {
-                    capped_srv(view, dropped, levels);
+                    let moved = crate::resource::dropped(resource);
+                    capped_srv(view, dropped.saturating_sub(moved), levels);
                 }
                 // Levels on demand (`crate::tiles`): a texture made level by
                 // level is shown from the first level that is the title's
