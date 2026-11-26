@@ -2110,7 +2110,18 @@ impl State {
         #[cfg(feature = "diagnostics")]
         let refreshed = std::time::Instant::now();
         stage.next("the heap pass: textures");
+<<<<<<< HEAD
         let _ = self.heap_textures(list, heap, host, None);
+||||||| merged common ancestors
+>>>>>>>>> Temporary merge branch 2
+        self.heap_textures(list, heap, host);
+<<<<<<<<< Temporary merge branch 1
+        HEAP_PASS_PARTS[0].fetch_add(textures_began.elapsed().as_micros() as u64, Ordering::Relaxed);
+||||||||| a26859fc5
+=========
+=======
+        self.heap_textures(list, heap, host);
+>>>>>>> origin/exp/vibr-head
         stage.end();
         #[cfg(feature = "diagnostics")]
         HEAP_SPLIT[2].fetch_add(refreshed.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -2291,7 +2302,15 @@ impl State {
         if compute || (early_ms == 0 && bake_ms == 0) {
             return;
         }
+<<<<<<< HEAD
         let is_bake = bake_ms > 0 && self.is_bake_draw(p);
+||||||| merged common ancestors
+        let bake = bake_ms > 0
+            && p.stages.iter().any(|s| BAKE_PIXEL_SHADERS.contains(&s.shader.hash.as_str()));
+=======
+        let bake = bake_ms > 0
+            && p.stages.iter().any(|s| s.shader.bakes || BAKE_PIXEL_SHADERS.contains(&s.shader.hash.as_str()));
+>>>>>>> origin/exp/vibr-head
         static FRAME: AtomicU64 = AtomicU64::new(u64::MAX);
         // The milliseconds this frame's bake draws have taken so far: a
         // frame has several, and together they get `bake_ms`.
@@ -3094,6 +3113,20 @@ impl State {
             crate::pipeline::note_drop(self.pipeline as This);
             return;
         }
+<<<<<<< HEAD
+||||||| merged common ancestors
+        // A program that walks ray-tracing structures nothing has built.
+        if crate::pipeline::walk_held(self.pipeline as This) {
+            #[cfg(feature = "diagnostics")]
+            crate::pipeline::note_why("a walk of ray-tracing structures that are not built (VICTORY_BVH_HOLD=1)".to_owned());
+            return;
+        }
+=======
+        if crate::pipeline::skips_rt_skin(self.pipeline as This) {
+            once!("passes that only serve rays are left out (VICTORY_RT_MISS=1, builder off; VICTORY_RT_SKIN, VICTORY_RT_RESOLVE, VICTORY_ACTIVATE_RAYS =1 run them)");
+            return;
+        }
+>>>>>>> origin/exp/vibr-head
         // The ray-tracing structure builder's stages run all or none.
         if crate::pipeline::is_builder(self.pipeline as This) && !crate::pipeline::builder_runs() {
             DROPPED.fetch_add(1, Ordering::Relaxed);
@@ -4179,9 +4212,28 @@ impl State {
             crate::pipeline::note_drop(self.pipeline as This);
             return false;
         }
+<<<<<<< HEAD
         if crate::pipeline::is_builder(self.pipeline as This) && !crate::pipeline::builder_runs() {
             return false;
         }
+||||||| merged common ancestors
+        if crate::pipeline::is_builder(self.pipeline as This) && !crate::pipeline::builder_runs() {
+            return false;
+        }
+        // A program that walks ray-tracing structures nothing has built:
+        // dropped before the argument clamp, like a skipped one.
+        if crate::pipeline::walk_held(self.pipeline as This) {
+            #[cfg(feature = "diagnostics")]
+            crate::pipeline::note_why("a walk of ray-tracing structures that are not built (VICTORY_BVH_HOLD=1)".to_owned());
+            return false;
+        }
+=======
+        if crate::pipeline::skips_rt_skin(self.pipeline as This)
+            || crate::pipeline::is_builder(self.pipeline as This) && !crate::pipeline::builder_runs()
+        {
+            return false;
+        }
+>>>>>>> origin/exp/vibr-head
         const DRAW: u32 = 0;
         const INDEXED: u32 = 1;
         const DISPATCH: u32 = 2;

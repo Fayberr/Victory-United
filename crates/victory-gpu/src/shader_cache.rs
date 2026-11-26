@@ -75,10 +75,16 @@ fn build() -> [u8; 32] {
             "VICTORY_MESH_OUTPUT_STRICT",
             "VICTORY_BVH_FENCES",
             "VICTORY_BVH_BOUNDS",
+<<<<<<< HEAD
             "VICTORY_NAN_GUARD",
             "VICTORY_THREAD_TICKET",
             "VICTORY_WAVE_LDS_LOOSE",
             "VICTORY_SCC_LOCAL_ANY",
+||||||| merged common ancestors
+=======
+            // Whether the ray-tracing node test always misses.
+            "VICTORY_RT_MISS",
+>>>>>>> origin/exp/vibr-head
         ] {
             bytes.extend_from_slice(name.as_bytes());
             bytes.push(b'=');

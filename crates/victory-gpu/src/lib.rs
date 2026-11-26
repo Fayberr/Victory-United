@@ -19,8 +19,14 @@
 mod ambient;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod capture;
+<<<<<<< HEAD
 #[cfg(windows)]
 mod compose;
+||||||| merged common ancestors
+#[cfg(windows)]
+mod cardmeter;
+=======
+>>>>>>> origin/exp/vibr-head
 pub mod console;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod copystat;
@@ -60,8 +66,13 @@ pub mod query;
 pub mod queue;
 #[cfg(all(windows, feature = "diagnostics"))]
 pub mod replay;
+<<<<<<< HEAD
 #[cfg(windows)]
 mod residency;
+||||||| merged common ancestors
+>>>>>>>>> Temporary merge branch 2
+=======
+>>>>>>> origin/exp/vibr-head
 pub mod resource;
 pub mod root;
 #[cfg(windows)]

@@ -12,14 +12,20 @@
 //! bake) are there at once as before; past the budget a draw or dispatch
 //! whose pipeline is not ready is dropped, as an untranslated one is.
 //!
-//! The default budget is half a second per title frame. A pass the title
-//! runs only once and whose pipeline takes longer is lost. Passes over the
+//! The default budget is half a second per title frame for the first
+//! [`WARMUP_FRAMES`] (boot and one-shot init passes compile reliably), then
+//! [`STEADY_MS`]: half a second in every frame that met a new pipeline made
+//! the intro and menus stutter while a cold library was filled. A pass the
+//! title runs only once and whose pipeline takes longer is lost.
+//! Passes over the
 //! screen (no vertex input, no depth) have workers and a longer budget of
 //! their own ([`screen_budget`]): the title fills its lighting tables with
 //! such draws once, at the world's first frame, and behind a world's worth of
 //! pipelines they were dropped; that run had no lamps and no diffuse light to
 //! its end (run textures-d2, the first after a new translation; Belobug
 //! 18e57db8 found the same).
+//! Every compute pipeline is started when the title creates it, so the
+//! workers have usually made it by its first dispatch.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
@@ -44,6 +50,7 @@ pub(crate) struct Pending {
     /// A pass over the screen ([`GraphicsState::screen_pass`]) or a confirmed
     /// opening-scene / bake producer that must never sit behind cold RT shaders.
     screen: bool,
+<<<<<<< HEAD
     /// Confirmed first-scene / bake producer prepared early even on a cold cache.
     scene_input: bool,
     /// Why this pipeline is intentionally skipped (e.g. RT resolve without BVH).
@@ -98,6 +105,14 @@ fn scene_input(shaders: &[Arc<Shader>]) -> bool {
                 | "369cbe906ea72764"
         ) || crate::draw::BAKE_PIXEL_SHADERS.contains(&s.hash.as_str())
     })
+||||||| merged common ancestors
+=======
+    /// First title frame in which a recording thread waited on this pipeline
+    /// (`u64::MAX`: never waited yet). Caps waiting to one frame per pipeline
+    /// so a slow or hung shader compiles asynchronously without stalling every
+    /// subsequent frame for the full wait budget.
+    waited_frame: AtomicU64,
+>>>>>>> origin/exp/vibr-head
 }
 
 // SAFETY: D3D12 objects are free-threaded; the graphics state (whose input
@@ -130,11 +145,17 @@ impl Pending {
             made: OnceLock::new(),
             key: key.finalize().to_hex()[..32].to_owned(),
             used: AtomicBool::new(false),
+            waited_frame: AtomicU64::new(u64::MAX),
         }
     }
 
     pub(super) fn key(&self) -> &str {
         &self.key
+    }
+
+    /// A compute pipeline: one program, of the compute stage.
+    fn compute(&self) -> bool {
+        matches!(self.shaders.as_slice(), [cs] if cs.stage == "compute")
     }
 
     fn make(&self) {
@@ -182,17 +203,24 @@ pub(crate) fn hashes(p: &Pending) -> String {
 /// Signalled whenever a worker has made a pipeline.
 static DONE: (Mutex<()>, Condvar) = (Mutex::new(()), Condvar::new());
 
-/// Waiting allowed per title frame, over all threads.
-fn wait_budget() -> Duration {
-    static BUDGET: OnceLock<Duration> = OnceLock::new();
-    *BUDGET.get_or_init(|| {
+/// Title frames that get [`WARMUP_MS`] of waiting.
+const WARMUP_FRAMES: u64 = 60;
+const WARMUP_MS: u64 = 500;
+/// Waiting per frame after the warm-up frames.
+const STEADY_MS: u64 = 8;
+
+/// Waiting allowed in title frame `frame`, over all threads;
+/// `VICTORY_PIPELINE_WAIT_MS` sets it for every frame.
+fn wait_budget(frame: u64) -> Duration {
+    static BUDGET: OnceLock<Option<Duration>> = OnceLock::new();
+    let set = *BUDGET.get_or_init(|| {
         let millis = std::env::var("VICTORY_PIPELINE_WAIT_MS")
             .ok()
-            .and_then(|value| value.trim().parse::<u64>().ok())
-            .unwrap_or(500);
-        tracing::info!(millis, "host pipeline wait budget per frame");
-        Duration::from_millis(millis)
-    })
+            .and_then(|value| value.trim().parse::<u64>().ok());
+        tracing::info!(?millis, "host pipeline wait budget per frame (none: {WARMUP_MS} ms, then {STEADY_MS} ms)");
+        millis.map(Duration::from_millis)
+    });
+    set.unwrap_or(Duration::from_millis(if frame < WARMUP_FRAMES { WARMUP_MS } else { STEADY_MS }))
 }
 
 /// As [`wait_budget`], for passes over the screen (`VICTORY_SCREEN_WAIT_MS`,
@@ -231,7 +259,19 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
     }
     if p.made.get().is_none() {
         start(p, REQUESTED);
-        wait(p, crate::frame::current());
+        let frame = crate::frame::current();
+        let first = match p.waited_frame.compare_exchange(
+            u64::MAX,
+            frame,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => frame,
+            Err(f) => f,
+        };
+        if first == frame {
+            wait(p, frame);
+        }
     }
     p.made.get()?.as_ref()
 }
@@ -247,13 +287,27 @@ pub(crate) fn now(p: &Arc<Pending>) -> bool {
 }
 
 /// At the title's creation of a pipeline: starts it at once if an earlier
+<<<<<<< HEAD
 /// run drew with it (during loading, so the world's first frames find it),
 /// or if it is a confirmed opening-scene / bake producer.
+||||||| merged common ancestors
+/// run drew with it (during loading, so the world's first frames find it).
+=======
+/// run drew with it (during loading, so the world's first frames find it),
+/// and every compute pipeline: its first dispatch waits for it, and a frame
+/// that first dispatches hundreds of them (the world's) waited minutes.
+>>>>>>> origin/exp/vibr-head
 pub(crate) fn early(p: &Arc<Pending>) {
+<<<<<<< HEAD
     if p.left_out.is_some() {
         return;
     }
     if !p.shaders.is_empty() && (p.scene_input || super::library::wanted_early(&p.key)) {
+||||||| merged common ancestors
+    if !p.shaders.is_empty() && super::library::wanted_early(&p.key) {
+=======
+    if !p.shaders.is_empty() && (p.compute() || super::library::wanted_early(&p.key)) {
+>>>>>>> origin/exp/vibr-head
         super::library::EARLY.fetch_add(1, Ordering::Relaxed);
         start(p, if p.scene_input { REQUESTED } else { EARLY });
     }
@@ -275,7 +329,7 @@ fn shared_budget() -> bool {
 /// Waits for `p` while frame `frame` has budget left.
 fn wait(p: &Pending, frame: u64) {
     let screen = p.screen && screens_first();
-    let budget = if screen { screen_budget() } else { wait_budget() };
+    let budget = if screen { screen_budget() } else { wait_budget(frame) };
     if budget.is_zero() {
         return;
     }
@@ -468,6 +522,10 @@ fn next(screens_only: bool) -> Arc<Pending> {
     }
 }
 
+/// Stack of each pipeline worker: room for the driver's shader compiler,
+/// which runs on it (reserved address space; committed only as used).
+const PIPELINE_STACK: usize = 64 << 20;
+
 /// How many workers make pipelines: `asked` (`VICTORY_PIPELINE_WORKERS`, 1 to
 /// 64), else two thirds of the logical processors, 2 to 16. They run below the
 /// title's own threads, and a cold cache queues hundreds at once.
@@ -501,6 +559,10 @@ fn workers() -> bool {
             let screens_only = i >= workers;
             let spawned = std::thread::Builder::new()
                 .name(format!("victory-pipelines-{i}"))
+                // The driver compiles pipelines on this thread, recursively:
+                // NVIDIA's compiler (nvgpucomp64) overflowed the default 2 MB
+                // on a world compute program and refused it as out of memory.
+                .stack_size(PIPELINE_STACK)
                 .spawn(move || {
                     // Below the title's own threads (loading, recording),
                     // and the streaming one, which is below normal itself
@@ -659,5 +721,24 @@ mod tests {
         assert!(Arc::ptr_eq(&queue.pop(true, 1).unwrap(), &screen));
         assert!(queue.pop(true, 1).is_none());
         assert!(Arc::ptr_eq(&queue.pop(false, 1).unwrap(), &world));
+    }
+
+    #[test]
+    fn slow_pipeline_waits_at_most_one_frame() {
+        let mut p = Pending::new(Vec::new(), None);
+        p.key = "slow-pipeline-one-frame-test".to_owned();
+        // Simulate a pipeline already claimed by a worker that has not finished.
+        p.queue_state.store(MAKING, Ordering::Relaxed);
+        let first_frame = crate::frame::current();
+        // Pretend it already exhausted its wait on another frame (avoid u64::MAX sentinel).
+        let earlier_frame = if first_frame == 0 { 1 } else { first_frame - 1 };
+        p.waited_frame.store(earlier_frame, Ordering::Relaxed);
+        let p = Arc::new(p);
+        let started = Instant::now();
+        assert!(ready(&p).is_none());
+        assert!(
+            started.elapsed() < Duration::from_millis(50),
+            "subsequent frames must not block for the pipeline wait budget"
+        );
     }
 }

@@ -64,6 +64,9 @@ pub(crate) struct Shader {
     /// Its part in the stand-in for the indirect light.
     #[cfg(windows)]
     pub(crate) ambient: Option<crate::ambient::Role>,
+    /// A pixel program of the title's decoration bake ([`bakes`]).
+    #[cfg(windows)]
+    pub(crate) bakes: bool,
     #[cfg(windows)]
     translated: OnceLock<Option<Translated>>,
 }
@@ -117,7 +120,17 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
                 #[cfg(windows)]
                 ambient: (stage == "compute").then(|| crate::ambient::role(bytes)).flatten(),
                 #[cfg(windows)]
+<<<<<<< HEAD
                 translated: OnceLock::new(),
+||||||| merged common ancestors
+                translated: OnceLock::new(),
+                #[cfg(windows)]
+                walks: OnceLock::new(),
+=======
+                bakes: bakes(bytes),
+                #[cfg(windows)]
+                translated: OnceLock::new(),
+>>>>>>> origin/exp/vibr-head
             })
         })
         .clone()
@@ -293,6 +306,99 @@ fn of_builder(shaders: &[Arc<Shader>]) -> bool {
         .is_some_and(|programs| programs.iter().any(victory_shader::spill::is_spilled))
 }
 
+/// Whether a compute container is one of the title's `bvh_skinning`
+/// programs: they pose every animated mesh (and its motion) once more, only
+/// for the ray-tracing structures. With every ray a miss
+/// (`VICTORY_RT_MISS=1`) and the structure builder off, nothing reads what
+/// they write, and they were the largest share of the card's time in a
+/// cutscene (~6 ms a dispatch, hundreds a frame).
+///
+/// The container holds its entry point's name, not the effect's: all 30
+/// entry points named `CSComputeSkinning*` in the title's shader file are
+/// `bvh_skinning`'s; the picture's own skinning is `CS_PedStandardSkinning*`,
+/// `CS_PosOnlyLodSkinning*` and the cloth's `computeclothSkinning`.
+///
+/// Two more kinds only serve rays (after codec-d/cool_fox `make.rs`):
+/// `CS_RaytracingResolve*` shades what a ray hit (some 1,000 programs) and
+/// `CS_ScreenProbes_ActivateRays*` picks the screen probes that cast rays.
+///
+/// And the tracing itself against the structures, with the hair's geometry
+/// made for them (8 % of the card's time in the opening cutscene): the
+/// `bvh_skinning_smh` program `CSGenerateHairVB`, the screen probes'
+/// `CS_ScreenProbes_TraceRays*_BVH*` and the reflections'
+/// `CS_RaytraceVBuffer*`. Their `Fallback` and `Voxels` forms march through
+/// the title's voxels, not the structures, and light the picture: they run.
+#[cfg(windows)]
+fn for_rays(bytes: &[u8]) -> RayOnly {
+    let has = |name: &[u8]| bytes.windows(name.len()).any(|w| w == name);
+    if has(b"CSComputeSkinning") || has(b"CSGenerateHairVB") {
+        RayOnly::Skin
+    } else if has(b"CS_RaytracingResolve") {
+        RayOnly::Resolve
+    } else if has(b"CS_ScreenProbes_ActivateRays") {
+        RayOnly::Activate
+    } else if (has(b"CS_ScreenProbes_TraceRays") && has(b"_BVH")) || (has(b"CS_RaytraceVBuffer") && !has(b"Voxels")) {
+        RayOnly::Trace
+    } else {
+        RayOnly::No
+    }
+}
+
+/// What a compute pipeline does only for rays ([`for_rays`]).
+#[cfg(windows)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RayOnly {
+    No,
+    Skin,
+    Resolve,
+    Activate,
+    Trace,
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn ray_programs_are_known_by_name() {
+    assert_eq!(for_rays(b"..\0CSComputeSkinningRigidVelocity_1c34db0a_Wrapped\0.."), RayOnly::Skin);
+    assert_eq!(for_rays(b"..\0CS_PedStandardSkinning_3_00aa11bb_Wrapped\0.."), RayOnly::No);
+    assert_eq!(for_rays(b"computeclothSkinning"), RayOnly::No);
+    assert_eq!(for_rays(b"..\0CS_RaytracingResolve_Opaque_12345678_Wrapped\0.."), RayOnly::Resolve);
+    assert_eq!(for_rays(b"..\0CS_ScreenProbes_ActivateRays_0_Wrapped\0.."), RayOnly::Activate);
+    assert_eq!(for_rays(b"..\0CSGenerateHairVB_c88a8f19_Wrapped\0.."), RayOnly::Skin);
+    assert_eq!(for_rays(b"..\0CS_ScreenProbes_TraceRays_RayBinning_BVH_Mixed\0.."), RayOnly::Trace);
+    assert_eq!(for_rays(b"..\0CS_ScreenProbes_TraceRays_Voxels\0.."), RayOnly::No);
+    assert_eq!(for_rays(b"..\0CS_ScreenProbes_TraceRays_Fallback\0.."), RayOnly::No);
+    assert_eq!(for_rays(b"..\0CS_RaytraceVBuffer_ShaderBinning_WithFar\0.."), RayOnly::Trace);
+    assert_eq!(for_rays(b"..\0CS_RaytraceVBuffer_Voxels_RayBinning\0.."), RayOnly::No);
+}
+
+/// Whether a dispatch of `this` is left out because it only serves rays,
+/// and nothing they could hit is there: every ray is a miss
+/// (`VICTORY_RT_MISS=1`) and the structure builder is off. Each kind runs
+/// anyway with its switch: `VICTORY_RT_SKIN=1`, `VICTORY_RT_RESOLVE=1`, `VICTORY_RT_TRACE=1`,
+/// `VICTORY_ACTIVATE_RAYS=1`.
+#[cfg(windows)]
+pub(crate) fn skips_rt_skin(this: This) -> bool {
+    fn off(switch: &str) -> bool {
+        victory_shader::emit::rt_miss()
+            && std::env::var_os("VICTORY_BVH_BUILDER").is_none_or(|v| v != "1")
+            && std::env::var_os(switch).is_none_or(|v| v != "1")
+    }
+    static SKIN: OnceLock<bool> = OnceLock::new();
+    static RESOLVE: OnceLock<bool> = OnceLock::new();
+    static ACTIVATE: OnceLock<bool> = OnceLock::new();
+    static TRACE: OnceLock<bool> = OnceLock::new();
+    if this.is_null() {
+        return false;
+    }
+    match pipeline(this).rt_only {
+        RayOnly::No => false,
+        RayOnly::Skin => *SKIN.get_or_init(|| off("VICTORY_RT_SKIN")),
+        RayOnly::Resolve => *RESOLVE.get_or_init(|| off("VICTORY_RT_RESOLVE")),
+        RayOnly::Activate => *ACTIVATE.get_or_init(|| off("VICTORY_ACTIVATE_RAYS")),
+        RayOnly::Trace => *TRACE.get_or_init(|| off("VICTORY_RT_TRACE")),
+    }
+}
+
 /// `VICTORY_BVH_QUARANTINE=1`: what the structure builder's stages store
 /// stays in the host's copies and is not copied back into title memory. A
 /// check for a first run of the whole builder: a stage that stores where
@@ -421,6 +527,10 @@ struct Pipeline {
     /// One of the ray-tracing structure builder's ([`Builder`]).
     #[cfg(windows)]
     builder: bool,
+    /// One of the title's passes that only serve rays
+    /// ([`for_rays`]).
+    #[cfg(windows)]
+    rt_only: RayOnly,
 }
 const _: () = assert!(offset_of!(Pipeline, packet) == 0x10);
 
@@ -588,6 +698,8 @@ fn hand_out(
         host,
         #[cfg(windows)]
         builder,
+        #[cfg(windows)]
+        rt_only: shaders.iter().filter(|s| s.stage == "compute").map(|s| for_rays(&s.container)).find(|k| *k != RayOnly::No).unwrap_or(RayOnly::No),
         shaders,
         bound: std::sync::atomic::AtomicBool::new(false),
     });
@@ -909,4 +1021,25 @@ mod tests {
             );
         }
     }
+}
+
+/// Whether a container is a pixel program of the title's decoration bake,
+/// by its name inside (`PS_DecorationBlend_*`, `PS_BakeDecorations_*`: 51
+/// of them). A list of four hashes ([`crate::draw`]'s) missed the one the
+/// cutscene's faces are baked with (`PS_DecorationBlend_0011`,
+/// fcee612943c008e0): its sources were not on the card and the face came
+/// out black.
+#[cfg(windows)]
+fn bakes(bytes: &[u8]) -> bool {
+    [&b"PS_DecorationBlend_"[..], b"PS_BakeDecorations_"]
+        .iter()
+        .any(|name| bytes.windows(name.len()).any(|w| w == *name))
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn bake_programs_are_known_by_name() {
+    assert!(bakes(b"..\0PS_DecorationBlend_0011_ff00f5de_Wrapped\0.."));
+    assert!(bakes(b"PS_BakeDecorations_0100_583f45fe_Wrapped"));
+    assert!(!bakes(b"PS_PedSkin_0001"));
 }
