@@ -1811,7 +1811,10 @@ impl State {
                 // (Of a program that only walks structures, the structures'
                 // views below: its root views are constants and tables.)
                 Root::View(address) if use_ != crate::memory::Use::Reads => addresses.push(*address),
-                Root::Constants(values) => constants.extend_from_slice(values),
+                // Only the structure builder passes structures in constants;
+                // elsewhere what looks like an address is mostly not one, and
+                // each took a numbered copy.
+                Root::Constants(values) if builder => constants.extend_from_slice(values),
                 _ => {}
             }
         }
@@ -1820,7 +1823,11 @@ impl State {
                 addresses.push(self.view_address(compute, u.slot, u.dword));
             }
         }
-        crate::memory::ready(list, heap, &addresses, &written, &constants, use_, t.threads)
+        // The programs that walk the structures only load by address: they
+        // must not declare every copy written (the builder's quarantine, and
+        // the cost of comparing them all).
+        let written: &[u64] = if builder { &written } else { &[] };
+        crate::memory::ready(list, heap, &addresses, written, &constants, use_, t.threads)
     }
 
     /// The bound heap holding `handle`.
@@ -2567,11 +2574,11 @@ impl State {
         }
         // All the spans in under one lock of the list: some 4,600 a frame.
         crate::shadow::Shadow::refresh_many(list, eligible);
-        HEAP_BUFFER_PASSES.fetch_add(1, Ordering::Relaxed);
-        HEAP_BUFFER_MICROS.fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
         let textures_began = std::time::Instant::now();
         self.heap_textures(list, heap, host);
         HEAP_PASS_PARTS[0].fetch_add(textures_began.elapsed().as_micros() as u64, Ordering::Relaxed);
+        HEAP_BUFFER_PASSES.fetch_add(1, Ordering::Relaxed);
+        HEAP_BUFFER_MICROS.fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
         static LOGGED: AtomicU64 = AtomicU64::new(0);
         // The first pass and every growth of the set by half.
         let seen = LOGGED.load(Ordering::Relaxed);
@@ -3090,7 +3097,7 @@ impl State {
                 match memory {
                     Some((at, len)) => {
                         let print = crate::texture::fingerprint(at, len);
-                        host.texture_slot_recheck(index, write, frame, (at, len), print);
+                        host.texture_slot_recheck(index, frame, (at, len), print);
                     }
                     None => host.texture_slot_done(index, write, again),
                 }
@@ -3130,9 +3137,7 @@ impl State {
                 host.texture_slot_show_after(list, index, handle);
             }
             #[cfg(feature = "diagnostics")]
-            if crate::book::on()
-                && crate::pool::fresh(texture)
-            {
+            if crate::book::on() && crate::pool::fresh(texture) {
                 use windows::core::Interface;
                 let raw = texture.as_raw() as usize;
                 let asked = crate::host::submissions();
