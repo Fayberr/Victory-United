@@ -807,7 +807,7 @@ mod tests {
                 panic!("not an SMEM instruction");
             };
             assert_eq!(got, Some(data), "{words:08x?}");
-            assert_eq!(got_base, base, "{words:08x?}");
+            assert_eq!(got_base, Some(base), "{words:08x?}");
             assert_eq!(cache, Cache::default(), "{words:08x?}");
         }
     }

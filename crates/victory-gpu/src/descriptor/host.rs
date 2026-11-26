@@ -7332,6 +7332,7 @@ mod record_print_tests {
         // A record of zeros is told from "never looked at" by the caller's `| 1`.
         assert_ne!(record_print(&[0u8; 32]) | 1, 0);
     }
+}
 
 #[cfg(test)]
 mod own_copy_tests {
