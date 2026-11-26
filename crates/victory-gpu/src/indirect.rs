@@ -656,7 +656,6 @@ void main() {
         event: HANDLE,
         clamp: Clamp,
         worker: Clamp,
-<<<<<<< HEAD
         /// Last, so given up last.
         _turn: std::sync::MutexGuard<'static, ()>,
     }
@@ -670,15 +669,10 @@ void main() {
     pub(crate) fn warp_turn() -> std::sync::MutexGuard<'static, ()> {
         static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
         TURN.lock().unwrap_or_else(|e| e.into_inner())
-||||||| 085ee7c4c
-=======
-        _serial: std::sync::MutexGuard<'static, ()>,
->>>>>>> origin/exp/vitoriabr-head
     }
 
     impl WarpHarness {
         fn new() -> Option<Self> {
-<<<<<<< HEAD
             Self::on(true)
         }
 
@@ -686,14 +680,6 @@ void main() {
         fn on(software: bool) -> Option<Self> {
             let turn = warp_turn();
             // SAFETY: plain DXGI query and D3D12 test harness setup.
-||||||| 085ee7c4c
-            // SAFETY: plain DXGI WARP query and D3D12 test harness setup.
-=======
-            let serial = crate::host::WARP_SERIAL
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            // SAFETY: plain DXGI WARP query and D3D12 test harness setup.
->>>>>>> origin/exp/vitoriabr-head
             unsafe {
                 let factory: IDXGIFactory4 =
                     CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)).ok()?;
@@ -735,12 +721,7 @@ void main() {
                     event,
                     clamp,
                     worker,
-<<<<<<< HEAD
                     _turn: turn,
-||||||| 085ee7c4c
-=======
-                    _serial: serial,
->>>>>>> origin/exp/vitoriabr-head
                 })
             }
         }
@@ -1006,13 +987,7 @@ void main() {
                 warp.list.SetComputeRootShaderResourceView(1, now_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(2, hashes_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(3, differs_gpu);
-<<<<<<< HEAD
-                warp.list.Dispatch(PIECES, 1, 1);
-||||||| 085ee7c4c
-                warp.list.Dispatch(PIECES.div_ceil(64), 1, 1);
-=======
                 warp.list.Dispatch(groups(PIECES), 1, 1);
->>>>>>> origin/exp/vitoriabr-head
             }
             warp.submit_and_wait();
             // SAFETY: as above.
@@ -1052,19 +1027,6 @@ void main() {
         assert_eq!(run(&mut warp, 2), [0, 0, 0]);
     }
 
-<<<<<<< HEAD
-    /// What the passes over copies in the card's memory cost on the card
-    /// (ignored: a measurement): rounds of a few passes of some pieces and a
-    /// wait, as a frame has them. `VICTORY_BENCH_CS=<file>` times another
-    /// source of the shader.
-||||||| 085ee7c4c
-    /// The fetch inside flights (`crate::host::CARD_FETCH`), on the software
-    /// adapter, in one list behind the compare as `Host::card_before`
-    /// records it: each flagged piece takes a ticket and, while it is
-    /// within the slots of the lowest ticket in the air, its bytes go to
-    /// its slot; an unflagged piece's entry says so; a ticket past the
-    /// slots is written but copies nothing.
-=======
     /// The merge on the card (`crate::host::CARD_MERGE`), on the software
     /// adapter, with the masks `crate::shadow` lays out: random bytes on
     /// the card's side and on the CPU's, and random runs of a few bytes
@@ -1183,13 +1145,10 @@ void main() {
         assert!(unsafe { std::slice::from_raw_parts(title_ptr.cast_const(), size) } == &title[..]);
     }
 
-    /// The fetch inside flights (`crate::host::CARD_FETCH`), on the software
-    /// adapter, in one list behind the compare as `Host::card_before`
-    /// records it: each flagged piece takes a ticket and, while it is
-    /// within the slots of the lowest ticket in the air, its bytes go to
-    /// its slot; an unflagged piece's entry says so; a ticket past the
-    /// slots is written but copies nothing.
->>>>>>> origin/exp/vitoriabr-head
+    /// What the passes over copies in the card's memory cost on the card
+    /// (ignored: a measurement): rounds of a few passes of some pieces and a
+    /// wait, as a frame has them. `VICTORY_BENCH_CS=<file>` times another
+    /// source of the shader.
     #[test]
     #[ignore]
     fn card_compare_costs() {
@@ -2690,14 +2649,7 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         for i in 0..RECORDS as usize {
             let rec = &out_words[i * 6..(i + 1) * 6];
             if rec[0] == (1 << 22) && rec[1] == 16 {
-<<<<<<< HEAD
-                kept += 1;
-||||||| 085ee7c4c
-                assert!(i == 1 || i == 2, "the first two real draws fit the budget");
-                kept += 1;
-=======
                 kept.push(i);
->>>>>>> origin/exp/vitoriabr-head
             } else {
                 assert_eq!((rec[0], rec[1]), (0, 0), "excess draw must be zeroed");
                 zeroed += 1;
@@ -3669,13 +3621,6 @@ void work() {
         heap_pairs: [[Option<ID3D12DescriptorHeap>; 2]; 2],
         tables: [D3D12_GPU_DESCRIPTOR_HANDLE; 2],
         targets: [D3D12_CPU_DESCRIPTOR_HANDLE; 2],
-<<<<<<< HEAD
-||||||| 085ee7c4c
-        depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
-=======
-        #[allow(dead_code)]
-        depth_written: D3D12_CPU_DESCRIPTOR_HANDLE,
->>>>>>> origin/exp/vitoriabr-head
         depth_tested: D3D12_CPU_DESCRIPTOR_HANDLE,
         stamps: ID3D12QueryHeap,
         back: ID3D12Resource,

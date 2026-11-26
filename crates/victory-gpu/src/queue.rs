@@ -1468,8 +1468,6 @@ extern "system" fn present(
     plane_parameters: *const Plane,
     _parameters: *const u8,
 ) -> HRESULT {
-<<<<<<< HEAD
-||||||| 085ee7c4c
     #[cfg(windows)]
     let presenting = std::time::Instant::now();
     let hr = present_now(this, planes, plane_parameters);
@@ -1494,55 +1492,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
     // the queue holds, and nothing is run or waited for here.
     #[cfg(windows)]
     let sent_behind = present_behind() && send_behind(this, planes, plane_parameters);
-=======
-    #[cfg(windows)]
-    let presenting = std::time::Instant::now();
-    let hr = present_now(this, planes, plane_parameters);
-    #[cfg(windows)]
-    {
-        crate::framelog::add(crate::framelog::T::PresentUs, presenting.elapsed().as_micros() as u64);
-        crate::framelog::frame();
-        #[cfg(feature = "diagnostics")]
-        crate::fence::pace::frame();
-    }
-    hr
-}
-
-/// The second plane's host copy, its GPU state, and the title resource, when
-/// the present carries one (`crate::compose`). The state is left in
-/// `COPY_SOURCE` for the compose pass; the caller restores it after showing.
-#[cfg(windows)]
-fn second_plane(
-    planes: u32,
-    plane_parameters: *const Plane,
-) -> Option<(This, std::sync::Arc<crate::resource::HostTexture>, u32)> {
-    if planes < 2 || plane_parameters.is_null() {
-        return None;
-    }
-    // SAFETY: the title passes `planes` plane descriptions.
-    let plane = unsafe { plane_parameters.add(1).as_ref() }?;
-    if plane.count == 0 || plane.resources.is_null() {
-        return None;
-    }
-    // SAFETY: the plane lists `count` resources.
-    let resource = unsafe { *plane.resources };
-    let copy = crate::resource::host_copy(resource)?;
-    let (_, before) = crate::resource::host_transition(resource, 0x800)?;
-    Some((resource, copy, before))
-}
-
-fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESULT {
-    #[cfg(windows)]
-    let presenting = std::time::Instant::now();
-    #[cfg(all(windows, feature = "diagnostics"))]
-    crate::copystat::present_begins();
-    #[cfg(all(windows, feature = "diagnostics"))]
-    crate::profile::frame();
-    // With `present_behind`: the frame is shown by our thread, behind what
-    // the queue holds, and nothing is run or waited for here.
-    #[cfg(windows)]
-    let sent_behind = present_behind() && send_behind(this, planes, plane_parameters);
->>>>>>> origin/exp/vitoriabr-head
     #[cfg(not(windows))]
     let _ = this;
     #[cfg(all(windows, feature = "diagnostics"))]
@@ -1663,7 +1612,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
         const COPY_SOURCE: u32 = 0x800;
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
-<<<<<<< HEAD
         let overlay = (planes > 1)
             .then(|| overlay_resource(plane_parameters))
             .flatten()
@@ -1681,18 +1629,6 @@ fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESU
             overlay.as_ref().map(|(_, tex, st)| (*tex, *st)),
             Shown { frame, resource: resource as usize },
         );
-||||||| 085ee7c4c
-        let shown = host.present(texture, state, frame);
-=======
-        let second = second_plane(planes, plane_parameters);
-        let over = second
-            .as_ref()
-            .map(|(_, copy, before)| (&copy.texture, *before));
-        let shown = host.present_over(texture, state, over, frame);
-        if let Some((resource, _, before)) = second {
-            crate::resource::host_transition(resource, before);
-        }
->>>>>>> origin/exp/vitoriabr-head
         crate::resource::host_transition(resource, state);
         if let Some((over_res, _, over_state)) = overlay {
             crate::resource::host_transition(over_res, over_state);
