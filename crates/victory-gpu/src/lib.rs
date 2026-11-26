@@ -73,26 +73,21 @@ pub mod object;
 mod over;
 pub mod pipeline;
 #[cfg(windows)]
-<<<<<<< HEAD
-pub mod precompile;
+mod picked;
 #[cfg(windows)]
 mod plaincopy;
-#[cfg(windows)]
-||||||| a26859fc
-=======
-mod picked;
 #[cfg(windows)]
 mod pool;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod popwatch;
 #[cfg(windows)]
->>>>>>> avatar/main
+pub mod precompile;
+#[cfg(windows)]
 mod primitive;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod profile;
 pub mod query;
 pub mod queue;
-<<<<<<< HEAD
 #[cfg(windows)]
 mod queue2;
 #[cfg(windows)]
@@ -101,22 +96,15 @@ mod ranges;
 mod readback;
 #[cfg(windows)]
 mod rebar;
-||||||| a26859fc
-=======
 #[cfg(all(windows, feature = "diagnostics"))]
 pub mod replay;
->>>>>>> avatar/main
 pub mod resource;
 pub mod root;
 #[cfg(windows)]
-<<<<<<< HEAD
 mod census;
 #[cfg(windows)]
-||||||| a26859fc
-=======
 mod safecopy;
 #[cfg(windows)]
->>>>>>> avatar/main
 mod sampler;
 #[cfg(windows)]
 pub mod shader_cache;
@@ -158,26 +146,12 @@ pub fn frame_phase() -> u32 {
     copystat::phase()
 }
 #[cfg(windows)]
-<<<<<<< HEAD
 pub use census::title_memory_reserved;
 #[cfg(windows)]
-pub use inplace::{title_memory_freeing, title_memory_section, title_memory_view};
-||||||| a26859fc
-pub use inplace::{title_memory_freeing, title_memory_section, title_memory_view};
-=======
 pub use inplace::{title_memory_freeing, title_memory_section, title_memory_section_gone, title_memory_view};
->>>>>>> avatar/main
 #[cfg(windows)]
 pub use watch::{
-<<<<<<< HEAD
-    title_memory_committed, title_memory_reading, title_memory_remapped, title_memory_remapping,
-    title_memory_written, writing as kernel_will_write,
-||||||| a26859fc
-    title_memory_reading, title_memory_remapped, title_memory_remapping, title_memory_written,
-    writing as kernel_will_write,
-=======
-    kernel_writing, title_memory_allocated, title_memory_freed, title_memory_reading, title_memory_remapped,
-    title_memory_remapping, title_memory_splitting, title_memory_unmapping, title_memory_written,
-    writing as kernel_will_write,
->>>>>>> avatar/main
+    kernel_writing, title_memory_allocated, title_memory_committed, title_memory_freed,
+    title_memory_reading, title_memory_remapped, title_memory_remapping, title_memory_splitting,
+    title_memory_unmapping, title_memory_written, writing as kernel_will_write,
 };
