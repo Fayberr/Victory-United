@@ -136,7 +136,6 @@ fn operands(inst: &Instruction, name: &str, fields: &Fields) -> String {
             soffset,
             cache,
         } => {
-<<<<<<< HEAD
             let data = match (name, data) {
                 ("s_atc_probe" | "s_atc_probe_buffer", Some(Operand::Literal(imm))) => {
                     Some(atc_immediate(*imm))
@@ -167,37 +166,6 @@ fn operands(inst: &Instruction, name: &str, fields: &Fields) -> String {
                 (None, Some(base)) => format!("{base}, {off}"),
                 (None, None) => String::new(),
             };
-||||||| merged common ancestors
-            if let Some(data) = data {
-                let off = match (soffset, offset) {
-                    (Operand::Scalar { code: NULL, .. }, 0) => soffset.to_string(),
-                    (Operand::Scalar { code: NULL, .. }, _) => {
-                        format!("0x{:06x}", offset & 0x1F_FFFF)
-                    }
-                    (_, 0) => soffset.to_string(),
-                    _ => format!("{soffset} offset:0x{:06x}", offset & 0x1F_FFFF),
-                };
-                out = format!("{data}, {base}, {off}");
-            }
-=======
-            if let Some(data) = data {
-                let data = match (name, data) {
-                    ("s_atc_probe" | "s_atc_probe_buffer", Operand::Literal(imm)) => {
-                        atc_immediate(*imm)
-                    }
-                    _ => data.to_string(),
-                };
-                let off = match (soffset, offset) {
-                    (Operand::Scalar { code: NULL, .. }, 0) => soffset.to_string(),
-                    (Operand::Scalar { code: NULL, .. }, _) => {
-                        format!("0x{:06x}", offset & 0x1F_FFFF)
-                    }
-                    (_, 0) => soffset.to_string(),
-                    _ => format!("{soffset} offset:0x{:06x}", offset & 0x1F_FFFF),
-                };
-                out = format!("{data}, {base}, {off}");
-            }
->>>>>>> vibr/main
             flags(&mut out, cache, false);
         }
         Fields::Valu(v) => out = valu(name, v, inst.encoding),
@@ -781,7 +749,6 @@ mod tests {
         );
     }
 
-<<<<<<< HEAD
     /// `s_atc_probe` / `s_atc_probe_buffer`: SDATA is a 7-bit immediate, the
     /// buffer resource is 4 dwords, and GLC/DLC are not operands.
     ///
@@ -845,72 +812,6 @@ mod tests {
         }
     }
 
-||||||| merged common ancestors
-=======
-    /// `s_atc_probe` / `s_atc_probe_buffer`: SDATA is a 7-bit immediate, the
-    /// buffer resource is 4 dwords, and GLC/DLC are not operands.
-    ///
-    /// Words checked with `llvm-mc -arch=amdgcn -mcpu=gfx1030 --disassemble`.
-    /// The offset keeps this printer's 6-digit hex (`0x000064`, not `0x64`).
-    #[test]
-    fn atc_probe_immediate_is_not_a_register() {
-        let cases = [
-            (
-                [0xF498_01C2, 0xFA00_0064],
-                "s_atc_probe 7, s[4:5], 0x000064",
-                Operand::Literal(7),
-                Operand::Scalar { code: 4, dwords: 2 },
-            ),
-            (
-                [0xF498_1FF4, 0x0A00_0001],
-                "s_atc_probe 0x7f, s[104:105], s5 offset:0x000001",
-                Operand::Literal(0x7f),
-                Operand::Scalar {
-                    code: 104,
-                    dwords: 2,
-                },
-            ),
-            (
-                [0xF498_0000, 0xFA00_0000],
-                "s_atc_probe 0, s[0:1], null",
-                Operand::Literal(0),
-                Operand::Scalar { code: 0, dwords: 2 },
-            ),
-            (
-                [0xF49C_01C4, 0xFA00_0020],
-                "s_atc_probe_buffer 7, s[8:11], 0x000020",
-                Operand::Literal(7),
-                Operand::Scalar { code: 8, dwords: 4 },
-            ),
-            (
-                [0xF499_41C2, 0xFA00_0000],
-                "s_atc_probe 7, s[4:5], null",
-                Operand::Literal(7),
-                Operand::Scalar { code: 4, dwords: 2 },
-            ),
-        ];
-        for (words, text, data, base) in cases {
-            assert_eq!(one(&words, false), text, "{words:08x?}");
-            assert_eq!(one(&words, true), text, "{words:08x?}");
-            let mut code: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
-            code.extend(0xBF81_0000u32.to_le_bytes());
-            let inst = &decode(&code).unwrap()[0];
-            let Fields::Smem {
-                data: got,
-                base: got_base,
-                cache,
-                ..
-            } = inst.fields(false)
-            else {
-                panic!("not an SMEM instruction");
-            };
-            assert_eq!(got, Some(data), "{words:08x?}");
-            assert_eq!(got_base, base, "{words:08x?}");
-            assert_eq!(cache, Cache::default(), "{words:08x?}");
-        }
-    }
-
->>>>>>> vibr/main
     #[test]
     fn lane_masks_follow_the_wave_size() {
         let cmp = [0x7C08_06F0]; // v_cmp_gt_f32 with 0.5 and v3
