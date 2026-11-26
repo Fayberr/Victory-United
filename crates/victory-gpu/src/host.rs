@@ -1449,6 +1449,12 @@ impl Host {
 #[cfg(test)]
 pub(crate) static WARP_SERIAL: Mutex<()> = Mutex::new(());
 
+/// Whether the host device is the software adapter (WARP): diagnostics
+/// builds with `VICTORY_D3D12_WARP`.
+pub(crate) fn on_warp() -> bool {
+    cfg!(feature = "diagnostics") && std::env::var_os("VICTORY_D3D12_WARP").is_some()
+}
+
 impl Host {
     /// Whether the host GPU adapter is AMD (vendor ID 0x1002).
     pub(crate) fn is_amd(&self) -> bool {
