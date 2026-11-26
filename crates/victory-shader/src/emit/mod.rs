@@ -1765,7 +1765,7 @@ mod tests {
             let st = crate::structure::structure(&p).unwrap();
             let res = crate::resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
             let io = crate::io::raise(&p, &native).unwrap();
-            super::emit(&c, &native, &p, &st, &io, &res).unwrap().dxil
+            super::emit(&c, &native, &p, &st, &io, &res, Target::ANY).unwrap().dxil
         };
         let (Some(low), Some(high)) = (
             dump_dxil(&dump(false, 0, false)),
@@ -1896,7 +1896,7 @@ mod tests {
             let io = io::raise(&p, &native).unwrap();
             let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
             let was = lower::TEST_HOST_WAVE.replace(Some(host));
-            let result = emit(&container, &native, &p, &st, &io, &res);
+            let result = emit(&container, &native, &p, &st, &io, &res, Target::ANY);
             lower::TEST_HOST_WAVE.set(was);
             result.unwrap().dxil
         };
@@ -2078,7 +2078,7 @@ mod tests {
             let st = structure::structure(&p)?;
             let res = resource::track(&p, &native.layout, native.stage, Some(&st))?;
             let io = io::raise(&p, &native)?;
-            let out = emit(&c, &native, &p, &st, &io, &res)?;
+            let out = emit(&c, &native, &p, &st, &io, &res, Target::ANY)?;
             #[cfg(windows)]
             if let Ok(mut v) = super::validator::Validator::load(
                 super::validator::Validator::default_path().as_deref(),
@@ -2179,7 +2179,7 @@ mod tests {
         let st = structure::structure(&p).unwrap();
         let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
         let io = io::raise(&p, &native).unwrap();
-        let out = emit(&c, &native, &p, &st, &io, &res).unwrap();
+        let out = emit(&c, &native, &p, &st, &io, &res, Target::ANY).unwrap();
 
         let sampler = StaticSampler::from_words([0; 4]);
         let comparison = StaticSampler {
@@ -2243,7 +2243,7 @@ mod tests {
             let st = structure::structure(&p).unwrap();
             let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
             let io = io::raise(&p, &native).unwrap();
-            emit(&c, &native, &p, &st, &io, &res).unwrap().dxil
+            emit(&c, &native, &p, &st, &io, &res, Target::ANY).unwrap().dxil
         };
         let late = emitted(&color, el("SV_Target", 16, 4), 0x50);
         let early = emitted(&color, el("SV_Target", 16, 4), 0x1050);
@@ -2348,7 +2348,7 @@ mod tests {
         let st = structure::structure(&p).unwrap();
         let container = crate::dxbc::build(&[]);
         let c = Container::parse(&container).unwrap();
-        emit(&c, &native, &p, &st, &io, &res).map(|_| ())
+        emit(&c, &native, &p, &st, &io, &res, Target::ANY).map(|_| ())
     }
 
     /// The high dword of a wave64 mask rewritten alone (`s_mov_b32 vcc_hi`
@@ -2625,7 +2625,7 @@ mod tests {
             let st = structure::structure(&p).unwrap();
             let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
             let io = io::raise(&p, &native).unwrap();
-            let out = emit(&c, &native, &p, &st, &io, &res).unwrap();
+            let out = emit(&c, &native, &p, &st, &io, &res, Target::ANY).unwrap();
             #[cfg(windows)]
             if let Ok(mut v) = super::validator::Validator::load(
                 super::validator::Validator::default_path().as_deref(),
@@ -2756,7 +2756,7 @@ mod tests {
         let st = structure::structure(&p).unwrap();
         let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
         let io = io::raise(&p, &native).unwrap();
-        let ps = emit(&c, &native, &p, &st, &io, &res).unwrap();
+        let ps = emit(&c, &native, &p, &st, &io, &res, Target::ANY).unwrap();
         if let Some(path) = super::validator::Validator::default_path() {
             let mut v = super::validator::Validator::load(Some(&path)).unwrap();
             v.validate(&mut ps.dxil.clone()).unwrap();
@@ -2883,7 +2883,7 @@ mod tests {
         let st = structure::structure(&p)?;
         let res = resource::track(&p, &native.layout, native.stage, Some(&st))?;
         let io = io::raise(&p, &native)?;
-        emit(&c, &native, &p, &st, &io, &res)
+        emit(&c, &native, &p, &st, &io, &res, Target::ANY)
     }
 
     /// A primitive export's corners are 9-bit indices: the edge flag above
@@ -3126,7 +3126,7 @@ mod tests {
         let res = crate::resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
         let io = crate::io::raise(&p, &native).unwrap();
         let out =
-            super::emit(&c, &native, &p, &st, &io, &res).expect("a POPS pixel shader translates");
+            super::emit(&c, &native, &p, &st, &io, &res, Target::ANY).expect("a POPS pixel shader translates");
         let host = super::Container::parse(&out.dxil).expect("the emitted shader container parses");
         assert!(host.part(super::FourCC::DXIL).is_some());
         #[cfg(windows)]
@@ -4553,6 +4553,10 @@ mod pr306_tests {
             outputs: Vec::new(),
             prims: Vec::new(),
             mesh_stride: 0,
+            target: crate::emit::Target::ANY,
+            psv: None,
+            console_cf: false,
+            per_lane_only: false,
         })
         .unwrap();
         // The calls that read the SRV: 28 a dword, 7 with four a call.
@@ -4678,6 +4682,7 @@ mod atomic_tests {
                 &structure::structure(&p).unwrap(),
                 &io::raise(&p, &native).unwrap(),
                 &resource::track(&p, &native.layout, native.stage, None).unwrap(),
+                Target::ANY,
             )
             .unwrap();
             let container = Container::parse(&shader.dxil).unwrap();
@@ -4811,7 +4816,7 @@ mod barycentric_tests {
         let res = resource::track(&p, &native.layout, native.stage, None)?;
         let io = io::raise(&p, &native)?;
         let st = structure::structure(&p)?;
-        emit(&c, &native, &p, &st, &io, &res)
+        emit(&c, &native, &p, &st, &io, &res, Target::ANY)
     }
 
     #[test]
@@ -5367,7 +5372,7 @@ mod barycentric_tests {
         let res = resource::track(&p, &native.layout, native.stage, None).unwrap();
         let io = io::raise(&p, &native).unwrap();
         let st = structure::structure(&p).unwrap();
-        emit(&c, &native, &p, &st, &io, &res).unwrap()
+        emit(&c, &native, &p, &st, &io, &res, Target::ANY).unwrap()
     }
 
     fn packed(name: &str, kind: u8, comp: u8, row: u32, col: u8, cols: u8) -> SigElement {
@@ -5552,7 +5557,7 @@ mod barycentric_tests {
         let res = resource::track(&p, &native.layout, native.stage, None)?;
         let io = io::raise(&p, &native)?;
         let st = structure::structure(&p)?;
-        link::with_linked(linked, || emit(&c, &native, &p, &st, &io, &res))
+        link::with_linked(linked, || emit(&c, &native, &p, &st, &io, &res, Target::ANY))
     }
 
     /// `link_mesh`'s pixel side: the inputs the program never reads leave its signature, the
@@ -5674,7 +5679,7 @@ mod barycentric_tests {
         let res = resource::track(&p, &native.layout, native.stage, None)?;
         let io = io::raise(&p, &native)?;
         let st = structure::structure(&p)?;
-        emit(&c, &native, &p, &st, &io, &res)
+        emit(&c, &native, &p, &st, &io, &res, Target::ANY)
     }
 
     /// The `PSV0` input elements: (kind, start row if allocated, mode).
@@ -5981,7 +5986,7 @@ mod lds_bounds_tests {
         let res = resource::track(&p, &native.layout, native.stage, None)?;
         let io = io::raise(&p, &native)?;
         let st = structure::structure(&p)?;
-        let shader = emit(&c, &native, &p, &st, &io, &res)?;
+        let shader = emit(&c, &native, &p, &st, &io, &res, Target::ANY)?;
         #[cfg(windows)]
         if let Ok(mut v) =
             validator::Validator::load(validator::Validator::default_path().as_deref())

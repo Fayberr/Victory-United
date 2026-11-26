@@ -2353,6 +2353,10 @@ fn whole_wave_f64_sum_and_cvt_f32_f64() {
         outputs: Vec::new(),
         prims: Vec::new(),
         mesh_stride: 0,
+        target: crate::emit::Target::ANY,
+        psv: None,
+        console_cf: false,
+        per_lane_only: false,
     })
     .expect("lower");
 
@@ -2495,7 +2499,7 @@ fn ps_sample_coverage_input_reads_coverage_mask() {
     let res =
         resource::track(&p, &native.layout, native.stage, Some(&st)).expect("resource::track");
     let io = io::raise(&p, &native).expect("io::raise");
-    let ps = super::emit(&c, &native, &p, &st, &io, &res).expect("emit");
+    let ps = super::emit(&c, &native, &p, &st, &io, &res, super::Target::ANY).expect("emit");
 
     if let Ok(mut v) = validator::Validator::load(validator::Validator::default_path().as_deref()) {
         let mut copy = ps.dxil.clone();
@@ -2806,6 +2810,10 @@ fn wave_prefix_f32_uses_signed_flag_and_validates() {
         outputs: Vec::new(),
         prims: Vec::new(),
         mesh_stride: 0,
+        target: crate::emit::Target::ANY,
+        psv: None,
+        console_cf: false,
+        per_lane_only: false,
     })
     .unwrap();
     assert!(l.wave_ops, "expected wave prefix lowering");
@@ -3059,6 +3067,10 @@ fn halves_go_through_a_table_as_they_are_and_name_their_views() {
         outputs: Vec::new(),
         prims: Vec::new(),
         mesh_stride: 0,
+        target: crate::emit::Target::ANY,
+        psv: None,
+        console_cf: false,
+        per_lane_only: false,
     })
     .expect("lower");
     assert_eq!(lowered.half_views, [(1, 0), (1, 8)]);
@@ -3218,6 +3230,10 @@ fn half_places_are_the_descriptors_the_program_loads() {
             outputs: Vec::new(),
             prims: Vec::new(),
             mesh_stride: 0,
+            target: crate::emit::Target::ANY,
+            psv: None,
+            console_cf: false,
+            per_lane_only: false,
         })
         .expect("lower")
     };
@@ -3340,6 +3356,10 @@ fn a_format_load_read_as_halves_loads_the_integer() {
             outputs: Vec::new(),
             prims: Vec::new(),
             mesh_stride: 0,
+            target: crate::emit::Target::ANY,
+            psv: None,
+            console_cf: false,
+            per_lane_only: false,
         })
         .expect("lower");
         HostShader {
