@@ -66,6 +66,27 @@ pub(crate) struct Shader {
     pub(crate) ambient: Option<crate::ambient::Role>,
     #[cfg(windows)]
     translated: OnceLock<Option<Translated>>,
+<<<<<<< HEAD
+||||||| 085ee7c4c
+    /// Whether its code walks the ray-tracing structures, once looked at
+    /// ([`Shader::walks`]).
+    #[cfg(windows)]
+    walks: OnceLock<bool>,
+=======
+    /// Whether its code walks the ray-tracing structures, once looked at
+    /// ([`Shader::walks`]).
+    #[cfg(windows)]
+    walks: OnceLock<bool>,
+    /// Its result gets the depth-shaded ambient light fallback ([`crate::ambient`]).
+    #[cfg(windows)]
+    pub(crate) resolves_light: bool,
+    /// Its last reflection output can be bounded by the ambient light.
+    #[cfg(windows)]
+    pub(crate) ends_reflections: bool,
+    /// Its output can provide the sky dome for ambient lighting.
+    #[cfg(windows)]
+    pub(crate) draws_sky: bool,
+>>>>>>> origin/exp/vitoriabr-head
 }
 
 impl std::fmt::Debug for Shader {
@@ -117,7 +138,23 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
                 #[cfg(windows)]
                 ambient: (stage == "compute").then(|| crate::ambient::role(bytes)).flatten(),
                 #[cfg(windows)]
+<<<<<<< HEAD
                 translated: OnceLock::new(),
+||||||| 085ee7c4c
+                walks: OnceLock::new(),
+=======
+                walks: OnceLock::new(),
+                #[cfg(windows)]
+                resolves_light: bytes
+                    .windows(crate::ambient::PROGRAM.len())
+                    .any(|w| w == crate::ambient::PROGRAM),
+                #[cfg(windows)]
+                ends_reflections: bytes
+                    .windows(crate::ambient::REFLECTED.len())
+                    .any(|w| w == crate::ambient::REFLECTED),
+                #[cfg(windows)]
+                draws_sky: bytes.windows(crate::ambient::SKY.len()).any(|w| w == crate::ambient::SKY),
+>>>>>>> origin/exp/vitoriabr-head
             })
         })
         .clone()
@@ -127,18 +164,32 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
 #[cfg(windows)]
 pub(crate) struct Translated {
     pub(crate) host: victory_shader::emit::HostShader,
+<<<<<<< HEAD
     /// A compute program's threads in a group.
     pub(crate) threads: Option<[u32; 3]>,
+||||||| 085ee7c4c
+=======
+    pub(crate) compute_threads: Option<[u32; 3]>,
+>>>>>>> origin/exp/vitoriabr-head
     pub(crate) used: Vec<victory_shader::UsedResource>,
     pub(crate) tables: crate::draw::TablePlan,
     /// Whether the shader's code can store to buffer memory ([`stores`]);
     /// true when its code is not known.
     pub(crate) stores: bool,
+<<<<<<< HEAD
     /// Whether it can store through raw addresses ([`stores_by_address`]).
     pub(crate) stores_by_address: bool,
     /// Whether it stores through a view it picks from the heap by an index,
     /// once asked (`crate::picked`).
     pub(crate) picks: std::sync::atomic::AtomicU8,
+||||||| 085ee7c4c
+=======
+    /// Per [`Translated::used`] entry: a store or atomic names that buffer
+    /// descriptor. Empty when the code is not known.
+    pub(crate) used_written: Vec<bool>,
+    /// A buffer store whose descriptor could not be matched to `used`.
+    pub(crate) write_unknown: bool,
+>>>>>>> origin/exp/vitoriabr-head
 }
 
 #[cfg(windows)]
@@ -208,6 +259,7 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
     };
     let host = crate::shader_cache::host_shader(container)?;
     let stores = programs.is_empty() || programs.iter().any(stores);
+<<<<<<< HEAD
     let threads = programs.iter().find_map(|p| match &p.io {
         victory_shader::native::StageIo::Cs(cs) if cs.threads.iter().all(|&n| n > 0) => Some(cs.threads),
         _ => None,
@@ -233,6 +285,48 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         stores_by_address,
         picks: Default::default(),
     })
+||||||| 085ee7c4c
+    let used = programs
+        .into_iter()
+        .find(|p| {
+            matches!(
+                p.stage,
+                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
+            )
+        })
+        .map(|p| p.used)
+        .unwrap_or_default();
+    Ok(Translated { host, used, stores })
+=======
+    let compute_threads = programs.iter().find_map(|p| match &p.io {
+        victory_shader::native::StageIo::Cs(cs) if cs.threads.iter().all(|&n| n > 0) => {
+            Some(cs.threads)
+        }
+        _ => None,
+    });
+    let chosen = programs.iter().find(|p| {
+        matches!(
+            p.stage,
+            HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
+        )
+    });
+    let used = chosen.map(|p| p.used.to_vec()).unwrap_or_default();
+    let (used_written, mut write_unknown) = chosen
+        .map(|p| written_used(p, &used))
+        .unwrap_or((Vec::new(), !programs.is_empty()));
+    if programs.len() > 1 {
+        // Another stage's table store could name the same descriptor.
+        write_unknown = true;
+    }
+    Ok(Translated {
+        host,
+        compute_threads,
+        used,
+        stores,
+        used_written,
+        write_unknown,
+    })
+>>>>>>> origin/exp/vitoriabr-head
 }
 
 /// The compute pipelines of the console's ray-tracing structure builder
@@ -340,9 +434,34 @@ pub(crate) fn builder_runs() -> bool {
     if b.whole {
         return true;
     }
+<<<<<<< HEAD
     let missing: Vec<String> = b.pipelines.iter().filter(|p| !make::now(p)).map(|p| make::hashes(p)).collect();
     if !missing.is_empty() {
         b.off = b.pipelines.len();
+||||||| 085ee7c4c
+    let missing = b.pipelines.iter().filter(|p| !make::now(p)).count();
+    if missing > 0 {
+        b.off = true;
+=======
+    let missing_pipelines: Vec<Arc<make::Pending>> = b
+        .pipelines
+        .iter()
+        .filter(|p| !make::now(p))
+        .cloned()
+        .collect();
+    let missing = missing_pipelines.len();
+    if missing > 0 {
+        b.off = true;
+        for p in &missing_pipelines {
+            if let Some(shader) = p.shaders.first() {
+                tracing::warn!(
+                    hash = %shader.hash,
+                    stage = %shader.stage,
+                    "the ray-tracing structure builder is missing this program's host pipeline"
+                );
+            }
+        }
+>>>>>>> origin/exp/vitoriabr-head
         tracing::warn!(
             missing = missing.len(),
             of = b.pipelines.len(),
@@ -389,6 +508,7 @@ fn stores(program: &victory_shader::NativeProgram) -> bool {
     })
 }
 
+<<<<<<< HEAD
 /// Whether a console program can store to memory through raw addresses
 /// (`crate::memory`): a flat or global store or atomic, or code that does
 /// not decode. The programs that only walk ray-tracing structures do not,
@@ -406,6 +526,60 @@ fn stores_by_address(program: &victory_shader::NativeProgram) -> bool {
     })
 }
 
+||||||| 085ee7c4c
+=======
+/// Which [`Translated::used`] buffer descriptors a store or atomic names.
+/// The descriptor is the instruction's `rsrc`/SMEM base SGPR; a store whose
+/// descriptor is computed in VGPRs, or names a descriptor outside `used`,
+/// leaves [`Translated::write_unknown`] set.
+#[cfg(windows)]
+fn written_used(
+    program: &victory_shader::NativeProgram,
+    used: &[victory_shader::UsedResource],
+) -> (Vec<bool>, bool) {
+    use victory_shader::gfx10::{Encoding, Fields, Operand, decode};
+    let Ok(code) = decode(&program.code) else {
+        return (vec![true; used.len()], true);
+    };
+    let mut written = vec![false; used.len()];
+    let mut unknown = false;
+    for inst in code.iter() {
+        let is_store = match inst.encoding {
+            Encoding::Mubuf | Encoding::Mtbuf | Encoding::Smem => {
+                inst.name().is_none_or(|n| n.contains("store") || n.contains("atomic"))
+            }
+            _ => false,
+        };
+        if !is_store {
+            continue;
+        }
+        let fields = inst.fields(program.wave64);
+        let descriptor = match &fields {
+            Fields::Buffer { rsrc, .. } => Some(rsrc),
+            Fields::Smem { base, .. } => Some(base),
+            _ => None,
+        };
+        let Some(Operand::Scalar { code, .. }) = descriptor else {
+            unknown = true;
+            continue;
+        };
+        let mut hit = false;
+        for (i, resource) in used.iter().enumerate() {
+            if resource.kind == victory_shader::ResourceType::Uav
+                && resource.lower_bound == u32::from(*code)
+            {
+                written[i] = true;
+                hit = true;
+            }
+        }
+        if !hit {
+            unknown = true;
+        }
+    }
+    (written, unknown)
+}
+
+>>>>>>> origin/exp/vitoriabr-head
 #[repr(C)]
 struct Pipeline {
     object: Object,
@@ -805,6 +979,51 @@ mod tests {
 
     use super::*;
     use crate::object::{S_OK, slot};
+
+    #[cfg(windows)]
+    #[test]
+    fn a_store_marks_only_the_table_descriptor_it_names() {
+        let program = victory_shader::NativeProgram {
+            stage: victory_shader::HwStage::Cs,
+            wave64: false,
+            vgprs: 32,
+            layout: Vec::new(),
+            used: vec![victory_shader::UsedResource {
+                kind: victory_shader::ResourceType::Uav,
+                root: victory_shader::RootType::Table,
+                table_offset_dwords: 0,
+                lower_bound: 0,
+                stride: 1,
+                dwords: 4,
+                user_data: 0,
+                slot: 0,
+            }],
+            io: victory_shader::native::StageIo::Cs(victory_shader::native::ComputeIo {
+                rsrc2: 0,
+                threads: [64, 1, 1],
+            }),
+            code: [
+                0xE078_1000u32, // buffer_store_dwordx4 v[4:7], v1, s[0:3], 0 offen
+                0x8000_0401,
+                0xBF81_0000, // s_endpgm
+            ]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect(),
+        };
+        let (written, unknown) = super::written_used(&program, &program.used);
+        assert_eq!(written, [true]);
+        assert!(!unknown);
+
+        let mut load = program;
+        load.code = [0xBF81_0000u32] // s_endpgm
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        let (written, unknown) = super::written_used(&load, &load.used);
+        assert_eq!(written, [false]);
+        assert!(!unknown);
+    }
 
     fn shaders(p: This) -> Vec<(&'static str, Vec<u8>)> {
         pipeline(p)

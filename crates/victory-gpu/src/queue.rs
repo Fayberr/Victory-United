@@ -315,6 +315,576 @@ pub(crate) fn release_held(all: bool) {
         behind::wake();
         return;
     }
+<<<<<<< HEAD
+||||||| 085ee7c4c
+    release_held_now(all);
+}
+
+/// Whether a submission is only put in its queue's line by the thread
+/// that submits it, and prepared and sent by a thread of ours
+/// (`VICTORY_ASYNC_SUBMIT=1`; needs flights and lists cut at their waits,
+/// both defaults).
+///
+/// Why: the profile of run 213 (292 ms a frame) has the title's render
+/// thread inside `queue::execute` for 202 ms of every frame: 155 ms in
+/// `Host::submit` (preparing: the copies of title memory, the write
+/// watch, descriptors, textures; and waiting for flights), while its five
+/// recording threads stand idle 78 % of the time and the card 43 %. The
+/// title's thread does nothing with the result of that work: it only has
+/// to be done before the lists run, in order.
+///
+/// With the switch a submission's lists are taken from the title's lists
+/// (as they already are when the queue holds anything) and put behind
+/// the queue's line; one thread of ours ([`worker`]) runs the line in
+/// order. A signal of the queue goes behind them, as it does behind
+/// anything held. Everything that must see earlier submissions done runs
+/// the line itself first: a present, and every submission of ours that
+/// is waited for ([`before_sync`]).
+///
+/// What it assumes: title memory a submission reads is not rewritten by
+/// the title between its submit call and the moment our thread prepares
+/// it, some milliseconds later. On the console the card reads that
+/// memory when it runs the list, later still, so a title that rewrote it
+/// earlier would be wrong there too.
+#[cfg(windows)]
+pub(crate) fn behind() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        let on = std::env::var_os("VICTORY_ASYNC_SUBMIT").is_some_and(|v| v == "1") && crate::host::late() && cuts();
+        if on {
+            tracing::info!("submissions are prepared and sent by a thread of ours, not by the thread that submits (VICTORY_ASYNC_SUBMIT=1)");
+            let _ = std::thread::Builder::new().name("victory-submit".into()).spawn(worker);
+        }
+        on
+    })
+}
+
+/// Whether there is something for [`worker`] to look at.
+#[cfg(windows)]
+static WORK: (std::sync::Mutex<bool>, std::sync::Condvar) = (std::sync::Mutex::new(false), std::sync::Condvar::new());
+
+#[cfg(windows)]
+fn wake() {
+    *lock(&WORK.0) = true;
+    WORK.1.notify_one();
+}
+
+/// The thread of [`behind`]: runs what queues hold as far as it is free
+/// to run, each time something was added or a fence moved.
+#[cfg(windows)]
+fn worker() {
+    crate::framelog::keep_on_fast_cores("victory-submit");
+    loop {
+        {
+            let mut work = lock(&WORK.0);
+            while !*work {
+                work = WORK.1.wait(work).unwrap_or_else(|e| e.into_inner());
+            }
+            *work = false;
+        }
+        let started = std::time::Instant::now();
+        let (user, kernel) = crate::framelog::thread_times();
+        if crate::framelog::on() {
+            crate::framelog::add(crate::framelog::T::WorkerLooks, 1);
+            if crate::framelog::on_slow_core() {
+                crate::framelog::add(crate::framelog::T::WorkerSlow, 1);
+            }
+        }
+        release_held_now(false);
+        let (user_now, kernel_now) = crate::framelog::thread_times();
+        crate::framelog::add(crate::framelog::T::WorkerUs, started.elapsed().as_micros() as u64);
+        crate::framelog::add(crate::framelog::T::WorkerUserUs, user_now.saturating_sub(user));
+        crate::framelog::add(crate::framelog::T::WorkerKernelUs, kernel_now.saturating_sub(kernel));
+    }
+}
+
+#[cfg(windows)]
+thread_local! {
+    /// This thread is inside [`release_held_now`].
+    static RELEASING_HERE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether parts that follow one another in the queues' lines go to the
+/// host as one submission (`VICTORY_JOIN_PARTS=1`; `alt`: twenty seconds
+/// with, twenty without, in turn, each change said in the log). Off by
+/// default. Needs [`behind`].
+///
+/// Why: the title's lists wait for memory values (19 to 20 waits a frame
+/// in the first rooms, each met by the bottom-of-pipe write of the part
+/// before it), and every wait cuts a submission into parts: 29 host
+/// submissions a frame from about 15 of the title's (run 238). Each part
+/// is prepared on its own: 82 askings of the write watch, 666 refresh
+/// steps, a heap sync, a merge under the flights in the air, and on the
+/// card one list of ours that sends changed bytes and one that compares.
+/// The title hands a frame over in one burst at the end of its recording,
+/// then stands still until the line has finished it (its fence wait of
+/// the next frame: run 238), so the parts are all in the lines when our
+/// thread gets to them.
+///
+/// With the switch the thread that runs the lines takes parts off them
+/// in the order they would have run and gives them to the host together:
+/// the same host lists in the same order, prepared once. Between two
+/// parts a wait passes if memory meets it, if a write of a flight in the
+/// air is known to meet it, or if a bottom-of-pipe write of a part taken
+/// before it meets it (that part is ahead of it in the joined
+/// submission, which is the order the wait asks for). A signal met
+/// behind parts not sent yet is delivered right behind the joined
+/// submission: never before the part it followed has run. Anything else
+/// (a wait not known to be met, a present, the end of what is free to
+/// run) sends what was taken first. At most [`join_most`] parts or
+/// [`join_lists`] lists are joined, so that the card has work while the
+/// next ones are prepared. Each queue with a part taken keeps the mark
+/// [`Held::Running`] at the head of its line until the part is sent:
+/// what the title gives the queue meanwhile, signals too, stays behind.
+#[cfg(windows)]
+fn join_parts() -> bool {
+    /// 0 off, 1 on, 2 in turn.
+    static MODE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    let mode = *MODE.get_or_init(|| {
+        let mode = match std::env::var("VICTORY_JOIN_PARTS").as_deref() {
+            Ok("1") => 1,
+            Ok("alt") => 2,
+            _ => 0,
+        };
+        if mode != 0 {
+            tracing::info!(
+                "parts that follow one another in the queues' lines go to the host as one submission, at most {} parts or {} lists (VICTORY_JOIN_PARTS=1; alt: in turn)",
+                join_most(),
+                join_lists()
+            );
+        }
+        mode
+    });
+    match mode {
+        0 => false,
+        1 => true,
+        _ => {
+            static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+            let on = (EPOCH.get_or_init(std::time::Instant::now).elapsed().as_secs() / 20) % 2 == 1;
+            static LAST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+            if LAST.swap(u8::from(on), Ordering::Relaxed) != u8::from(on) {
+                tracing::info!("parts joined into one host submission from now (VICTORY_JOIN_PARTS=alt): {}", if on { "ON" } else { "off, as usual" });
+            }
+            on
+        }
+    }
+}
+
+/// The most parts joined into one host submission (`VICTORY_JOIN_MOST`, 4).
+#[cfg(windows)]
+fn join_most() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| std::env::var("VICTORY_JOIN_MOST").ok().and_then(|v| v.parse().ok()).filter(|&n| n >= 1).unwrap_or(4))
+}
+
+/// The most host lists joined into one host submission (`VICTORY_JOIN_LISTS`, 48).
+#[cfg(windows)]
+fn join_lists() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| std::env::var("VICTORY_JOIN_LISTS").ok().and_then(|v| v.parse().ok()).filter(|&n| n >= 1).unwrap_or(48))
+}
+
+/// With [`join_parts`]: parts taken off the queues' lines and not yet
+/// given to the host, in the order they run.
+#[cfg(windows)]
+#[derive(Default)]
+struct Joined {
+    lists: Vec<crate::list::Detached>,
+    order: Vec<usize>,
+    parts: usize,
+    /// Signals met behind those parts: delivered when the parts are sent.
+    signals: Vec<(usize, u64)>,
+    /// The queues with a part here: each has [`Held::Running`] at the
+    /// head of its line.
+    marked: Vec<usize>,
+}
+
+#[cfg(windows)]
+impl Joined {
+    fn is_empty(&self) -> bool {
+        self.parts == 0
+    }
+
+    /// One more part behind those taken: its lists keep their order.
+    fn add(&mut self, lists: Vec<crate::list::Detached>, order: Vec<usize>) {
+        let (lists, order) = join(std::mem::take(&mut self.lists), std::mem::take(&mut self.order), lists, order);
+        self.lists = lists;
+        self.order = order;
+        self.parts += 1;
+    }
+
+    fn full(&self) -> bool {
+        self.parts >= join_most() || self.order.len() >= join_lists()
+    }
+
+    /// Whether a bottom-of-pipe write of a part taken meets `wait`.
+    fn meets(&self, wait: &crate::list::ValueWait) -> bool {
+        let (address, bytes) = wait.place();
+        self.order.iter().any(|&i| self.lists[i].host().will_write(address, bytes, |v| wait.holds_for(v)))
+    }
+}
+
+#[cfg(windows)]
+/// The things of one part behind those of another: `order` names places in
+/// `lists`, so the second part's places move up by the first's count.
+fn join<T>(mut lists: Vec<T>, mut order: Vec<usize>, more: Vec<T>, more_order: Vec<usize>) -> (Vec<T>, Vec<usize>) {
+    let base = lists.len();
+    lists.extend(more);
+    order.extend(more_order.into_iter().map(|i| i + base));
+    (lists, order)
+}
+
+/// Parts joined, host submissions they went in, their lists, signals
+/// delivered behind them, and waits passed for a write of a part taken.
+#[cfg(windows)]
+static JOINED: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
+
+/// Gives the host what [`Joined`] holds, as one submission, delivers the
+/// signals met behind it, and takes the marks off the lines. Called with
+/// no line locked.
+#[cfg(windows)]
+fn send_joined(joined: &mut Joined) {
+    if joined.parts > 0 {
+        let (lists, order) = (std::mem::take(&mut joined.lists), std::mem::take(&mut joined.order));
+        JOINED[0].fetch_add(joined.parts as u64, Ordering::Relaxed);
+        let sent = JOINED[1].fetch_add(1, Ordering::Relaxed) + 1;
+        JOINED[2].fetch_add(order.len() as u64, Ordering::Relaxed);
+        JOINED[3].fetch_add(joined.signals.len() as u64, Ordering::Relaxed);
+        if sent % 2048 == 0 {
+            let n: Vec<u64> = JOINED.iter().map(|n| n.swap(0, Ordering::Relaxed)).collect();
+            tracing::info!(
+                "parts joined (VICTORY_JOIN_PARTS=1): {} parts went to the host in {} submissions ({:.1} parts, {:.1} lists each), {} signals delivered behind them, {} waits passed for a write of a part not sent yet",
+                n[0],
+                n[1],
+                n[0] as f64 / n[1].max(1) as f64,
+                n[2] as f64 / n[1].max(1) as f64,
+                n[3],
+                n[4]
+            );
+        }
+        match crate::host::host() {
+            Some(host) => host.execute_late(lists, order),
+            // (Not reached: parts are only taken with a host.)
+            None => crate::list::recycle(lists, &order),
+        }
+        joined.parts = 0;
+    }
+    // Behind what was just sent, in the order they were met.
+    for (fence, value) in joined.signals.drain(..) {
+        if !crate::host::late_signal(fence, value) {
+            crate::fence::set(fence as This, value);
+        }
+    }
+    for q in joined.marked.drain(..) {
+        // SAFETY: a live queue, as in the loop that marked it.
+        let line = unsafe { &(*(q as *const Queue)).held };
+        let mut held = lock(line);
+        if matches!(held.first(), Some(Held::Running)) {
+            held.remove(0);
+        }
+        if held.is_empty() {
+            lock(&WAITING).retain(|&w| w != q);
+        }
+    }
+}
+
+/// Before a submission of ours that is waited for, with [`behind`]: what
+/// the queues hold and is free to run runs first, on this thread, so the
+/// submission keeps its place behind them.
+#[cfg(windows)]
+pub(crate) fn before_sync() {
+    if behind() && !RELEASING_HERE.get() {
+        release_held_now(false);
+    }
+}
+
+#[cfg(windows)]
+fn release_held_now(all: bool) {
+=======
+    release_held_now(all);
+}
+
+/// Whether a submission is only put in its queue's line by the thread
+/// that submits it, and prepared and sent by a thread of ours
+/// (`VICTORY_ASYNC_SUBMIT=1`; needs flights and lists cut at their waits,
+/// both defaults).
+///
+/// Why: the profile of run 213 (292 ms a frame) has the title's render
+/// thread inside `queue::execute` for 202 ms of every frame: 155 ms in
+/// `Host::submit` (preparing: the copies of title memory, the write
+/// watch, descriptors, textures; and waiting for flights), while its five
+/// recording threads stand idle 78 % of the time and the card 43 %. The
+/// title's thread does nothing with the result of that work: it only has
+/// to be done before the lists run, in order.
+///
+/// With the switch a submission's lists are taken from the title's lists
+/// (as they already are when the queue holds anything) and put behind
+/// the queue's line; one thread of ours ([`worker`]) runs the line in
+/// order. A signal of the queue goes behind them, as it does behind
+/// anything held. Everything that must see earlier submissions done runs
+/// the line itself first: a present, and every submission of ours that
+/// is waited for ([`before_sync`]).
+///
+/// What it assumes: title memory a submission reads is not rewritten by
+/// the title between its submit call and the moment our thread prepares
+/// it, some milliseconds later. On the console the card reads that
+/// memory when it runs the list, later still, so a title that rewrote it
+/// earlier would be wrong there too.
+#[cfg(windows)]
+pub(crate) fn behind() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        let on = std::env::var_os("VICTORY_ASYNC_SUBMIT").is_some_and(|v| v == "1") && crate::host::late() && cuts();
+        if on {
+            tracing::info!("submissions are prepared and sent by a thread of ours, not by the thread that submits (VICTORY_ASYNC_SUBMIT=1)");
+            let _ = std::thread::Builder::new().name("victory-submit".into()).spawn(worker);
+        }
+        on
+    })
+}
+
+/// Whether there is something for [`worker`] to look at.
+#[cfg(windows)]
+static WORK: (std::sync::Mutex<bool>, std::sync::Condvar) = (std::sync::Mutex::new(false), std::sync::Condvar::new());
+
+#[cfg(windows)]
+fn wake() {
+    *lock(&WORK.0) = true;
+    WORK.1.notify_one();
+}
+
+/// The thread of [`behind`]: runs what queues hold as far as it is free
+/// to run, each time something was added or a fence moved.
+#[cfg(windows)]
+fn worker() {
+    crate::framelog::keep_on_fast_cores("victory-submit");
+    loop {
+        {
+            let mut work = lock(&WORK.0);
+            while !*work {
+                work = WORK.1.wait(work).unwrap_or_else(|e| e.into_inner());
+            }
+            *work = false;
+        }
+        let started = std::time::Instant::now();
+        let (user, kernel) = crate::framelog::thread_times();
+        if crate::framelog::on() {
+            crate::framelog::add(crate::framelog::T::WorkerLooks, 1);
+            if crate::framelog::on_slow_core() {
+                crate::framelog::add(crate::framelog::T::WorkerSlow, 1);
+            }
+        }
+        release_held_now(false);
+        let (user_now, kernel_now) = crate::framelog::thread_times();
+        crate::framelog::add(crate::framelog::T::WorkerUs, started.elapsed().as_micros() as u64);
+        crate::framelog::add(crate::framelog::T::WorkerUserUs, user_now.saturating_sub(user));
+        crate::framelog::add(crate::framelog::T::WorkerKernelUs, kernel_now.saturating_sub(kernel));
+    }
+}
+
+#[cfg(windows)]
+thread_local! {
+    /// This thread is inside [`release_held_now`].
+    static RELEASING_HERE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether parts that follow one another in the queues' lines go to the
+/// host as one submission (`VICTORY_JOIN_PARTS=1`; `alt`: twenty seconds
+/// with, twenty without, in turn, each change said in the log). Off by
+/// default. Needs [`behind`].
+///
+/// Why: the title's lists wait for memory values (19 to 20 waits a frame
+/// in the first rooms, each met by the bottom-of-pipe write of the part
+/// before it), and every wait cuts a submission into parts: 29 host
+/// submissions a frame from about 15 of the title's (run 238). Each part
+/// is prepared on its own: 82 askings of the write watch, 666 refresh
+/// steps, a heap sync, a merge under the flights in the air, and on the
+/// card one list of ours that sends changed bytes and one that compares.
+/// The title hands a frame over in one burst at the end of its recording,
+/// then stands still until the line has finished it (its fence wait of
+/// the next frame: run 238), so the parts are all in the lines when our
+/// thread gets to them.
+///
+/// With the switch the thread that runs the lines takes parts off them
+/// in the order they would have run and gives them to the host together:
+/// the same host lists in the same order, prepared once. Between two
+/// parts a wait passes if memory meets it, if a write of a flight in the
+/// air is known to meet it, or if a bottom-of-pipe write of a part taken
+/// before it meets it (that part is ahead of it in the joined
+/// submission, which is the order the wait asks for). A signal met
+/// behind parts not sent yet is delivered right behind the joined
+/// submission: never before the part it followed has run. Anything else
+/// (a wait not known to be met, a present, the end of what is free to
+/// run) sends what was taken first. At most [`join_most`] parts or
+/// [`join_lists`] lists are joined, so that the card has work while the
+/// next ones are prepared. Each queue with a part taken keeps the mark
+/// [`Held::Running`] at the head of its line until the part is sent:
+/// what the title gives the queue meanwhile, signals too, stays behind.
+#[cfg(windows)]
+fn join_parts() -> bool {
+    /// 0 off, 1 on, 2 in turn.
+    static MODE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    let mode = *MODE.get_or_init(|| {
+        let mode = match std::env::var("VICTORY_JOIN_PARTS").as_deref() {
+            Ok("1") => 1,
+            Ok("alt") => 2,
+            _ => 0,
+        };
+        if mode != 0 {
+            tracing::info!(
+                "parts that follow one another in the queues' lines go to the host as one submission, at most {} parts or {} lists (VICTORY_JOIN_PARTS=1; alt: in turn)",
+                join_most(),
+                join_lists()
+            );
+        }
+        mode
+    });
+    match mode {
+        0 => false,
+        1 => true,
+        _ => {
+            static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+            let on = (EPOCH.get_or_init(std::time::Instant::now).elapsed().as_secs() / 20) % 2 == 1;
+            static LAST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+            if LAST.swap(u8::from(on), Ordering::Relaxed) != u8::from(on) {
+                tracing::info!("parts joined into one host submission from now (VICTORY_JOIN_PARTS=alt): {}", if on { "ON" } else { "off, as usual" });
+            }
+            on
+        }
+    }
+}
+
+/// The most parts joined into one host submission (`VICTORY_JOIN_MOST`, 4).
+#[cfg(windows)]
+fn join_most() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| std::env::var("VICTORY_JOIN_MOST").ok().and_then(|v| v.parse().ok()).filter(|&n| n >= 1).unwrap_or(4))
+}
+
+/// The most host lists joined into one host submission (`VICTORY_JOIN_LISTS`, 48).
+#[cfg(windows)]
+fn join_lists() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| std::env::var("VICTORY_JOIN_LISTS").ok().and_then(|v| v.parse().ok()).filter(|&n| n >= 1).unwrap_or(48))
+}
+
+/// With [`join_parts`]: parts taken off the queues' lines and not yet
+/// given to the host, in the order they run.
+#[cfg(windows)]
+#[derive(Default)]
+struct Joined {
+    lists: Vec<crate::list::Detached>,
+    order: Vec<usize>,
+    parts: usize,
+    /// Signals met behind those parts: delivered when the parts are sent.
+    signals: Vec<(usize, u64)>,
+    /// The queues with a part here: each has [`Held::Running`] at the
+    /// head of its line.
+    marked: Vec<usize>,
+}
+
+#[cfg(windows)]
+impl Joined {
+    fn is_empty(&self) -> bool {
+        self.parts == 0
+    }
+
+    /// One more part behind those taken: its lists keep their order.
+    fn add(&mut self, lists: Vec<crate::list::Detached>, order: Vec<usize>) {
+        let (lists, order) = join(std::mem::take(&mut self.lists), std::mem::take(&mut self.order), lists, order);
+        self.lists = lists;
+        self.order = order;
+        self.parts += 1;
+    }
+
+    fn full(&self) -> bool {
+        self.parts >= join_most() || self.order.len() >= join_lists()
+    }
+
+    /// Whether a bottom-of-pipe write of a part taken meets `wait`.
+    fn meets(&self, wait: &crate::list::ValueWait) -> bool {
+        let (address, bytes) = wait.place();
+        self.order.iter().any(|&i| self.lists[i].host().will_write(address, bytes, |v| wait.holds_for(v)))
+    }
+}
+
+#[cfg(windows)]
+/// The things of one part behind those of another: `order` names places in
+/// `lists`, so the second part's places move up by the first's count.
+fn join<T>(mut lists: Vec<T>, mut order: Vec<usize>, more: Vec<T>, more_order: Vec<usize>) -> (Vec<T>, Vec<usize>) {
+    let base = lists.len();
+    lists.extend(more);
+    order.extend(more_order.into_iter().map(|i| i + base));
+    (lists, order)
+}
+
+/// Parts joined, host submissions they went in, their lists, signals
+/// delivered behind them, and waits passed for a write of a part taken.
+#[cfg(windows)]
+static JOINED: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
+
+/// Gives the host what [`Joined`] holds, as one submission, delivers the
+/// signals met behind it, and takes the marks off the lines. Called with
+/// no line locked.
+#[cfg(windows)]
+fn send_joined(joined: &mut Joined) {
+    if joined.parts > 0 {
+        let (lists, order) = (std::mem::take(&mut joined.lists), std::mem::take(&mut joined.order));
+        JOINED[0].fetch_add(joined.parts as u64, Ordering::Relaxed);
+        let sent = JOINED[1].fetch_add(1, Ordering::Relaxed) + 1;
+        JOINED[2].fetch_add(order.len() as u64, Ordering::Relaxed);
+        JOINED[3].fetch_add(joined.signals.len() as u64, Ordering::Relaxed);
+        if sent.is_multiple_of(2048) {
+            let n: Vec<u64> = JOINED.iter().map(|n| n.swap(0, Ordering::Relaxed)).collect();
+            tracing::info!(
+                "parts joined (VICTORY_JOIN_PARTS=1): {} parts went to the host in {} submissions ({:.1} parts, {:.1} lists each), {} signals delivered behind them, {} waits passed for a write of a part not sent yet",
+                n[0],
+                n[1],
+                n[0] as f64 / n[1].max(1) as f64,
+                n[2] as f64 / n[1].max(1) as f64,
+                n[3],
+                n[4]
+            );
+        }
+        match crate::host::host() {
+            Some(host) => host.execute_late(lists, order),
+            // (Not reached: parts are only taken with a host.)
+            None => crate::list::recycle(lists, &order),
+        }
+        joined.parts = 0;
+    }
+    // Behind what was just sent, in the order they were met.
+    for (fence, value) in joined.signals.drain(..) {
+        if !crate::host::late_signal(fence, value) {
+            crate::fence::set(fence as This, value);
+        }
+    }
+    for q in joined.marked.drain(..) {
+        // SAFETY: a live queue, as in the loop that marked it.
+        let line = unsafe { &(*(q as *const Queue)).held };
+        let mut held = lock(line);
+        if matches!(held.first(), Some(Held::Running)) {
+            held.remove(0);
+        }
+        if held.is_empty() {
+            lock(&WAITING).retain(|&w| w != q);
+        }
+    }
+}
+
+/// Before a submission of ours that is waited for, with [`behind`]: what
+/// the queues hold and is free to run runs first, on this thread, so the
+/// submission keeps its place behind them.
+#[cfg(windows)]
+pub(crate) fn before_sync() {
+    if behind() && !RELEASING_HERE.get() {
+        release_held_now(false);
+    }
+}
+
+#[cfg(windows)]
+fn release_held_now(all: bool) {
+>>>>>>> origin/exp/vitoriabr-head
     // One caller at a time, so a queue's submissions keep their order.
     static RELEASING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     if lock(&WAITING).is_empty() {
@@ -898,6 +1468,81 @@ extern "system" fn present(
     plane_parameters: *const Plane,
     _parameters: *const u8,
 ) -> HRESULT {
+<<<<<<< HEAD
+||||||| 085ee7c4c
+    #[cfg(windows)]
+    let presenting = std::time::Instant::now();
+    let hr = present_now(this, planes, plane_parameters);
+    #[cfg(windows)]
+    {
+        crate::framelog::add(crate::framelog::T::PresentUs, presenting.elapsed().as_micros() as u64);
+        crate::framelog::frame();
+        #[cfg(feature = "diagnostics")]
+        crate::fence::pace::frame();
+    }
+    hr
+}
+
+fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESULT {
+    #[cfg(windows)]
+    let presenting = std::time::Instant::now();
+    #[cfg(all(windows, feature = "diagnostics"))]
+    crate::copystat::present_begins();
+    #[cfg(all(windows, feature = "diagnostics"))]
+    crate::profile::frame();
+    // With `present_behind`: the frame is shown by our thread, behind what
+    // the queue holds, and nothing is run or waited for here.
+    #[cfg(windows)]
+    let sent_behind = present_behind() && send_behind(this, planes, plane_parameters);
+=======
+    #[cfg(windows)]
+    let presenting = std::time::Instant::now();
+    let hr = present_now(this, planes, plane_parameters);
+    #[cfg(windows)]
+    {
+        crate::framelog::add(crate::framelog::T::PresentUs, presenting.elapsed().as_micros() as u64);
+        crate::framelog::frame();
+        #[cfg(feature = "diagnostics")]
+        crate::fence::pace::frame();
+    }
+    hr
+}
+
+/// The second plane's host copy, its GPU state, and the title resource, when
+/// the present carries one (`crate::compose`). The state is left in
+/// `COPY_SOURCE` for the compose pass; the caller restores it after showing.
+#[cfg(windows)]
+fn second_plane(
+    planes: u32,
+    plane_parameters: *const Plane,
+) -> Option<(This, std::sync::Arc<crate::resource::HostTexture>, u32)> {
+    if planes < 2 || plane_parameters.is_null() {
+        return None;
+    }
+    // SAFETY: the title passes `planes` plane descriptions.
+    let plane = unsafe { plane_parameters.add(1).as_ref() }?;
+    if plane.count == 0 || plane.resources.is_null() {
+        return None;
+    }
+    // SAFETY: the plane lists `count` resources.
+    let resource = unsafe { *plane.resources };
+    let copy = crate::resource::host_copy(resource)?;
+    let (_, before) = crate::resource::host_transition(resource, 0x800)?;
+    Some((resource, copy, before))
+}
+
+fn present_now(this: This, planes: u32, plane_parameters: *const Plane) -> HRESULT {
+    #[cfg(windows)]
+    let presenting = std::time::Instant::now();
+    #[cfg(all(windows, feature = "diagnostics"))]
+    crate::copystat::present_begins();
+    #[cfg(all(windows, feature = "diagnostics"))]
+    crate::profile::frame();
+    // With `present_behind`: the frame is shown by our thread, behind what
+    // the queue holds, and nothing is run or waited for here.
+    #[cfg(windows)]
+    let sent_behind = present_behind() && send_behind(this, planes, plane_parameters);
+>>>>>>> origin/exp/vitoriabr-head
     #[cfg(not(windows))]
     let _ = this;
     #[cfg(all(windows, feature = "diagnostics"))]
@@ -1018,6 +1663,7 @@ extern "system" fn present(
         const COPY_SOURCE: u32 = 0x800;
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
+<<<<<<< HEAD
         let overlay = (planes > 1)
             .then(|| overlay_resource(plane_parameters))
             .flatten()
@@ -1035,6 +1681,18 @@ extern "system" fn present(
             overlay.as_ref().map(|(_, tex, st)| (*tex, *st)),
             Shown { frame, resource: resource as usize },
         );
+||||||| 085ee7c4c
+        let shown = host.present(texture, state, frame);
+=======
+        let second = second_plane(planes, plane_parameters);
+        let over = second
+            .as_ref()
+            .map(|(_, copy, before)| (&copy.texture, *before));
+        let shown = host.present_over(texture, state, over, frame);
+        if let Some((resource, _, before)) = second {
+            crate::resource::host_transition(resource, before);
+        }
+>>>>>>> origin/exp/vitoriabr-head
         crate::resource::host_transition(resource, state);
         if let Some((over_res, _, over_state)) = overlay {
             crate::resource::host_transition(over_res, over_state);

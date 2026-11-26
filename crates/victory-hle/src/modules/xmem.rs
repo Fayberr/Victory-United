@@ -1721,7 +1721,13 @@ fn commit_limit_message(
     info: Option<&PERFORMANCE_INFORMATION>,
 ) -> String {
     let mut message = format!(
+<<<<<<< HEAD
         "VIctory: Windows commit limit reached while committing {len} bytes of {what}: {error}.\n"
+||||||| 085ee7c4c
+        "VIctory: Windows commit limit reached while committing {len} bytes of physical pages: {error}.\n"
+=======
+        "VItoriaBr: Windows commit limit reached while committing {len} bytes of physical pages: {error}.\n"
+>>>>>>> origin/exp/vitoriabr-head
     );
     if let Some(info) = info {
         use std::fmt::Write;
