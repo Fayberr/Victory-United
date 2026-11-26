@@ -10564,19 +10564,12 @@ impl<'a> Lower<'a> {
                 args.push(self.handle(site, src, false, (10 | u, component))?);
                 args.extend([index.unwrap_or(self.s.m.i32(0)), iu]);
                 for x in vals {
-<<<<<<< HEAD
-                    let f = self.as_float(x);
-                    args.push(self.nan_guard(f, false));
-||||||| 465b94f5
-                    args.push(self.as_float(x));
-=======
                     args.push(if halves {
                         x
                     } else {
                         let f = self.as_float(x);
                         self.nan_guard(f, false)
                     });
->>>>>>> vertex/main
                 }
                 (
                     69,
