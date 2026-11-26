@@ -403,7 +403,6 @@ extern "system" fn unknown_pipeline<const SLOT: usize>(
     E_NOTIMPL
 }
 
-<<<<<<< HEAD
 /// The host device's state: the console's device is removed when the host's is
 /// (VIctory 13185f5: the default answer, E_NOTIMPL, reads as a lost device).
 extern "system" fn removed_reason(_: This) -> HRESULT {
@@ -417,8 +416,6 @@ extern "system" fn removed_reason(_: This) -> HRESULT {
     S_OK
 }
 
-||||||| 9c184b35b
-=======
 /// `VICTORY_NATIVE_PSO_DUMP=<dir>` (diagnostics; off unless set): the blobs
 /// a 0x1c8 / 0x218 description names, once per description key (0x218: its
 /// word 11, a 64-bit hash; 0x1c8: the code pointers of words 5 and 9).
@@ -487,7 +484,6 @@ fn dump_native(slot: usize, desc: usize, dir: &std::path::Path) {
     }
 }
 
->>>>>>> origin/exp/fork-head
 /// IUnknown 3, object methods 4, device methods 76 (0x18-0x290), then the
 /// methods `ID3D12Device1` to `ID3D12Device8` add, in order: 3, 1, 3, 6, 9,
 /// 1, 2, 9 (0x298-0x3a0, the console's own among them), then those of
