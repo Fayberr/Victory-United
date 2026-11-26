@@ -70,7 +70,6 @@ pub(crate) struct Pending {
     /// whether a draw or dispatch has requested it yet.
     key: String,
     used: AtomicBool,
-<<<<<<< HEAD
     /// A pass over the screen ([`GraphicsState::screen_pass`]) or a confirmed
     /// opening-scene / bake producer that must never sit behind cold RT shaders.
     screen: bool,
@@ -78,6 +77,16 @@ pub(crate) struct Pending {
     scene_input: bool,
     /// Why this pipeline is intentionally skipped (e.g. RT resolve without BVH).
     left_out: Option<&'static str>,
+    /// Whether the made pipeline has gone to a draw or dispatch yet
+    /// (`crate::host::first_use`: for a device removal's report).
+    handed: AtomicBool,
+    /// The formats its state declares for what a draw draws into (zeros
+    /// without a graphics state).
+    pub(crate) formats: TargetFormats,
+    /// The same shaders and state for other formats, bound at a draw
+    /// ([`for_formats`]): a chain from the title's pipeline, one link per
+    /// set of formats met, never shortened.
+    variant: OnceLock<Arc<Pending>>,
 }
 
 fn named(shaders: &[Arc<Shader>], name: &[u8]) -> bool {
@@ -128,19 +137,6 @@ fn scene_input(shaders: &[Arc<Shader>]) -> bool {
                 | "369cbe906ea72764"
         ) || crate::draw::BAKE_PIXEL_SHADERS.contains(&s.hash.as_str())
     })
-||||||| 9c184b35b
-=======
-    /// Whether the made pipeline has gone to a draw or dispatch yet
-    /// (`crate::host::first_use`: for a device removal's report).
-    handed: AtomicBool,
-    /// The formats its state declares for what a draw draws into (zeros
-    /// without a graphics state).
-    pub(crate) formats: TargetFormats,
-    /// The same shaders and state for other formats, bound at a draw
-    /// ([`for_formats`]): a chain from the title's pipeline, one link per
-    /// set of formats met, never shortened.
-    variant: OnceLock<Arc<Pending>>,
->>>>>>> origin/exp/fork-head
 }
 
 // SAFETY: D3D12 objects are free-threaded; the graphics state (whose input
@@ -163,15 +159,11 @@ impl Pending {
             || scene_input;
         let left_out = left_out(&shaders);
         Pending {
-<<<<<<< HEAD
             screen,
             scene_input,
             left_out,
-||||||| 9c184b35b
-=======
             formats: graphics.as_ref().map_or([0; 9], |g| g.formats()),
             variant: OnceLock::new(),
->>>>>>> origin/exp/fork-head
             shaders,
             graphics,
             queue_state: AtomicU8::new(NOT_QUEUED),
@@ -188,25 +180,16 @@ impl Pending {
     }
 
     fn make(&self) {
-<<<<<<< HEAD
-        self.made.get_or_init(|| {
-            let began = Instant::now();
-            let made = HostPipeline::new(&self.shaders, self.graphics.as_deref());
-            super::library::note_time(&self.key, began.elapsed().as_millis() as u64);
-            made
-        });
-||||||| 9c184b35b
-        self.made
-            .get_or_init(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
-=======
         self.made.get_or_init(|| {
             if let Some(hash) = denied(&self.shaders) {
                 tracing::warn!(hash, shaders = ?self.shaders, "pipeline not built: its shader is in VICTORY_DENY_PIPELINES");
                 return None;
             }
-            HostPipeline::new(&self.shaders, self.graphics.as_deref())
+            let began = Instant::now();
+            let made = HostPipeline::new(&self.shaders, self.graphics.as_deref());
+            super::library::note_time(&self.key, began.elapsed().as_millis() as u64);
+            made
         });
->>>>>>> origin/exp/fork-head
         let (lock, done) = &DONE;
         let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
         done.notify_all();
