@@ -10,13 +10,8 @@ mod replay;
 mod run;
 mod shader;
 mod translate;
-<<<<<<< HEAD
 #[cfg(windows)]
 mod warm;
-||||||| 085ee7c4c
-=======
-mod warm;
->>>>>>> origin/exp/vitoriabr-head
 
 use std::path::PathBuf;
 
@@ -102,7 +97,6 @@ enum Command {
         #[arg(long)]
         warm: Option<PathBuf>,
     },
-<<<<<<< HEAD
     /// Translate every shader found (as `translate` finds them) into the
     /// shader cache, so that no run has to: a few minutes, once per change
     /// of the translator.
@@ -134,24 +128,6 @@ enum Command {
         #[arg(long, hide = true)]
         these: Option<String>,
     },
-||||||| 085ee7c4c
-=======
-    /// Translate every shader found into the shader cache ahead of a run,
-    /// so the first run reads them from the cache instead of translating
-    /// them while the title waits. Run it with the same build and
-    /// VICTORY_* settings as the title (including `VICTORY_HOST_WAVE` and
-    /// `VICTORY_VIEW_LIMIT` when matching the host run's log). Defaults to
-    /// the configured game and test-title directories.
-    Warm {
-        paths: Vec<PathBuf>,
-        /// Print each shader that does not translate.
-        #[arg(long)]
-        list: bool,
-        /// Worker threads (default: every logical core).
-        #[arg(long)]
-        jobs: Option<usize>,
-    },
->>>>>>> origin/exp/vitoriabr-head
     /// Prepare, map and bind a title executable; with --execute, run it.
     Run {
         exe: PathBuf,
@@ -231,17 +207,13 @@ fn main() -> Result<()> {
             }
             translate::run(paths, validate, pipelines, list, jobs)
         }
-<<<<<<< HEAD
-        Command::Shaders { paths, jobs } => translate::precompile(paths, jobs),
+        Command::Shaders { paths, jobs } => {
+            // As `translate --warm`: the cache keys follow the host run's.
+            apply_host_shader_overrides_from_env();
+            translate::precompile(paths, jobs)
+        }
         #[cfg(windows)]
         Command::Warm { jobs, limit, again, used, these } => warm::run(jobs, limit, again, used, these),
-||||||| 085ee7c4c
-=======
-        Command::Warm { paths, list, jobs } => {
-            apply_host_shader_overrides_from_env();
-            warm::run(paths, list, jobs)
-        }
->>>>>>> origin/exp/vitoriabr-head
         Command::Run {
             exe,
             unimplemented,
