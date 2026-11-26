@@ -90,9 +90,14 @@ pub(crate) fn allow_staging_growth(bake: bool) -> bool {
     has_growth_reserve(sample_commit(now), bake)
 }
 
+/// A PC with 32 GiB of RAM or less, or `VICTORY_RESIDENCY_LIMITED=1` (the
+/// name avatarmanz/VIctory-7900XTX gives it): the budgets of a smaller PC.
 pub(crate) fn limited_host_ram() -> bool {
     static LIMITED: OnceLock<bool> = OnceLock::new();
-    *LIMITED.get_or_init(|| memory_status().is_some_and(|s| s.ullTotalPhys <= 32 * GIB))
+    *LIMITED.get_or_init(|| {
+        std::env::var_os("VICTORY_RESIDENCY_LIMITED").is_some_and(|v| v == "1")
+            || memory_status().is_some_and(|s| s.ullTotalPhys <= 32 * GIB)
+    })
 }
 
 fn next_pressure(was: bool, physical: u64, commit: u64) -> bool {

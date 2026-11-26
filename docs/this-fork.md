@@ -61,7 +61,7 @@ commit log says which are in.
 
 ## Measuring
 
-- Every host list that ran is kept for reuse (`VICTORY_IDLE_LISTS=<n>` caps them).
+- Every host list that ran is kept for reuse.
 - Frame dumps (`VICTORY_CAPTURE`) are encoded on a thread of their own, and the
   ones still queued are written before the process exits.
 - Diagnostics builds: `VICTORY_WALLS_TRACE=1` logs the source of each read-back;

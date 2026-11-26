@@ -987,7 +987,7 @@ extern "system" fn present(
             })
         };
         let texture = base_res.and_then(take_copy);
-        let overlay = (planes > 1 && !plane_parameters.is_null())
+        let overlay = (planes > 1 && !plane_parameters.is_null() && crate::compose::on())
             .then(|| overlay_resource(plane_parameters))
             .flatten()
             .filter(|&over_res| base_res != Some(over_res))
@@ -1018,7 +1018,7 @@ extern "system" fn present(
         const COPY_SOURCE: u32 = 0x800;
         let state = crate::resource::host_transition(resource, COPY_SOURCE)
             .map_or(COPY_SOURCE, |(_, before)| before);
-        let overlay = (planes > 1)
+        let overlay = (planes > 1 && crate::compose::on())
             .then(|| overlay_resource(plane_parameters))
             .flatten()
             .filter(|&over_res| over_res != resource)
@@ -1059,6 +1059,18 @@ fn frame_ends() {
             behind::leave();
         }
     });
+    if let Some(on) = crate::ab::pick("VICTORY_LANE_CORE") {
+        static WAS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if WAS.swap(on, std::sync::atomic::Ordering::Relaxed) != on {
+            crate::cores::settle();
+        }
+    }
+    if let Some(on) = crate::ab::pick("VICTORY_CACHE_CORES") {
+        static WAS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if WAS.swap(on, std::sync::atomic::Ordering::Relaxed) != on {
+            crate::cores::settle();
+        }
+    }
 }
 
 /// The frame a present shows, and the title's resource it shows.

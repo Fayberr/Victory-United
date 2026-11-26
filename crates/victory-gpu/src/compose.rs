@@ -10,6 +10,15 @@ use windows::core::{PCSTR, s};
 
 use crate::host::Host;
 
+/// Whether a second presented plane is composed over the first
+/// (`VICTORY_PLANES`; on by default, `0` turns it off, as in
+/// avatarmanz/VIctory-7900XTX). It acts only when the title presents a
+/// second plane.
+pub(crate) fn on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_PLANES").is_none_or(|v| v != "0"))
+}
+
 const SOURCE: &str = r#"
 #define RS "DescriptorTable(SRV(t0, numDescriptors=2), visibility=SHADER_VISIBILITY_PIXEL), StaticSampler(s0, filter=FILTER_MIN_MAG_MIP_LINEAR, addressU=TEXTURE_ADDRESS_CLAMP, addressV=TEXTURE_ADDRESS_CLAMP)"
 Texture2D<float4> scene : register(t0);
