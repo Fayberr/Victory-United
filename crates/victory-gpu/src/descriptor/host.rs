@@ -4036,7 +4036,6 @@ impl HostHeap {
             } else {
                 make(&view, self.cpu(index))
             };
-<<<<<<< HEAD
             if shown != key {
                 // Views of other textures in the memory this one describes
                 // are stale: their host slots read nothing from here on, and
@@ -4101,109 +4100,26 @@ impl HostHeap {
             } else if self.tiled_stale(index) {
                 let built = make(&view, self.cpu(index));
                 if built.is_none() && !self.sampler {
-||||||| c7daeea5
-            if made[index as usize] != key {
-                // Views of other textures in the memory this one describes
-                // are stale: their host slots read nothing from here on, and
-                // let go of the host copies they held.
-                for stale in self.note_buffer(index, Some(&view), for_draw) {
-                    if stale != index {
-                        if made.get(stale as usize).is_some_and(|&k| k != 0) {
-                            stale_unmade.push(stale);
-                        }
-                        self.unmake(&mut made, stale);
-                    }
-                }
-                // A view of a texture object that has no host copy yet waits
-                // for it, as buffer views wait for a draw: the slot is made
-                // when the texture is first used (`super::make_waiting`), or
-                // here when a draw reads the slot through a table.
-                let waiting = if for_draw { None } else { view.waiting_texture() };
-                if let Some(texture) = waiting {
-                    super::wait_for(texture, handle);
-                }
-                let later = !for_draw && (view.is_buffer() || waiting.is_some());
-                // Another view of the placed texture the slot shows already (a
-                // title that streams a texture in writes its view again with
-                // more mips each time some arrive): the slot goes on showing
-                // the old view until a draw or the texture pass makes the new
-                // one and uploads what it shows. Made null here, the texture
-                // read as nothing for as long as it waited in the queue, every
-                // time it got sharper.
-                if later
-                    && keep_views()
-                    && view_at(made[index as usize] as u32, (made[index as usize] >> 32) as u32)
-                        .is_some_and(|old| same_placed_texture(&old, &view))
-                {
-                    KEPT_VIEWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Some(view)
-                } else {
-                    self_changed = true;
-                    made[index as usize] = if later { 0 } else { key };
-                    if later {
-                        self.made_keys[index as usize].store(0, Ordering::Release);
-                    } else {
-                        self.made_keys[index as usize].store(key, Ordering::Release);
-                    }
-                    let built = if later {
-                        None
-                    } else {
-                        make(&view, self.cpu(index))
-                    };
-                    if built.is_none() && !self.sampler {
-                        null_for(&view, self.cpu(index));
-                    }
-                    let (kept, tiled) = match built {
-                        Some(m) => (m.kept, m.tiled),
-                        None => (None, None),
-                    };
-                    self.record_tiled(index, &view, tiled);
-                    self.keep(index, kept);
-                    Some(view)
-                }
-            } else if self.tiled_stale(index) {
-                let built = make(&view, self.cpu(index));
-                if built.is_none() && !self.sampler {
-=======
-            if built.is_none() && !self.sampler {
-                let kind = null_kind(&view);
-                let null = self.nulls.get(index as usize);
-                if kind != 0 && null_skip() && null.is_some_and(|n| n.load(std::sync::atomic::Ordering::Relaxed) == kind) {
-                    // The slot holds that null view and keeps nothing: as it
-                    // was.
-                    NULLS_SKIPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                } else {
->>>>>>> integ/vertex
                     null_for(&view, self.cpu(index));
-                    self.record_tiled(index, &view, None);
-                    self.keep(index, None);
-                    if let Some(null) = null {
-                        null.store(kind, std::sync::atomic::Ordering::Relaxed);
-                    }
                 }
-            } else {
                 let (kept, tiled) = match built {
                     Some(m) => (m.kept, m.tiled),
                     None => (None, None),
                 };
                 self.record_tiled(index, &view, tiled);
                 self.keep(index, kept);
+                Some(view)
+            } else {
+                Some(view)
             }
-            // Last: who reads the key without holding the slot finds it made.
-            self.made.set(index, new_key);
-        } else if self.tiled_stale(index) {
-            let built = make(&view, self.cpu(index));
-            if built.is_none() && !self.sampler {
-                null_for(&view, self.cpu(index));
-            }
-            let (kept, tiled) = match built {
-                Some(m) => (m.kept, m.tiled),
-                None => (None, None),
-            };
-            self.record_tiled(index, &view, tiled);
-            self.keep(index, kept);
+        };
+        if invalidate_copied && self_changed {
+            self.forget_copied(index);
         }
-        Some(view)
+        for stale in stale_unmade {
+            self.forget_copied(stale);
+        }
+        result
     }
 
     /// Whether slot `index` was made from no record: what [`HostHeap::mirror`]
@@ -4279,7 +4195,6 @@ impl HostHeap {
     }
 }
 
-<<<<<<< HEAD
 /// Slots of this thread's own in heaps the card does not see, two of views
 /// and two of samplers (`which` 0 or 1): descriptors are made there and
 /// copied whole into the heaps it does see. Made in place they are seen half
@@ -4364,8 +4279,6 @@ fn staged(sampler: bool, which: u32) -> Option<D3D12_CPU_DESCRIPTOR_HANDLE> {
     })
 }
 
-||||||| c7daeea5
-=======
 /// Threads that make view slots side by side (`VICTORY_SLOT_THREADS`, 4 by
 /// default, at most 8; 1: one slot after the other, as before).
 pub(crate) fn slot_threads() -> usize {
@@ -4415,7 +4328,6 @@ impl SlotKeys {
     }
 }
 
->>>>>>> integ/vertex
 /// Logs `what` the first time it happens.
 macro_rules! once {
     ($($arg:tt)*) => {{
@@ -4653,41 +4565,36 @@ pub(crate) fn buffer_copy(view: &View) -> Option<(std::sync::Arc<crate::shadow::
     if len == 0 {
         return None;
     }
-    // Choose the same backing as `buffer_srv` and `buffer_uav`, including
-    // a copy of the view's own bytes when it starts off an element.
-    if let Some((base, width)) = buffer_extent(view) {
-        let backing = buffer_fields(view).and_then(|(format, first, count, element, stride, raw)| {
-            crate::shadow::find_or_exact(base, width, |offset| {
-                own_bytes(offset, base, width, format, first, count, element, stride, raw)
-            })
-        });
-        if let Some((shadow, true)) = backing {
-            let (start, bytes) = shadow.span();
-            return Some((shadow, start, bytes));
-        }
+    // A view off its buffer's elements is made on a copy of its own bytes
+    // (`own_bytes`): the same question `buffer_srv` and `buffer_uav` ask,
+    // of the copy they find, so that the copy brought up to date is the
+    // one the slot shows.
+    if let Some((base, width)) = buffer_extent(view)
+        && let Some((format, first, count, element, stride, raw)) = buffer_fields(view)
+        && let Some(whole) = crate::shadow::find(base, width)
+        && let Some((start, bytes)) = own_bytes(
+            whole.offset(base),
+            base,
+            width,
+            format,
+            first,
+            count,
+            element,
+            stride,
+            raw,
+        )
+        && let Some(own) = crate::shadow::exact(start, bytes)
+    {
+        return Some((own, start, bytes));
+    }
+    if view_extent()
+        && let Some((base, width)) = buffer_extent(view)
         // (The console is lax: a view may begin past its buffer's end.)
-<<<<<<< HEAD
         && address >= base
         && address - base < width.max(1)
         && let Some(shadow) = crate::shadow::find(base, width)
     {
         return Some((view_home(shadow, address, len, view_elements(view)?), address, len));
-||||||| c7daeea5
-        && address >= base
-        && address - base < width.max(1)
-        && let Some(shadow) = crate::shadow::find(base, width)
-    {
-        return Some((shadow, address, len));
-=======
-        if view_extent()
-            && address >= base
-            && address - base < width.max(1)
-            && let Some(shadow) = backing.map(|(shadow, _)| shadow)
-                .or_else(|| crate::shadow::find(base, width))
-        {
-            return Some((shadow, address, len));
-        }
->>>>>>> integ/vertex
     }
     let shadow = crate::shadow::find(address, len)?;
     Some((view_home(shadow, address, len, view_elements(view)?), address, len))
@@ -4961,7 +4868,6 @@ fn buffer_view_ok(format: DXGI_FORMAT, first: u64, count: u32, stride: u32, raw:
             .is_some_and(|end| end <= width)
 }
 
-<<<<<<< HEAD
 /// VU's name for a constant buffer view's host byte length
 /// ([`constant_bytes`]): multiple of 256 bytes, at most the 64 KiB a shader
 /// can index. The host removes the device for a larger one, and the title's
@@ -4970,17 +4876,6 @@ fn constant_size(size: u32) -> u32 {
     constant_bytes(size)
 }
 
-||||||| c7daeea5
-/// A constant buffer view's host byte length: multiple of 256 bytes, at
-/// most the 64 KiB a shader can index. The host removes the device for a
-/// larger one, and the title's heap holds old views of any size in slots it
-/// does not use.
-fn constant_size(size: u32) -> u32 {
-    size.min(64 << 10).next_multiple_of(256)
-}
-
-=======
->>>>>>> integ/vertex
 /// How many of `count` elements of `element` bytes from `first` on lie in
 /// `width` bytes: the console lets a view reach past its buffer's end, the
 /// host refuses one. A view with no element inside keeps its count (and is
@@ -5087,7 +4982,6 @@ fn buffer_srv(
     at: D3D12_CPU_DESCRIPTOR_HANDLE,
     twin: Option<D3D12_CPU_DESCRIPTOR_HANDLE>,
 ) -> Option<Kept> {
-<<<<<<< HEAD
     let mut shadow = crate::shadow::find(address, len)?;
     let mut offset = shadow.offset(address);
     let unit = element_size(&desc);
@@ -5101,61 +4995,6 @@ fn buffer_srv(
         (shadow, offset) = (home, 0);
         own.FirstElement = 0;
     }
-||||||| c7daeea5
-    let shadow = crate::shadow::find(address, len)?;
-    let offset = shadow.offset(address);
-    // Off the elements of that copy: on a copy of its own bytes, from its
-    // element 0 (`own_bytes`).
-    let (shadow, offset) = {
-        // SAFETY: a buffer view's union member.
-        let b = unsafe { desc.Anonymous.Buffer };
-        let raw = b.Flags.0 & D3D12_BUFFER_SRV_FLAG_RAW.0 != 0;
-        match own_bytes(
-            offset,
-            address,
-            len,
-            desc.Format,
-            b.FirstElement,
-            b.NumElements,
-            element_size(&desc),
-            b.StructureByteStride,
-            raw,
-        )
-        .and_then(|(start, bytes)| crate::shadow::exact(start, bytes))
-        {
-            Some(own) => {
-                desc.Anonymous.Buffer.FirstElement = 0;
-                (own, 0)
-            }
-            None => (shadow, offset),
-        }
-    };
-=======
-    // Off the elements of that copy: on a copy of its own bytes, from its
-    // element 0 (`own_bytes`).
-    // SAFETY: a buffer view's union member.
-    let b = unsafe { desc.Anonymous.Buffer };
-    let raw = b.Flags.0 & D3D12_BUFFER_SRV_FLAG_RAW.0 != 0;
-    let (shadow, own) = crate::shadow::find_or_exact(address, len, |offset| {
-        own_bytes(
-            offset,
-            address,
-            len,
-            desc.Format,
-            b.FirstElement,
-            b.NumElements,
-            element_size(&desc),
-            b.StructureByteStride,
-            raw,
-        )
-    })?;
-    let offset = if own {
-        desc.Anonymous.Buffer.FirstElement = 0;
-        0
-    } else {
-        shadow.offset(address)
-    };
->>>>>>> integ/vertex
     // A structured view as a raw view of the same bytes (see `raw_window`).
     // SAFETY: a buffer view's union member.
     let structured = unsafe { desc.Anonymous.Buffer };
@@ -5256,7 +5095,6 @@ fn buffer_uav(
     at: D3D12_CPU_DESCRIPTOR_HANDLE,
     twin: Option<D3D12_CPU_DESCRIPTOR_HANDLE>,
 ) -> Option<Kept> {
-<<<<<<< HEAD
     let mut shadow = crate::shadow::find(address, len)?;
     let unit = {
         // SAFETY: a buffer view's union member.
@@ -5281,71 +5119,6 @@ fn buffer_uav(
         (shadow, address) = (home, start);
         own.FirstElement = 0;
     }
-||||||| c7daeea5
-    let shadow = crate::shadow::find(address, len)?;
-    // Off the elements of that copy: on a copy of its own bytes, from its
-    // element 0 (`own_bytes`).
-    let (shadow, own) = {
-        // SAFETY: a buffer view's union member.
-        let b = unsafe { desc.Anonymous.Buffer };
-        let raw = b.Flags.0 & D3D12_BUFFER_UAV_FLAG_RAW.0 != 0;
-        let element = if b.StructureByteStride > 0 {
-            u64::from(b.StructureByteStride)
-        } else if raw {
-            4
-        } else {
-            crate::resource::element(desc.Format.0 as u32).map_or(0, |(bytes, _)| bytes)
-        };
-        match own_bytes(
-            shadow.offset(address),
-            address,
-            len,
-            desc.Format,
-            b.FirstElement,
-            b.NumElements,
-            element,
-            b.StructureByteStride,
-            raw,
-        )
-        .and_then(|(start, bytes)| crate::shadow::exact(start, bytes))
-        {
-            Some(own) => {
-                desc.Anonymous.Buffer.FirstElement = 0;
-                (own, true)
-            }
-            None => (shadow, false),
-        }
-    };
-=======
-    // Off the elements of that copy: on a copy of its own bytes, from its
-    // element 0 (`own_bytes`).
-    // SAFETY: a buffer view's union member.
-    let buffer = unsafe { desc.Anonymous.Buffer };
-    let raw = buffer.Flags.0 & D3D12_BUFFER_UAV_FLAG_RAW.0 != 0;
-    let element = if buffer.StructureByteStride > 0 {
-        u64::from(buffer.StructureByteStride)
-    } else if raw {
-        4
-    } else {
-        crate::resource::element(desc.Format.0 as u32).map_or(0, |(bytes, _)| bytes)
-    };
-    let (shadow, own) = crate::shadow::find_or_exact(address, len, |offset| {
-        own_bytes(
-            offset,
-            address,
-            len,
-            desc.Format,
-            buffer.FirstElement,
-            buffer.NumElements,
-            element,
-            buffer.StructureByteStride,
-            raw,
-        )
-    })?;
-    if own {
-        desc.Anonymous.Buffer.FirstElement = 0;
-    }
->>>>>>> integ/vertex
     // SAFETY: a live buffer.
     let flags = unsafe { shadow.buffer.GetDesc() }.Flags;
     if flags.0 & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS.0 == 0 {
@@ -5354,7 +5127,6 @@ fn buffer_uav(
     }
     // SAFETY: a buffer view's union member.
     let buffer = unsafe { &mut desc.Anonymous.Buffer };
-<<<<<<< HEAD
     let element = if buffer.StructureByteStride > 0 {
         u64::from(buffer.StructureByteStride)
     } else if buffer.Flags.0 & D3D12_BUFFER_UAV_FLAG_RAW.0 != 0 {
@@ -5363,18 +5135,6 @@ fn buffer_uav(
         crate::resource::element(desc.Format.0 as u32).map_or(0, |(bytes, _)| bytes)
     };
     let offset = shadow.offset(address);
-||||||| c7daeea5
-    let element = if buffer.StructureByteStride > 0 {
-        u64::from(buffer.StructureByteStride)
-    } else if buffer.Flags.0 & D3D12_BUFFER_UAV_FLAG_RAW.0 != 0 {
-        4
-    } else {
-        crate::resource::element(desc.Format.0 as u32).map_or(0, |(bytes, _)| bytes)
-    };
-    let offset = if own { 0 } else { shadow.offset(address) };
-=======
-    let offset = if own { 0 } else { shadow.offset(address) };
->>>>>>> integ/vertex
     // A structured view as a raw view of the same bytes (see `raw_window`).
     let window = (desc.Format == DXGI_FORMAT_UNKNOWN)
         .then(|| raw_window(offset, buffer.FirstElement, buffer.NumElements, buffer.StructureByteStride))
@@ -5649,7 +5409,6 @@ fn constant_bytes(size: u32) -> u32 {
 
 /// Makes the host descriptor for `view` at `at`: the host resource it
 /// views, or `None` if it cannot.
-<<<<<<< HEAD
 fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Built> {
     make_twinned(view, at, None)
 }
@@ -5662,11 +5421,6 @@ fn make_twinned(
     at: D3D12_CPU_DESCRIPTOR_HANDLE,
     twin: Option<D3D12_CPU_DESCRIPTOR_HANDLE>,
 ) -> Option<Built> {
-||||||| c7daeea5
-fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Made> {
-=======
-fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Built> {
->>>>>>> integ/vertex
     let host = host()?;
     let device = &host.device;
     match view {
@@ -5682,15 +5436,8 @@ fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Built> {
             }
             let desc = D3D12_CONSTANT_BUFFER_VIEW_DESC {
                 BufferLocation: gpu,
-<<<<<<< HEAD
                 SizeInBytes: constant_bytes(size),
-||||||| c7daeea5
-                SizeInBytes: constant_size(size),
-=======
-                SizeInBytes: cbv_size(size),
->>>>>>> integ/vertex
             };
-<<<<<<< HEAD
             // SAFETY: slots of our heap; the range lies in the host copy.
             unsafe {
                 device.CreateConstantBufferView(Some(&desc), at);
@@ -5699,15 +5446,6 @@ fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Built> {
                 }
             }
             Some(Built::plain(Some(shadow.buffer.clone())))
-||||||| c7daeea5
-            // SAFETY: a slot of our heap; the range lies in the host copy.
-            unsafe { device.CreateConstantBufferView(Some(&desc), at) };
-            Some(Made::plain(Some(shadow.buffer.clone())))
-=======
-            // SAFETY: a slot of our heap; the range lies in the host copy.
-            unsafe { device.CreateConstantBufferView(Some(&desc), at) };
-            Some(Built::plain(Some(shadow.buffer.clone())))
->>>>>>> integ/vertex
         }
         View::Shader(resource, desc) => {
             let resource = *resource as crate::object::This;
@@ -5792,13 +5530,7 @@ fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Built> {
             } else if let (Some((data, len)), Some(desc)) =
                 (crate::resource::buffer_bytes(resource), desc)
             {
-<<<<<<< HEAD
                 buffer_srv(data as u64, len, srv_desc(desc), at, twin).map(Built::plain)
-||||||| c7daeea5
-                buffer_srv(data as u64, len, srv_desc(desc), at).map(Made::plain)
-=======
-                buffer_srv(data as u64, len, srv_desc(desc), at).map(Built::plain)
->>>>>>> integ/vertex
             } else {
                 None
             }
@@ -5808,13 +5540,7 @@ fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Built> {
             let Some(texture) = crate::resource::host_resource(resource) else {
                 return match (crate::resource::buffer_bytes(resource), desc) {
                     (Some((data, len)), Some(desc)) => {
-<<<<<<< HEAD
                         buffer_uav(data as u64, len, uav_desc(desc), at, twin).map(Built::plain)
-||||||| c7daeea5
-                        buffer_uav(data as u64, len, uav_desc(desc), at).map(Made::plain)
-=======
-                        buffer_uav(data as u64, len, uav_desc(desc), at).map(Built::plain)
->>>>>>> integ/vertex
                     }
                     _ => None,
                 };
@@ -5925,21 +5651,9 @@ fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Built> {
                 return None;
             }
             if *unordered {
-<<<<<<< HEAD
                 buffer_uav(address, len, uav_desc(words), at, twin).map(Built::plain)
-||||||| c7daeea5
-                buffer_uav(address, len, uav_desc(words), at).map(Made::plain)
-=======
-                buffer_uav(address, len, uav_desc(words), at).map(Built::plain)
->>>>>>> integ/vertex
             } else {
-<<<<<<< HEAD
                 buffer_srv(address, len, srv_desc(words), at, twin).map(Built::plain)
-||||||| c7daeea5
-                buffer_srv(address, len, srv_desc(words), at).map(Made::plain)
-=======
-                buffer_srv(address, len, srv_desc(words), at).map(Built::plain)
->>>>>>> integ/vertex
             }
         }
     }
@@ -6226,19 +5940,10 @@ mod changed_records_tests {
 fn same_placed_texture(a: &View, b: &View) -> bool {
     match (a, b) {
         (View::Placed(false, resource, desc), View::Placed(false, other, other_desc)) => {
-<<<<<<< HEAD
             // (Words 1 and 13 are the filler of the description's layout, not
             // part of what a texture is: `crate::resource::texture_at`.)
             let same = |from: usize, to: usize| resource[from..to] == other[from..to];
             resource[0] != 1 && resource[0] == other[0] && same(2, 13) && desc[10..12] == other_desc[10..12]
-||||||| c7daeea5
-            resource[0] != 1 && resource == other && desc[10..12] == other_desc[10..12]
-=======
-            resource[0] != 1
-                && crate::resource::placed_desc_key(resource)
-                    == crate::resource::placed_desc_key(other)
-                && desc[10..12] == other_desc[10..12]
->>>>>>> integ/vertex
         }
         _ => false,
     }
@@ -6560,13 +6265,7 @@ mod tests {
         };
         assert_ne!(key(a), key(b));
         let handle = live.as_mut_ptr() as u64;
-<<<<<<< HEAD
         let installed = || heap.made.get(1).unwrap_or(0);
-||||||| c7daeea5
-        let installed = || heap.made.lock().unwrap()[1];
-=======
-        let installed = || heap.made_key(1);
->>>>>>> integ/vertex
         // The sampler record interning is identical to the title's API
         // writes. Both byte records and the later guest location are valid.
         live.copy_from_slice(&b);
@@ -7199,7 +6898,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert!(!same_placed_texture(&low, &View::Shader(0, None)));
     }
 
-<<<<<<< HEAD
     #[test]
     fn ranges_that_touch_are_one() {
         let mut ranges = vec![(40, 50), (30, 40), (35, 40), (10, 20), (45, 60), (60, 61), (1, 1)];
@@ -7284,8 +6982,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert_eq!(constant_bytes(u32::MAX), 64 << 10);
     }
 
-||||||| c7daeea5
-=======
     /// The texture that stands for missing ones can be made and viewed.
     #[cfg(feature = "diagnostics")]
     #[test]
@@ -7303,7 +6999,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         assert!(unsafe { host.device.GetDeviceRemovedReason() }.is_ok());
     }
 
->>>>>>> integ/vertex
     /// A null 3D UAV made on the real device leaves it alive.
     #[test]
     fn null_3d_uav_is_accepted_by_the_device() {
@@ -8669,7 +8364,6 @@ mod own_copy_tests {
         assert_eq!(heap.dynamic(2), None);
     }
 }
-<<<<<<< HEAD
 
 /// What is known of a record a list's tables hold, in that recording of the
 /// list ([`HostHeap::make_listed`]).
@@ -8767,16 +8461,8 @@ pub(crate) fn note_listed(recording: u64, words: [u32; 3], listed: Listed) {
 pub(crate) fn list_views() -> bool {
     crate::toggled!("VICTORY_LIST_VIEWS")
 }
-||||||| c7daeea5
-=======
 
-/// Largest constant buffer view D3D12 takes (4096 16-byte elements). A
-/// title view past it (a shader only reads its first 64 KiB) made an
-/// invalid view that removed NVIDIA's device (0x887A0001).
-const MAX_CBV_BYTES: u32 = 65_536;
-
-/// The host size of a constant buffer view of `size` bytes.
+/// Vertex's name for [`constant_bytes`] (its tests use it).
 fn cbv_size(size: u32) -> u32 {
-    size.min(MAX_CBV_BYTES).next_multiple_of(256)
+    constant_bytes(size)
 }
->>>>>>> integ/vertex
