@@ -101,7 +101,7 @@ pub(crate) struct ResourceDesc {
 #[cfg(windows)]
 impl ResourceDesc {
     /// The texture of this one's levels from `base` on.
-    fn from_level(&self, base: u32) -> ResourceDesc {
+    fn levels_from(&self, base: u32) -> ResourceDesc {
         let mut d = *self;
         if base > 0 {
             d.width = (d.width >> base).max(1);
@@ -1715,6 +1715,7 @@ fn hosted(this: This, make: bool) -> Option<Made> {
             }
         }
         let texture = match texture {
+<<<<<<< HEAD
             Some(texture) => Some((texture, None)),
             // In a range of a big heap only what the title places in memory
             // and fills, in a layout the upload reads (`crate::texture`
@@ -1726,6 +1727,13 @@ fn hosted(this: This, make: bool) -> Option<Made> {
                     && texture_layout(&r.desc).is_some_and(|t| !t.planes[0].layout.desc.swizzle.xor());
                 host_texture(&r.desc.from_level(base), r.host.state, clear, heaped)
             }
+||||||| 0a4356653
+            Some(texture) => Some(texture),
+            None => host_texture(&r.desc.from_level(base), r.host.state, clear),
+=======
+            Some(texture) => Some(texture),
+            None => host_texture(&r.desc.levels_from(base), r.host.state, clear),
+>>>>>>> vicetay/main
         };
         let Some((texture, range)) = texture else {
             r.host.refused.store(true, Relaxed);
@@ -3120,6 +3128,14 @@ pub(crate) fn host_resource<'a>(
     Some(unsafe { &*std::ptr::from_ref(&host.texture) })
 }
 
+/// Whether `this` is a valid title resource created by this runtime.
+#[cfg(windows)]
+pub(crate) fn is_resource(this: This) -> bool {
+    let mut table = [0; size_of::<usize>()];
+    crate::host::read_into(this.cast(), &mut table)
+        && usize::from_ne_bytes(table) == RESOURCE_FUNCTIONS.0.as_ptr() as usize
+}
+
 /// A title texture's host copy, shared, for a list to hold.
 #[cfg(windows)]
 pub(crate) fn host_copy(this: This) -> Option<std::sync::Arc<HostTexture>> {
@@ -3308,6 +3324,7 @@ fn host_texture_in(
     };
     crate::census::made(if reserved { 5 } else { 4 }, 0);
     if let Err(e) = &made {
+        crate::residency::allocation_error(e);
         tracing::warn!(error = %e, desc = ?d, reserved, "no host texture");
     }
     if !reserved
@@ -3732,8 +3749,17 @@ static PLACED_RAW: std::sync::Mutex<std::collections::BTreeSet<(u64, [u32; 14])>
 #[cfg(windows)]
 static PLACED_TWINS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+<<<<<<< HEAD
 /// See [`PLACED_TWINS`]. Read by the diagnostics' memory report only.
 #[cfg(all(windows, feature = "diagnostics"))]
+||||||| 0a4356653
+/// See [`PLACED_TWINS`].
+#[cfg(windows)]
+=======
+/// See [`PLACED_TWINS`].
+#[cfg(windows)]
+#[cfg_attr(not(feature = "diagnostics"), allow(dead_code))]
+>>>>>>> vicetay/main
 pub(crate) fn placed_filler_twins() -> u64 {
     PLACED_TWINS.load(std::sync::atomic::Ordering::Relaxed)
 }

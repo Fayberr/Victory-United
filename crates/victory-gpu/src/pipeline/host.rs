@@ -1022,12 +1022,241 @@ impl HostPipeline {
                 collect_stage_bindings(t, visibility, &mut params, &mut ranges, &mut samplers, aniso_point_mip_supported);
             bound.push(Stage {
                 shader: shader.clone(),
+<<<<<<< HEAD
                 tables: TableLayout::build(&translated.used, &t.root_indexed_views),
                 user_data,
                 root_cbvs,
                 root_srvs,
                 root_uavs,
             });
+||||||| 0a4356653
+                user_data: None,
+                root_cbvs: Vec::new(),
+                root_srvs: Vec::new(),
+                root_uavs: Vec::new(),
+            };
+            let dwords = t.user_data_dwords();
+            if dwords > 0 {
+                stage.user_data = Some((params.len() as u32, dwords));
+                params.push(D3D12_ROOT_PARAMETER1 {
+                    ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+                    Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                        Constants: D3D12_ROOT_CONSTANTS {
+                            ShaderRegister: 0,
+                            RegisterSpace: USER_DATA_SPACE,
+                            Num32BitValues: dwords,
+                        },
+                    },
+                    ShaderVisibility: visibility,
+                });
+            }
+            for (slots, kind, out) in [
+                (
+                    &t.root_cbvs,
+                    D3D12_ROOT_PARAMETER_TYPE_CBV,
+                    &mut stage.root_cbvs,
+                ),
+                (
+                    &t.root_srvs,
+                    D3D12_ROOT_PARAMETER_TYPE_SRV,
+                    &mut stage.root_srvs,
+                ),
+                (
+                    &t.root_uavs,
+                    D3D12_ROOT_PARAMETER_TYPE_UAV,
+                    &mut stage.root_uavs,
+                ),
+            ] {
+                for &slot in slots {
+                    let uav = kind == D3D12_ROOT_PARAMETER_TYPE_UAV;
+                    // Ours, not the title's, stay root descriptors: the
+                    // table of strides, the directory of title memory by
+                    // address and its fault notes.
+                    let ours = if uav {
+                        slot == victory_shader::emit::SLOT_FAULTS
+                    } else {
+                        slot == victory_shader::emit::SLOT_STRIDES
+                            || slot == victory_shader::emit::SLOT_MEMORY
+                    };
+                    if (uav || kind == D3D12_ROOT_PARAMETER_TYPE_SRV) && !ours && bounded_root_srvs() {
+                        // A one-view table: the view's size bounds the
+                        // reads (and a root UAV's writes), which a root
+                        // descriptor leaves unbounded.
+                        // (Our own table of strides stays a descriptor.)
+                        ranges.push(Box::new(D3D12_DESCRIPTOR_RANGE1 {
+                            RangeType: if uav {
+                                D3D12_DESCRIPTOR_RANGE_TYPE_UAV
+                            } else {
+                                D3D12_DESCRIPTOR_RANGE_TYPE_SRV
+                            },
+                            NumDescriptors: 1,
+                            BaseShaderRegister: u32::from(slot),
+                            RegisterSpace: ROOT_CBV_SPACE,
+                            Flags: D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE
+                                | D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE,
+                            OffsetInDescriptorsFromTableStart: 0,
+                        }));
+                        let range: *const D3D12_DESCRIPTOR_RANGE1 = &**ranges.last()?;
+                        out.push((slot, params.len() as u32));
+                        params.push(D3D12_ROOT_PARAMETER1 {
+                            ParameterType: D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+                            Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                                DescriptorTable: D3D12_ROOT_DESCRIPTOR_TABLE1 {
+                                    NumDescriptorRanges: 1,
+                                    pDescriptorRanges: range,
+                                },
+                            },
+                            ShaderVisibility: visibility,
+                        });
+                        continue;
+                    }
+                    out.push((slot, params.len() as u32));
+                    params.push(D3D12_ROOT_PARAMETER1 {
+                        ParameterType: kind,
+                        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                            Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                                ShaderRegister: u32::from(slot),
+                                RegisterSpace: ROOT_CBV_SPACE,
+                                Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+                            },
+                        },
+                        ShaderVisibility: visibility,
+                    });
+                }
+            }
+            for (n, s) in t.static_samplers.iter().enumerate() {
+                samplers.push(D3D12_STATIC_SAMPLER_DESC {
+                    Filter: D3D12_FILTER(s.filter_for_host(aniso_point_mip_supported) as i32),
+                    AddressU: D3D12_TEXTURE_ADDRESS_MODE(s.address[0] as i32),
+                    AddressV: D3D12_TEXTURE_ADDRESS_MODE(s.address[1] as i32),
+                    AddressW: D3D12_TEXTURE_ADDRESS_MODE(s.address[2] as i32),
+                    MipLODBias: s.mip_lod_bias,
+                    MaxAnisotropy: s.max_anisotropy,
+                    ComparisonFunc: D3D12_COMPARISON_FUNC(s.comparison as i32),
+                    BorderColor: D3D12_STATIC_BORDER_COLOR(s.border as i32),
+                    MinLOD: s.min_lod,
+                    MaxLOD: s.max_lod,
+                    ShaderRegister: n as u32,
+                    RegisterSpace: SAMPLER_SPACE,
+                    ShaderVisibility: visibility,
+                });
+            }
+            bound.push(stage);
+=======
+                user_data: None,
+                root_cbvs: Vec::new(),
+                root_srvs: Vec::new(),
+                root_uavs: Vec::new(),
+            };
+            let dwords = t.user_data_dwords();
+            if dwords > 0 {
+                stage.user_data = Some((params.len() as u32, dwords));
+                params.push(D3D12_ROOT_PARAMETER1 {
+                    ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+                    Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                        Constants: D3D12_ROOT_CONSTANTS {
+                            ShaderRegister: 0,
+                            RegisterSpace: USER_DATA_SPACE,
+                            Num32BitValues: dwords,
+                        },
+                    },
+                    ShaderVisibility: visibility,
+                });
+            }
+            for (slots, kind, out) in [
+                (
+                    &t.root_cbvs,
+                    D3D12_ROOT_PARAMETER_TYPE_CBV,
+                    &mut stage.root_cbvs,
+                ),
+                (
+                    &t.root_srvs,
+                    D3D12_ROOT_PARAMETER_TYPE_SRV,
+                    &mut stage.root_srvs,
+                ),
+                (
+                    &t.root_uavs,
+                    D3D12_ROOT_PARAMETER_TYPE_UAV,
+                    &mut stage.root_uavs,
+                ),
+            ] {
+                for &slot in slots {
+                    let uav = kind == D3D12_ROOT_PARAMETER_TYPE_UAV;
+                    // Ours, not the title's, stay root descriptors: the
+                    // table of strides, the directory of title memory by
+                    // address and its fault notes.
+                    let ours = if uav {
+                        slot == victory_shader::emit::SLOT_FAULTS
+                    } else {
+                        slot == victory_shader::emit::SLOT_STRIDES
+                            || slot == victory_shader::emit::SLOT_TABLE_STRIDES
+                            || slot == victory_shader::emit::SLOT_MEMORY
+                    };
+                    if (uav || kind == D3D12_ROOT_PARAMETER_TYPE_SRV) && !ours && bounded_root_srvs() {
+                        // A one-view table: the view's size bounds the
+                        // reads (and a root UAV's writes), which a root
+                        // descriptor leaves unbounded.
+                        // (Our own table of strides stays a descriptor.)
+                        ranges.push(Box::new(D3D12_DESCRIPTOR_RANGE1 {
+                            RangeType: if uav {
+                                D3D12_DESCRIPTOR_RANGE_TYPE_UAV
+                            } else {
+                                D3D12_DESCRIPTOR_RANGE_TYPE_SRV
+                            },
+                            NumDescriptors: 1,
+                            BaseShaderRegister: u32::from(slot),
+                            RegisterSpace: ROOT_CBV_SPACE,
+                            Flags: D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE
+                                | D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE,
+                            OffsetInDescriptorsFromTableStart: 0,
+                        }));
+                        let range: *const D3D12_DESCRIPTOR_RANGE1 = &**ranges.last()?;
+                        out.push((slot, params.len() as u32));
+                        params.push(D3D12_ROOT_PARAMETER1 {
+                            ParameterType: D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+                            Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                                DescriptorTable: D3D12_ROOT_DESCRIPTOR_TABLE1 {
+                                    NumDescriptorRanges: 1,
+                                    pDescriptorRanges: range,
+                                },
+                            },
+                            ShaderVisibility: visibility,
+                        });
+                        continue;
+                    }
+                    out.push((slot, params.len() as u32));
+                    params.push(D3D12_ROOT_PARAMETER1 {
+                        ParameterType: kind,
+                        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                            Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                                ShaderRegister: u32::from(slot),
+                                RegisterSpace: ROOT_CBV_SPACE,
+                                Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+                            },
+                        },
+                        ShaderVisibility: visibility,
+                    });
+                }
+            }
+            for (n, s) in t.static_samplers.iter().enumerate() {
+                samplers.push(D3D12_STATIC_SAMPLER_DESC {
+                    Filter: D3D12_FILTER(s.filter_for_host(aniso_point_mip_supported) as i32),
+                    AddressU: D3D12_TEXTURE_ADDRESS_MODE(s.address[0] as i32),
+                    AddressV: D3D12_TEXTURE_ADDRESS_MODE(s.address[1] as i32),
+                    AddressW: D3D12_TEXTURE_ADDRESS_MODE(s.address[2] as i32),
+                    MipLODBias: s.mip_lod_bias,
+                    MaxAnisotropy: s.max_anisotropy,
+                    ComparisonFunc: D3D12_COMPARISON_FUNC(s.comparison as i32),
+                    BorderColor: D3D12_STATIC_BORDER_COLOR(s.border as i32),
+                    MinLOD: s.min_lod,
+                    MaxLOD: s.max_lod,
+                    ShaderRegister: n as u32,
+                    RegisterSpace: SAMPLER_SPACE,
+                    ShaderVisibility: visibility,
+                });
+            }
+            bound.push(stage);
+>>>>>>> vicetay/main
         }
         let (root, root_blob) = match root_signature(&host.device, &params, &samplers, compute.is_some()) {
             Ok(root) => root,
@@ -2087,17 +2316,29 @@ mod tests {
 
         let mut g = GraphicsState::default();
         // Subobject 21 (`DEPTH_STENCIL1`) with `DepthBoundsTestEnable = true`,
-        // depth test itself off so only depth bounds gates the draw.
+        // a depth test that always passes and writes nothing, so only depth
+        // bounds gates the draw. With the depth test off WARP (the software
+        // adapter CI runs on) skips the bounds too; hardware does not.
         #[repr(C, align(8))]
         struct Sub21(u32, D3D12_DEPTH_STENCIL_DESC1);
         let sub = Sub21(
             21,
             D3D12_DEPTH_STENCIL_DESC1 {
+<<<<<<< HEAD
                 DepthEnable: false.into(),
                 // Ignored when `DepthEnable` is false: `depth1()` must clear
                 // writes and force `ALWAYS` when enabling depth for WARP.
                 DepthWriteMask: D3D12_DEPTH_WRITE_MASK_ALL,
                 DepthFunc: D3D12_COMPARISON_FUNC_NEVER,
+||||||| 0a4356653
+                DepthEnable: false.into(),
+                DepthWriteMask: D3D12_DEPTH_WRITE_MASK_ZERO,
+                DepthFunc: D3D12_COMPARISON_FUNC_ALWAYS,
+=======
+                DepthEnable: true.into(),
+                DepthWriteMask: D3D12_DEPTH_WRITE_MASK_ZERO,
+                DepthFunc: D3D12_COMPARISON_FUNC_ALWAYS,
+>>>>>>> vicetay/main
                 DepthBoundsTestEnable: true.into(),
                 ..Default::default()
             },

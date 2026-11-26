@@ -2,29 +2,77 @@
 #   scripts\play.ps1 -Exe <path of your own copy's executable>
 # -Safe         without the newer, faster ways (the first thing to try when something is wrong)
 # -RayTracing   the title's own ray-traced indirect light: lit interiors, about a third slower
+# -Windowed     a window instead of the whole screen (full screen is the default)
+# -Console      series-x (the default) or series-s: the console the title takes this PC for
 # -Build        target\diag (the default, the build all measurements are of) or target\release
+# -Machine      auto (the default: by the graphics card), 7900xtx or 4090
 # -More         other settings: -More @{VICTORY_PANEL='1'}
 # Run it from a normal window, not as administrator: the driver then keeps its shader cache elsewhere.
 param(
     [Parameter(Mandatory)][string]$Exe,
     [switch]$Safe,
     [switch]$RayTracing,
+    [switch]$Windowed,
+    [ValidateSet('series-x', 'series-s')][string]$Console = 'series-x',
     [ValidateSet('diag', 'release')][string]$Build = 'diag',
+    [ValidateSet('auto', '7900xtx', '4090')][string]$Machine = 'auto',
     [hashtable]$More = @{}
 )
 $settings = @{
     VICTORY_TEXTURE_NO_WAIT = '1'; VICTORY_RELAY = '2'; VICTORY_WIDE_BACK = '1'; VICTORY_CARD_REHASH_RUNS = '1'
     VICTORY_JOIN_COPIES = '1'; VICTORY_INDIRECT_WINDOW = '1'; VICTORY_RELAY_COPY = '1'; VICTORY_CARD_STEPS = '2'
-    VICTORY_INDIRECT_BATCH = '2'; VICTORY_MAP_THREADS = '1'; VICTORY_TITLE_PRIORITIES = '0'; VICTORY_CARD_AWAKE = '1'
+    VICTORY_TITLE_PRIORITIES = '0'
     VICTORY_SHOW_AFTER = '1'; VICTORY_AMBIENT = '0.8'; VICTORY_D3D12_DRED = 'light'; VICTORY_SKIP_PIPELINES = 'none'
 }
+if ($Machine -eq 'auto') {
+    # An NVIDIA card (PCI vendor 10DE) gets the 4090's settings, any other the 7900 XTX's.
+    $cards = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | ForEach-Object { $_.PNPDeviceID })
+    $Machine = if ($cards -match 'VEN_10DE') { '4090' } else { '7900xtx' }
+}
+if ($Machine -eq '7900xtx') {
+    # i9-12900K, RX 7900 XTX, 64 GB: the page-mapping lock was fastest with one
+    # thread, and the AMD driver lowers its clocks between submissions.
+    $settings.VICTORY_MAP_THREADS = '1'; $settings.VICTORY_CARD_AWAKE = '1'
+} else {
+    # RTX 4090, Ryzen 9 9950X3D (16 cores of one kind, two caches), 48 GB.
+    # NVIDIA sets its clocks by the driver's power mode: no spinner on the
+    # compute queue. 16 cores record and land, not 8.
+    $settings.VICTORY_THIN_THREADS = '12'; $settings.VICTORY_UNDER_THREADS = '8'; $settings.VICTORY_LAND_THREADS = '6'
+    if (-not $Safe) {
+        # Pages are mapped by several threads only while the title streams
+        # (not the default: one run behind it).
+        $settings.VICTORY_MAP_THREADS = 'auto'
+        # A fill of the constant-buffer ring that a small copy at its place writes
+        # into refused the whole submission to the card steps; in list order it is
+        # taken (submit thread 104.7 -> 50.9 ms a frame, 12.1 -> 14.3 fps here).
+        $settings.VICTORY_PLACED_ORDER = '1'
+    }
+    # The console wave64 programs a 32-lane card takes only in the wave-wide
+    # form; this list of them ran without a lost device on this card for 30
+    # minutes (the losses of runs 121-124 had the form on for every program).
+    # Kept under -Safe too: without it those programs do not translate and
+    # their draws are dropped, the picture -Safe is there to check.
+    $settings.VICTORY_WAVE_WIDE_ONLY = '6f225b641c5b0708,5dc3b25986622949,369cbe906ea72764,2cc4c197ee29e291'
+}
+# -Safe leaves out every way still on trial, and the newest faster ones.
 if ($Safe) {
     $settings.VICTORY_UNDER_WIDE = '0'; $settings.VICTORY_LAND_ECHO = '0'
 } else {
     $settings.VICTORY_THIN = '1'; $settings.VICTORY_JOIN_PARTS = '8'; $settings.VICTORY_UPLOAD_AHEAD = '1'
+    # A dispatch does not end a batch of argument clamps before the title waits
+    # for it: off by default, as other ways the title may wait are not known.
+    $settings.VICTORY_INDIRECT_BATCH = '2'
 }
 if ($RayTracing) { $settings.VICTORY_BVH_BUILDER = '1' }
+# The whole screen, with no frame, as on the console.
+if (-not $Windowed) { $settings.VICTORY_FULLSCREEN = '1' }
 foreach ($k in $More.Keys) { $settings[$k] = $More[$k] }
+
+$ram = (Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue).TotalPhysicalMemory
+Write-Host "Settings for the $Machine$(if ($Safe) { ', safe' })$(if ($RayTracing) { ', with ray tracing' })."
+if ($ram -and $ram -lt 60GB) {
+    Write-Host ("This PC has {0:N0} GB: private memory reaches 40-46 GB; keep a system-managed page file." -f ($ram / 1GB))
+}
 
 $victory = Join-Path $PSScriptRoot "..\target\$Build\victory.exe"
 if (-not (Test-Path $victory)) { Write-Host "No $victory. Build it first (README.md)."; return }
@@ -35,4 +83,4 @@ Get-ChildItem Env:VICTORY_* | Where-Object { $_.Name -notin $paths } | ForEach-O
 foreach ($k in $settings.Keys) { Set-Item "Env:$k" $settings[$k] }
 $Exe = (Resolve-Path $Exe).Path
 Push-Location (Join-Path $PSScriptRoot '..')   # victory.toml is looked for here
-try { & $victory run $Exe --execute } finally { Pop-Location }
+try { & $victory run $Exe --console $Console --execute } finally { Pop-Location }

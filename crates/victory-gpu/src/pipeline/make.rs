@@ -52,8 +52,10 @@ pub(crate) struct Pending {
     /// whether a draw or dispatch has requested it yet.
     pub(super) key: String,
     used: AtomicBool,
-    /// A pass over the screen ([`GraphicsState::screen_pass`]).
+    /// A pass over the screen ([`GraphicsState::screen_pass`]) or a confirmed
+    /// opening-scene / bake producer that must never sit behind cold RT shaders.
     screen: bool,
+<<<<<<< HEAD
     /// When a worker began it ([`slow`]).
     begun: OnceLock<Instant>,
     /// Why it is not made, if it is not ([`left_out`]).
@@ -112,6 +114,63 @@ fn without_structures(shaders: &[Arc<Shader>]) -> bool {
     let is = |name, value| std::env::var_os(name).is_some_and(|v| v == value);
     let out = *OUT.get_or_init(|| is("VICTORY_RT_RESOLVE", "0") && !is("VICTORY_BVH_BUILDER", "1"));
     out && named(shaders, b"CS_RaytracingResolve")
+||||||| 0a4356653
+=======
+    /// Confirmed first-scene / bake producer prepared early even on a cold cache.
+    scene_input: bool,
+    /// Why this pipeline is intentionally skipped (e.g. RT resolve without BVH).
+    left_out: Option<&'static str>,
+}
+
+fn named(shaders: &[Arc<Shader>], name: &[u8]) -> bool {
+    shaders
+        .iter()
+        .any(|s| s.stage == "compute" && s.container.windows(name.len()).any(|w| w == name))
+}
+
+fn left_out(shaders: &[Arc<Shader>]) -> Option<&'static str> {
+    static SKIP_RT_RESOLVE: OnceLock<bool> = OnceLock::new();
+    let skip_rt = *SKIP_RT_RESOLVE.get_or_init(|| {
+        let builder = std::env::var_os("VICTORY_BVH_BUILDER").is_some_and(|v| v == "1");
+        if builder {
+            return false;
+        }
+        // Without BVH, ~1,000 CS_RaytracingResolve shaders shade no hits while
+        // clogging the cold compiler queue; skip unless VICTORY_RT_RESOLVE=1.
+        std::env::var_os("VICTORY_RT_RESOLVE").is_none_or(|v| v == "0")
+    });
+    if skip_rt && named(shaders, b"CS_RaytracingResolve") {
+        return Some("shades ray-tracing hits without BVH, left out");
+    }
+    static SKIP_ACTIVATE_RAYS: OnceLock<bool> = OnceLock::new();
+    let skip_activate = *SKIP_ACTIVATE_RAYS.get_or_init(|| {
+        let builder = std::env::var_os("VICTORY_BVH_BUILDER").is_some_and(|v| v == "1");
+        if builder {
+            return std::env::var_os("VICTORY_ACTIVATE_RAYS").is_some_and(|v| v == "0");
+        }
+        std::env::var_os("VICTORY_ACTIVATE_RAYS").is_none_or(|v| v == "0")
+    });
+    if skip_activate && named(shaders, b"CS_ScreenProbes_ActivateRays") {
+        return Some("ray activation shader without BVH, left out");
+    }
+    None
+}
+
+/// Confirmed first-scene producers. Prepare these at creation even on a cold
+/// launch so cutscene lighting, tiling, and bakes never miss their first frame.
+fn scene_input(shaders: &[Arc<Shader>]) -> bool {
+    shaders.iter().any(|s| {
+        matches!(
+            s.hash.as_str(),
+            "970c4fbb3b017c0e"
+                | "068c90badc86f1fd"
+                | "e4a7e088c7780ce8"
+                | "ebe4e53f031f5249"
+                | "2cc4c197ee29e291"
+                | "369cbe906ea72764"
+        ) || crate::draw::BAKE_PIXEL_SHADERS.contains(&s.hash.as_str())
+    })
+>>>>>>> vicetay/main
 }
 
 // SAFETY: D3D12 objects are free-threaded; the graphics state (whose input
@@ -122,12 +181,41 @@ unsafe impl Sync for Pending {}
 
 impl Pending {
     pub(crate) fn new(shaders: Vec<Arc<Shader>>, graphics: Option<Box<GraphicsState>>) -> Pending {
+<<<<<<< HEAD
         let key = key(&shaders, graphics.as_deref());
         let left_out = left_out(&shaders);
+||||||| 0a4356653
+        let mut key = blake3::Hasher::new();
+        for s in &shaders {
+            key.update(s.stage.as_bytes());
+            key.update(s.hash.as_bytes());
+        }
+        key.update(graphics.as_ref().map(|g| g.describe()).unwrap_or_default().as_bytes());
+=======
+        let mut key = blake3::Hasher::new();
+        for s in &shaders {
+            key.update(s.stage.as_bytes());
+            key.update(s.hash.as_bytes());
+        }
+        key.update(graphics.as_ref().map(|g| g.describe()).unwrap_or_default().as_bytes());
+        let scene_input = scene_input(&shaders);
+        let screen = (graphics.as_ref().is_some_and(|g| g.screen_pass())
+            && shaders.iter().all(|s| s.stage != "mesh"))
+            || scene_input;
+        let left_out = left_out(&shaders);
+>>>>>>> vicetay/main
         Pending {
+<<<<<<< HEAD
             screen: graphics.as_ref().is_some_and(|g| g.screen_pass()),
             formats: graphics.as_ref().map_or([0; 9], |g| g.formats()),
             variant: OnceLock::new(),
+||||||| 0a4356653
+            screen: graphics.as_ref().is_some_and(|g| g.screen_pass()),
+=======
+            screen,
+            scene_input,
+            left_out,
+>>>>>>> vicetay/main
             shaders,
             graphics,
             left_out,
@@ -447,14 +535,24 @@ pub(crate) fn now(p: &Arc<Pending>) -> bool {
 }
 
 /// At the title's creation of a pipeline: starts it at once if an earlier
-/// run drew with it (during loading, so the world's first frames find it).
+/// run drew with it (during loading, so the world's first frames find it),
+/// or if it is a confirmed opening-scene / bake producer.
 pub(crate) fn early(p: &Arc<Pending>) {
+<<<<<<< HEAD
     // Turning off speculative starts keeps first-use scheduling and the disk caches available.
     static PREWARM: OnceLock<bool> = OnceLock::new();
     let enabled = *PREWARM.get_or_init(|| std::env::var_os("VICTORY_EARLY_PIPELINES").is_none_or(|v| v != "0"));
     if enabled && p.left_out.is_none() && !p.shaders.is_empty() && super::library::wanted_early(&p.key) {
+||||||| 0a4356653
+    if !p.shaders.is_empty() && super::library::wanted_early(&p.key) {
+=======
+    if p.left_out.is_some() {
+        return;
+    }
+    if !p.shaders.is_empty() && (p.scene_input || super::library::wanted_early(&p.key)) {
+>>>>>>> vicetay/main
         super::library::EARLY.fetch_add(1, Ordering::Relaxed);
-        start(p, EARLY);
+        start(p, if p.scene_input { REQUESTED } else { EARLY });
     }
 }
 
@@ -856,8 +954,13 @@ pub(crate) fn frame_drew(drawn: u64) {
 /// 64), else two thirds of the logical processors, 2 to 16. They run below the
 /// title's own threads, and a cold cache queues hundreds at once.
 fn worker_count(asked: Option<usize>, processors: usize) -> usize {
+    worker_count_for(asked, processors, false)
+}
+
+fn worker_count_for(asked: Option<usize>, processors: usize, limited_ram: bool) -> usize {
     match asked {
         Some(n) => n.clamp(1, 64),
+        None if limited_ram => (processors * 3 / 4).clamp(2, 8),
         None => (processors * 2 / 3).clamp(2, 16),
     }
 }
@@ -867,11 +970,12 @@ fn workers() -> bool {
     static RUNNING: OnceLock<bool> = OnceLock::new();
     *RUNNING.get_or_init(|| {
         let mut running = false;
-        let workers = worker_count(
+        let workers = worker_count_for(
             std::env::var("VICTORY_PIPELINE_WORKERS")
                 .ok()
                 .and_then(|v| v.trim().parse().ok()),
             std::thread::available_parallelism().map_or(2, |n| n.get()),
+            crate::residency::limited_host_ram(),
         );
         tracing::info!(workers, "pipeline workers");
         let screens = if screens_first() { SCREEN_WORKERS } else { 0 };
@@ -1035,6 +1139,10 @@ mod tests {
         assert_eq!(worker_count(None, 64), 16);
         assert_eq!(worker_count(Some(0), 24), 1);
         assert_eq!(worker_count(Some(20), 24), 20);
+        assert_eq!(worker_count_for(None, 8, true), 6);
+        assert_eq!(worker_count_for(None, 16, true), 8);
+        assert_eq!(worker_count_for(None, 24, true), 8);
+        assert_eq!(worker_count_for(Some(12), 8, true), 12);
     }
 
     /// A first use queues the pipeline and, within the budget, gets the

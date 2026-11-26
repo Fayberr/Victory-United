@@ -79,7 +79,8 @@ const _: () = assert!(size_of::<KeyState>() == 12);
 trait Source: Send {
     /// The pad in host slot `slot`, `None` when the slot is empty.
     fn pad(&mut self, slot: usize) -> Option<PadState>;
-    /// Keys held down; none while the title's window lacks focus.
+    /// Keys held down: the keyboard's only while the title's window has
+    /// focus, scripted ones (`VICTORY_KEYS_FILE`, `VICTORY_KEYS`) always.
     fn keys(&mut self) -> Vec<KeyState>;
     /// Mouse buttons held down (`controls::MOUSE_BUTTONS`); none while the
     /// cursor is not captured.
@@ -1940,8 +1941,8 @@ mod host {
                 return None;
             }
             self.empty_until[slot] = None;
-            #[allow(unused_mut)]
             let mut pad = convert(&state.Gamepad);
+<<<<<<< HEAD
             // A button tapped between two of the title's looks stays down
             // until it has looked.
             let down: Vec<u32> = (0..32).filter(|bit| pad.buttons & (1 << bit) != 0).collect();
@@ -1955,12 +1956,37 @@ mod host {
             // connected the stand-in is not there, and a title that listens
             // to the pad (the title's start screen) saw nothing.
             #[cfg(feature = "diagnostics")]
+||||||| 0a4356653
+            // The scripted keys (`VICTORY_KEYS`) also press the first
+            // pad's buttons, by the stand-in pad's table: with a real pad
+            // connected the stand-in is not there, and a title that listens
+            // to the pad (the title's start screen) saw nothing.
+            #[cfg(feature = "diagnostics")]
+=======
+            // The scripted keys (`VICTORY_KEYS_FILE` and `VICTORY_KEYS`)
+            // also press the first pad's buttons, by the stand-in pad's
+            // table: with a real pad connected the stand-in is not there,
+            // and a title that listens to the pad (the title's start screen)
+            // saw nothing.
+>>>>>>> vicetay/main
             if slot == 0 {
+<<<<<<< HEAD
                 for vk in scripted() {
                     for (key, part) in super::binds::layout(|_| false) {
                         if let (true, super::Part::Button(button)) = (key == vk, part) {
                             pad.buttons |= button;
                         }
+||||||| 0a4356653
+                for vk in scripted() {
+                    if let Some(&(_, button)) = super::FALLBACK_BUTTONS.iter().find(|(key, _)| *key == vk) {
+                        pad.buttons |= button;
+=======
+                let mut asked = asked_keys();
+                asked.extend(scripted());
+                for vk in asked {
+                    if let Some(&(_, button)) = super::FALLBACK_BUTTONS.iter().find(|(key, _)| *key == vk) {
+                        pad.buttons |= button;
+>>>>>>> vicetay/main
                     }
                 }
             }
@@ -1968,6 +1994,7 @@ mod host {
         }
 
         fn keys(&mut self) -> Vec<KeyState> {
+<<<<<<< HEAD
             let focus = self.focus();
             self.cursor(focus);
             #[cfg(feature = "diagnostics")]
@@ -1979,6 +2006,17 @@ mod host {
             #[cfg(not(feature = "diagnostics"))]
             let mut down = Vec::new();
             if focus || anywhere() {
+||||||| 0a4356653
+            #[cfg(feature = "diagnostics")]
+            let mut down = scripted();
+            #[cfg(not(feature = "diagnostics"))]
+            let mut down = Vec::new();
+            if focused() {
+=======
+            let mut down = asked_keys();
+            down.extend(scripted());
+            if focused() {
+>>>>>>> vicetay/main
                 // Left/right modifier keys only, as devices report them; no
                 // mouse buttons (below 0x08; `mouse` has them).
                 let held: Vec<u8> = (0x08..=0xFE_u8)
@@ -2054,31 +2092,95 @@ mod host {
         }
     }
 
+    /// A key's virtual-key code: a letter, a digit, or `Enter`, `Esc`,
+    /// `Tab`, `Back`, `Up`, `Down`, `Left`, `Right` (the stand-in pad's
+    /// table maps them to buttons).
+    fn key_code(key: &str) -> Option<u8> {
+        Some(match key {
+            "Enter" => 0x0D,
+            "Esc" => 0x1B,
+            "Tab" => 0x09,
+            "Back" => 0x08,
+            "Up" => 0x26,
+            "Down" => 0x28,
+            "Left" => 0x25,
+            "Right" => 0x27,
+            k if k.len() == 1 && k.as_bytes()[0].is_ascii_alphanumeric() => {
+                k.as_bytes()[0].to_ascii_uppercase()
+            }
+            _ => return None,
+        })
+    }
+
+    /// Test aid: `VICTORY_KEYS_FILE=<file>`. A script writes lines
+    /// `<key> <seconds>` into the file (keys as [`key_code`] names them);
+    /// the next look, at most 50 ms later, holds each key that long, focus
+    /// or not, and removes the file. A measuring script can then answer
+    /// what is on screen (the account screen's prompt, a turn of the
+    /// camera) while someone else uses the desktop. Unset: nothing is read.
+    fn asked_keys() -> Vec<u8> {
+        /// The file, and the name it is taken to before it is read ([`take`]).
+        static FILE: LazyLock<Option<(std::path::PathBuf, std::path::PathBuf)>> = LazyLock::new(|| {
+            let file = std::env::var_os("VICTORY_KEYS_FILE")?;
+            let mut taken = file.clone();
+            taken.push(".taken");
+            Some((file.into(), taken.into()))
+        });
+        /// Keys held, until when; when the file was last looked at.
+        type Held = (Vec<(Instant, u8)>, Option<Instant>);
+        static HELD: Mutex<Held> = Mutex::new((Vec::new(), None));
+        let Some((file, taken)) = &*FILE else {
+            return Vec::new();
+        };
+        let now = Instant::now();
+        let mut held = HELD.lock().unwrap_or_else(PoisonError::into_inner);
+        let due = held.1.is_none_or(|last| now.duration_since(last) >= Duration::from_millis(50));
+        if due {
+            held.1 = Some(now);
+            if let Some(text) = take(file, taken) {
+                held.0.extend(asked(&text, now));
+            }
+        }
+        held.0.retain(|&(until, _)| until > now);
+        held.0.iter().map(|&(_, vk)| vk).collect()
+    }
+
+    /// What the keys file holds, taken away: it is first renamed to `taken`
+    /// (one step), then read and removed there. A batch the script moves in
+    /// after the rename is a new file at `file`, read by the next look; read
+    /// and removed by name, it could be removed unread between the two.
+    fn take(file: &std::path::Path, taken: &std::path::Path) -> Option<String> {
+        std::fs::rename(file, taken).ok()?;
+        let text = std::fs::read_to_string(taken);
+        let _ = std::fs::remove_file(taken);
+        text.ok()
+    }
+
+    /// The keys of a [`asked_keys`] file read at `now`: each with the time
+    /// it is held until. Lines that do not read as `<key> <seconds>` are
+    /// left out.
+    fn asked(text: &str, now: Instant) -> Vec<(Instant, u8)> {
+        text.lines()
+            .filter_map(|line| {
+                let mut words = line.split_whitespace();
+                let vk = key_code(words.next()?)?;
+                let long = Duration::try_from_secs_f64(words.next()?.parse().ok()?).ok()?;
+                Some((now + long, vk))
+            })
+            .collect()
+    }
+
     /// Debugging aid: `VICTORY_KEYS=<seconds>:<key>,...` holds each key for
     /// 0.2 s that long after input starts (`<from>-<to>:<key>`: all that
     /// time), with or without focus. A key is a
     /// letter, a digit, or `Enter`, `Esc`, `Tab`, `Back`, `Up`, `Down`,
     /// `Left`, `Right` (the stand-in pad's table maps them to buttons).
-    #[cfg(feature = "diagnostics")]
     fn scripted() -> Vec<u8> {
         static SCRIPT: LazyLock<(Instant, Vec<(Duration, Duration, u8)>)> = LazyLock::new(|| {
             let list = std::env::var("VICTORY_KEYS").unwrap_or_default();
             let keys = list.split(',').filter_map(|entry| {
                 let (at, key) = entry.split_once(':')?;
-                let vk = match key.trim() {
-                    "Enter" => 0x0D,
-                    "Esc" => 0x1B,
-                    "Tab" => 0x09,
-                    "Back" => 0x08,
-                    "Up" => 0x26,
-                    "Down" => 0x28,
-                    "Left" => 0x25,
-                    "Right" => 0x27,
-                    k if k.len() == 1 && k.as_bytes()[0].is_ascii_alphanumeric() => {
-                        k.as_bytes()[0].to_ascii_uppercase()
-                    }
-                    _ => return None,
-                };
+                let vk = key_code(key.trim())?;
                 let time = |t: &str| Duration::try_from_secs_f64(t.trim().parse().ok()?).ok();
                 let (from, to) = match at.split_once('-') {
                     Some((from, to)) => (time(from)?, time(to)?),
@@ -2252,6 +2354,30 @@ mod host {
         assert!(!switch_on(Some("0")));
         assert!(switch_on(Some("1")));
         assert!(switch_on(Some("yes")));
+    }
+
+    #[test]
+    fn a_keys_file_holds_each_key_for_its_seconds() {
+        let now = Instant::now();
+        let asked = asked("Enter 0.2\nJ 1.5\nnot a key 3\nW -1\nX\n", now);
+        assert_eq!(
+            asked,
+            [(now + Duration::from_millis(200), 0x0D), (now + Duration::from_millis(1500), b'J')]
+        );
+    }
+
+    #[test]
+    fn a_batch_written_after_the_file_is_taken_waits_for_the_next_look() {
+        let dir = tempfile::tempdir().unwrap();
+        let (file, taken) = (dir.path().join("keys.txt"), dir.path().join("keys.txt.taken"));
+        assert_eq!(take(&file, &taken), None);
+        std::fs::write(&file, "Enter 0.3\n").unwrap();
+        assert_eq!(take(&file, &taken).as_deref(), Some("Enter 0.3\n"));
+        assert!(!file.exists() && !taken.exists());
+        // the script's next batch, after the take: still there, and the next look's
+        std::fs::write(&file, "L 1.5\n").unwrap();
+        assert!(file.exists());
+        assert_eq!(take(&file, &taken).as_deref(), Some("L 1.5\n"));
     }
 
     #[test]

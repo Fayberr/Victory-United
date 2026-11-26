@@ -147,6 +147,7 @@ pub(crate) struct Translated {
     /// A compute program's threads in a group.
     pub(crate) threads: Option<[u32; 3]>,
     pub(crate) used: Vec<victory_shader::UsedResource>,
+    pub(crate) tables: crate::draw::TablePlan,
     /// Whether the shader's code can store to buffer memory ([`stores`]);
     /// true when its code is not known.
     pub(crate) stores: bool,
@@ -242,6 +243,7 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         _ => None,
     });
     let stores_by_address = programs.is_empty() || programs.iter().any(stores_by_address);
+<<<<<<< HEAD
     let chosen = programs.iter().find(|p| {
         matches!(
             p.stage,
@@ -256,10 +258,35 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         // Another stage's table store could name the same descriptor.
         write_unknown = true;
     }
+||||||| 0a4356653
+    let used = programs
+        .into_iter()
+        .find(|p| {
+            matches!(
+                p.stage,
+                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
+            )
+        })
+        .map(|p| p.used)
+        .unwrap_or_default();
+=======
+    let used = programs
+        .into_iter()
+        .find(|p| {
+            matches!(
+                p.stage,
+                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
+            )
+        })
+        .map(|p| p.used)
+        .unwrap_or_default();
+    let tables = crate::draw::TablePlan::new(&used, &host.root_indexed_views);
+>>>>>>> vicetay/main
     Ok(Translated {
         host,
         threads,
         used,
+        tables,
         stores,
         writes,
         stores_by_address,

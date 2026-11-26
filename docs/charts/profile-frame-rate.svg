@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="346" viewBox="0 0 880 346" role="img" aria-labelledby="title description">
+  <title id="title">Frame rate in the world</title>
+  <desc id="description">Series X median 14.3 fps, 1% low 3.5, p10 to p90 13.6 to 14.7. Series S median 20.8 fps, 1% low 8.7, p10 to p90 19.2 to 21.8. The target is 30 fps.</desc>
+  <defs>
+    <linearGradient id="surface" x2="1" y2="1">
+      <stop stop-color="#252939"/>
+      <stop offset="1" stop-color="#151824"/>
+    </linearGradient>
+
+  </defs>
+  <style>
+    text { font-family: system-ui, 'Segoe UI', sans-serif; font-variant-numeric: tabular-nums; }
+    .subtitle { fill: #B7BED3; font-size: 18px; }
+    .tick { fill: #B7BED3; font-size: 16px; }
+    .annotation { paint-order: stroke; stroke: #141825; stroke-width: 4px; }
+    .axis-line { stroke: #3E465D; stroke-dasharray: 2 5; }
+  </style>
+  <rect x=".5" y=".5" width="879" height="345" rx="20" fill="url(#surface)" stroke="#424960"/>
+  <text x="34" y="52" fill="#F5F7FC" font-size="33" font-weight="730">Frame rate in the world</text>
+  <text x="36" y="80" class="subtitle">RTX 4090 · Build 672cf831 · median FPS by profile</text>
+  <rect x="30" y="98" width="820" height="234" rx="12" fill="#141825" stroke="#343C50"/>
+  <path d="M222 135V292" class="axis-line"/>
+  <text x="222" y="314" class="tick" text-anchor="middle">0</text>
+  <path d="M321.33 135V292" class="axis-line"/>
+  <text x="321.33" y="314" class="tick" text-anchor="middle">5</text>
+  <path d="M420.67 135V292" class="axis-line"/>
+  <text x="420.67" y="314" class="tick" text-anchor="middle">10</text>
+  <path d="M520 135V292" class="axis-line"/>
+  <text x="520" y="314" class="tick" text-anchor="middle">15</text>
+  <path d="M619.33 135V292" class="axis-line"/>
+  <text x="619.33" y="314" class="tick" text-anchor="middle">20</text>
+  <path d="M718.67 135V292" class="axis-line"/>
+  <text x="718.67" y="314" class="tick" text-anchor="middle">25</text>
+  <path d="M818 135V292" class="axis-line"/>
+  <text x="818" y="314" class="tick" text-anchor="middle">30 fps</text>
+  <text x="51" y="134" fill="#EEF1FA" font-size="19" font-weight="660">Series X</text>
+  <text x="51" y="163" fill="#89EED5" font-size="27" font-weight="730">14.3 <tspan font-size="17">fps</tspan></text>
+  <text x="51" y="185" class="tick">123 samples</text>
+  <rect x="222" y="138" width="596" height="14" rx="7" fill="#2F3548"/>
+  <rect x="222" y="138" width="284.09" height="14" rx="7" fill="#89EED5" opacity=".25"/>
+  <text x="51" y="225" fill="#EEF1FA" font-size="19" font-weight="660">Series S</text>
+  <text x="51" y="254" fill="#B9BCFF" font-size="27" font-weight="730">20.8 <tspan font-size="17">fps</tspan></text>
+  <text x="51" y="276" class="tick">117 samples</text>
+  <rect x="222" y="229" width="596" height="14" rx="7" fill="#2F3548"/>
+  <rect x="222" y="229" width="413.23" height="14" rx="7" fill="#B9BCFF" opacity=".25"/>
+  <g>
+    <animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;.86;.95;.985;1" dur="8s" repeatCount="indefinite"/>
+    <rect x="222" y="138" width="284.09" height="14" rx="7" fill="#89EED5">
+      <animate attributeName="width" values="0;0;284.09;284.09;0;0"
+      keyTimes="0;0.04;0.28;.95;.985;1" calcMode="spline"
+      keySplines="0 0 1 1;.32 .12 .26 1;0 0 1 1;0 0 1 1;0 0 1 1"
+      dur="8s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="222" y="229" width="413.23" height="14" rx="7" fill="#B9BCFF">
+      <animate attributeName="width" values="0;0;413.23;413.23;0;0"
+      keyTimes="0;0.13;0.37;.95;.985;1" calcMode="spline"
+      keySplines="0 0 1 1;.32 .12 .26 1;0 0 1 1;0 0 1 1;0 0 1 1"
+      dur="8s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+  <path d="M291.53 138l7 7-7 7-7-7z" fill="#D9DFFC" stroke="#141825" stroke-width="2"/>
+  <text x="291.53" y="128" class="tick annotation" text-anchor="middle">1% low 3.5</text>
+  <circle cx="506.09" cy="145" r="7" fill="#89EED5" stroke="#141825" stroke-width="2"/>
+  <path d="M492.19 157v7H514.04v-7" fill="none" stroke="#89EED5" stroke-width="2"/>
+  <text x="503.12" y="185" fill="#89EED5" font-size="17" font-weight="610" text-anchor="middle">P10–P90 13.6–14.7</text>
+  <circle cx="506.09" cy="145" r="9" fill="none" stroke="#89EED5" opacity="0">
+    <animate attributeName="r" values="9;9;20;20" keyTimes="0;0.28;0.44;1" dur="8s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0;0;.8;0;0" keyTimes="0;0.26;0.31;0.44;1" dur="8s" repeatCount="indefinite"/>
+  </circle>
+  <path d="M394.84 229l7 7-7 7-7-7z" fill="#D9DFFC" stroke="#141825" stroke-width="2"/>
+  <text x="394.84" y="219" class="tick annotation" text-anchor="middle">1% low 8.7</text>
+  <circle cx="635.23" cy="236" r="7" fill="#B9BCFF" stroke="#141825" stroke-width="2"/>
+  <path d="M603.44 248v7H655.09v-7" fill="none" stroke="#B9BCFF" stroke-width="2"/>
+  <text x="629.27" y="276" fill="#B9BCFF" font-size="17" font-weight="610" text-anchor="middle">P10–P90 19.2–21.8</text>
+  <circle cx="635.23" cy="236" r="9" fill="none" stroke="#B9BCFF" opacity="0">
+    <animate attributeName="r" values="9;9;20;20" keyTimes="0;0.37;0.53;1" dur="8s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0;0;.8;0;0" keyTimes="0;0.35;0.4;0.53;1" dur="8s" repeatCount="indefinite"/>
+  </circle>
+  <path d="M818 125V292" stroke="#FFC693" stroke-width="2" stroke-dasharray="4 5"/>
+  <text x="809" y="121" fill="#FFC693" font-size="17" font-weight="680" text-anchor="end">30 fps target</text>
+</svg>
