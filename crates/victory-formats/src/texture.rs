@@ -274,10 +274,20 @@ pub struct Layout {
     /// The first mip in the tail; `mips.len()` without one.
     pub first_tail_mip: u32,
     pub mips: Vec<Mip>,
-<<<<<<< HEAD
     /// Byte offsets inside a block for each coordinate, per axis.
     /// Empty for linear and unsupported modes.
     pattern: &'static SwizzlePattern,
+    /// The pipe configuration the XOR modes' addresses follow.
+    pub pipes: Pipes,
+    /// The base swizzle (addrlib's `pipeBankXor`) of an XOR mode, 0 for the
+    /// others: pipe bits, then bank bits, XORed into every block from
+    /// address bit 8.
+    pub pipe_bank_xor: u32,
+    /// The pattern, read by coordinate bit; `None` for linear and the
+    /// layouts without addressing.
+    flips: Option<Flips>,
+    /// `pipe_bank_xor` as it lands in a block's offset.
+    xor: u32,
 }
 
 type SwizzlePattern = [Vec<u32>; 3];
@@ -349,91 +359,6 @@ fn spread(bits: &[u32]) -> Vec<u32> {
                 .sum()
         })
         .collect()
-||||||| 465b94f5
-    /// Byte offsets inside a block of each element coordinate bit, per
-    /// axis; empty for linear and unsupported modes.
-    pattern: [Vec<u32>; 3],
-}
-
-/// Micro tile (256 bytes) patterns by log2 of the element size: for each
-/// address bit, the element coordinate bit it takes (`x0`, `y1`, `z0`...),
-/// `--` for the bits inside an element. Thin `S`, thin `D`, thick `S`
-/// (also the `D` 3D modes). From addrlib's `GFX10_SW_256_S_RBPLUS`,
-/// `GFX10_SW_256_D_RBPLUS` and `GFX10_SW_4K_S3_RBPLUS` patterns; the larger
-/// blocks add bits Y, X (thin) or Y, X, Z (thick) in turn.
-const MICRO: [[&[u8; 16]; 5]; 3] = [
-    [
-        b"x0x1x2x3y0y1y2y3",
-        b"--x0x1x2y0y1y2x3",
-        b"----x0x1y0y1y2x2",
-        b"------x0y0y1x1x2",
-        b"--------y0y1x0x1",
-    ],
-    [
-        b"x0x1x2y1y0y2x3y3",
-        b"--x0x1x2y0y1y2x3",
-        b"----x0x1y0y1x2y2",
-        b"------x0y0x1x2y1",
-        b"--------x0y0x1y1",
-    ],
-    [
-        b"x0x1z0y0z1y1x2z2",
-        b"--x0z0y0z1y1x1z2",
-        b"----x0y0z0y1x1z1",
-        b"------x0z0y0x1z1",
-        b"--------z0y0x0z1",
-    ],
-];
-
-/// For each axis, the address bit each coordinate bit lands on.
-fn pattern(kind: usize, element_log2: u32, block_log2: u32) -> [Vec<u32>; 3] {
-    let mut axes: [Vec<u32>; 3] = Default::default();
-    let micro = MICRO[kind][element_log2 as usize];
-    for bit in 0..8u32 {
-        let (axis, index) = (micro[2 * bit as usize], micro[2 * bit as usize + 1]);
-        let axis = match axis {
-            b'x' => 0,
-            b'y' => 1,
-            b'z' => 2,
-            _ => continue,
-        };
-        let index = usize::from(index - b'0');
-        let to = &mut axes[axis];
-        if to.len() <= index {
-            to.resize(index + 1, 0);
-        }
-        to[index] = bit;
-    }
-    let order: &[usize] = if kind == 2 { &[1, 0, 2] } else { &[1, 0] };
-    for (bit, axis) in (8..block_log2).zip(order.iter().cycle()) {
-        axes[*axis].push(bit);
-    }
-    axes
-}
-
-/// Byte offsets inside a block for coordinates 0..2^bits of one axis.
-fn spread(bits: &[u32]) -> Vec<u32> {
-    (0..1u32 << bits.len())
-        .map(|c| {
-            bits.iter()
-                .enumerate()
-                .map(|(i, &to)| ((c >> i) & 1) << to)
-                .sum()
-        })
-        .collect()
-=======
-    /// The pipe configuration the XOR modes' addresses follow.
-    pub pipes: Pipes,
-    /// The base swizzle (addrlib's `pipeBankXor`) of an XOR mode, 0 for the
-    /// others: pipe bits, then bank bits, XORed into every block from
-    /// address bit 8.
-    pub pipe_bank_xor: u32,
-    /// The pattern, read by coordinate bit; `None` for linear and the
-    /// layouts without addressing.
-    flips: Option<Flips>,
-    /// `pipe_bank_xor` as it lands in a block's offset.
-    xor: u32,
->>>>>>> vertex/main
 }
 
 /// Tables depend only on the micro-tile kind, block size and element size.
@@ -531,16 +456,11 @@ impl Layout {
             alignment: 256,
             first_tail_mip: d.mips,
             mips,
-<<<<<<< HEAD
             pattern: &EMPTY_PATTERN,
-||||||| 465b94f5
-            pattern: Default::default(),
-=======
             pipes,
             pipe_bank_xor: 0,
             flips: None,
             xor: 0,
->>>>>>> vertex/main
         }
     }
 
@@ -701,7 +621,6 @@ impl Layout {
         let slab = if thick { u64::from(block[2]) } else { 1 };
         let slice_size = slice_size * slab;
         let slices = slices / block[2];
-<<<<<<< HEAD
         let addressable = !d.swizzle.xor() && d.samples == 1;
         let pattern = if addressable {
             let kind = if thick {
@@ -710,25 +629,12 @@ impl Layout {
                 usize::from(d.swizzle.display())
             };
             shared_pattern(kind, element_log2, block_log2)
-||||||| 465b94f5
-        let addressable = !d.swizzle.xor() && d.samples == 1;
-        let pattern = if addressable {
-            let kind = if thick {
-                2
-            } else {
-                usize::from(d.swizzle.display())
-            };
-            pattern(kind, element_log2, block_log2).map(|bits| spread(&bits))
-=======
+        } else {
+            &EMPTY_PATTERN
+        };
         let flips = if d.samples == 1 {
             flips(d.swizzle, thick, element_log2, pipes)
->>>>>>> vertex/main
         } else {
-<<<<<<< HEAD
-            &EMPTY_PATTERN
-||||||| 465b94f5
-            Default::default()
-=======
             None
         };
         // ComputeSurfaceAddrFromCoordMacroTiled: the pipe bits and the bank
@@ -741,7 +647,6 @@ impl Layout {
             ((pipe_bank_xor & mask) << 8) & ((1 << block_log2) - 1)
         } else {
             0
->>>>>>> vertex/main
         };
         Layout {
             desc: d,
@@ -1622,7 +1527,6 @@ mod tests {
         assert_eq!(l.mips[0].offset, 8192 + 16384);
     }
 
-<<<<<<< HEAD
     /// A volume deeper than its block keeps its whole chain in the tail when
     /// every mip's width and height fit it (addrlib's `mipChainInTail`): each
     /// depth slab has its own tail block, holding that slab's slices of
@@ -1745,37 +1649,6 @@ mod tests {
         }
     }
 
-||||||| 465b94f5
-=======
-    /// The smaller mips lie first: they are read from the memory that holds
-    /// them alone, as from the whole texture's.
-    #[test]
-    fn smaller_mips_need_only_the_start_of_the_texture() {
-        // 1024x1024 BC1 (8-byte elements) in 4 KiB blocks: the tail (from
-        // 64x64 on), then 128x128 in two blocks, 256x256 in eight.
-        let l = Layout::new(&Desc { block: 4, ..desc(1024, 1024, 9, 8, Swizzle::SW_4KB_S) }).unwrap();
-        assert_eq!(l.bytes_from(0), l.size);
-        let needs: Vec<u64> = (0..9).map(|mip| l.bytes_from(mip)).collect();
-        assert!(needs.windows(2).all(|w| w[0] >= w[1]), "{needs:?}");
-        assert_eq!((l.bytes_from(4), l.bytes_from(8)), (4096, 4096));
-        let tiled: Vec<u8> = (0..l.size).map(|i| (i * 7 >> 3) as u8).collect();
-        for mip in 1..9 {
-            let m = l.mips[mip as usize];
-            let pitch = m.width as usize * 8;
-            let read = |tiled: &[u8]| {
-                let mut linear = vec![0; pitch * m.height as usize];
-                l.detile(tiled, mip, 0, &mut linear, pitch, pitch * m.height as usize).map(|()| linear)
-            };
-            let len = l.bytes_from(mip) as usize;
-            assert_eq!(read(&tiled[..len]), read(&tiled));
-            assert_eq!(read(&tiled[..len - 1]), Err(Error::TooSmall));
-        }
-        // Slices each hold their chain: the whole texture.
-        let l = Layout::new(&Desc { depth: 2, block: 4, ..desc(1024, 1024, 9, 8, Swizzle::SW_4KB_S) }).unwrap();
-        assert_eq!(l.bytes_from(4), l.size);
-    }
-
->>>>>>> vertex/main
     #[test]
     fn depth_stencil_is_two_planes() {
         let t = Texture::new(&TextureDesc {
