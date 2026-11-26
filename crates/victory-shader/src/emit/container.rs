@@ -572,7 +572,6 @@ fn md5_block(state: &mut [u32; 4], block: &[u8; 64]) {
 mod tests {
     use super::*;
 
-<<<<<<< HEAD
     /// Two elements packed into one register are written in element order, not by column
     /// (the title's packed pedestrian outputs: TEXCOORD22 in columns 1-2 of the register
     /// whose column 0 is COLOR0, listed after it).
@@ -716,94 +715,6 @@ mod tests {
         assert_eq!(mesh_output_modes(&guest_psv, &osg, &outputs), None);
     }
 
-||||||| 465b94f5
-=======
-    /// Two elements packed into one register are written in element order, not by column
-    /// (the title's packed pedestrian outputs: TEXCOORD22 in columns 1-2 of the register
-    /// whose column 0 is COLOR0, listed after it).
-    #[test]
-    fn rows_of_one_register_keep_the_element_order() {
-        let element = |name: &str, index, row, col, cols| SigElement {
-            name: name.into(),
-            index,
-            kind: 0,
-            comp: 9,
-            interp: 2,
-            row: Some(row),
-            col,
-            cols,
-            usage: 0,
-            half: false,
-        };
-        let part = signature(
-            &[
-                element("TEXCOORD", 19, 13, 0, 3),
-                element("TEXCOORD", 22, 14, 1, 2),
-                element("COLOR", 0, 14, 0, 1),
-                element("TEXCOORD", 21, 15, 0, 3),
-            ],
-            false,
-        );
-        let u32_at = |at: usize| u32::from_le_bytes(part[at..at + 4].try_into().unwrap());
-        // (register, semantic index, mask) of each 32-byte row after the 8-byte header
-        let rows: Vec<(u32, u32, u8)> = (0..4)
-            .map(|k| 8 + 32 * k)
-            .map(|at| (u32_at(at + 20), u32_at(at + 8), part[at + 24]))
-            .collect();
-        assert_eq!(rows, [(13, 19, 0b111), (14, 22, 0b110), (14, 0, 0b1), (15, 21, 0b111)]);
-    }
-
-    /// The registers of the title's programs that packed two modes: a float beside an integer
-    /// or the front face, an unread input beside one read at its vertices. Registers whose modes
-    /// agree, and those whose fixed elements disagree, keep their modes.
-    #[test]
-    fn one_register_takes_the_mode_of_its_fixed_elements() {
-        let element = |name: &str, row, col, cols, comp, interp, usage| SigElement {
-            name: name.into(),
-            index: 0,
-            kind: if name == "SV_IsFrontFace" { 13 } else { 0 },
-            comp,
-            interp,
-            row: Some(row),
-            col,
-            cols,
-            usage,
-            half: false,
-        };
-        let modes = |els: &[SigElement]| els.iter().map(|e| e.interp).collect::<Vec<_>>();
-        // VS_Transform_VfxVBuffer_AlphaClip's outputs: TEXCOORD2 (float2) beside TEXCOORD14
-        // (uint2) in register 7; register 6 holds two linear floats.
-        let mut outputs = vec![
-            element("TEXCOORD", 6, 0, 3, 9, 2, 0b111),
-            element("TEXCOORD", 6, 3, 1, 9, 2, 0b1),
-            element("TEXCOORD", 7, 0, 2, 9, 2, 0b11),
-            element("TEXCOORD", 7, 2, 2, 5, 1, 0b11),
-        ];
-        one_mode_per_register(&mut outputs, false);
-        assert_eq!(modes(&outputs), [2, 2, 1, 1]);
-        // A pixel program's inputs: an unread float beside the front face; another beside an
-        // input read at its vertices (constant), where the float would be linear.
-        let mut inputs = vec![
-            element("TEXCOORD", 9, 0, 1, 9, 2, 0),
-            element("SV_IsFrontFace", 9, 1, 1, 5, 1, 0b1),
-            element("NORMAL", 5, 0, 3, 9, 2, 0),
-            element("TEXCOORD", 5, 3, 1, 9, 1, 0b1),
-        ];
-        one_mode_per_register(&mut inputs, true);
-        assert_eq!(modes(&inputs), [1, 1, 1, 1]);
-        // Two floats a pixel program reads in two modes: no element gives the register one.
-        let mut both = vec![
-            element("TEXCOORD", 3, 0, 2, 9, 2, 0b11),
-            element("TEXCOORD", 3, 2, 2, 9, 3, 0b11),
-        ];
-        one_mode_per_register(&mut both, true);
-        assert_eq!(modes(&both), [2, 3]);
-        // As outputs nothing is read: the floats keep their defaults too.
-        one_mode_per_register(&mut both, false);
-        assert_eq!(modes(&both), [2, 3]);
-    }
-
->>>>>>> vertex/main
     #[test]
     fn md5_core_matches_the_standard() {
         // Standard MD5 of "abc" with standard padding, through md5_block.
