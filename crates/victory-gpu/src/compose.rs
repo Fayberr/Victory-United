@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 //! Ported from fxceless/victory-gta6 PR #1189 (Series S interface plane), `VICTORY_COMPOSE=1`.
 //! A present's second plane laid over its first.
 //!
@@ -11,14 +10,21 @@
 //! is scaled down). shortcut: the planes' placement and source rectangles
 //! are not read; both cover the screen. The interface's alpha is taken as
 //! straight (`VICTORY_PLANE_PREMULTIPLIED=1`: premultiplied).
+//!
+//! [`record_over`] is the other way round: the planes are drawn into the
+//! back buffer of a present that has one (one triangle, blended by its
+//! alpha), as the console's display does.
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
 use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
-use windows::core::s;
+use windows::core::{PCSTR, s};
+
+use crate::host::Host;
 
 /// Frames of descriptors in the ring (three each): presents in flight
 /// must not find theirs rewritten.
@@ -244,22 +250,8 @@ pub(crate) fn record(
     }
     Some(out)
 }
-||||||| merged common ancestors
-=======
-//! Two presented planes as one image: the console's display puts the second
-//! (the interface) over the first (the scene), each scaled to the screen.
-//! Grand Theft Auto VI presents so on Series S.
 
-use std::sync::atomic::{AtomicU32, Ordering};
-use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
-use windows::Win32::Graphics::Direct3D::ID3DBlob;
-use windows::Win32::Graphics::Direct3D12::*;
-use windows::Win32::Graphics::Dxgi::Common::*;
-use windows::core::{PCSTR, s};
-
-use crate::host::Host;
-
-const SOURCE: &str = r#"
+const OVER: &str = r#"
 #define RS "DescriptorTable(SRV(t0, numDescriptors=2), visibility=SHADER_VISIBILITY_PIXEL), StaticSampler(s0, filter=FILTER_MIN_MAG_MIP_LINEAR, addressU=TEXTURE_ADDRESS_CLAMP, addressV=TEXTURE_ADDRESS_CLAMP)"
 Texture2D<float4> scene : register(t0);
 Texture2D<float4> over : register(t1);
@@ -295,14 +287,14 @@ unsafe impl Send for Composer {}
 // SAFETY: as above.
 unsafe impl Sync for Composer {}
 
-fn compile(entry: PCSTR, target: PCSTR) -> windows::core::Result<ID3DBlob> {
+fn compile_over(entry: PCSTR, target: PCSTR) -> windows::core::Result<ID3DBlob> {
     let mut code: Option<ID3DBlob> = None;
     // SAFETY: the source and names live through the call; the out pointer is
     // ours.
     unsafe {
         D3DCompile(
-            SOURCE.as_ptr().cast(),
-            SOURCE.len(),
+            OVER.as_ptr().cast(),
+            OVER.len(),
             s!("compose"),
             None,
             None,
@@ -317,8 +309,8 @@ fn compile(entry: PCSTR, target: PCSTR) -> windows::core::Result<ID3DBlob> {
     code.ok_or_else(windows::core::Error::empty)
 }
 
-fn make(host: &Host, format: DXGI_FORMAT) -> windows::core::Result<Composer> {
-    let (vs, ps) = (compile(s!("vs"), s!("vs_5_1"))?, compile(s!("ps"), s!("ps_5_1"))?);
+fn make_over(host: &Host, format: DXGI_FORMAT) -> windows::core::Result<Composer> {
+    let (vs, ps) = (compile_over(s!("vs"), s!("vs_5_1"))?, compile_over(s!("ps"), s!("ps_5_1"))?);
     // SAFETY: the blobs' own bytes, alive through the calls.
     unsafe {
         let bytes = |b: &ID3DBlob| {
@@ -368,8 +360,10 @@ fn make(host: &Host, format: DXGI_FORMAT) -> windows::core::Result<Composer> {
 }
 
 /// Records the planes (either may be missing), in the shader resource state,
-/// into `back`, a render target of `format`.
-pub(crate) fn record(
+/// into `back`, a render target of `format`. The present's back buffer
+/// variant: [`record`] instead gives a texture of ours laid out at the
+/// game plane's size.
+pub(crate) fn record_over(
     host: &Host,
     list: &ID3D12GraphicsCommandList,
     planes: [Option<(&ID3D12Resource, DXGI_FORMAT)>; 2],
@@ -380,7 +374,7 @@ pub(crate) fn record(
         std::sync::Mutex::new(None);
     let mut composer = COMPOSER.lock().unwrap_or_else(|e| e.into_inner());
     if composer.as_ref().is_none_or(|c| c.0 != format) {
-        let made = make(host, format);
+        let made = make_over(host, format);
         if let Err(e) = &made {
             tracing::warn!(error = %e, "presented planes not put together");
         }
@@ -415,7 +409,7 @@ pub(crate) fn record(
             host.device
                 .CreateShaderResourceView(plane.map(|p| p.0), Some(&desc), at);
         }
-        let rtv = host.rtv(back, None);
+        let rtv = host.rtv(Some(back), None);
         list.OMSetRenderTargets(1, Some(&rtv), false, None);
         list.SetDescriptorHeaps(&[Some(c.views.clone())]);
         list.SetGraphicsRootSignature(&c.root);
@@ -445,4 +439,3 @@ pub(crate) fn record(
     }
     true
 }
->>>>>>> belobug/main
