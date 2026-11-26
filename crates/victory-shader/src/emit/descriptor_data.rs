@@ -89,72 +89,72 @@ impl<'a> Lower<'a> {
         // ([`Self::unused_descriptor_kind`]).
         let (first, used, uav, props, image, sized) =
             if let Some((at, first)) = use_at.or(sized.map(|_| (site, 0))) {
-            let src = Source::Loaded { load: site, first };
-            let used = self.used_kind(&src);
-            let ui: &Inst = &self.x.p.blocks[at.0].insts[at.1];
-            let un = ui.name();
-            let uav = un.contains("store")
-                || un.contains("atomic")
-                || used.is_some_and(|u| u.kind == ResourceType::Uav);
-            let u = if uav { 0x1000 } else { 0 };
-            let (props, image) = match &ui.fields {
-                _ if sized.is_some_and(|image| image) => ((2 | u, 0x409), Some(2)),
-                _ if sized.is_some() => ((11 | u, 0), None),
-                // A ray-tracing structure in a buffer of the host: read raw.
-                Fields::Image { .. } if un.starts_with("image_bvh") => ((11, 0), None),
-                Fields::Image { dim, .. } => {
-                    let kind = match dim {
-                        0 => 1,
-                        1 => 2,
-                        2 => 4,
-                        4 => 6,
-                        5 => 7,
-                        _ => return Err("an image dimension (cube or MSAA)"),
-                    };
-                    ((kind | u, 0x409), Some(kind))
-                }
-                Fields::Buffer { idxen, format, .. } => {
-                    let stride = used.map_or(0, |u| u.stride);
-                    let counted = inst
-                        .write(Reg::S(code + first + 2))
-                        .is_some_and(|v| self.read_as_number(v));
-                    let props = if un.starts_with("buffer_load_format")
-                        || un.starts_with("buffer_store_format")
-                    {
-                        (10 | u, 0x409)
-                    } else if !counted
-                        && *idxen
-                        && format.is_none()
-                        && stride >= 4
-                        && stride.is_multiple_of(4)
-                    {
-                        // Nothing reads the count: the query is cleaned up.
-                        (12 | u, stride)
-                    } else {
-                        // Structured ones too: the host's views of them are raw
-                        // (see `buffer`), which count bytes, and a size asked
-                        // for as a structured view's is that count on AMD.
-                        (11 | u, 0)
-                    };
-                    if used.is_some_and(|u| u.kind == ResourceType::Cbv) {
+                let src = Source::Loaded { load: site, first };
+                let used = self.used_kind(&src);
+                let ui: &Inst = &self.x.p.blocks[at.0].insts[at.1];
+                let un = ui.name();
+                let uav = un.contains("store")
+                    || un.contains("atomic")
+                    || used.is_some_and(|u| u.kind == ResourceType::Uav);
+                let u = if uav { 0x1000 } else { 0 };
+                let (props, image) = match &ui.fields {
+                    _ if sized.is_some_and(|image| image) => ((2 | u, 0x409), Some(2)),
+                    _ if sized.is_some() => ((11 | u, 0), None),
+                    // A ray-tracing structure in a buffer of the host: read raw.
+                    Fields::Image { .. } if un.starts_with("image_bvh") => ((11, 0), None),
+                    Fields::Image { dim, .. } => {
+                        let kind = match dim {
+                            0 => 1,
+                            1 => 2,
+                            2 => 4,
+                            4 => 6,
+                            5 => 7,
+                            _ => return Err("an image dimension (cube or MSAA)"),
+                        };
+                        ((kind | u, 0x409), Some(kind))
+                    }
+                    Fields::Buffer { idxen, format, .. } => {
+                        let stride = used.map_or(0, |u| u.stride);
+                        let counted = inst
+                            .write(Reg::S(code + first + 2))
+                            .is_some_and(|v| self.read_as_number(v));
+                        let props = if un.starts_with("buffer_load_format")
+                            || un.starts_with("buffer_store_format")
+                        {
+                            (10 | u, 0x409)
+                        } else if !counted
+                            && *idxen
+                            && format.is_none()
+                            && stride >= 4
+                            && stride.is_multiple_of(4)
+                        {
+                            // Nothing reads the count: the query is cleaned up.
+                            (12 | u, stride)
+                        } else {
+                            // Structured ones too: the host's views of them are raw
+                            // (see `buffer`), which count bytes, and a size asked
+                            // for as a structured view's is that count on AMD.
+                            (11 | u, 0)
+                        };
+                        if used.is_some_and(|u| u.kind == ResourceType::Cbv) {
+                            self.stale.extend(inst.writes.iter().map(|w| w.1));
+                            return Err("a constant buffer's descriptor read as data");
+                        }
+                        (props, None)
+                    }
+                    // Read by scalar buffer loads alone: the raw view `smem` reads it through.
+                    Fields::Smem { .. } if used.is_some_and(|u| u.kind == ResourceType::Srv) => {
+                        ((11, 0), None)
+                    }
+                    // A constant buffer: nothing of its descriptor is a number.
+                    Fields::Smem { .. } => {
                         self.stale.extend(inst.writes.iter().map(|w| w.1));
                         return Err("a constant buffer's descriptor read as data");
                     }
-                    (props, None)
-                }
-                // Read by scalar buffer loads alone: the raw view `smem` reads it through.
-                Fields::Smem { .. } if used.is_some_and(|u| u.kind == ResourceType::Srv) => {
-                    ((11, 0), None)
-                }
-                // A constant buffer: nothing of its descriptor is a number.
-                Fields::Smem { .. } => {
-                    self.stale.extend(inst.writes.iter().map(|w| w.1));
-                    return Err("a constant buffer's descriptor read as data");
-                }
-                _ => return Err("a scalar memory read as data"),
-            };
-            (first, used, uav, props, image, false)
-        } else {
+                    _ => return Err("a scalar memory read as data"),
+                };
+                (first, used, uav, props, image, false)
+            } else {
             // A descriptor kept per lane in VGPRs (`Resources::lane_copied`): the code only
             // copies its dwords and compares them, lane against first lane, and every load
             // that reaches those lanes reads one address. Each dword stands in as its place
@@ -219,7 +219,7 @@ impl<'a> Lower<'a> {
                         self.view_address_indexed(site, first).ok().flatten()
                     else {
                         continue;
-                    };
+            };
                     wrote = true;
                     for k in 4 * group..4 * group + 4 {
                         let reg = Reg::S(code + k as u8);
