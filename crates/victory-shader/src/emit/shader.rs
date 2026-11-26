@@ -48,6 +48,25 @@ pub const SLOT_STRIDES_COUNT: u32 = 1 << 21;
 pub const VIEW_ADDRESSES: u32 = SLOT_STRIDES_COUNT * 4;
 /// Bytes of the whole [`SLOT_STRIDES`] buffer.
 pub const SLOT_STRIDES_BYTES: u32 = VIEW_ADDRESSES + SLOT_STRIDES_COUNT * 8;
+/// LOCAL (port of fxceless/victory-fork PR #1216, GamingRipperDoc): the
+/// [`SLOT_STRIDES`] dword of a slot that holds a constant buffer view (a
+/// stride no buffer has, no kind bits). A program reads a slot it picks as a
+/// constant buffer only where this mark is; a slot whose dword is 0 holds
+/// neither a buffer nor a constant buffer, and the read gives zeros. Read as
+/// a constant buffer, a texture's descriptor is taken as a buffer's: the
+/// meshlet culling `_Prev` passes then read whatever lies at a made-up
+/// address (a page fault on AMD).
+/// `VICTORY_CONSTANT_MARKS=1` turns it on. Off by default here (on in the
+/// PR): not yet run in the game on this tree, where a constant buffer slot
+/// whose mark is not written yet would read zeros.
+pub const SLOT_STRIDE_CONSTANT: u32 = VIEW_STRIDE_BITS;
+
+/// Whether [`SLOT_STRIDE_CONSTANT`] is in use: read once, by the host and
+/// the translator alike.
+pub fn constant_marks() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_CONSTANT_MARKS").is_some_and(|v| v == "1"))
+}
 
 /// Title memory by address (`resource::MEMORY`): console code reads and
 /// writes through raw 40-bit addresses it takes from root constants,

@@ -183,6 +183,17 @@ fn frame_ms(role: Role) -> f32 {
     dt
 }
 
+/// LOCAL: how many times the estimate the title's own result may keep
+/// (`VICTORY_AMBIENT_MOST=<multiple>`, 4 when unset). Without rays the
+/// probes hold the sky's light indoors too; at 4 times the estimate a room
+/// looked towards a window or the sky goes very bright.
+fn most() -> f32 {
+    static SET: OnceLock<f32> = OnceLock::new();
+    *SET.get_or_init(|| {
+        let set = std::env::var("VICTORY_AMBIENT_MOST").unwrap_or_default();
+        set.trim().parse().ok().filter(|v: &f32| v.is_finite() && *v > 0.0).unwrap_or(4.0)
+    })
+}
 /// Strength and radius of the creases' shade.
 fn shade() -> [f32; 2] {
     static SET: OnceLock<[f32; 2]> = OnceLock::new();
@@ -325,6 +336,9 @@ void clear_air(uint3 at : SV_DispatchThreadID) {
     float far = float(at.z) / float(d);
     float cap = air * lerp(dot(cells[CELLS].rgb, LUMA), dot(seen_there, LUMA), far);
     float3 c = scattered[at];
+    // LOCAL: a NaN or infinity in the air is summed along every view ray
+    // through it: black or white patches floating in the room.
+    if (any(isnan(c)) || any(isinf(c))) { scattered[at] = 0; return; }
     float has = dot(c, LUMA);
     if (has > cap) scattered[at] = c * (cap / has);
 }
@@ -525,7 +539,7 @@ pub(crate) struct Views {
     /// The image the title's program just wrote.
     pub(crate) image: D3D12_GPU_DESCRIPTOR_HANDLE,
     /// The scene's depth, for [`Role::Resolve`].
-    pub(crate) depth: D3D12_GPU_DESCRIPTOR_HANDLE,
+    pub(crate) depth: Option<D3D12_GPU_DESCRIPTOR_HANDLE>,
     /// The size of the image, and how many slices it has.
     pub(crate) size: [u32; 2],
     pub(crate) slices: u32,
@@ -570,7 +584,7 @@ pub(crate) fn after(list: &HostList, role: Role, views: &Views) -> bool {
     words[6] = views.size[0];
     words[7] = views.size[1];
     words[8] = follow(role).to_bits();
-    words[9] = 4.0f32.to_bits();
+    words[9] = most().to_bits();
     words[10] = air().to_bits();
     words[11] = u32::from(crate::lightprobe::on());
     words[12] = settle().map_or(0.0, |s| s.jump).to_bits();
@@ -584,7 +598,9 @@ pub(crate) fn after(list: &HostList, role: Role, views: &Views) -> bool {
         uav_barrier(l);
         l.SetComputeRootSignature(&pass.root);
         l.SetComputeRoot32BitConstants(0, 15, words.as_ptr().cast(), 0);
-        l.SetComputeRootDescriptorTable(1, views.depth);
+        if let Some(depth) = views.depth {
+            l.SetComputeRootDescriptorTable(1, depth);
+        }
         l.SetComputeRootDescriptorTable(2, views.image);
         l.SetComputeRootUnorderedAccessView(3, pass.cells.GetGPUVirtualAddress());
         l.SetComputeRootUnorderedAccessView(4, pass.points.GetGPUVirtualAddress());

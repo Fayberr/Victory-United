@@ -1004,6 +1004,9 @@ fn create() -> windows::core::Result<Host> {
             let adapter = warp_adapter()?;
             D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device)?;
             tracing::info!("host device on the software adapter (WARP)");
+        } else if let Some(adapter) = chosen_adapter() {
+            D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device)?;
+            crate::tdr::log();
         } else {
             device = Some(victory_shader::emit::host::create_preferred_device()?);
             // Whether a GPU hang ends the run or freezes the PC (#1054).
@@ -1114,6 +1117,51 @@ impl Host {
 
 /// DXGI may return hardware for `EnumWarpAdapter` (notably under Proton).
 /// Reject it before creating a device in diagnostics' software-only mode.
+/// LOCAL: the card `VICTORY_ADAPTER` names, for a PC with more than one.
+/// The value is part of the card's name, any case (`5060`, `RTX 5070`), or
+/// its index in DXGI's order (`#1`). Unset: Windows' default card. A value
+/// that matches no hardware card is logged with the list and ignored.
+fn chosen_adapter() -> Option<IDXGIAdapter1> {
+    let want = std::env::var("VICTORY_ADAPTER").ok()?;
+    let want = want.trim();
+    if want.is_empty() {
+        return None;
+    }
+    // SAFETY: plain DXGI adapter queries.
+    unsafe {
+        let factory: IDXGIFactory4 = CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)).ok()?;
+        let index = want.strip_prefix('#').and_then(|n| n.parse::<u32>().ok());
+        let mut seen = Vec::new();
+        for i in 0.. {
+            let Ok(adapter) = factory.EnumAdapters1(i) else { break };
+            let Ok(desc) = adapter.GetDesc1() else { continue };
+            let len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
+            let name = String::from_utf16_lossy(&desc.Description[..len]);
+            let software = desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0;
+            let hit = match index {
+                Some(n) => n == i,
+                None => name.to_lowercase().contains(&want.to_lowercase()),
+            };
+            if hit && !software {
+                tracing::warn!(
+                    adapter = %name,
+                    index = i,
+                    memory_mb = desc.DedicatedVideoMemory / (1024 * 1024),
+                    "host device on the card VICTORY_ADAPTER names"
+                );
+                return Some(adapter);
+            }
+            seen.push(format!("#{i} {name}"));
+        }
+        tracing::warn!(
+            want,
+            cards = %seen.join(", "),
+            "VICTORY_ADAPTER names no hardware card; Windows' default card is used"
+        );
+        None
+    }
+}
+
 pub(crate) fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
     // SAFETY: plain DXGI adapter queries.
     unsafe {
@@ -6043,11 +6091,15 @@ impl Host {
         for (shadow, at, bytes) in batch.placed.drain(..) {
             shadow.placed_copy(at, &bytes);
         }
-        if let Some(check) = card.as_ref().and_then(|c| c.check.clone()) {
-            #[cfg(feature = "diagnostics")]
-            marks.push((lists.len(), crate::copystat::Timed::Compare));
-            lists.push(Some(check));
-        }
+        // A title list can leave a buffer promoted to COPY_DEST. Buffers
+        // decay to COMMON between ExecuteCommandLists calls, so submit
+        // the compare separately before signalling this submission's fence.
+        // Keep it in the list array so the timing end markers follow it.
+        let compare_at = card.as_ref().and_then(|c| c.check.clone()).map(|list| {
+            let at = lists.len();
+            lists.push(Some(list));
+            at
+        });
         #[cfg(feature = "diagnostics")]
         split.part(4);
         stage.next("submit: waiting for the heaps' records");
@@ -6065,24 +6117,31 @@ impl Host {
         #[cfg(feature = "diagnostics")]
         let stamp = stamps::take();
         #[cfg(feature = "diagnostics")]
-        if let Some((ahead, behind)) = stamp.and_then(stamps::lists) {
+        let compare_at = if let Some((ahead, behind)) = stamp.and_then(stamps::lists) {
             lists.insert(0, Some(ahead));
             marks.iter_mut().for_each(|m| m.0 += 1);
             marks.insert(0, (0, crate::copystat::Timed::Other));
             marks.push((lists.len(), crate::copystat::Timed::Other));
             lists.push(Some(behind));
             firsts.iter_mut().for_each(|first| *first += 1);
-        }
+            compare_at.map(|at| at + 1)
+        } else {
+            compare_at
+        };
         #[cfg(feature = "diagnostics")]
         let sending = crate::timeline::ticks();
         if late {
             *submitted += 1;
             #[cfg(feature = "diagnostics")]
-            if let Some([front, behind]) = self.span_lists() {
+            let compare_at = if let Some([front, behind]) = self.span_lists() {
                 lists.insert(0, Some(front));
                 lists.push(Some(behind));
                 firsts.iter_mut().for_each(|first| *first += 1);
-            }
+                compare_at.map(|at| at + 1)
+            } else {
+                compare_at
+            };
+            let (lists, compare) = lists.split_at(compare_at.unwrap_or(lists.len()));
             let cuts: Vec<usize> = parts.iter().filter_map(|&n| firsts.get(n).copied()).collect();
             // SAFETY: closed lists; the fence is ours.
             let signalled = unsafe {
@@ -6090,6 +6149,9 @@ impl Host {
                 for to in cuts.into_iter().chain([lists.len()]) {
                     self.queue.ExecuteCommandLists(&lists[from..to]);
                     from = to;
+                }
+                if !compare.is_empty() {
+                    self.queue.ExecuteCommandLists(compare);
                 }
                 self.queue.Signal(&self.fence, *submitted)
             };
@@ -6124,6 +6186,7 @@ impl Host {
             working(was_working);
             return Some((submitted, sent));
         }
+        let (lists, compare) = lists.split_at(compare_at.unwrap_or(lists.len()));
         // Diagnostics: each list on its own, timed (`VICTORY_GPU_TIMING`).
         #[cfg(feature = "diagnostics")]
         // (Each list on its own: a run's prelude, which brings its copies up
@@ -6132,22 +6195,27 @@ impl Host {
         let groups: Vec<(&[Option<ID3D12CommandList>], crate::copystat::Timed)> = if timing() {
             marks
                 .iter()
+                .enumerate()
                 .zip(marks.iter().skip(1).map(|m| m.0).chain([lists.len()]))
-                .filter(|&(&(a, _), b)| a < b)
-                .map(|(&(a, kind), b)| (&lists[a..b], kind))
+                .filter(|&((_, &(a, _)), b)| a < b)
+                // Include any leading timeline marker in the first timed group.
+                .map(|((i, &(a, kind)), b)| (&lists[if i == 0 { 0 } else { a }..b], kind))
                 .collect()
         } else {
-            vec![(&lists[..], crate::copystat::Timed::Other)]
+            vec![(lists, crate::copystat::Timed::Other)]
         };
         #[cfg(not(feature = "diagnostics"))]
-        let groups = [(&lists[..], ())];
+        let groups = [(lists, ())];
         submitting(2, runs.len());
-        for (_i, &(group, _kind)) in groups.iter().enumerate() {
+        for (i, &(group, _kind)) in groups.iter().enumerate() {
             *submitted += 1;
             let started = std::time::Instant::now();
             // SAFETY: closed lists; the fence and event are ours.
             unsafe {
                 self.queue.ExecuteCommandLists(group);
+                if i + 1 == groups.len() && !compare.is_empty() {
+                    self.queue.ExecuteCommandLists(compare);
+                }
                 self.card_sent();
                 let waited = self
                     .queue
@@ -6167,8 +6235,7 @@ impl Host {
                     Err(e) => tracing::warn!(error = %e, "host submission not waited for"),
                 }
             }
-            // With timing on each group is one of `runs` (and the compare
-            // of copies in the card's memory, with the last): every
+            // With timing on each group is one of `runs`: every
             // command's time on the card goes to the sums by pipeline.
             // The list's time from its sending to the card's signal, by what
             // it is, and of a run's the part its noted commands account for.
