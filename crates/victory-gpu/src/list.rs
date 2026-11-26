@@ -1309,7 +1309,6 @@ extern "system" fn copy_resource(this: This, dst: This, src: This) {
             if crate::texture::title_written(from) {
                 crate::texture::upload(list, src, from);
             }
-            }
             // Depth textures shaders also write: what they wrote, first.
             list.twin_use(dst, false, true);
             list.twin_use(src, false, false);
