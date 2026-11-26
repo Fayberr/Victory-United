@@ -61,23 +61,9 @@ pub fn run(
     let original = std::fs::read(exe).with_context(|| format!("reading {}", exe.display()))?;
     let mut prepared = victory_loader::prepare(&original)?;
     let hash = prepared.original_hash.to_hex();
-<<<<<<< HEAD
     let build = victory_game::identify(&hash);
     match build {
         Some(build) => println!("build          {} ({hash})", build.label),
-||||||| merged common ancestors
-    let title_dir = exe.parent().unwrap_or(Path::new("."));
-    match victory_game::identify(&hash) {
-        Some(build) => {
-            println!("build          {} ({hash})", build.label);
-            if execute {
-                check_startup_archive(&title_dir.join(build.startup_archive))?;
-            }
-        }
-=======
-    match victory_game::identify(&hash) {
-        Some(build) => println!("build          {} ({hash})", build.label),
->>>>>>> vibr/main
         None => println!("build          unknown ({hash})"),
     }
     apply_title_patches(&mut prepared, build)?;
@@ -250,40 +236,10 @@ pub fn run(
         .join()
         .map_err(|_| anyhow::anyhow!("title main thread panicked"))??;
     println!("title exited with {code}");
-<<<<<<< HEAD
     Ok(code)
 }
 
-||||||| merged common ancestors
-    Ok(())
-}
 
-#[cfg(windows)]
-fn check_startup_archive(path: &Path) -> Result<()> {
-    use std::io::Read;
-
-    let mut magic = [0; 4];
-    std::fs::File::open(path)
-        .and_then(|mut file| file.read_exact(&mut magic))
-        .with_context(|| {
-            format!(
-                "Cannot read startup archive {}. Check that the file from your package is present and readable.",
-                path.display()
-            )
-        })?;
-    anyhow::ensure!(
-        magic == *b"9FPR",
-        "Invalid RPF9 header in {}. Restore the startup archive from your package.",
-        path.display()
-    );
-    Ok(())
-}
-
-=======
-    Ok(())
-}
-
->>>>>>> vibr/main
 /// The debugging aids (README): scheduled stack dumps, watched values and
 /// memory saved on a crash.
 #[cfg(all(windows, feature = "diagnostics"))]
