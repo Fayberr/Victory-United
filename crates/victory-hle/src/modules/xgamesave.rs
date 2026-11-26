@@ -229,22 +229,6 @@ fn current(dir: &Path) -> std::io::Result<Option<Version>> {
     committed.sort_unstable_by(|a, b| b.cmp(a));
     if committed.is_empty() {
         return Ok(None);
-<<<<<<< HEAD
-||||||| merged common ancestors
-    };
-    for old in &committed[..committed.len() - 1] {
-        std::fs::remove_dir_all(dir.join(format!("v{old}")))?;
-=======
-    };
-    for old in &committed[..committed.len() - 1] {
-        // An older version that does not go must not hide the newest one:
-        // the title then started as if it had no settings at all, each time
-        // (a version in a folder the host shows through another one, which
-        // refuses the removal: error 4395, 2026-11-25).
-        if let Err(e) = std::fs::remove_dir_all(dir.join(format!("v{old}"))) {
-            tracing::warn!(dir = %dir.display(), old, %e, "an older save version stays");
-        }
->>>>>>> belobug/main
     }
     for (at, &number) in committed.iter().enumerate() {
         let version = dir.join(format!("v{number}"));
