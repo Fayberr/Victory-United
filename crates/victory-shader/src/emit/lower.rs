@@ -3444,8 +3444,10 @@ impl<'a> Lower<'a> {
                 found = Some(lane);
             }
         }
+        found
+    }
 
-    /// [`Self::section_inst`] in the paired form: a value over the wave's lanes takes both
+    /// [`Self::section`] in the paired form: a value over the wave's lanes takes both
     /// lanes of every thread ([`Self::paired_shape`]), a lane's own value each lane's.
     fn paired_section_inst(&mut self, b: usize, i: usize, start: usize) {
         use super::wave::Shape;
@@ -4037,12 +4039,12 @@ impl<'a> Lower<'a> {
                     self.inst(b, i)?;
                 }
                 if let Some(end) = self.sections.get(&b).and_then(|s| s.get(&i)).map(|s| s.end) {
-                    for j in i + 1..end {
-                        if self.twin.is_some() {
+                    if self.twin.is_some() {
+                        for j in i + 1..end {
                             self.paired_section_inst(b, j, i);
-                        } else {
-                            self.section_inst(b, j, i);
                         }
+                    } else {
+                        self.section(b, i, end)?;
                     }
                     i = end;
                     continue;
@@ -8321,15 +8323,21 @@ impl<'a> Lower<'a> {
             return Err("GDS");
         }
         let name = inst.name();
-        if name == "ds_nop" {
-            return Ok(());
-        }
+<<<<<<< HEAD
         let is_shuffle = name == "ds_swizzle_b32" || name.contains("permute");
         let guard = if is_shuffle {
             self.guard(b, i)?
         } else {
             self.effect_guard(b, i)?
         };
+||||||| merged common ancestors
+        let guard = self.guard(b, i)?;
+=======
+        if name == "ds_nop" {
+            return Ok(());
+        }
+        let guard = self.guard(b, i)?;
+>>>>>>> belobug/main
         let c = self.cur;
         let offset = u32::from(*offset0) | u32::from(*offset1) << 8;
         let dst_reg = match dst {
@@ -8369,6 +8377,7 @@ impl<'a> Lower<'a> {
                 let t = self.s.m.bin(c, Bin::Or, t, or);
                 self.s.m.bin(c, Bin::Xor, t, xor)
             };
+<<<<<<< HEAD
             let r = if use_quad {
                 self.quad_pick(x, src, (offset & 0x8000 != 0).then_some(offset as u8))
             } else if self.helpers_read(quad) {
@@ -8380,6 +8389,13 @@ impl<'a> Lower<'a> {
                     [0, 1, 2, 3].map(|i| ((i & offset | offset >> 5 & 3) ^ offset >> 10 & 3) as u8 & 3)
                 };
                 self.quad_read(x, lanes)
+||||||| merged common ancestors
+            let r = if mesh_quad {
+                self.quad_pick(x, src)
+=======
+            let r = if mesh_quad || self.helpers_read(quad) {
+                self.quad_pick(x, src)
+>>>>>>> belobug/main
             } else {
                 self.read_lane(x, src)
             };
