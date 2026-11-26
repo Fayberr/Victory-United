@@ -4761,26 +4761,25 @@ impl Shadow {
             return;
         }
         let mut dirty = card.dirty.lock().unwrap_or_else(|e| e.into_inner());
-<<<<<<< HEAD
+        let first = dirty.is_empty();
         for (from, to) in runs {
             match dirty.last_mut() {
                 Some(last) if from <= last.1 && to >= last.0 => *last = (last.0.min(from), last.1.max(to)),
                 _ => dirty.push((from, to)),
             }
-||||||| 9c184b35b
-        match dirty.last_mut() {
-            Some(last) if from <= last.1 && to >= last.0 => *last = (last.0.min(from), last.1.max(to)),
-            _ => dirty.push((from, to)),
-=======
-        let first = dirty.is_empty();
-        match dirty.last_mut() {
-            Some(last) if from <= last.1 && to >= last.0 => *last = (last.0.min(from), last.1.max(to)),
-            _ => dirty.push((from, to)),
->>>>>>> origin/exp/fork-head
         }
-<<<<<<< HEAD
         // (Under the lock: what takes the list sees it or finds it set.)
         card.touched.store(true, Ordering::Release);
+        drop(dirty);
+        // From none to some: [`card_dirty`] finds the copy in the list. (A
+        // copy changed again before its ranges are taken is in it already;
+        // one whose ranges the walk took may be in it with nothing to take.)
+        if first
+            && changed_kept()
+            && let Some(me) = card.me.get()
+        {
+            CHANGED.lock().unwrap_or_else(|e| e.into_inner()).push(me.clone());
+        }
     }
 
     /// Whether shaders were ever declared to write it.
@@ -4833,19 +4832,6 @@ impl Shadow {
     /// yet.
     pub(crate) fn card_dirty_now(&self) -> Vec<(usize, usize)> {
         self.card.as_ref().map_or_else(Vec::new, |c| c.dirty.lock().unwrap_or_else(|e| e.into_inner()).clone())
-||||||| 9c184b35b
-=======
-        drop(dirty);
-        // From none to some: [`card_dirty`] finds the copy in the list. (A
-        // copy changed again before its ranges are taken is in it already;
-        // one whose ranges the walk took may be in it with nothing to take.)
-        if first
-            && changed_kept()
-            && let Some(me) = card.me.get()
-        {
-            CHANGED.lock().unwrap_or_else(|e| e.into_inner()).push(me.clone());
-        }
->>>>>>> origin/exp/fork-head
     }
 
     /// Of a copy in the card's memory: the CPU's side (PC memory), the
@@ -5601,32 +5587,9 @@ pub(crate) fn find_any(address: u64, len: u64) -> Option<Arc<Shadow>> {
     lookup(address, len, true)
 }
 
-<<<<<<< HEAD
-/// The copy [`find`] gives for a range inside a title buffer, if it was made.
-pub(crate) fn peek(address: u64, len: u64) -> Option<Arc<Shadow>> {
-||||||| 9c184b35b
-fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
-=======
 /// Counts the changes of the tables [`lookup`] reads that can change what an
 /// ask finds: a buffer registered or released, a copy taken out of a table,
-/// a window made. A thread's remembered answers ([`FOUND`]) are from one
-/// count.
-///
-/// The order that makes a thread's remembered answer safe with no lock on
-/// a remembered ask: a copy that LEAVES a table is counted before it
-/// leaves, an entry that COMES is counted after it is in, both with the
-/// table's lock held; and a thread that finds a remembered answer looks at
-/// the count again before it uses it ([`lookup`]). So an answer used was
-/// the tables' own at the moment of that second look, or a moment before
-/// a change that had not been made yet: what an ask of the tables just
-/// ahead of the change would have found. The idle sweep, which lets go
-/// only what nobody holds, looks at each copy's holders again after it
-/// counted: the thread took its handle and then read the count, the sweep
-/// counts and then reads the holders, so one of the two sees the other.
-/// (That last step leans on the processor: the handle's count is the
-/// standard library's, whose orderings are not ours to choose; on x86-64,
-/// the only processor the layer runs on, taking a handle and adding to the
-/// count are both locked instructions, which is what it needs.)
+/// a window made.
 static TABLES_CHANGED: AtomicU64 = AtomicU64::new(0);
 
 fn tables_changed() {
@@ -5678,111 +5641,20 @@ mod registration_tests {
 /// them, and asks that went to the tables.
 pub(crate) static LOOKUPS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 
-/// Whether a thread remembers what its asks found (fork pull request
-/// #1237; `VICTORY_LOOKUP_CACHE=1`).
-///
-/// Every bind of a draw asks for the host copy of each buffer it reads:
-/// under the tables' one lock, among the 64 buffers that start below the
-/// address, then, for memory outside buffers, under the windows' lock. The
-/// title's six recording threads spent 54 ms a frame there together in the
-/// prologue cell (`VICTORY_PROFILE`), and asked for the same ranges again
-/// and again. A thread now keeps what each ask (address, length, kind)
-/// found, weakly (a copy nothing else holds can still be let go), for as
-/// long as the tables have not changed ([`TABLES_CHANGED`]).
-///
-/// Here: OFF unless `VICTORY_LOOKUP_CACHE=1` until a run of ours has carried
-/// it (the pull request has it on by default); `alt`: twenty seconds with,
-/// twenty without, in turn, each change said in the log.
-fn lookup_cache() -> bool {
-    /// 0 off, 1 on, 2 in turn.
-    static MODE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
-    match *MODE.get_or_init(|| match std::env::var("VICTORY_LOOKUP_CACHE").as_deref() {
-        Ok("1") => 1,
-        Ok("alt") => 2,
-        _ => 0,
-    }) {
-        0 => false,
-        1 => true,
-        _ => {
-            static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-            let on = (EPOCH.get_or_init(std::time::Instant::now).elapsed().as_secs() / 20) % 2 == 1;
-            static LAST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
-            if LAST.swap(u8::from(on), Ordering::Relaxed) != u8::from(on) {
-                tracing::info!(
-                    "a thread remembers what its asks for a buffer's host copy found from now (VICTORY_LOOKUP_CACHE=alt): {}",
-                    if on { "ON" } else { "off, every ask goes to the tables as usual" }
-                );
-            }
-            on
-        }
-    }
-}
-
-/// The most asks a thread remembers before it starts again.
-const FOUND_MOST: usize = 8192;
-
-type Found = std::collections::HashMap<(u64, u64, bool), std::sync::Weak<Shadow>>;
-
-thread_local! {
-    /// What this thread's asks found, and the count of table changes they
-    /// are from.
-    static FOUND: std::cell::RefCell<(u64, Found)> = std::cell::RefCell::new((u64::MAX, Found::new()));
-}
-
-fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
-    if !lookup_cache() {
-        return lookup_tables(address, len, any);
-    }
-    let changes = TABLES_CHANGED.load(Ordering::Acquire);
-    let found = FOUND.with(|f| {
-        let f = &mut *f.borrow_mut();
-        if f.0 != changes {
-            f.1.clear();
-            f.0 = changes;
-        }
-        f.1.get(&(address, len, any)).and_then(std::sync::Weak::upgrade)
-    });
-    // (The count again: a copy the sweep is taking out of its table at
-    // this moment can still be alive for the weak handle.)
-    if let Some(shadow) = found.filter(|_| TABLES_CHANGED.load(Ordering::SeqCst) == changes) {
-        LOOKUPS[0].fetch_add(1, Ordering::Relaxed);
-        if shadow.window {
-            // As `loose` notes an ask of a window it hands out.
-            shadow.used.store(crate::host::moment(), Ordering::Relaxed);
-            shadow.asked[0].fetch_min(address, Ordering::Relaxed);
-            shadow.asked[1].fetch_max(address.saturating_add(len.max(1)), Ordering::Relaxed);
-            if len <= 1 {
-                shadow.unsized_asks.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-        return Some(shadow);
-    }
-    LOOKUPS[1].fetch_add(1, Ordering::Relaxed);
-    let shadow = lookup_tables(address, len, any)?;
-    FOUND.with(|f| {
-        let f = &mut *f.borrow_mut();
-        // (from the count read before the tables were: a change since
-        // clears it at the next ask)
-        if f.0 == changes {
-            if f.1.len() >= FOUND_MOST {
-                f.1.clear();
-            }
-            f.1.insert((address, len, any), Arc::downgrade(&shadow));
-        }
-    });
-    Some(shadow)
-}
-
-fn lookup_tables(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
->>>>>>> origin/exp/fork-head
+/// The copy [`find`] gives for a range inside a title buffer, if it was made.
+pub(crate) fn peek(address: u64, len: u64) -> Option<Arc<Shadow>> {
     let end = address.checked_add(len.max(1))?;
     buffers_read().range(..=(address, usize::MAX)).rev().take(64).find(|(_, e)| e.end >= end).and_then(|(_, e)| e.shadow.clone())
 }
 
 fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
     let quick = quick_find();
-    if quick && let Some(shadow) = found(address, len) {
-        return Some(shadow);
+    if quick {
+        if let Some(shadow) = found(address, len) {
+            LOOKUPS[0].fetch_add(1, Ordering::Relaxed);
+            return Some(shadow);
+        }
+        LOOKUPS[1].fetch_add(1, Ordering::Relaxed);
     }
     let end = address.checked_add(len.max(1))?;
     {
@@ -6417,205 +6289,6 @@ mod window_tests {
     }
 }
 
-<<<<<<< HEAD
-||||||| 9c184b35b
-#[cfg(test)]
-mod card_merge_tests {
-    use super::{Card, Shadow};
-    use std::sync::Mutex;
-    use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
-    use windows::Win32::Graphics::Direct3D12::*;
-    use windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC;
-    use windows::Win32::Graphics::Dxgi::*;
-
-    /// A plain buffer on the software adapter: what a copy's `buffer` and
-    /// its card's `staging` are; the merge never touches them.
-    fn warp_buffer() -> Option<ID3D12Resource> {
-        // SAFETY: plain DXGI and D3D12 creation calls on the software adapter.
-        unsafe {
-            let factory: IDXGIFactory4 = CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)).ok()?;
-            let adapter: IDXGIAdapter = factory.EnumWarpAdapter().ok()?;
-            let mut device: Option<ID3D12Device> = None;
-            D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_11_0, &mut device).ok()?;
-            let device = device?;
-            let heap = D3D12_HEAP_PROPERTIES {
-                Type: D3D12_HEAP_TYPE_DEFAULT,
-                ..Default::default()
-            };
-            let desc = D3D12_RESOURCE_DESC {
-                Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
-                Width: 64 << 10,
-                Height: 1,
-                DepthOrArraySize: 1,
-                MipLevels: 1,
-                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-                Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-                ..Default::default()
-            };
-            let mut buffer: Option<ID3D12Resource> = None;
-            device
-                .CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON, None, &mut buffer)
-                .ok()?;
-            buffer
-        }
-    }
-
-    /// The mixed landing the fetch inside flights must survive, on a real
-    /// copy in the card's memory and its merge (`Shadow::card_merge_relay`):
-    /// flights 5, 6, 7 in the air; 5 lands the old way with the queue's
-    /// count at 7; the title wrote a byte that went up in send 7 into a
-    /// piece flight 6's shaders write; 6 then lands from its own slot, which
-    /// holds that byte as it was before send 7. The notes of sends are
-    /// dropped as `card_dirty` drops them, below the mark the old-way fetch
-    /// sets (`crate::host::fallback_fetched_mark`): with the mark at the
-    /// landed plans' send the title's byte survives and the shader's write
-    /// lands; with the mark at the fetch's count (as before the fix) the
-    /// title's byte is put back to the card's older one.
-    #[test]
-    fn a_title_byte_sent_after_a_flight_survives_its_slot() {
-        let (Some(buffer), Some(staging)) = (warp_buffer(), warp_buffer()) else {
-            return;
-        };
-        const LEN: usize = 64 << 10;
-        let (title_byte, shader_byte) = (100usize, 200usize);
-        let content: Vec<u8> = (0..LEN).map(|i| (i * 7 + 3) as u8).collect();
-        let land = |mark: u64| -> Vec<u8> {
-            let mut title = content.clone();
-            let mut side = content.clone();
-            // The title's byte, refreshed into the CPU's side and sent up in send 7.
-            title[title_byte] ^= 0x5a;
-            side[title_byte] = title[title_byte];
-            let mut shadow = Shadow::new(buffer.clone(), side.as_mut_ptr(), 0, title.as_ptr() as u64, LEN as u64);
-            shadow.card = Some(Card {
-                staging: staging.clone(),
-                before: Mutex::new(None),
-                dirty: Mutex::default(),
-                sent: Mutex::new(vec![(title_byte, title_byte + 1, 7)]),
-                // 0: no card bytes counted (`Drop` takes them off again).
-                size: 0,
-            });
-            // As `card_dirty` with the mark set by the old-way fetch.
-            if let Some(card) = &shadow.card {
-                card.sent.lock().unwrap().retain(|s| s.2 > mark);
-            }
-            // Flight 6's slot: the card's bytes behind its lists, before send 7.
-            let mut slot = content.clone();
-            slot[shader_byte] ^= 0xc3;
-            let written = shadow.card_merge_relay(0, &slot, 6, &mut Vec::new());
-            assert!(written > 0);
-            drop(shadow);
-            title
-        };
-        let fixed = land(crate::host::fallback_fetched_mark(true, 7, Some(5)));
-        assert_eq!(fixed[title_byte], content[title_byte] ^ 0x5a, "the title's byte was lost");
-        assert_eq!(fixed[shader_byte], content[shader_byte] ^ 0xc3, "the shader's write did not land");
-        // The mark at the fetch's count: the note of send 7 is gone and the
-        // older card byte is taken for a shader's write.
-        let before = land(7);
-        assert_eq!(before[title_byte], content[title_byte]);
-    }
-}
-
-=======
-#[cfg(test)]
-mod card_merge_tests {
-    use super::{Card, Shadow};
-    use std::sync::Mutex;
-    use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
-    use windows::Win32::Graphics::Direct3D12::*;
-    use windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC;
-    use windows::Win32::Graphics::Dxgi::*;
-
-    /// A plain buffer on the software adapter: what a copy's `buffer` and
-    /// its card's `staging` are; the merge never touches them.
-    fn warp_buffer() -> Option<ID3D12Resource> {
-        // SAFETY: plain DXGI and D3D12 creation calls on the software adapter.
-        unsafe {
-            let factory: IDXGIFactory4 = CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)).ok()?;
-            let adapter: IDXGIAdapter = factory.EnumWarpAdapter().ok()?;
-            let mut device: Option<ID3D12Device> = None;
-            D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_11_0, &mut device).ok()?;
-            let device = device?;
-            let heap = D3D12_HEAP_PROPERTIES {
-                Type: D3D12_HEAP_TYPE_DEFAULT,
-                ..Default::default()
-            };
-            let desc = D3D12_RESOURCE_DESC {
-                Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
-                Width: 64 << 10,
-                Height: 1,
-                DepthOrArraySize: 1,
-                MipLevels: 1,
-                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-                Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-                ..Default::default()
-            };
-            let mut buffer: Option<ID3D12Resource> = None;
-            device
-                .CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON, None, &mut buffer)
-                .ok()?;
-            buffer
-        }
-    }
-
-    /// The mixed landing the fetch inside flights must survive, on a real
-    /// copy in the card's memory and its merge (`Shadow::card_merge_relay`):
-    /// flights 5, 6, 7 in the air; 5 lands the old way with the queue's
-    /// count at 7; the title wrote a byte that went up in send 7 into a
-    /// piece flight 6's shaders write; 6 then lands from its own slot, which
-    /// holds that byte as it was before send 7. The notes of sends are
-    /// dropped as `card_dirty` drops them, below the mark the old-way fetch
-    /// sets (`crate::host::fallback_fetched_mark`): with the mark at the
-    /// landed plans' send the title's byte survives and the shader's write
-    /// lands; with the mark at the fetch's count (as before the fix) the
-    /// title's byte is put back to the card's older one.
-    #[test]
-    fn a_title_byte_sent_after_a_flight_survives_its_slot() {
-        let (Some(buffer), Some(staging)) = (warp_buffer(), warp_buffer()) else {
-            return;
-        };
-        const LEN: usize = 64 << 10;
-        let (title_byte, shader_byte) = (100usize, 200usize);
-        let content: Vec<u8> = (0..LEN).map(|i| (i * 7 + 3) as u8).collect();
-        let land = |mark: u64| -> Vec<u8> {
-            let mut title = content.clone();
-            let mut side = content.clone();
-            // The title's byte, refreshed into the CPU's side and sent up in send 7.
-            title[title_byte] ^= 0x5a;
-            side[title_byte] = title[title_byte];
-            let mut shadow = Shadow::new(buffer.clone(), side.as_mut_ptr(), 0, title.as_ptr() as u64, LEN as u64);
-            shadow.card = Some(Card {
-                staging: staging.clone(),
-                before: Mutex::new(None),
-                dirty: Mutex::default(),
-                sent: Mutex::new(vec![(title_byte, title_byte + 1, 7)]),
-                // 0: no card bytes counted (`Drop` takes them off again).
-                size: 0,
-                me: std::sync::OnceLock::new(),
-            });
-            // As `card_dirty` with the mark set by the old-way fetch.
-            if let Some(card) = &shadow.card {
-                card.sent.lock().unwrap().retain(|s| s.2 > mark);
-            }
-            // Flight 6's slot: the card's bytes behind its lists, before send 7.
-            let mut slot = content.clone();
-            slot[shader_byte] ^= 0xc3;
-            let written = shadow.card_merge_relay(0, &slot, 6, &mut Vec::new());
-            assert!(written > 0);
-            drop(shadow);
-            title
-        };
-        let fixed = land(crate::host::fallback_fetched_mark(true, 7, Some(5)));
-        assert_eq!(fixed[title_byte], content[title_byte] ^ 0x5a, "the title's byte was lost");
-        assert_eq!(fixed[shader_byte], content[shader_byte] ^ 0xc3, "the shader's write did not land");
-        // The mark at the fetch's count: the note of send 7 is gone and the
-        // older card byte is taken for a shader's write.
-        let before = land(7);
-        assert_eq!(before[title_byte], content[title_byte]);
-    }
-}
-
->>>>>>> origin/exp/fork-head
 /// For device-removed reports: the copy of title memory whose host range
 /// starts closest below host GPU address `va`, and where `va` is in it.
 pub(crate) fn near(va: u64) -> String {
