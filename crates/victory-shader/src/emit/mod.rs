@@ -128,14 +128,8 @@ pub use lower::{host_max_wave, set_host_max_wave};
 pub use rect::rect_list_gs;
 pub use shader::{
     MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-<<<<<<< HEAD
     SLOT_STRIDES_COUNT, SLOT_VIEWS, SLOT_VIEWS_COUNT, SLOT_VIEWS_RECORD_BYTES, USER_DATA_SPACE,
-    USER_GROUP_BASE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
-||||||| 465b94f5
-    SLOT_STRIDES_COUNT, USER_DATA_SPACE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
-=======
-    SLOT_STRIDES_COUNT, USER_DATA_SPACE, USER_DISPATCH_THREADS, USER_GROUP_BASE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
->>>>>>> vertex/main
+    USER_DISPATCH_THREADS, USER_GROUP_BASE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
     set_view_heap_limit, view_heap_limit,
 };
 
@@ -706,7 +700,6 @@ fn emit_forms(
                 let local = lower::with_local_waves_any(|| emit_program(c, native, p, st, io, res));
                 report("local waves (APPROXIMATE, any mask)", &local);
                 if done(&local) {
-<<<<<<< HEAD
                     return exactly(local);
                 }
             }
@@ -737,40 +730,6 @@ fn emit_forms(
                 report("loose LDS + local waves (APPROXIMATE, any mask)", &local);
                 if done(&local) {
                     return local;
-||||||| 465b94f5
-                    return local.map(|(shader, _)| shader);
-=======
-                    return exactly(local);
-                }
-            }
-        }
-        // Last of all (`VICTORY_WAVE_LDS_LOOSE=0` turns it off): LDS read and written inside
-        // one lane-branch region, ordered between the two host waves only where the region
-        // is entered and left (`lower::with_loose_lds`, approximate). A 32-lane host refuses
-        // the 64-lane form outright, which drops every dispatch of the program.
-        let loose_on = std::env::var_os("VICTORY_WAVE_LDS_LOOSE").is_none_or(|v| v != "0");
-        if loose_on && !strict {
-            let bases = [forms[0].1.as_ref(), forms[1].1.as_ref()];
-            for (name, f) in [("without early-outs", bases[0]), ("without skips", bases[1])] {
-                if let Some((p, st, io, res)) = f {
-                    let again = lower::with_loose_lds(|| emit_program(c, native, p, st, io, res));
-                    report(&format!("loose LDS (APPROXIMATE), {name}"), &again);
-                    if done(&again) {
-                        return exactly(again);
-                    }
-                }
-            }
-            let again = lower::with_loose_lds(|| emit_program(c, native, p, st, io, res));
-            report("loose LDS (APPROXIMATE)", &again);
-            if done(&again) {
-                return exactly(again);
-            }
-            if local_on && !exact_only {
-                let local = lower::with_loose_lds(|| lower::with_local_waves_any(|| emit_program(c, native, p, st, io, res)));
-                report("loose LDS + local waves (APPROXIMATE, any mask)", &local);
-                if done(&local) {
-                    return exactly(local);
->>>>>>> vertex/main
                 }
             }
         }
@@ -1379,7 +1338,6 @@ mod tests {
         assert_ne!(features & 0x200, 0, "SFI0 {features:#x}: no StencilRef");
     }
 
-<<<<<<< HEAD
     /// Triangle (0, 1, 2), each corner's 9-bit index in its 10-bit field.
     const TRIANGLE: u32 = 1 << 10 | 2 << 20;
     /// The edge flags of the three corners (bits 9, 19 and 29).
@@ -1558,8 +1516,6 @@ mod tests {
         }
     }
 
-||||||| 465b94f5
-=======
     /// A pixel program the console tests depth for before it runs
     /// (`DB_SHADER_CONTROL` 0x1050: DEPTH_BEFORE_SHADER, early Z, kill, as
     /// the title's glass prepass has it) declares ForceEarlyDepthStencil:
@@ -1633,7 +1589,6 @@ mod tests {
         assert!(!lower::early_depth(&StageIo::None, &[]));
     }
 
->>>>>>> vertex/main
     /// A wave64 compute program that writes only EXEC's high dword
     /// (`s_mov_b32 exec_hi, 0`) before a vector instruction. The new mask was
     /// opaque and keyed by the unchanged low dword, so building its lane bit
