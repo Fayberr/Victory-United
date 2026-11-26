@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, RwLock, RwLockReadGuard, TryLockError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::xasync::E_INVALIDARG;
 use super::xgameruntime::{HRESULT, S_OK};
@@ -326,6 +326,12 @@ const SAMPLES_PER_BLOCK: usize = BLOCK_BYTES / 2;
 /// Error status: the input ran out.
 const INPUT_INVALID: u32 = 4;
 
+static SHORT_READS: AtomicU32 = AtomicU32::new(0);
+static DEFERRED_REFILLS: AtomicU32 = AtomicU32::new(0);
+static INPUT_RESUMES: AtomicU32 = AtomicU32::new(0);
+static BAD_FRAMES: AtomicU32 = AtomicU32::new(0);
+static EMPTY_DECODE_YIELDS: AtomicU32 = AtomicU32::new(0);
+
 struct Voice {
     decoder: Option<xma::Decoder>,
     /// Decoded samples not yet in the ring: up to a reserve ahead of it, so
@@ -518,9 +524,18 @@ impl Xma {
         };
         let slot = &self.voices[index as usize];
         let mut takes = lock(&slot.ring);
-        let size = context.field(0, 22, 5).max(1);
+        let ring_size = context.field(0, 22, 5);
+        let size = ring_size.max(1);
+        let read = context.field(9, 0, 5) % size;
+        if blocks != 0 && ring_size != 0 {
+            let write = context.field(0, 27, 5) % size;
+            let writable = context.field(1, 31, 1) != 0;
+            if blocks > readable_blocks(size, read, write, writable) {
+                SHORT_READS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
         // The count is the title's: reduced first, so the sum stays small.
-        let read = (context.field(9, 0, 5) + blocks % size) % size;
+        let read = (read + blocks % size) % size;
         context.set_field(9, 0, 5, read);
         if blocks > 0 {
             context.set_field(1, 31, 1, 1);
@@ -535,7 +550,12 @@ impl Xma {
         let voice = match slot.voice.try_lock() {
             Ok(voice) => Some(voice),
             Err(TryLockError::Poisoned(e)) => Some(e.into_inner()),
-            Err(TryLockError::WouldBlock) => None,
+            Err(TryLockError::WouldBlock) => {
+                if blocks != 0 {
+                    DEFERRED_REFILLS.fetch_add(1, Ordering::Relaxed);
+                }
+                None
+            }
         };
         if let Some(mut guard) = voice
             && let Some(voice) = guard.as_mut()
@@ -546,7 +566,7 @@ impl Xma {
     }
 
     /// Fills every enabled context's output as far as it has room.
-    fn pump(&self) {
+    fn pump(&self) -> u32 {
         let start = Instant::now();
         let mut active = 0;
         for (index, slot) in self.voices.iter().enumerate() {
@@ -558,6 +578,15 @@ impl Xma {
         if took.as_millis() >= 4 {
             tracing::debug!(active, ms = took.as_millis(), "slow XMA decoding pass");
         }
+        active
+    }
+}
+
+fn readable_blocks(size: u32, read: u32, write: u32, writable: bool) -> u32 {
+    if read == write && !writable {
+        size
+    } else {
+        (write + size - read) % size
     }
 }
 
@@ -586,6 +615,7 @@ fn pump(context: Context, slot: &Slot) -> bool {
         if voice.pcm.len() == queued {
             empty_steps += 1;
             if empty_steps == 8 {
+                EMPTY_DECODE_YIELDS.fetch_add(1, Ordering::Relaxed);
                 return true;
             }
         } else {
@@ -663,6 +693,7 @@ fn decode(context: Context, voice: &mut Voice) -> bool {
         // from a cold decoder at the start of the input, with the error
         // cleared as enabling does.
         voice.drained = false;
+        INPUT_RESUMES.fetch_add(1, Ordering::Relaxed);
         voice.decoder = None;
         context.set(2, 0);
     }
@@ -734,6 +765,7 @@ fn decode(context: Context, voice: &mut Voice) -> bool {
     voice.trace.frames += 1;
     if let Err(e) = decoder.decode(&frame.data, frame.bits, &mut pcm) {
         voice.trace.bad_frames += 1;
+        BAD_FRAMES.fetch_add(1, Ordering::Relaxed);
         if voice.trace.bad_frames <= 2 {
             tracing::debug!(
                 at,
@@ -808,15 +840,52 @@ fn wake_decoder() {
                 .spawn(|| {
                     #[cfg(windows)]
                     raise_decoder_priority();
+                    let mut previous_pass = Instant::now();
+                    let mut last_report = previous_pass;
+                    let mut max_active_gap = Duration::ZERO;
                     loop {
-                        xma().pump();
+                        let now = Instant::now();
+                        if xma().pump() != 0 {
+                            max_active_gap = max_active_gap.max(now.duration_since(previous_pass));
+                        }
+                        previous_pass = now;
+                        if now.duration_since(last_report) >= Duration::from_secs(5) {
+                            report_xma_pressure(max_active_gap);
+                            max_active_gap = Duration::ZERO;
+                            last_report = now;
+                        }
                         // At 48 kHz a block lasts 2.7 ms mono or 1.3 ms stereo.
-                        std::thread::park_timeout(std::time::Duration::from_millis(2));
+                        std::thread::park_timeout(Duration::from_millis(2));
                     }
                 })
                 .map_or_else(|_| std::thread::current(), |h| h.thread().clone())
         })
         .unpark();
+}
+
+fn report_xma_pressure(max_active_gap: Duration) {
+    let short_reads = SHORT_READS.swap(0, Ordering::Relaxed);
+    let deferred_refills = DEFERRED_REFILLS.swap(0, Ordering::Relaxed);
+    let input_resumes = INPUT_RESUMES.swap(0, Ordering::Relaxed);
+    let bad_frames = BAD_FRAMES.swap(0, Ordering::Relaxed);
+    let empty_decode_yields = EMPTY_DECODE_YIELDS.swap(0, Ordering::Relaxed);
+    if !max_active_gap.is_zero()
+        || short_reads != 0
+        || deferred_refills != 0
+        || input_resumes != 0
+        || bad_frames != 0
+        || empty_decode_yields != 0
+    {
+        tracing::info!(
+            short_reads,
+            deferred_refills,
+            input_resumes,
+            bad_frames,
+            empty_decode_yields,
+            max_active_gap_us = max_active_gap.as_micros(),
+            "XMA playback pressure"
+        );
+    }
 }
 
 #[cfg(windows)]
@@ -1096,6 +1165,14 @@ pub(crate) fn module() -> HleModule {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readable_blocks_distinguishes_empty_full_and_wrapped_rings() {
+        assert_eq!(readable_blocks(4, 2, 2, true), 0);
+        assert_eq!(readable_blocks(4, 2, 2, false), 4);
+        assert_eq!(readable_blocks(4, 3, 1, true), 2);
+        assert_eq!(readable_blocks(4, 1, 3, true), 2);
+    }
 
     #[test]
     fn read_advance_returns_while_the_decoder_owns_the_voice() {
