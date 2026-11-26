@@ -7926,30 +7926,19 @@ impl Host {
                     let _ = fault_va;
                     if done > 0 {
                         text.push_str(&in_flight(history, &markers, done as usize));
-<<<<<<< HEAD
                     }
                     #[cfg(feature = "diagnostics")]
                     if let Some(indirects) = indirects {
                         text.push_str(&indirects_around(history, done as usize, &indirects));
                     }
                     // (Without markers a list that stopped midway says what
-                    // it may have been at only by what it binds.)
-                    if (done == 0 || markers.is_empty())
+                    // it may have been at only by what it binds; and in
+                    // `light`, where no marker says what a command runs,
+                    // every stopped list.)
+                    if (done == 0 || markers.is_empty() || dred_mode() == Dred::Light)
                         && let Some(bound) = bound
                     {
                         let pipelines = bound.lock().unwrap_or_else(|e| e.into_inner());
-||||||| 9c184b35b
-                    } else if let Some(r) = run {
-                        let pipelines = r.pipelines.lock().unwrap_or_else(|e| e.into_inner());
-=======
-                    }
-                    // A list that never started; and in `light`, where no
-                    // marker says what a command runs, every stopped list.
-                    if (done == 0 || dred_mode() == Dred::Light)
-                        && let Some(r) = run
-                    {
-                        let pipelines = r.pipelines.lock().unwrap_or_else(|e| e.into_inner());
->>>>>>> origin/exp/fork-head
                         text.push_str(&format!(", its pipelines {pipelines:?}"));
                     }
                 }
@@ -7959,71 +7948,6 @@ impl Host {
         text
     }
 
-<<<<<<< HEAD
-||||||| 9c184b35b
-    /// With the frame line (`VICTORY_D3D12_DEBUG=1`, diagnostics builds):
-    /// the debug layer's messages since the last call go to our log, the
-    /// first five of each kind in full, the rest counted, with one line of
-    /// the counts by kind.
-    ///
-    /// They were only read when the device was lost ([`fail`]): a run that
-    /// survived (run 205) said nothing of what the layer had found, and
-    /// what it finds is what a driver's fault would have to be traced back
-    /// to (an object let go while the card uses it, a resource in the
-    /// wrong state, a view of something gone).
-    pub(crate) fn drain_messages(&self) {
-        let Some(queue) = &self.messages else {
-            return;
-        };
-        static SEEN: Mutex<std::collections::BTreeMap<i32, (u64, i32)>> = Mutex::new(std::collections::BTreeMap::new());
-        let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
-        // SAFETY: each message is read into a buffer of the size the queue
-        // reports, then the queue is emptied.
-        let stored = unsafe {
-            let stored = queue.GetNumStoredMessages();
-            for i in 0..stored {
-                let mut size = 0;
-                if queue.GetMessage(i, None, &mut size).is_err() || size == 0 {
-                    continue;
-                }
-                let mut buffer = vec![0u64; size.div_ceil(8)];
-                let message = buffer.as_mut_ptr().cast::<D3D12_MESSAGE>();
-                if queue.GetMessage(i, Some(message), &mut size).is_ok() {
-                    let m = &*message;
-                    let kind = seen.entry(m.ID.0).or_insert((0, m.Severity.0));
-                    kind.0 += 1;
-                    if kind.0 <= 5 {
-                        let text = std::slice::from_raw_parts(m.pDescription, m.DescriptionByteLength);
-                        let text = String::from_utf8_lossy(text);
-                        let text = text.trim_end_matches('\0');
-                        tracing::warn!(id = m.ID.0, severity = m.Severity.0, nth = kind.0, "D3D12 debug layer: {text}");
-                    }
-                }
-            }
-            queue.ClearStoredMessages();
-            stored
-        };
-        if stored > 0 {
-            let counts: Vec<String> = seen.iter().map(|(id, (n, severity))| format!("id {id} (severity {severity}) x{n}")).collect();
-            tracing::info!(
-                "D3D12 debug layer messages so far by kind (severity 0 corruption, 1 error, 2 warning, 3 info, 4 message): {}",
-                counts.join(", ")
-            );
-        }
-    }
-
-    /// The host device (`crate::cardmeter`).
-    pub(crate) fn device(&self) -> &ID3D12Device {
-        &self.device
-    }
-
-    /// Ticks a second of the queue's timestamps; 0 if it has none.
-    pub(crate) fn timestamp_frequency(&self) -> u64 {
-        // SAFETY: a plain query.
-        unsafe { self.queue.GetTimestampFrequency() }.unwrap_or(0)
-    }
-
-=======
     /// With the frame line (`VICTORY_D3D12_DEBUG=1`, diagnostics builds):
     /// the debug layer's messages since the last call go to our log, the
     /// first five of each kind in full, the rest counted, with one line of
@@ -8103,7 +8027,6 @@ impl Host {
         unsafe { self.queue.GetTimestampFrequency() }.unwrap_or(0)
     }
 
->>>>>>> origin/exp/fork-head
     /// Moves the debug layer's messages into our log; returns the first
     /// error among them.
     pub(crate) fn log_messages(&self) -> Option<String> {
@@ -8316,10 +8239,7 @@ impl HostList {
     }
 
     pub(crate) fn close(&self) {
-<<<<<<< HEAD
         let _closing = crate::timeline::span("closing a host list");
-||||||| 9c184b35b
-=======
         // The copies below write buffers on the card: no draw after them joins a window.
         crate::indirect::end_window(self);
         // Host queries begun in this list and never ended here: ended now, answered "visible".
@@ -8327,7 +8247,6 @@ impl HostList {
         if !open.is_empty() {
             crate::query::close_open(open, self);
         }
->>>>>>> origin/exp/fork-head
         self.twins_to_depth();
         self.textures_back();
         let scratch = self.indirect_args.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -8384,31 +8303,14 @@ impl HostList {
         let started = std::time::Instant::now();
         let _resetting = crate::timeline::span("resetting a host list");
         self._alive.used();
-<<<<<<< HEAD
         *self.coming.lock().unwrap_or_else(|e| e.into_inner()) = None;
-||||||| 9c184b35b
-=======
         *self.clamp_window.lock().unwrap_or_else(|e| e.into_inner()) = None;
->>>>>>> origin/exp/fork-head
         *self.deferred() = Deferred::default();
         self.states.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.twins.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.pipelines.lock().unwrap_or_else(|e| e.into_inner()).clear();
-<<<<<<< HEAD
         #[cfg(feature = "diagnostics")]
         self.indirects.lock().unwrap_or_else(|e| e.into_inner()).clear();
-||||||| 9c184b35b
-        {
-            let mut gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
-            let Gather { closed, sets, spare, .. } = &mut *gather;
-            *closed = false;
-            for set in sets.drain(..) {
-                if spare.len() < GATHER_SETS {
-                    spare.push(set.into_scratch());
-                }
-            }
-        }
-=======
         {
             let mut gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
             let Gather { closed, written, sets, spare, .. } = &mut *gather;
@@ -8420,7 +8322,6 @@ impl HostList {
                 }
             }
         }
->>>>>>> origin/exp/fork-head
         #[cfg(feature = "diagnostics")]
         self.notes.lock().unwrap_or_else(|e| e.into_inner()).clear();
         {
@@ -8831,76 +8732,6 @@ impl HostList {
         list.cast().ok()
     }
 
-<<<<<<< HEAD
-||||||| 9c184b35b
-    /// From here on the list gathers no records (`crate::indirect::gather`):
-    /// what is about to be recorded may write arguments.
-    pub(crate) fn gather_close(&self) {
-        self.gather.lock().unwrap_or_else(|e| e.into_inner()).closed = true;
-    }
-
-    /// A slot for the record at `offset` of the host copy `src` in the
-    /// scratch buffer the list's prelude fills (`crate::indirect::gather`,
-    /// which checked the record): the buffer and the slot's place in it.
-    pub(crate) fn gather_slot(&self, src: &ID3D12Resource, src_id: u64, offset: u32, (kind, stride): (u32, u32)) -> Option<(ID3D12Resource, u64)> {
-        let none = |why: usize| {
-            crate::indirect::GATHER_NONE[why].fetch_add(1, Ordering::Relaxed);
-            None
-        };
-        let mut gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
-        if gather.closed {
-            return none(1);
-        }
-        let found = gather
-            .sets
-            .iter()
-            .position(|s| s.src_id == src_id && s.kind == kind && s.stride == stride && s.src.as_raw() == src.as_raw());
-        let at = match found {
-            Some(at) => at,
-            None => {
-                if gather.sets.len() >= GATHER_SETS {
-                    return none(2);
-                }
-                // The prelude zeroes the budget as the list zeroes its own.
-                if self.list.cast::<ID3D12GraphicsCommandList2>().is_err() {
-                    return none(4);
-                }
-                let Some(host) = host() else {
-                    return none(4);
-                };
-                if gather.budget.is_none() {
-                    let Some(budget) = host.uav_buffer(256) else {
-                        return none(4);
-                    };
-                    name(&budget, || "indirect budget of gathered records".to_owned());
-                    gather.budget = Some(budget);
-                }
-                let scratch = match gather.spare.pop() {
-                    Some(scratch) => scratch,
-                    None => {
-                        let Some(scratch) = host.uav_buffer(u64::from(crate::indirect::GATHER_MOST) * u64::from(crate::indirect::GATHER_STRIDE)) else {
-                            return none(4);
-                        };
-                        name(&scratch, || "indirect arguments, gathered".to_owned());
-                        scratch
-                    }
-                };
-                let Some(table) = self.scratch(u64::from(crate::indirect::GATHER_MOST) * 4) else {
-                    gather.spare.push(scratch);
-                    return none(4);
-                };
-                gather.sets.push(crate::indirect::GatherSet::new(src.clone(), src_id, (kind, stride), scratch, table));
-                gather.sets.len() - 1
-            }
-        };
-        let set = &mut gather.sets[at];
-        let Some(slot) = set.slot(offset) else {
-            return none(3);
-        };
-        Some((set.scratch.clone(), u64::from(slot) * u64::from(stride)))
-    }
-
-=======
     /// From here on the list gathers no records (`crate::indirect::gather`):
     /// what is about to be recorded may write arguments.
     pub(crate) fn gather_close(&self) {
@@ -8979,7 +8810,6 @@ impl HostList {
         Some((set.scratch.clone(), u64::from(slot) * u64::from(stride)))
     }
 
->>>>>>> origin/exp/fork-head
     /// Notes what the command about to be recorded does, as a marker
     /// command whose text the list keeps (diagnostics, with device-removed
     /// data on): the report pairs the breadcrumbs' marker commands with the
@@ -8998,16 +8828,10 @@ impl HostList {
 
     #[cfg(feature = "diagnostics")]
     fn note(&self, what: impl FnOnce() -> String, range: Option<(u64, u64)>) {
-<<<<<<< HEAD
-||||||| 9c184b35b
-        // A frame shot times the command: the card's clock before it.
-        crate::shot::stamp(self);
-=======
         // A frame shot times the command: the card's clock before it.
         crate::shot::stamp(self);
         // Only the full form of device-removed data goes on: `light` and
         // `faults` make no text and set no marker, as with the data off.
->>>>>>> origin/exp/fork-head
         if !dred_on() {
             crate::capture::op(std::ptr::from_ref(self) as usize, what);
             return;
@@ -9139,17 +8963,8 @@ impl HostList {
         deferred
             .copies
             .push(Step::Copy(dst as usize, src as usize, len));
-<<<<<<< HEAD
         deferred.title_written();
         self.changed_something();
-||||||| 9c184b35b
-        deferred.refreshed.clear();
-=======
-        deferred.refreshed.clear();
-        if list_reuse_set() {
-            deferred.filled.clear();
-        }
->>>>>>> origin/exp/fork-head
     }
 
     /// Copies `len` bytes of title memory at `src` into the list's upload
@@ -9244,17 +9059,9 @@ impl HostList {
     ///
     /// shortcut: one buffer per copy; pool them once uploads are frequent.
     pub(crate) fn upload(&self, host: &Host, size: u64) -> Option<(ID3D12Resource, *mut u8)> {
-<<<<<<< HEAD
         // With [`card_steps`] the card may be the one that fills it.
         let (buffer, data) = if card_steps::stage() > 1 { host.shared_buffer(size)? } else { host.upload_buffer(size)? };
-        name(&buffer, || format!("list upload {size:#x}"));
-||||||| 9c184b35b
-        let (buffer, data) = host.upload_buffer(size)?;
-        name(&buffer, || format!("list upload {size:#x}"));
-=======
-        let (buffer, data) = host.upload_buffer(size)?;
         name_frame(&buffer, || format!("list upload {size:#x}"));
->>>>>>> origin/exp/fork-head
         self.deferred().hold_upload(buffer.clone(), size);
         Some((buffer, data))
     }
@@ -9284,23 +9091,9 @@ impl HostList {
         let len = len.max(1).next_multiple_of(256);
         if len > SCRATCH_CHUNK {
             let (buffer, data) = host.upload_buffer(len)?;
-<<<<<<< HEAD
-            name(&buffer, || format!("list scratch {len:#x}"));
+            name_frame(&buffer, || format!("list scratch {len:#x}"));
             self.deferred().hold_upload(buffer.clone(), len);
             return Some((buffer, 0, data));
-||||||| 9c184b35b
-            name(&buffer, || format!("list scratch {len:#x}"));
-            // SAFETY: a live buffer.
-            let gpu = unsafe { buffer.GetGPUVirtualAddress() };
-            self.deferred().hold_upload(buffer, len);
-            return Some((gpu, data));
-=======
-            name_frame(&buffer, || format!("list scratch {len:#x}"));
-            // SAFETY: a live buffer.
-            let gpu = unsafe { buffer.GetGPUVirtualAddress() };
-            self.deferred().hold_upload(buffer, len);
-            return Some((gpu, data));
->>>>>>> origin/exp/fork-head
         }
         // The chunk in use while `len` fits in what is left of it, else the
         // next one (a list's first chunk may be a small one).
@@ -9582,47 +9375,28 @@ impl HostList {
         self.deferred().textures.insert(key)
     }
 
-<<<<<<< HEAD
     /// Whether `key` was asked about ([`HostList::first_use`]) since the
     /// reset.
     pub(crate) fn used(&self, key: usize) -> bool {
         self.deferred().textures.contains(&key)
     }
 
-||||||| 9c184b35b
-=======
     pub(crate) fn alias_source_changed(&self, view: &ID3D12Resource, source: &ID3D12Resource) -> bool {
         let view = view.as_raw() as usize;
         let source = source.as_raw() as usize;
         self.deferred().texture_aliases.insert(view, source) != Some(source)
     }
 
->>>>>>> origin/exp/fork-head
     /// Runs `work` when the list is submitted, in order with its copies.
-<<<<<<< HEAD
-    /// `work` may write title memory (refreshes after it copy again).
-    pub(crate) fn defer(&self, work: impl Fn() + Send + 'static) {
+    /// `work` may write title memory, and only in `[at, at + len)`
+    /// (refreshes after it copy again; [`near_writes`] uses the place,
+    /// without the switch any write of title memory is assumed).
+    pub(crate) fn defer_at(&self, at: usize, len: usize, work: impl Fn() + Send + 'static) {
         let mut deferred = self.deferred();
         deferred.copies.push(Step::Run(Box::new(work)));
         deferred.title_written();
         drop(deferred);
         self.changed_something();
-||||||| 9c184b35b
-    /// `work` may write title memory (refreshes after it copy again).
-    pub(crate) fn defer(&self, work: impl Fn() + Send + 'static) {
-        self.deferred().copies.push(Step::Run(Box::new(work)));
-        self.deferred().refreshed.clear();
-=======
-    /// `work` may write title memory, and only in `[at, at + len)`
-    /// (refreshes after it copy again; [`near_writes`] uses the place,
-    /// without the switch any write of title memory is assumed).
-    pub(crate) fn defer_at(&self, at: usize, len: usize, work: impl Fn() + Send + 'static) {
-        self.deferred().copies.push(Step::Run(Box::new(work), Some((at, len))));
-        self.deferred().refreshed.clear();
-        if list_reuse_set() {
-            self.deferred().filled.clear();
-        }
->>>>>>> origin/exp/fork-head
     }
 
     /// As [`HostList::defer`], for work that writes only host memory.
@@ -9642,7 +9416,6 @@ impl HostList {
         self.deferred().copies.push(Step::Texture(staging));
     }
 
-<<<<<<< HEAD
     /// A copy source owned exclusively by this list until reset after its
     /// last execution. A different list can prepare its movie plane concurrently.
     pub(crate) fn plane_upload(
@@ -9660,8 +9433,6 @@ impl HostList {
         Some(source)
     }
 
-||||||| 9c184b35b
-=======
     /// Detiles the textures the list uploads now, ahead of its submission
     /// ([`crate::texture::Staging::refresh_ahead`]); how many were left.
     pub(crate) fn refresh_textures_ahead(&self) -> u64 {
@@ -9677,7 +9448,6 @@ impl HostList {
         textures.iter().filter(|staging| !staging.refresh_ahead()).count() as u64
     }
 
->>>>>>> origin/exp/fork-head
     /// Runs the list's submission-time steps; refreshes go into `batch`
     /// (the title's big buffers, a 174 MB one among them, are read by most
     /// lists of a submission, through many ranges). Copies and fills that
@@ -9702,26 +9472,12 @@ impl HostList {
                     {
                         copies += 1;
                     }
-<<<<<<< HEAD
                     batch.fill();
-                    batch.title_written();
-||||||| 9c184b35b
-                    batch.title_wrote(dst, len);
-                    #[cfg(feature = "diagnostics")]
-                    fill_check::copy_runs(dst, src, len);
-                    #[cfg(feature = "diagnostics")]
-                    let _reads_as = crate::backreads::reading_as(crate::backreads::TITLE_COPY, 0);
-=======
                     if near_writes() {
                         batch.title_wrote_near(dst, len, false);
                     } else {
                         batch.title_wrote(dst, len);
                     }
-                    #[cfg(feature = "diagnostics")]
-                    fill_check::copy_runs(dst, src, len);
-                    #[cfg(feature = "diagnostics")]
-                    let _reads_as = crate::backreads::reading_as(crate::backreads::TITLE_COPY, 0);
->>>>>>> origin/exp/fork-head
                     copy_mapped(dst as *mut u8, src as *const u8, len, true);
                     // With the submission's one asking: the journal learns it.
                     crate::watch::wrote(dst, len);
@@ -9737,14 +9493,13 @@ impl HostList {
                     {
                         copies += 1;
                     }
-<<<<<<< HEAD
                     if wide_fills() {
                         batch.fills.push((dst, src, len));
                         bytes += len as u64;
                         continue;
                     }
                     let started = std::time::Instant::now();
-                    copy_mapped(dst as *mut u8, src as *const u8, len, false);
+                    copy_fill(dst as *mut u8, src as *const u8, len);
                     (started, len)
                 }
                 Step::Placed(p) => {
@@ -9758,17 +9513,6 @@ impl HostList {
                         batch.placed.push((p.shadow.clone(), p.dst, bytes));
                     }
                     (started, p.len)
-||||||| 9c184b35b
-                    #[cfg(feature = "diagnostics")]
-                    let _reads_as = crate::backreads::reading_as(crate::backreads::TITLE_COPY, 0);
-                    copy_mapped(dst as *mut u8, src as *const u8, len, false);
-                    len
-=======
-                    #[cfg(feature = "diagnostics")]
-                    let _reads_as = crate::backreads::reading_as(crate::backreads::TITLE_COPY, 0);
-                    copy_fill(dst as *mut u8, src as *const u8, len);
-                    len
->>>>>>> origin/exp/fork-head
                 }
                 Step::Refresh(shadow, address, len) => {
                     #[cfg(feature = "diagnostics")]
@@ -9779,21 +9523,16 @@ impl HostList {
                     batch.add(shadow, *address, *len);
                     continue;
                 }
-<<<<<<< HEAD
-                Step::Run(work) | Step::Host(work, _) => {
-                    batch.fill();
-                    #[cfg(feature = "diagnostics")]
-                    let started = std::time::Instant::now();
-                    if matches!(step, Step::Run(_)) {
-||||||| 9c184b35b
-                Step::Run(work) | Step::Host(work) => {
-                    if matches!(step, Step::Run(_)) {
-=======
                 Step::Run(work, Some((at, len))) if near_writes() => {
                     // Its place is known: only what it touches is brought up
                     // to date first and checked again after it, and the
                     // submission's one asking stands, told of the write, as
                     // for a title buffer copy ([`near_writes`]).
+                    // Its work reads title memory, and the fills noted read
+                    // it too: they are done first.
+                    batch.fill();
+                    #[cfg(feature = "diagnostics")]
+                    let started = std::time::Instant::now();
                     let written = batch.title_wrote_near(*at, *len, true);
                     work();
                     for &(from, to) in &written {
@@ -9806,9 +9545,11 @@ impl HostList {
                     }
                     continue;
                 }
-                Step::Run(work, _) | Step::Host(work) => {
+                Step::Run(work, _) | Step::Host(work, _) => {
+                    batch.fill();
+                    #[cfg(feature = "diagnostics")]
+                    let started = std::time::Instant::now();
                     if matches!(step, Step::Run(..)) {
->>>>>>> origin/exp/fork-head
                         batch.title_written();
                     }
                     let _step = crate::timeline::span("a step of ours");
