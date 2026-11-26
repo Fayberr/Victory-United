@@ -59,7 +59,6 @@ pub struct Instruction {
     pub offset: usize,
     pub encoding: Encoding,
     pub opcode: u16,
-<<<<<<< HEAD
     /// Every dword of the instruction, including literals and extra dwords;
     /// `len` of them. The longest instruction here is an MIMG with its three
     /// extra address dwords, five in all, so they live inline: a heap vector
@@ -71,21 +70,9 @@ pub struct Instruction {
     /// The translator asks about every instruction eight times; the table is
     /// a binary search.
     name: Option<&'static str>,
-||||||| a26859fc
-    /// Every dword of the instruction, including literals and extra dwords.
-    pub words: Vec<u32>,
-=======
-    /// Every dword of the instruction, including literals and extra dwords.
-    pub words: Vec<u32>,
-    /// [`name`] of `encoding` and `opcode`, resolved once at decode time.
-    /// The translator asks about every instruction eight times; the table is
-    /// a binary search.
-    name: Option<&'static str>,
->>>>>>> avatar/main
 }
 
 impl Instruction {
-<<<<<<< HEAD
     /// The most dwords an instruction here has: an MIMG with its three extra
     /// address dwords.
     pub const MAX_WORDS: usize = 5;
@@ -97,28 +84,14 @@ impl Instruction {
         Self { offset, encoding, opcode, words, len: 1, name: name(encoding, opcode) }
     }
 
-||||||| a26859fc
-=======
-    /// An instruction of these words, its name resolved.
-    pub fn new(offset: usize, encoding: Encoding, opcode: u16, words: Vec<u32>) -> Self {
-        Self { offset, encoding, opcode, words, name: name(encoding, opcode) }
-    }
-
->>>>>>> avatar/main
     /// AMD's name for the opcode, if it is in our table.
     pub fn name(&self) -> Option<&'static str> {
-<<<<<<< HEAD
         self.name
     }
 
     /// Every dword of the instruction, including literals and extra dwords.
     pub fn words(&self) -> &[u32] {
         &self.words[..usize::from(self.len)]
-||||||| a26859fc
-        name(self.encoding, self.opcode)
-=======
-        self.name
->>>>>>> avatar/main
     }
 }
 
@@ -528,7 +501,6 @@ fn instruction(code: &[u8], offset: usize) -> Result<Instruction, ShaderError> {
             _ => return Err(isa(offset, "unknown encoding")),
         }
     };
-<<<<<<< HEAD
     if len > Instruction::MAX_WORDS {
         return Err(isa(offset, "instruction longer than the decoder's budget"));
     }
@@ -537,26 +509,13 @@ fn instruction(code: &[u8], offset: usize) -> Result<Instruction, ShaderError> {
         *w = word(i)?;
     }
     let opcode = opcode as u16;
-||||||| a26859fc
-=======
-    let opcode = opcode as u16;
->>>>>>> avatar/main
     Ok(Instruction {
         offset,
         encoding,
-<<<<<<< HEAD
         opcode,
         words,
         len: len as u8,
         name: name(encoding, opcode),
-||||||| a26859fc
-        opcode: opcode as u16,
-        words: (0..len).map(word).collect::<Result<_, _>>()?,
-=======
-        opcode,
-        words: (0..len).map(word).collect::<Result<_, _>>()?,
-        name: name(encoding, opcode),
->>>>>>> avatar/main
     })
 }
 
@@ -623,7 +582,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn vop3_cmpx_writes_exec() {
         let code = bytes(&[0xD411_0005, 0x0001_E501, S_ENDPGM]);
         let inst = &decode(&code).unwrap()[0];
@@ -641,8 +599,6 @@ mod tests {
     }
 
     #[test]
-||||||| a26859fc
-=======
     fn flat_offsets_ignore_bit_eleven() {
         let offset = |word0: u32| {
             let code = bytes(&[word0, 0x0000_0001, S_ENDPGM]);
@@ -658,7 +614,6 @@ mod tests {
     }
 
     #[test]
->>>>>>> avatar/main
     fn tables_are_sorted() {
         for t in [
             opcodes::SOP2,
