@@ -47,18 +47,12 @@ mod draw;
 pub mod dxgi;
 pub mod fence;
 pub mod frame;
-<<<<<<< HEAD
 #[cfg(all(windows, feature = "diagnostics"))]
 mod book;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod heap_pass;
 #[cfg(windows)]
 mod fx;
-||||||| 9c184b35
-=======
-#[cfg_attr(not(windows), allow(dead_code))]
-mod heap_pass;
->>>>>>> fork/main
 #[cfg(windows)]
 pub mod framelog;
 #[cfg(windows)]
@@ -163,14 +157,8 @@ pub use census::title_memory_reserved;
 pub use inplace::{title_memory_freeing, title_memory_section, title_memory_section_gone, title_memory_view};
 #[cfg(windows)]
 pub use watch::{
-<<<<<<< HEAD
     kernel_writing, title_memory_allocated, title_memory_committed, title_memory_freed,
     title_memory_reading, title_memory_remapped, title_memory_remapping, title_memory_splitting,
     title_memory_unmapping, title_memory_written, title_pages_changed, title_pages_told,
-||||||| 9c184b35
-    title_memory_reading, title_memory_remapped, title_memory_remapping, title_memory_written,
-=======
-    title_memory_committed, title_memory_reading, title_memory_remapped, title_memory_remapping, title_memory_written,
->>>>>>> fork/main
     writing as kernel_will_write,
 };
