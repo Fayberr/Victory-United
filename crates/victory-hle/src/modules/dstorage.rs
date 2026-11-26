@@ -1427,6 +1427,7 @@ impl Traced {
         );
     }
 }
+
 /// When a page destination's list is read (`VICTORY_PAGE_LIST`). The
 /// title passes a pointer into its live table of physical pages: it
 /// enqueues, then maps the pages (which fills the table in), then submits,
@@ -1719,8 +1720,25 @@ fn execute(read: &QueuedRead, pages: Option<&PageRuns>) -> Result<(), HRESULT> {
             return Err(fail(E_INVALIDARG, "source larger than destination"));
         }
         let size = request.source_size as usize;
-        return into_destination(request, pages, size, |out| read_into(request, out).map(|()| size))
-            .map_err(|hr| fail(hr, "copying"));
+        // A file read into a title address is the kernel's write, and the
+        // kernel does not fault into the GPU side's guard: a block guarded
+        // again between `kernel_will_write` and the read (the guard over all
+        // the views of a page protects other views from other threads) made
+        // the read fail with ERROR_INVALID_USER_BUFFER, and the title stops
+        // at the failed request (runs amd-C and amd-C2, seconds after the
+        // world's first frame). It is read beside and copied in: our copy
+        // faults into the guard like the title's own writes.
+        let bounce = options & (PAGE_DESTINATION | MEMORY_SOURCE) == 0;
+        return into_destination(request, pages, size, |out| {
+            if !bounce {
+                return read_into(request, out).map(|()| size);
+            }
+            let mut data = vec![0; size];
+            read_into(request, &mut data)?;
+            out.copy_from_slice(&data);
+            Ok(size)
+        })
+        .map_err(|hr| fail(hr, "copying"));
     }
     let tables = if bc != 0 { Some(bcpack_tables()?) } else { None };
     let source = read_source(request).map_err(|hr| fail(hr, "reading the source"))?;
@@ -2082,37 +2100,6 @@ fn read_list(list: *const usize, offset: usize, len: usize) -> Vec<usize> {
         .collect()
 }
 
-/// The request's page numbers. A list is the part of the title's own page
-/// table (one number per 64 KiB of its address range) that describes the
-/// destination, filled in when the title submits the batch, so it is valid
-/// here. It is only ever overwritten: an address the title unmapped keeps
-/// the number of the page it had, which the title maps elsewhere soon after,
-/// so a number the title owns says nothing about whether it is the right
-/// one ([`half_submits`]). Page 0 does (an address never mapped yet): a list
-/// with a page the title does not own is read again for a while, up to
-/// 1.5 s; what it holds then is used as it is.
-fn page_list(list: *const usize, offset: usize, len: usize) -> Vec<usize> {
-    let mut pages = read_list(list, offset, len);
-    if super::xmem::pages_known(&pages, offset, len) {
-        return pages;
-    }
-    DESTINATION_WAITS.fetch_add(1, Ordering::Relaxed);
-    // Timed from here: what took long before was the lock on the page table
-    // (which the title's mapping calls hold), not the list.
-    let started = std::time::Instant::now();
-    let mut known = false;
-    while !known && started.elapsed().as_millis() < 1500 {
-        std::thread::sleep(std::time::Duration::from_millis(1));
-        pages = read_list(list, offset, len);
-        known = super::xmem::pages_known(&pages, offset, len);
-    }
-    tracing::warn!(
-        ms = started.elapsed().as_millis() as u64,
-        known,
-        "dstorage: a destination's page list was not filled in yet"
-    );
-    pages
-}
 
 /// Slots by the 2020 order, which the argument shapes at
 /// the title's call sites match (0x18, 0x20, 0x30 and 0x40 are called).
