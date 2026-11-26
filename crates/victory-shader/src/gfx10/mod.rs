@@ -763,7 +763,6 @@ mod tests {
         );
     }
 
-<<<<<<< HEAD
     /// Instructions found by dword (`decode_aligned`) are the tree's
     /// (`decode_any`): branches both ways, a loop, data after the end, far
     /// jumps both ways and bad code. A far jump to an offset that is no
@@ -836,8 +835,6 @@ mod tests {
         );
     }
 
-||||||| merged common ancestors
-=======
     /// RDNA2 (GFX10.3) has the fused legacy multiply-adds at these
     /// opcodes: LLVM's gfx1030 assembler tests encode
     /// `v_fma_legacy_f32 v0, v1, v2, v3` and `v_fmac_legacy_f32_e32 v0,
@@ -850,7 +847,6 @@ mod tests {
         assert_eq!(fmac[0].2, "v_fmac_legacy_f32");
     }
 
->>>>>>> belobug/main
     #[test]
     fn rejects_bad_code() {
         assert!(decode(&[0; 3]).is_err(), "size not a multiple of 4");

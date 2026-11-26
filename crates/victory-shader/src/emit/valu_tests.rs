@@ -156,7 +156,6 @@ fn a_group_number_in_x_counts_from_the_host_s_first_group() {
 /// 4 dwords of root constants in `s0..s3`, runs `body` (leaving its result in
 /// `v0`), and stores `v0` to dword 0 of the raw UAV at heap index 0.
 fn build_valu_cs(body: &[u32]) -> HostShader {
-<<<<<<< HEAD
     build_cs(body, 1, 0)
 }
 
@@ -171,13 +170,6 @@ fn tbuffer_load_of_v1(op: u8, format: u8) -> HostShader {
 /// [`build_valu_cs`] with `threads` threads in x (thread index in `v0`
 /// on entry, before `body`) and `lds_bytes` of LDS (a multiple of 512).
 fn build_cs(body: &[u32], threads: u32, lds_bytes: u32) -> HostShader {
-||||||| merged common ancestors
-=======
-    lower_test_shader(&valu_program(body), &[])
-}
-
-fn valu_program(body: &[u32]) -> NativeProgram {
->>>>>>> belobug/main
     let mut words = Vec::new();
     // s[4:5] = descriptor table address (heap index 0 -> byte offset 0).
     words.push(s_mov_b32(5, 0x80)); // inline constant 0
@@ -242,70 +234,11 @@ fn lower_test_shader(native: &NativeProgram, parts: &[(crate::FourCC, &[u8])]) -
     let container = crate::Container::parse(&bytes).unwrap();
 
     let p = ir::build(&native.code, native.wave64, native.vgprs).expect("ir::build");
-<<<<<<< HEAD
     let st = structure::structure(&p).expect("structure");
     let res =
         resource::track(&p, &native.layout, native.stage, Some(&st)).expect("resource::track");
     let io = io::raise(&p, &native).expect("io::raise");
-    let lowered = lower::lower(&lower::Parts {
-        native: &native,
-        p: &p,
-        st: &st,
-        io: &io,
-        res: &res,
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        prims: Vec::new(),
-        mesh_stride: 0,
-    })
-    .expect("lower");
-
-    let shader = HostShader {
-        stage: HwStage::Cs,
-        dxil: lowered.dxil,
-        user_data: lowered.user_data,
-        samplers: lowered.samplers,
-        static_samplers: Vec::new(),
-        root_cbvs: lowered.root_cbvs,
-        root_srvs: lowered.root_srvs,
-        root_uavs: lowered.root_uavs,
-        written_root_uavs: Vec::new(),
-        writes_guest_memory: false,
-        root_indexed_views: res.root_indexed_views,
-        half_views: lowered.half_views,
-    };
-||||||| merged common ancestors
-    let res = resource::track(&p, &native.layout, native.stage).expect("resource::track");
-    let io = io::raise(&p, &native).expect("io::raise");
-    let st = structure::structure(&p).expect("structure");
-    let lowered = lower::lower(&lower::Parts {
-        native: &native,
-        p: &p,
-        st: &st,
-        io: &io,
-        res: &res,
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        prims: Vec::new(),
-        mesh_stride: 0,
-    })
-    .expect("lower");
-
-    let shader = HostShader {
-        stage: HwStage::Cs,
-        dxil: lowered.dxil,
-        user_data: lowered.user_data,
-        samplers: lowered.samplers,
-        static_samplers: Vec::new(),
-        root_cbvs: lowered.root_cbvs,
-        root_srvs: lowered.root_srvs,
-    };
-=======
-    let res = resource::track(&p, &native.layout, native.stage).unwrap();
-    let io = io::raise(&p, native).unwrap();
-    let st = structure::structure(&p).unwrap();
     let shader = super::emit(&container, native, &p, &st, &io, &res, super::Target::ANY).expect("emit");
->>>>>>> belobug/main
 
     if let Ok(mut v) = validator::Validator::load(validator::Validator::default_path().as_deref()) {
         let mut copy = shader.dxil.clone();
@@ -329,18 +262,6 @@ pub(super) static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(()
 fn run_cases(
     shader: &HostShader,
     cases: &[[u32; 4]],
-<<<<<<< HEAD
-    check: impl FnMut(&str, usize, [u32; 4], u32),
-) {
-    run_cases_on(shader, cases, &[("hardware", false), ("warp", true)], check);
-}
-
-fn run_cases_on(
-    shader: &HostShader,
-    cases: &[[u32; 4]],
-    devices: &[(&str, bool)],
-||||||| merged common ancestors
-=======
     check: impl FnMut(&str, usize, [u32; 4], u32),
 ) {
     run_with_views(shader, cases, &[View::RawUav(1)], check);
@@ -350,7 +271,16 @@ fn run_with_views(
     shader: &HostShader,
     cases: &[[u32; 4]],
     views: &[View<'_>],
->>>>>>> belobug/main
+    check: impl FnMut(&str, usize, [u32; 4], u32),
+) {
+    run_cases_on(shader, cases, &[("hardware", false), ("warp", true)], views, check);
+}
+
+fn run_cases_on(
+    shader: &HostShader,
+    cases: &[[u32; 4]],
+    devices: &[(&str, bool)],
+    views: &[View<'_>],
     mut check: impl FnMut(&str, usize, [u32; 4], u32),
 ) {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
@@ -783,7 +713,7 @@ fn v_permlane16_and_x16_read_the_lanes_their_selectors_pick() {
             let inputs: Vec<[u32; 4]> = selectors.iter().map(|&(a, b)| [a, b, 0, 0]).collect();
             // Cross-lane code declares WaveSize(32), which WARP's pipeline
             // creation refuses: hardware only.
-            run_cases_on(&shader, &inputs, &[("hardware", false)], |backend, i, inp, got| {
+            run_cases_on(&shader, &inputs, &[("hardware", false)], &[View::RawUav(1)], |backend, i, inp, got| {
                 let want = permlane_source(u32::from(read), inp[0], inp[1], cross);
                 assert_eq!(
                     got, want,
@@ -2032,6 +1962,7 @@ fn ds_min_max_f32_order_floats_and_return_the_old_value() {
                 &shader,
                 &cases,
                 &[("hardware", false)],
+                &[View::RawUav(1)],
                 |backend, _, inp, got| {
                     let (old, data) = (f32::from_bits(inp[0]), f32::from_bits(inp[1]));
                     let want = if old_result {
@@ -2235,7 +2166,6 @@ fn v_cmp_class_f16_matches_rdna2() {
         );
     });
 }
-<<<<<<< HEAD
 
 #[test]
 fn v_cvt_f32_f64_matches_ieee754() {
@@ -2423,6 +2353,10 @@ fn whole_wave_f64_sum_and_cvt_f32_f64() {
         outputs: Vec::new(),
         prims: Vec::new(),
         mesh_stride: 0,
+        target: crate::emit::Target::ANY,
+        psv: None,
+        console_cf: false,
+        per_lane_only: false,
     })
     .expect("lower");
 
@@ -2565,7 +2499,7 @@ fn ps_sample_coverage_input_reads_coverage_mask() {
     let res =
         resource::track(&p, &native.layout, native.stage, Some(&st)).expect("resource::track");
     let io = io::raise(&p, &native).expect("io::raise");
-    let ps = super::emit(&c, &native, &p, &st, &io, &res).expect("emit");
+    let ps = super::emit(&c, &native, &p, &st, &io, &res, super::Target::ANY).expect("emit");
 
     if let Ok(mut v) = validator::Validator::load(validator::Validator::default_path().as_deref()) {
         let mut copy = ps.dxil.clone();
@@ -2876,6 +2810,10 @@ fn wave_prefix_f32_uses_signed_flag_and_validates() {
         outputs: Vec::new(),
         prims: Vec::new(),
         mesh_stride: 0,
+        target: crate::emit::Target::ANY,
+        psv: None,
+        console_cf: false,
+        per_lane_only: false,
     })
     .unwrap();
     assert!(l.wave_ops, "expected wave prefix lowering");
@@ -3031,7 +2969,7 @@ fn rdna_forms_give_what_the_spelled_out_ones_give() {
             lower::TEST_RDNA.set(None);
             written.push(shader.dxil.clone());
             let mut all = Vec::new();
-            run_cases_on(&shader, &cases, &[("hardware", false)], |_, _, _, r| all.push(r));
+            run_cases_on(&shader, &cases, &[("hardware", false)], &[View::RawUav(1)], |_, _, _, r| all.push(r));
             got.push(all);
         }
         assert_ne!(written[0], written[1], "{name}: written alike");
@@ -3129,6 +3067,10 @@ fn halves_go_through_a_table_as_they_are_and_name_their_views() {
         outputs: Vec::new(),
         prims: Vec::new(),
         mesh_stride: 0,
+        target: crate::emit::Target::ANY,
+        psv: None,
+        console_cf: false,
+        per_lane_only: false,
     })
     .expect("lower");
     assert_eq!(lowered.half_views, [(1, 0), (1, 8)]);
@@ -3288,6 +3230,10 @@ fn half_places_are_the_descriptors_the_program_loads() {
             outputs: Vec::new(),
             prims: Vec::new(),
             mesh_stride: 0,
+            target: crate::emit::Target::ANY,
+            psv: None,
+            console_cf: false,
+            per_lane_only: false,
         })
         .expect("lower")
     };
@@ -3410,6 +3356,10 @@ fn a_format_load_read_as_halves_loads_the_integer() {
             outputs: Vec::new(),
             prims: Vec::new(),
             mesh_stride: 0,
+            target: crate::emit::Target::ANY,
+            psv: None,
+            console_cf: false,
+            per_lane_only: false,
         })
         .expect("lower");
         HostShader {
@@ -3531,8 +3481,6 @@ fn a_format_load_read_as_halves_loads_the_integer() {
     }
     assert!(ran > 0, "no SM 6.6 device available");
 }
-||||||| merged common ancestors
-=======
 
 #[test]
 fn v_cmp_f32_nan_matches_rdna2() {
@@ -3820,39 +3768,6 @@ const fn mtbuf(op: u8, vdata: u8, srsrc: u8, format: u8) -> [u32; 2] {
     ]
 }
 
-/// Stores `v1` to the buffer, then reads it back into `v0` with the tbuffer
-/// load `op` in buffer format `format`.
-fn tbuffer_load_of_v1(op: u8, format: u8) -> HostShader {
-    let mut body = buffer_store_dword(1, 8, 0).to_vec();
-    body.extend(mtbuf(op, 0, 8, format));
-    build_valu_cs(&body)
-}
-
-#[test]
-fn tbuffer_d16_loads_pack_two_channels_per_dword() {
-    // tbuffer_load_format_d16_x and tbuffer_load_format_d16_xy.
-    let (x, xy) = (8, 9);
-    // (opcode, format, dword stored, dword loaded)
-    let cases: &[(u8, u8, u32, u32)] = &[
-        // 16_16_FLOAT: the f16 pair (1.0, 2.0) as it was stored.
-        (xy, 29, 0x4000_3C00, 0x4000_3C00),
-        // 16_16_UINT: the 16-bit integers as they were stored.
-        (xy, 27, 0xBEEF_1234, 0xBEEF_1234),
-        // 16_16_UNORM: 0.0 and 1.0, as f16.
-        (xy, 23, 0xFFFF_0000, 0x3C00_0000),
-        // 16_FLOAT, one channel: the high half is 0.
-        (x, 13, 0x4000_3C00, 0x0000_3C00),
-    ];
-    for &(op, format, stored, want) in cases {
-        let shader = tbuffer_load_of_v1(op, format);
-        run_cases(&shader, &[[stored, 0, 0, 0]], |backend, _, _, got| {
-            assert_eq!(
-                got, want,
-                "{backend}: d16 opcode {op} format {format} of {stored:#010x} = {got:#010x}, want {want:#010x}",
-            );
-        });
-    }
-}
 
 /// A wave64 compute program of 64 lanes (thread id in v0) with `body` between
 /// the descriptor load and the store of v0 at byte 4 * lane.
@@ -4112,4 +4027,3 @@ fn scalar_counted_in_nested_divergent_loops() {
         "inner iterations counted: {got:?}"
     );
 }
->>>>>>> belobug/main
