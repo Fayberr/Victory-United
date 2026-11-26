@@ -2,7 +2,8 @@
 //! texture sampling lowered to SM 6.6 DXIL.
 
 use super::{
-    Attr, Bin, Cast, Fields, Inst, Lower, Operand, Reg, ResourceType, V, Why, flags, pred,
+    Attr, Bin, Cast, Fields, Inst, Lower, Operand, Reg, ResourceType, Source, Term, V, Why, flags,
+    pred,
 };
 
 impl<'a> Lower<'a> {
@@ -82,7 +83,13 @@ impl<'a> Lower<'a> {
             || self
                 .used_kind(src)
                 .is_some_and(|u| u.kind == ResourceType::Uav);
-        let props = (kind | if uav { 0x1000 } else { 0 }, 0x409);
+        // A UAV inside an ordered section is a rasterizer ordered view.
+        let ordered = uav && self.ordered.contains(&site);
+        if ordered {
+            self.s.flags |= flags::ROVS;
+        }
+        let rov = if ordered { 0x2000 } else { 0 };
+        let props = (kind | if uav { 0x1000 } else { 0 } | rov, 0x409);
         if let Some(op) = name.strip_prefix("image_atomic_") {
             // GLC returns the old value. DXIL implements subtraction by adding
             // the two's complement of the operand at the same width.
@@ -102,7 +109,8 @@ impl<'a> Lower<'a> {
             let Fields::Image { cache, .. } = &inst.fields else {
                 unreachable!()
             };
-            if *d16 || *a16 {
+            // 16-bit coordinates (a16) are read as `addr_val` reads them.
+            if *d16 {
                 return Err("a 16-bit image atomic");
             }
             // Compare-exchange consumes a replacement followed by a comparand.
@@ -139,7 +147,7 @@ impl<'a> Lower<'a> {
             } else {
                 original
             };
-            let h = self.handle(site, src, false, (kind | 0x1000, component))?;
+            let h = self.handle(site, src, false, (kind | 0x1000 | rov, component))?;
             let mut args = vec![h];
             let (intrinsic, opcode) = if compare {
                 let comparand = if wide {
@@ -192,7 +200,9 @@ impl<'a> Lower<'a> {
             }
             // shortcut: stores are taken to write all four channels of a
             // float format (the console converts by the view's format).
-            if *dmask != 0xF {
+            // One channel goes into a view the program also counts in.
+            let counter = *dmask == 1 && self.is_counter(src);
+            if *dmask != 0xF && !counter {
                 return Err("an image store of some channels");
             }
             let iu = self.s.m.undef(self.s.t.i32);
@@ -203,6 +213,34 @@ impl<'a> Lower<'a> {
             let Operand::Vector { reg, .. } = *data else {
                 return Err("image store data");
             };
+            if counter {
+                let v = inst.read(Reg::V(reg)).ok_or("image store data")?;
+                let x = self.i32_of(v)?;
+                // A 16-bit integer, extended by the view's sign: the same
+                // number either way only if it is known to be small.
+                if *d16 && !self.s.m.int_k(x).is_some_and(|(_, k)| k < 0x8000) {
+                    return Err("a 16-bit image store of one channel");
+                }
+                let h = self.handle(site, src, false, (kind | 0x1000 | rov, 0x105))?;
+                let at = self.begin_guarded(guard);
+                // All four channels are written (the validator wants them
+                // all): the view has the first alone.
+                let mut args = vec![h];
+                args.extend(cs);
+                args.extend([x; 4]);
+                args.push(self.s.m.i8(0xF));
+                let void = self.s.t.void;
+                self.s.op(
+                    self.cur,
+                    "textureStore.i32",
+                    Attr::NoUnwind,
+                    void,
+                    67,
+                    &args,
+                );
+                self.end_guarded(at, &[]);
+                return Ok(());
+            }
             let mut vals = Vec::new();
             for k in 0..4u8 {
                 // d16: two f16 channels per VGPR, low half first.
@@ -221,6 +259,7 @@ impl<'a> Lower<'a> {
                     self.float_of(v)?
                 });
             }
+            let vals: Vec<V> = vals.into_iter().map(|v| self.nan_guard(v, false)).collect();
             let h = self.handle(site, src, false, props)?;
             let at = self.begin_guarded(guard);
             let mut args = vec![h];
@@ -321,7 +360,23 @@ impl<'a> Lower<'a> {
             if cmp && (*a16 || dmask.count_ones() != 1) {
                 return Err("a comparison sample of 16-bit coordinates or several channels");
             }
-            let sh = self.handle(site, ss, true, (14 | if cmp { 0x8000 } else { 0 }, 0))?;
+            let mut sampler_choice: Option<(V, Vec<u32>)> = None;
+            let sh = match ss {
+                Source::Phi { block, args } => {
+                    match self.sampler_phi_choice(*block, args, cmp, 8) {
+                        Ok((None, regs)) => self.s.sampler_handle(self.cur, regs[0]),
+                        Ok((Some(idx), regs)) => {
+                            let first = self.s.sampler_handle(self.cur, regs[0]);
+                            sampler_choice = Some((idx, regs));
+                            first
+                        }
+                        Err(_) => {
+                            self.handle(site, ss, true, (14 | if cmp { 0x8000 } else { 0 }, 0))?
+                        }
+                    }
+                }
+                _ => self.handle(site, ss, true, (14 | if cmp { 0x8000 } else { 0 }, 0))?,
+            };
             // Texel offsets (`_o`) come first: x in bits 0-5, y in 8-13,
             // signed (programmable offsets: gathers only).
             let offset_word = name.ends_with("_o");
@@ -451,33 +506,70 @@ impl<'a> Lower<'a> {
             } else {
                 fu
             };
+            let call_sample = |l: &mut Self,
+                               intrinsic: &str,
+                               opcode: u32,
+                               args: &[V],
+                               gathered: &mut Option<[V; 4]>|
+             -> V {
+                let Some((idx, ref regs)) = sampler_choice else {
+                    return l
+                        .s
+                        .op(c, intrinsic, Attr::ReadOnly, l.s.t.res_ret, opcode, args);
+                };
+                let merge = l.s.m.new_block();
+                let mut cur_test = c;
+                let mut per_ch: [Vec<(V, usize)>; 4] = Default::default();
+                let mut last_r = args[0];
+                for (i, &reg) in regs.iter().enumerate() {
+                    let arm = if i + 1 == regs.len() {
+                        cur_test
+                    } else {
+                        let arm = l.s.m.new_block();
+                        let next = l.s.m.new_block();
+                        let k = l.s.m.i32(i as u32);
+                        let cond = l.s.m.cmp(cur_test, pred::EQ, idx, k);
+                        l.s.m.terminate(cur_test, Term::CondBr(cond, arm, next));
+                        cur_test = next;
+                        arm
+                    };
+                    let mut arm_args = args.to_vec();
+                    arm_args[1] = l.s.sampler_handle(arm, reg);
+                    let r_i = l.s.op(
+                        arm,
+                        intrinsic,
+                        Attr::ReadOnly,
+                        l.s.t.res_ret,
+                        opcode,
+                        &arm_args,
+                    );
+                    for (ch, slot) in per_ch.iter_mut().enumerate() {
+                        let v = l.s.m.extract(arm, r_i, ch as u32);
+                        slot.push((v, arm));
+                    }
+                    l.s.m.terminate(arm, Term::Br(merge));
+                    last_r = r_i;
+                }
+                let mut phis = [fu; 4];
+                for (ch, incoming) in per_ch.into_iter().enumerate() {
+                    let phi = l.s.m.phi(merge, l.s.t.f32);
+                    l.s.m.set_phi(phi, incoming);
+                    phis[ch] = phi;
+                }
+                *gathered = Some(phis);
+                l.cur = merge;
+                last_r
+            };
             match op {
-                // Outside a pixel shader there are no screen derivatives:
-                // the validator refuses `sample` there ("features
-                // incompatible with the shader stage": 730 compute programs,
-                // among them the G-buffer resolves and the sky), and what a
-                // driver does with it is its own affair.
-                // shortcut: such a sample reads level 0 (a bias: that
-                // level). The console takes derivatives from neighbouring
-                // lanes there; compute them from the lanes if a resolve
-                // shows the wrong mip.
                 60 if !self.s.pixel => {
                     args.extend(&os);
                     args.push(self.s.m.f32(0));
-                    self.s.op(
-                        c,
-                        "sampleLevel.f32",
-                        Attr::ReadOnly,
-                        self.s.t.res_ret,
-                        62,
-                        &args,
-                    )
+                    call_sample(self, "sampleLevel.f32", 62, &args, &mut gathered)
                 }
                 60 => {
                     args.extend(&os);
                     args.push(clamp);
-                    self.s
-                        .op(c, "sample.f32", Attr::ReadOnly, self.s.t.res_ret, 60, &args)
+                    call_sample(self, "sample.f32", 60, &args, &mut gathered)
                 }
                 61 => {
                     // With a16 the bias is an f16 in the low half of its
@@ -493,35 +585,14 @@ impl<'a> Lower<'a> {
                     args.extend(&os);
                     if self.s.pixel {
                         args.extend([bias, clamp]);
-                        self.s.op(
-                            c,
-                            "sampleBias.f32",
-                            Attr::ReadOnly,
-                            self.s.t.res_ret,
-                            61,
-                            &args,
-                        )
+                        call_sample(self, "sampleBias.f32", 61, &args, &mut gathered)
                     } else {
                         // As above: the bias is the level.
                         args.push(bias);
-                        self.s.op(
-                            c,
-                            "sampleLevel.f32",
-                            Attr::ReadOnly,
-                            self.s.t.res_ret,
-                            62,
-                            &args,
-                        )
+                        call_sample(self, "sampleLevel.f32", 62, &args, &mut gathered)
                     }
                 }
                 63 if kind == 5 => {
-                    // A cube with explicit gradients: the host wants them
-                    // as changes of the direction, the console gives the
-                    // changes of the face coordinates (the face is one
-                    // unit wide). The level they select is taken from the
-                    // longer of the two, in texels, and sampled directly.
-                    // shortcut: no anisotropic filtering for these samples
-                    // (the longer axis alone decides the level).
                     let mut len = [fu; 2];
                     for (axis, slot) in len.iter_mut().enumerate() {
                         let mut sum = self.s.m.f32(0);
@@ -543,22 +614,11 @@ impl<'a> Lower<'a> {
                     let width = self.s.m.extract(c, d, 0);
                     let width = self.s.m.cast(c, Cast::UiToFp, width, self.s.t.f32);
                     let texels = self.s.m.bin(c, Bin::Mul, longer, width);
-                    // DXIL Log already returns log2. A footprint of zero
-                    // gives -infinity and the sampler takes its finest mip.
-                    // SampleLevel has no clamp operand; apply the guest
-                    // instruction's minimum LOD before passing the level.
                     let lod = self.unary(23, texels);
                     let lod = if has_cl { self.binary(35, lod, clamp) } else { lod };
                     args.extend(&os);
                     args.push(lod);
-                    self.s.op(
-                        c,
-                        "sampleLevel.f32",
-                        Attr::ReadOnly,
-                        self.s.t.res_ret,
-                        62,
-                        &args,
-                    )
+                    call_sample(self, "sampleLevel.f32", 62, &args, &mut gathered)
                 }
                 63 => {
                     let mut g = vec![fu; 6];
@@ -571,14 +631,7 @@ impl<'a> Lower<'a> {
                     args.extend(&os);
                     args.extend(g);
                     args.push(clamp);
-                    self.s.op(
-                        c,
-                        "sampleGrad.f32",
-                        Attr::ReadOnly,
-                        self.s.t.res_ret,
-                        63,
-                        &args,
-                    )
+                    call_sample(self, "sampleGrad.f32", 63, &args, &mut gathered)
                 }
                 64 | 65 => {
                     let reference = addr_u32(self, first - 1)?;
@@ -591,8 +644,7 @@ impl<'a> Lower<'a> {
                     } else {
                         "sampleCmpLevelZero.f32"
                     };
-                    self.s
-                        .op(c, name, Attr::ReadOnly, self.s.t.res_ret, op, &args)
+                    call_sample(self, name, op, &args, &mut gathered)
                 }
                 62 => {
                     let lod = if matches!(name, "image_sample_l" | "image_sample_l_o") {
@@ -603,14 +655,7 @@ impl<'a> Lower<'a> {
                     };
                     args.extend(&os);
                     args.push(lod);
-                    self.s.op(
-                        c,
-                        "sampleLevel.f32",
-                        Attr::ReadOnly,
-                        self.s.t.res_ret,
-                        62,
-                        &args,
-                    )
+                    call_sample(self, "sampleLevel.f32", 62, &args, &mut gathered)
                 }
                 _ => {
                     if name == "image_gather4" {
@@ -697,14 +742,7 @@ impl<'a> Lower<'a> {
                     } else {
                         args.extend(&os[..2]);
                         args.push(self.s.m.i32(dmask.trailing_zeros()));
-                        self.s.op(
-                            c,
-                            "textureGather.f32",
-                            Attr::ReadOnly,
-                            self.s.t.res_ret,
-                            73,
-                            &args,
-                        )
+                        call_sample(self, "textureGather.f32", 73, &args, &mut gathered)
                     }
                 }
             }
