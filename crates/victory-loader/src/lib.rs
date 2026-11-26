@@ -26,14 +26,10 @@ mod console_insn;
 #[cfg(windows)]
 mod console_ops;
 mod crash;
-<<<<<<< HEAD
-#[cfg(windows)]
-mod hooks;
-||||||| a66ac212
-=======
 #[cfg(windows)]
 pub mod descriptor_sites;
->>>>>>> klbf/beta-2
+#[cfg(windows)]
+mod hooks;
 pub mod prepare;
 pub(crate) mod publish;
 pub mod resolve;
