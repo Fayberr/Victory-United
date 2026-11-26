@@ -2,6 +2,8 @@
 //! and list shader packs, naming each stage's container where one of the
 //! given files holds it.
 
+pub(crate) mod scan;
+
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -88,8 +90,14 @@ struct Totals {
 pub fn run(paths: Vec<PathBuf>, verbose: bool, disasm: bool, effects: bool) -> Result<()> {
     let paths = crate::default_paths(paths)?;
     let mut t = Totals::default();
+<<<<<<< HEAD
     let mut packs = Vec::new();
+||||||| 85d564167
+=======
+    let mut scan = scan::FileScan::new(MAX_FILE, verbose);
+>>>>>>> avatar/main
     for root in &paths {
+<<<<<<< HEAD
         for entry in walkdir::WalkDir::new(root)
             .into_iter()
             .filter_map(Result::ok)
@@ -113,6 +121,25 @@ pub fn run(paths: Vec<PathBuf>, verbose: bool, disasm: bool, effects: bool) -> R
                 packs.push((path.to_owned(), data));
                 continue;
             }
+||||||| 85d564167
+        for entry in walkdir::WalkDir::new(root)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            if entry.metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE {
+                eprintln!("skipping large file {}", path.display());
+                continue;
+            }
+            let Ok(data) = std::fs::read(path) else {
+                continue;
+            };
+=======
+        for (path, data) in scan.files(root) {
+>>>>>>> avatar/main
             let mut found_here = 0;
             let engine: HashMap<usize, u64> = sgd5::databases(&data)
                 .iter()
@@ -273,9 +300,14 @@ pub fn run(paths: Vec<PathBuf>, verbose: bool, disasm: bool, effects: bool) -> R
     if t.containers == 0 && packs.is_empty() {
         println!("(none found: shaders may sit in compressed or encrypted archives)");
     }
+<<<<<<< HEAD
     for (path, data) in &packs {
         list_pack(path, data, &t, verbose);
     }
+||||||| 85d564167
+=======
+    println!("{scan}");
+>>>>>>> avatar/main
     Ok(())
 }
 

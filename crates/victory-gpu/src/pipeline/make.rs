@@ -166,6 +166,7 @@ impl Pending {
     /// later frame waited for it (and, on a title's thread, end the run).
     fn make_with(&self, new: impl FnOnce() -> Option<HostPipeline>) {
         self.made.get_or_init(|| {
+            let _building = crate::timeline::span("pipeline: build a host pipeline");
             let began = Instant::now();
             let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(new)).unwrap_or_else(|_| {
                 tracing::error!(
@@ -642,6 +643,13 @@ fn wait(p: &Pending, frame: u64) {
     if left.is_zero() {
         return;
     }
+<<<<<<< HEAD
+||||||| 85d564167
+    let started = Instant::now();
+=======
+    let waiting = crate::timeline::span("pipeline: first use waits for a host pipeline");
+    let started = Instant::now();
+>>>>>>> avatar/main
     let (lock, done) = &DONE;
     let mut held = lock.lock().unwrap_or_else(|e| e.into_inner());
     while p.made.get().is_none() && !p.slow() {
@@ -655,6 +663,7 @@ fn wait(p: &Pending, frame: u64) {
     }
     drop(held);
     let waited = started.elapsed().min(left);
+    waiting.end();
     if screen && waited > Duration::from_millis(500) {
         tracing::info!(
             ms = waited.as_millis() as u64,

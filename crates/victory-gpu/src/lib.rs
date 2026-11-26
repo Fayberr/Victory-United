@@ -17,10 +17,17 @@
 
 #[cfg(windows)]
 mod ambient;
+#[cfg(windows)]
+mod lightprobe;
+#[cfg(windows)]
+mod texlate;
+#[cfg(windows)]
+mod texstore;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod backreads;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod capture;
+<<<<<<< HEAD
 #[cfg(windows)]
 mod cardmeter;
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -29,6 +36,11 @@ mod renderdoc;
 mod shot;
 #[cfg(windows)]
 mod compose;
+||||||| 85d564167
+=======
+#[cfg(windows)]
+mod compose;
+>>>>>>> avatar/main
 pub mod console;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod copystat;
@@ -68,6 +80,12 @@ mod indirect;
 #[cfg(windows)]
 mod inplace;
 #[cfg(windows)]
+mod port;
+#[cfg(windows)]
+mod port_cbv;
+#[cfg(windows)]
+pub mod port_descriptors;
+#[cfg(windows)]
 mod land;
 pub mod list;
 #[cfg(windows)]
@@ -104,6 +122,8 @@ mod readback;
 mod rebar;
 #[cfg(all(windows, feature = "diagnostics"))]
 pub mod replay;
+#[cfg(windows)]
+mod residency;
 pub mod resource;
 pub mod root;
 #[cfg(windows)]
@@ -152,6 +172,11 @@ pub fn switched(switch: &str) -> Option<bool> {
 #[cfg(all(windows, feature = "diagnostics"))]
 pub fn frame_phase() -> u32 {
     copystat::phase()
+}
+
+/// Frames the title has begun (its frame waits that ended), for logs.
+pub fn frames_begun() -> u64 {
+    frame::current()
 }
 #[cfg(windows)]
 pub use census::title_memory_reserved;

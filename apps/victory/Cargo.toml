@@ -20,6 +20,10 @@ blake3.workspace = true
 memchr.workspace = true
 clap.workspace = true
 walkdir.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
