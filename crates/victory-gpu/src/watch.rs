@@ -4111,7 +4111,6 @@ pub fn title_memory_splitting(at: usize, len: usize) {
         return;
     }
     let mut g = guards();
-<<<<<<< HEAD
     // (The view itself too: the part that stays is read-only until then. And
     // all of them told as written before the first is writable.)
     for &other in &others {
@@ -4124,26 +4123,6 @@ pub fn title_memory_splitting(at: usize, len: usize) {
         if CHANGING.get().0 {
             CHANGING.set((true, true));
             g.changing.push((other / BLOCK, other / BLOCK + 1));
-||||||| 9c184b35
-    for &(at, n) in &ranges {
-        if open_here(&mut g, at, at.saturating_add(n)) {
-            #[cfg(feature = "diagnostics")]
-            ALIASES[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-=======
-    // The light refresh: all of them told as written before the first can
-    // be written (as in [`open`]).
-    if light_kept() {
-        for &(at, n) in &ranges {
-            for &block in g.protected.range(at / BLOCK..at.saturating_add(n).div_ceil(BLOCK)) {
-                PUBLISHED.clear(block);
-            }
-        }
-    }
-    for &(at, n) in &ranges {
-        if open_here(&mut g, at, at.saturating_add(n)) {
-            #[cfg(feature = "diagnostics")]
-            ALIASES[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
->>>>>>> fork/main
         }
     }
 }
@@ -4501,7 +4480,6 @@ pub fn title_memory_reading_now(at: usize, len: usize) -> Option<Reading> {
     Some(Reading(Held::Bytes(s.read(at, end))))
 }
 
-<<<<<<< HEAD
 /// The runtime mapped title memory `[at, at + len)`: what it shows is new,
 /// so it is no longer guarded (nor known unmapped), and read-write.
 ///
@@ -4512,37 +4490,6 @@ pub fn title_memory_reading_now(at: usize, len: usize) -> Option<Reading> {
 /// next write to it an access violation nobody takes (`on_write` finds it
 /// neither guarded nor writable) and a kernel read into it fail, so the
 /// write access is given back.
-||||||| 9c184b35
-/// The runtime mapped or unmapped title memory `[at, at + len)`: what it
-/// shows is new and read-write, so it is no longer guarded (nor known
-/// unmapped).
-=======
-/// The runtime committed title memory `[at, at + len)` for the title
-/// (`XMemVirtualAlloc` with a commit): what [`absent_once`] noted about its
-/// blocks is forgotten, so the next asking puts the question to Windows
-/// again, as every asking did before the notes. With `VICTORY_ABSENT_MS=told`
-/// this and [`title_memory_remapped`] are the only ways a block noted
-/// uncommitted is asked about again.
-pub fn title_memory_committed(at: usize, len: usize) {
-    if len == 0 || absent_mode() == 0 {
-        return;
-    }
-    let mut g = guards();
-    if g.verified.is_empty() {
-        return;
-    }
-    let (first, last) = (at / BLOCK, at.saturating_add(len).div_ceil(BLOCK));
-    let noted: Vec<usize> = g.verified.range(first..last).map(|(&block, _)| block).collect();
-    for block in noted {
-        g.verified.remove(&block);
-        forget_hole(&mut g, block);
-    }
-}
-
-/// The runtime mapped or unmapped title memory `[at, at + len)`: what it
-/// shows is new and read-write, so it is no longer guarded (nor known
-/// unmapped).
->>>>>>> fork/main
 pub fn title_memory_remapped(at: usize, len: usize) {
     // Stored pages followed there end (`VICTORY_BACK_READS`): counted only.
     #[cfg(feature = "diagnostics")]
@@ -4647,34 +4594,20 @@ fn title_memory_changed(at: usize, len: usize) -> std::sync::RwLockWriteGuard<'s
     let range = at / BLOCK..at.saturating_add(len).div_ceil(BLOCK);
     let absent: Vec<usize> = g.absent.range(range.clone()).collect();
     for block in absent {
-<<<<<<< HEAD
         g.absent.remove(block);
         if g.held.remove(block) {
             PUBLISHED.clear(block);
         }
         g.clean.remove(block);
-||||||| 9c184b35
-        g.absent.remove(&block);
-=======
-        g.absent.remove(&block);
         g.verified.remove(&block);
         forget_hole(&mut g, block);
->>>>>>> fork/main
     }
     let blocks: Vec<usize> = g.protected.range(range.clone()).collect();
     for block in blocks {
-<<<<<<< HEAD
         g.protected.remove(block);
         g.clean.remove(block);
-||||||| 9c184b35
-        g.protected.remove(&block);
-        g.clean.remove(&block);
-=======
-        g.protected.remove(&block);
-        g.clean.remove(&block);
         // What it shows is new ([`PUBLISHED`]).
         PUBLISHED.clear(block);
->>>>>>> fork/main
     }
     let foreign: Vec<usize> = g.foreign.range(range.clone()).copied().collect();
     for block in foreign {
@@ -4726,6 +4659,9 @@ pub fn title_memory_committed(at: usize, len: usize) {
     let absent: Vec<usize> = g.absent.range(range).collect();
     for block in absent {
         g.absent.remove(block);
+        // Its note goes too ([`absent_once`], [`note_life`]).
+        g.verified.remove(&block);
+        forget_hole(&mut g, block);
     }
 }
 
@@ -4995,33 +4931,14 @@ mod tests {
         let p = fresh_watched(4 * PAGE);
         assert_ne!(p, 0);
         let (start, end) = (p, p + 4 * PAGE);
-<<<<<<< HEAD
         // The journal may hold pages of another test's memory that was here.
         let (none, before) = writes(start, end, false).expect("watched");
         assert!(before.iter().all(|&(_, w)| w < none), "{before:?}");
-||||||| 9c184b35
-        let (_, before) = writes(start, end, false).expect("watched");
-        assert!(before.is_empty());
-=======
-        // (Not empty by rule: the journal is the process's and keeps what
-        // was written at an address for good, and a fresh allocation can
-        // land where another test's freed one stood; that failed this test
-        // now and then. Nothing written since the allocation is new.)
-        let (asked, before) = writes(start, end, false).expect("watched");
-        assert!(before.iter().all(|&(_, at)| at < asked), "a fresh allocation has no page written at this asking");
->>>>>>> fork/main
         // SAFETY: committed pages of ours.
         unsafe { ((p + PAGE + 8) as *mut u8).write(1) };
         let (now, after) = writes(start, end, false).expect("watched");
-<<<<<<< HEAD
         let new = |w: Vec<(usize, u64)>| w.into_iter().filter(|w| w.1 > none).collect::<Vec<_>>();
         assert_eq!(new(after), [(p / PAGE + 1, now)]);
-||||||| 9c184b35
-        assert_eq!(after, [(p / PAGE + 1, now)]);
-=======
-        let new: Vec<(usize, u64)> = after.iter().copied().filter(|entry| !before.contains(entry)).collect();
-        assert_eq!(new, [(p / PAGE + 1, now)], "the written page, and no other, is new at this asking");
->>>>>>> fork/main
         // Another asker after the kernel's bit was cleared still sees it.
         let (later, again) = writes(p + PAGE, p + 2 * PAGE, false).expect("watched");
         assert!(later > now);
@@ -6470,7 +6387,6 @@ mod tests {
         writing(top, PAGE);
         title_memory_remapped(top, usize::MAX);
     }
-<<<<<<< HEAD
 
     /// An uncommitted address noted in `g.absent` that is later allocated as
     /// `MEM_WRITE_WATCH` or ordinary `MEM_PRIVATE` memory must not be hijacked
@@ -6587,26 +6503,7 @@ mod tests {
             CloseHandle(section);
         }
     }
-}
 
-#[cfg(test)]
-mod range_tests {
-    use super::{add_range, covered};
-
-    #[test]
-    fn ranges_stay_in_order_and_joined() {
-        let mut ranges = Vec::new();
-        for (a, b) in [(10, 20), (30, 40), (0, 5), (40, 45), (19, 31), (7, 7), (50, 60), (5, 6)] {
-            add_range(&mut ranges, a, b);
-            assert!(ranges.windows(2).all(|w| w[0].1 < w[1].0), "{ranges:?}");
-        }
-        assert_eq!(ranges, [(0, 6), (10, 45), (50, 60)]);
-        assert!(covered(&ranges, 10, 45) && covered(&ranges, 0, 1) && covered(&ranges, 59, 60));
-        assert!(!covered(&ranges, 5, 7) && !covered(&ranges, 9, 11) && !covered(&ranges, 44, 46));
-        assert!(!covered(&ranges, 45, 51) && !covered(&ranges, 60, 61) && !covered(&[], 1, 2));
-    }
-||||||| 9c184b35
-=======
 
     /// The tests of the light refresh take turns: they read its counts,
     /// which no other test moves (the switch is not set in tests, so
@@ -6905,30 +6802,24 @@ mod range_tests {
         assert!(nothing_noted(one, one + SIZE, base, &[first, second]));
         drop_views(section, &[one, two], SIZE);
     }
+}
 
-    /// A range's bits are all of its blocks', whatever lies beside them.
+#[cfg(test)]
+mod range_tests {
+    use super::{add_range, covered};
+
     #[test]
-    fn bits_of_ranges() {
-        static BITS: Bits = Bits::new();
-        let blocks = [0usize, 1, 63, 64, 65, 127, 128, 200, 65535, 65536, 65537, 1 << 20, (1 << 31) - 1];
-        for &b in &blocks {
-            assert!(!BITS.all(b, b + 1));
-            BITS.set(b);
-            assert!(BITS.all(b, b + 1));
+    fn ranges_stay_in_order_and_joined() {
+        let mut ranges = Vec::new();
+        for (a, b) in [(10, 20), (30, 40), (0, 5), (40, 45), (19, 31), (7, 7), (50, 60), (5, 6)] {
+            add_range(&mut ranges, a, b);
+            assert!(ranges.windows(2).all(|w| w[0].1 < w[1].0), "{ranges:?}");
         }
-        assert!(BITS.all(0, 2) && BITS.all(63, 66) && BITS.all(127, 129) && BITS.all(65535, 65538));
-        assert!(!BITS.all(0, 3) && !BITS.all(62, 64) && !BITS.all(65534, 65536) && !BITS.all(5, 5));
-        for b in 300..700 {
-            BITS.set(b);
-        }
-        assert!(BITS.all(300, 700) && !BITS.all(299, 700) && !BITS.all(300, 701));
-        BITS.clear(511);
-        assert!(!BITS.all(300, 700) && BITS.all(300, 511) && BITS.all(512, 700));
-        BITS.set(1 << 40);
-        BITS.clear(1 << 40);
-        assert!(!BITS.all(1 << 40, (1 << 40) + 1), "outside the address space");
+        assert_eq!(ranges, [(0, 6), (10, 45), (50, 60)]);
+        assert!(covered(&ranges, 10, 45) && covered(&ranges, 0, 1) && covered(&ranges, 59, 60));
+        assert!(!covered(&ranges, 5, 7) && !covered(&ranges, 9, 11) && !covered(&ranges, 44, 46));
+        assert!(!covered(&ranges, 45, 51) && !covered(&ranges, 60, 61) && !covered(&[], 1, 2));
     }
->>>>>>> fork/main
 }
 
 #[cfg(test)]
