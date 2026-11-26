@@ -1274,7 +1274,6 @@ mod tests {
         assert_eq!(frame.next, None);
     }
 
-<<<<<<< HEAD
     /// A frame whose last eleven bits sit in the next rolling input buffer
     /// comes back byte-for-byte the same as an unsplit frame.
     #[test]
@@ -1388,38 +1387,6 @@ mod tests {
         assert_eq!(read_frame(&data, 3 * PACKET_BITS + HEADER_BITS).unwrap().next, None);
     }
 
-||||||| 085ee7c4
-=======
-    /// A frame that crosses a packet where no frame begins (a full
-    /// continuation) and ends in another such packet, followed by padding: the
-    /// next frame is the first one of the next packet that has frames, not the
-    /// padding the frame ended in.
-    #[test]
-    fn the_frame_after_continuation_packets_starts_in_the_next_packet_with_frames() {
-        let mut data = vec![0u8; 4 * PACKET_BYTES];
-        let header = |frames: u32, first: u32| (frames << 26) | (first << 11);
-        put_bits(&mut data, 0, 32, header(2, 0));
-        // Packet 1 is all of one frame; packet 2 holds only its last 64 bits.
-        put_bits(&mut data, PACKET_BITS, 32, header(0, 0x7fff));
-        put_bits(&mut data, 2 * PACKET_BITS, 32, header(0, 64));
-        put_bits(&mut data, 3 * PACKET_BITS, 32, header(1, 0));
-        // A first frame of 16000 bits, then one from the end of its payload
-        // through packets 1 and 2.
-        let second = HEADER_BITS + 16000;
-        put_bits(&mut data, HEADER_BITS, LENGTH_BITS, 16000);
-        let tail = PACKET_BITS - second;
-        let bits = tail + (PACKET_BITS - HEADER_BITS) + 64;
-        put_bits(&mut data, second, LENGTH_BITS, bits as u32);
-        put_bits(&mut data, 3 * PACKET_BITS + HEADER_BITS, LENGTH_BITS, 100);
-        let first = read_frame(&data, HEADER_BITS).unwrap();
-        assert_eq!(first.next, Some(second));
-        let frame = read_frame(&data, second).unwrap();
-        assert_eq!(frame.bits, bits);
-        assert_eq!(frame.next, Some(3 * PACKET_BITS + HEADER_BITS));
-        assert_eq!(read_frame(&data, 3 * PACKET_BITS + HEADER_BITS).unwrap().next, None);
-    }
-
->>>>>>> vitoriabr/main
     /// The direct sum `imdct_half` stands for (FFmpeg's naive inverse MDCT:
     /// the standard formula, negated).
     fn imdct_reference(input: &[f32]) -> Vec<f64> {

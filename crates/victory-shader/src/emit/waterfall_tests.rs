@@ -118,22 +118,12 @@ pub(super) fn run(shader: &HostShader, views: &[View]) -> Vec<(&'static str, Vec
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     for (label, warp) in [("hardware", false), ("warp", true)] {
-<<<<<<< HEAD
         let host = match Host::new(warp) {
             Ok(host) => host,
             Err(e) => {
-                eprintln!("no SM 6.6 {label} device ({e}); skipped");
+                crate::emit::test_skip::skip(&format!("no SM 6.6 {label} device ({e}); skipped"));
                 continue;
             }
-||||||| 085ee7c4
-        let Ok(host) = Host::new(warp) else {
-            eprintln!("no SM 6.6 {label} device; skipped");
-            continue;
-=======
-        let Ok(host) = Host::new(warp) else {
-            crate::emit::test_skip::skip(&format!("no SM 6.6 {label} device; skipped"));
-            continue;
->>>>>>> vitoriabr/main
         };
         let (root, pso) = match host.compute_pipeline(shader) {
             Ok(p) => p,

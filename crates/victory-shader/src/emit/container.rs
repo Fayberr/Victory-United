@@ -196,24 +196,10 @@ pub(crate) fn signature(elements: &[SigElement], input: bool) -> Vec<u8> {
             }
         }
     }
-<<<<<<< HEAD
     let mut order: Vec<usize> = (0..elements.len()).collect();
     order.sort_by_key(|&i| (elements[i].row.unwrap_or(u32::MAX), offsets[i]));
     for i in order {
         let (e, offset) = (&elements[i], offsets[i]);
-||||||| 085ee7c4
-    let mut order: Vec<usize> = (0..elements.len()).collect();
-    order.sort_by_key(|&i| (elements[i].row.unwrap_or(u32::MAX), elements[i].col));
-    for i in order {
-        let (e, offset) = (&elements[i], offsets[i]);
-=======
-    // The rows stay in the console's element order: the module's signature
-    // metadata lists them that way, and the validator compares the part to it
-    // element by element (a row's columns may be interleaved between
-    // semantics).
-    for (i, e) in elements.iter().enumerate() {
-        let offset = offsets[i];
->>>>>>> vitoriabr/main
         let used = e.usage << e.col;
         let rw = if input { used } else { !used & 0xf };
         for v in [
