@@ -2490,20 +2490,6 @@ impl HostHeap {
             .collect()
     }
 
-    /// Every title slot of the queue that is due at `frame`, and whether
-    /// it was uploaded before (in part, or whole and waiting for another
-    /// look): for the card accounting line
-    /// (`crate::resource::card_accounting`).
-    pub(crate) fn texture_slots_all_due(&self, frame: u64) -> Vec<(u32, bool)> {
-        let textures = self.textures.lock().unwrap_or_else(|e| e.into_inner());
-        textures
-            .slots
-            .iter()
-            .filter(|(_, w)| w.due <= frame)
-            .map(|(&index, w)| (index, w.mapped > 0 || textures.rechecks.contains_key(&index)))
-            .collect()
-    }
-
     /// The texture view of title slot `index` (as handed out with `write`)
     /// was brought up to date: due again from frame `again` (uploaded with
     /// that many bytes of its memory there, not all), or not until the
