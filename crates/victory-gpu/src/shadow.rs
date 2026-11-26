@@ -715,6 +715,37 @@ fn changed_kept() -> bool {
     *KEPT.get_or_init(|| std::env::var("VICTORY_CARD_CHANGED_LIST").is_ok_and(|v| v == "1" || v == "alt"))
 }
 
+/// (Neptune) The copies in the card's memory flagged since [`card_dirty`] last took them
+/// (`Card::flag`): it looked at every copy there is for every submission, 4,100 to 5,000 of
+/// them 46 times a frame, each a count taken and given back (27 of 400 samples of the
+/// thread that runs the lines, run ve178). `VICTORY_CARD_FLAGGED=0`: every copy, as before.
+static FLAGGED: Mutex<Vec<std::sync::Weak<Shadow>>> = Mutex::new(Vec::new());
+
+fn flagged_line() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_CARD_FLAGGED").is_none_or(|v| v != "0"))
+}
+
+/// (Neptune) `shadow` is shared from now on: if it has a card side it is among [`CARDED`],
+/// knows itself, and is in the line (a new card side is flagged).
+fn carded(shadow: &Arc<Shadow>) {
+    let Some(card) = &shadow.card else { return };
+    let me = Arc::downgrade(shadow);
+    let _ = card.me.set(me.clone());
+    CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(me.clone());
+    FLAGGED.lock().unwrap_or_else(|e| e.into_inner()).push(me);
+}
+
+impl Card {
+    /// `dirty` or `chunks` took something: [`card_dirty`] is to look.
+    fn flag(&self) {
+        if !self.touched.swap(true, Ordering::AcqRel)
+            && let Some(me) = self.me.get()
+        {
+            FLAGGED.lock().unwrap_or_else(|e| e.into_inner()).push(me.clone());
+        }
+    }
+}
 /// Since the last frame line: bytes copied to card sides and the ranges
 /// they were; pieces compared on the card, pieces fetched and their
 /// bytes; the waits for the card the fetches added and their microseconds.
@@ -1052,7 +1083,19 @@ pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)
     }
     let mut carded = CARDED.lock().unwrap_or_else(|e| e.into_inner());
     let fetched = RELAY_FETCHED.load(Ordering::Acquire);
-    carded.retain(|weak| {
+    // (Neptune) Those in the line alone ([`FLAGGED`]); the copies that are gone leave the
+    // list of all of them now and then.
+    let mut line = if flagged_line() {
+        static CALLS: AtomicU64 = AtomicU64::new(0);
+        if CALLS.fetch_add(1, Ordering::Relaxed) % 1024 == 1023 {
+            carded.retain(|weak| weak.strong_count() > 0);
+        }
+        std::mem::take(&mut *FLAGGED.lock().unwrap_or_else(|e| e.into_inner()))
+    } else {
+        std::mem::take(&mut *carded)
+    };
+    let all = !flagged_line();
+    line.retain(|weak| {
         let Some(shadow) = weak.upgrade() else {
             return false;
         };
@@ -1067,6 +1110,9 @@ pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)
         }
         true
     });
+    if all {
+        *carded = line;
+    }
     out
 }
 
@@ -2294,25 +2340,27 @@ type Job = Box<dyn FnOnce() + Send>;
 struct Workers {
     jobs: Mutex<std::collections::VecDeque<Job>>,
     more: std::sync::Condvar,
-    /// How many jobs there are, for [`spin`].
-    there: std::sync::atomic::AtomicUsize,
+    /// (Neptune) How many `jobs` holds, to look at without its lock ([`wide_spin`]).
+    queued: std::sync::atomic::AtomicUsize,
 }
 
-/// Waits awake until `there` says so, `VICTORY_WIDE_SPIN` microseconds at
-/// most (0, the default: not at all): asleep, a thread is woken in 50 us and
-/// more, 95 times a frame.
-fn spin(there: impl Fn() -> bool) {
-    static MOST: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
-    let most = *MOST.get_or_init(|| std::env::var("VICTORY_WIDE_SPIN").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0));
-    if most == 0 {
-        return;
-    }
-    let began = std::time::Instant::now();
-    while !there() && (began.elapsed().as_micros() as u64) < most {
-        for _ in 0..16 {
-            std::hint::spin_loop();
-        }
-    }
+/// (Neptune) How long a kept thread looks for more work before it sleeps, and half of how
+/// long the thread that handed work out looks for its end before it does
+/// (`VICTORY_WIDE_SPIN_US=<microseconds>`; 0, the default: no looking, and every thread
+/// woken for every batch, as before).
+///
+/// A submission hands out a few small pieces dozens of times: every batch woke all twelve
+/// threads, which took a piece each or none, and the thread that handed them out slept until
+/// the last was done and had to be woken in turn. The kept threads were at work a twentieth
+/// of the time; the thread that runs the lines stood waiting for them 53 to 122 of 400
+/// samples (runs ve174, ve178).
+fn wide_spin() -> std::time::Duration {
+    static US: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    std::time::Duration::from_micros(
+        // (0 unless given: with 100 a frame took 87.4 ms at 11,800 draws where it took 85.2
+        // at 11,400, runs ve182 and ve181b: no gain to set against threads that spin.)
+        *US.get_or_init(|| std::env::var("VICTORY_WIDE_SPIN_US").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0)),
+    )
 }
 
 /// How many threads are kept for [`wide`].
@@ -2326,25 +2374,46 @@ fn workers() -> &'static Workers {
     let workers = WORKERS.get_or_init(|| Workers {
         jobs: Mutex::new(std::collections::VecDeque::new()),
         more: std::sync::Condvar::new(),
-        there: std::sync::atomic::AtomicUsize::new(0),
+        queued: std::sync::atomic::AtomicUsize::new(0),
     });
     STARTED.call_once(|| {
         for i in 0..wide_threads() {
             let _ = std::thread::Builder::new().name(format!("victory-wide-{i}")).spawn(move || {
                 crate::cores::keep_helper_on_fast_cores("victory-wide");
                 let workers = WORKERS.get().expect("made above");
+                let spin = wide_spin();
                 loop {
-                    let job = {
-                        // A little while awake first: the next work comes
-                        // within microseconds more often than not.
-                        spin(|| workers.there.load(Ordering::Acquire) > 0);
-                        let mut jobs = workers.jobs.lock().unwrap_or_else(|e| e.into_inner());
+                    // (Neptune) More work within a moment is taken without sleeping.
+                    let mut found = None;
+                    if !spin.is_zero() {
+                        let began = std::time::Instant::now();
                         loop {
-                            if let Some(job) = jobs.pop_front() {
-                                workers.there.fetch_sub(1, Ordering::AcqRel);
-                                break job;
+                            if workers.queued.load(Ordering::Relaxed) > 0
+                                && let Some(job) = workers.jobs.lock().unwrap_or_else(|e| e.into_inner()).pop_front()
+                            {
+                                workers.queued.fetch_sub(1, Ordering::Relaxed);
+                                found = Some(job);
+                                break;
                             }
-                            jobs = workers.more.wait(jobs).unwrap_or_else(|e| e.into_inner());
+                            for _ in 0..16 {
+                                std::hint::spin_loop();
+                            }
+                            if began.elapsed() >= spin {
+                                break;
+                            }
+                        }
+                    }
+                    let job = match found {
+                        Some(job) => job,
+                        None => {
+                            let mut jobs = workers.jobs.lock().unwrap_or_else(|e| e.into_inner());
+                            loop {
+                                if let Some(job) = jobs.pop_front() {
+                                    workers.queued.fetch_sub(1, Ordering::Relaxed);
+                                    break job;
+                                }
+                                jobs = workers.more.wait(jobs).unwrap_or_else(|e| e.into_inner());
+                            }
                         }
                     };
                     let _working = crate::timeline::span("a job for another thread");
@@ -2367,37 +2436,56 @@ fn wide(jobs: Vec<Job>) {
     }
     let workers = workers();
     let _wide = crate::timeline::span("work spread over threads");
-    let left = Arc::new((Mutex::new(jobs.len()), std::sync::Condvar::new()));
+    let spin = wide_spin();
+    let pieces = jobs.len();
+    // What is left to do, the lock its waiter sleeps under, and the word that nothing is.
+    let left = Arc::new((std::sync::atomic::AtomicUsize::new(pieces), Mutex::new(()), std::sync::Condvar::new()));
     {
         let mut queue = workers.jobs.lock().unwrap_or_else(|e| e.into_inner());
         for job in jobs {
             let left = left.clone();
-            workers.there.fetch_add(1, Ordering::AcqRel);
             queue.push_back(Box::new(move || {
                 job();
-                let mut n = left.0.lock().unwrap_or_else(|e| e.into_inner());
-                *n -= 1;
-                if *n == 0 {
-                    left.1.notify_all();
+                if left.0.fetch_sub(1, Ordering::AcqRel) == 1 {
+                    // Under the lock: the waiter is asleep, or has not looked yet.
+                    let _held = left.1.lock().unwrap_or_else(|e| e.into_inner());
+                    left.2.notify_all();
                 }
             }));
         }
+        workers.queued.fetch_add(pieces, Ordering::Relaxed);
     }
-    workers.more.notify_all();
+    if spin.is_zero() {
+        workers.more.notify_all();
+    } else {
+        // (Neptune) A thread a piece but this thread's own; those that are looking for work
+        // need no waking.
+        for _ in 1..pieces.min(24) {
+            workers.more.notify_one();
+        }
+    }
     loop {
         let job = workers.jobs.lock().unwrap_or_else(|e| e.into_inner()).pop_front();
         match job {
             Some(job) => {
-                workers.there.fetch_sub(1, Ordering::AcqRel);
+                workers.queued.fetch_sub(1, Ordering::Relaxed);
                 job()
             }
             None => break,
         }
     }
-    spin(|| left.0.try_lock().is_ok_and(|n| *n == 0));
-    let mut n = left.0.lock().unwrap_or_else(|e| e.into_inner());
-    while *n > 0 {
-        n = left.1.wait(n).unwrap_or_else(|e| e.into_inner());
+    // (Neptune) The last pieces are short: looked for a moment before sleeping for them.
+    if !spin.is_zero() {
+        let began = std::time::Instant::now();
+        while left.0.load(Ordering::Acquire) > 0 && began.elapsed() < spin * 2 {
+            for _ in 0..16 {
+                std::hint::spin_loop();
+            }
+        }
+    }
+    let mut held = left.1.lock().unwrap_or_else(|e| e.into_inner());
+    while left.0.load(Ordering::Acquire) > 0 {
+        held = left.2.wait(held).unwrap_or_else(|e| e.into_inner());
     }
 }
 
@@ -5303,6 +5391,7 @@ impl Shadow {
         // (Under the lock: what takes the list sees it or finds it set.)
         card.touched.store(true, Ordering::Release);
         drop(dirty);
+        card.flag();
         // From none to some: [`card_dirty`] finds the copy in the list. (A
         // copy changed again before its ranges are taken is in it already;
         // one whose ranges the walk took may be in it with nothing to take.)
@@ -6302,10 +6391,7 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
         let mut shadow = Shadow::new(buffer, data, gpu, key.0, len);
         shadow.card = card;
         let shadow = Arc::new(shadow);
-        if let Some(card) = &shadow.card {
-            let _ = card.me.set(Arc::downgrade(&shadow));
-            CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
-        }
+        carded(&shadow);
         entry.shadow = Some(shadow);
     }
     entry.shadow.clone()
@@ -6628,10 +6714,7 @@ fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Sha
     shadow.window = true;
     shadow.card = card;
     let shadow = Arc::new(shadow);
-    if let Some(card) = &shadow.card {
-        let _ = card.me.set(Arc::downgrade(&shadow));
-        CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
-    }
+    carded(&shadow);
     note(&shadow);
     map.insert((start, len), shadow.clone());
     tables_changed();

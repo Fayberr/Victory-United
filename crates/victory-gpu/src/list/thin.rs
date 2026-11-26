@@ -185,7 +185,14 @@ pub(crate) struct Recording {
     done: AtomicBool,
     moved: Condvar,
     abandoned: AtomicBool,
+    /// (Neptune) Microseconds its translation has taken so far, and its calls.
+    took: [AtomicU64; 2],
 }
+
+/// (Neptune) Of the recordings translated since the last line: the longest one's microseconds
+/// and its calls, the sum of the five longest of each frame is not kept: only the longest,
+/// and how many took 10 ms or more.
+static LONGEST: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
 #[derive(Default)]
 struct Inner {
@@ -210,6 +217,7 @@ impl Recording {
             done: AtomicBool::new(false),
             moved: Condvar::new(),
             abandoned: AtomicBool::new(false),
+            took: [const { AtomicU64::new(0) }; 2],
         }
     }
 
@@ -250,7 +258,10 @@ impl Recording {
             let began = std::time::Instant::now();
             let (calls, closed) = translate(back, &chunk, || self.abandoned.load(Acquire));
             STATS[0].fetch_add(calls, Relaxed);
-            STATS[1].fetch_add(began.elapsed().as_micros() as u64, Relaxed);
+            let micros = began.elapsed().as_micros() as u64;
+            STATS[1].fetch_add(micros, Relaxed);
+            self.took[0].fetch_add(micros, Relaxed);
+            self.took[1].fetch_add(calls, Relaxed);
             let mut inner = held(&self.inner);
             inner.kept.push(chunk);
             if closed {
@@ -261,6 +272,13 @@ impl Recording {
                 drop(inner);
                 give_back(kept);
                 STATS[2].fetch_add(1, Relaxed);
+                let took = self.took[0].load(Relaxed);
+                if LONGEST[0].fetch_max(took, Relaxed) < took {
+                    LONGEST[1].store(self.took[1].load(Relaxed), Relaxed);
+                }
+                if took >= 10_000 {
+                    LONGEST[2].fetch_add(1, Relaxed);
+                }
                 crate::queue::line_moved();
             }
         }
@@ -353,6 +371,12 @@ pub(crate) fn line(frames: f64) {
     if !wanted() || !on() {
         return;
     }
+    let [longest, its_calls, long] = [0, 1, 2].map(|i| LONGEST[i].swap(0, Relaxed));
+    tracing::info!(
+        "the longest list translated since the last line (one thread translates a list, in order): {:.1} ms for {its_calls} calls;          lists of 10 ms or more: {:.1} a frame",
+        longest as f64 / 1000.0,
+        long as f64 / frames
+    );
     let s: Vec<f64> = STATS.iter().map(|s| s.swap(0, Relaxed) as f64 / frames).collect();
     tracing::info!(
         "list calls translated by threads of ours per frame (VICTORY_THIN): {:.0} in {:.1} ms (all threads), {:.1} lists, {:.1} pieces; left in the middle {:.2}",

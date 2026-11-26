@@ -3751,6 +3751,8 @@ struct Deferred {
     /// Scratch memory [`HostList::fill_scratch`] fills since the list last
     /// wrote title memory (source, bytes): its host address.
     filled: std::collections::HashMap<(usize, usize), u64, std::hash::BuildHasherDefault<AddressHash>>,
+    /// (Neptune) [`HostList::wants_ahead`].
+    wants_ahead: bool,
     /// Textures whose contents the list brings up to date.
     textures: std::collections::HashSet<usize>,
     /// Last GPU source copied into each aliased host texture in this list.
@@ -9871,6 +9873,17 @@ impl HostList {
         }
     }
 
+    /// (Neptune) The list's draws read what the list ahead of their frame makes ready
+    /// (`crate::draw::passes_ahead`): its submission goes behind that list.
+    pub(crate) fn wants_ahead(&self) {
+        self.deferred().wants_ahead = true;
+    }
+
+    /// [`HostList::wants_ahead`], as recorded.
+    pub(crate) fn wanted_ahead(&self) -> bool {
+        self.deferred().wants_ahead
+    }
+
     /// Shaders of the list write `[address, address + len)` of a buffer's
     /// host copy: copied back into title memory once the list has run.
     /// Declared once until the list next writes title memory (but with
@@ -12817,6 +12830,21 @@ impl Meter {
             crate::descriptor::sync_line(frames);
             late_line(frames);
             crate::queue::behind_line(frames);
+            crate::list::thin::line(frames);
+            if crate::draw::passes_ahead() {
+                let [lists, micros, since, since_micros] =
+                    [0, 1, 2, 3].map(|i| crate::draw::AHEAD_STATS[i].swap(0, Ordering::Relaxed) as f64 / frames);
+                let (lists, micros) = (lists + since, micros + since_micros);
+                tracing::info!(
+                    "of the lists ahead of a frame, those of what changed since the buffers' pass (VICTORY_AHEAD_SPLIT=0: none):                      {since:.2} a frame, {:.1} ms a frame of the thread that runs the lines",
+                    since_micros / 1000.0
+                );
+                tracing::info!(
+                    "lists of ours ahead of a frame's first submission, for its passes over the heap's views                      (VICTORY_PASSES_AHEAD=0: in the list that asks first): {lists:.2} a frame, {:.1} ms a frame on a                      thread of their own; the thread that runs the lines waited {:.1} ms a frame for them",
+                    micros / 1000.0,
+                    crate::queue::AHEAD_WAITED.swap(0, Ordering::Relaxed) as f64 / frames / 1000.0
+                );
+            }
             card_clock_line(frames, ms);
             upq::line(frames);
             rec::line(frames);

@@ -249,11 +249,51 @@ fn recheck_soon() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_RECHECK_SOON").is_none_or(|v| v != "0"))
 }
 
+/// (Neptune) Whether the once-a-frame passes over the heap's views (the buffers and the
+/// textures shaders pick by an index they compute) are recorded into a list of ours that
+/// runs ahead of the frame's first submission (`VICTORY_PASSES_AHEAD`: 1 or 0; unset: with
+/// `VICTORY_THIN=1`).
+///
+/// They were recorded into the list whose draw asked first, in the order the title records:
+/// its first list of a frame, which it also submits first. With lists translated by threads
+/// of ours that list is any of the frame's, often one submitted late: lists submitted before
+/// it read last frame's buffers through the heap (run ve167: hair and whole people drawn
+/// from old bones, 44 dark patches in 25 s; one translating thread: 2).
+pub(crate) fn passes_ahead() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| match std::env::var("VICTORY_PASSES_AHEAD") {
+        Ok(v) => v.trim() != "0",
+        Err(_) => crate::list::thin::wanted(),
+    })
+}
+
+/// (Neptune) The title's view heap a draw last had set ([`passes_ahead`]; 0: none yet).
+static VIEW_HEAP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+thread_local! {
+    /// (Neptune) This thread records a list that runs ahead of a frame
+    /// ([`State::passes_ahead`]): 0 not, else what of it ([`AHEAD_ALL`] and the others).
+    static AHEAD: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
 /// Frames ahead the pass before a bake takes slots from that are due only
 /// then ([`bake_exact`]): those of notices (1 and 2), and the first looks
 /// again ([`RECHECK_FRAMES`]), these at the frame's first bake alone (a
 /// look reads 48 KiB, and a frame bakes up to sixteen times).
 const BAKE_AHEAD: [u64; 2] = [12, 2];
+
+/// (Neptune) What a list ahead of a frame holds: the buffers' pass and the textures'.
+pub(crate) const AHEAD_ALL: u8 = 1;
+/// The buffers' pass alone (recorded early, by the thread of its own).
+pub(crate) const AHEAD_BUFFERS: u8 = 2;
+/// The buffer views written since the buffers' pass, and the textures' pass (recorded where
+/// the list is sent).
+pub(crate) const AHEAD_SINCE: u8 = 3;
+
+/// (Neptune) Lists recorded ahead of a frame, and the microseconds that took, since the last
+/// frame line.
+/// Then the same of the short lists of what changed since ([`AHEAD_SINCE`]).
+pub(crate) static AHEAD_STATS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 
 /// What [`crate::descriptor::host::HostHeap::texture_news`] said when the
 /// pass before a bake last served all there was, plus one (0: it did not):
@@ -775,6 +815,9 @@ pub(crate) struct State {
     /// Title heap address, host heap identity, first slot, and slot count.
     /// Given back when the list has run, is reset or released.
     dynamic: Vec<(usize, u64, u32, u32)>,
+    /// (Neptune) The host list has been told that its draws want the list ahead of their
+    /// frame (`HostList::wants_ahead`).
+    asked_ahead: std::cell::Cell<bool>,
     /// Root SRVs bound as one-view tables in this list: (title heap, title
     /// address; 0 for none) → dynamic slot, and the host copy the slot
     /// shows: later draws of the list bring that one up to date, whatever
@@ -1968,6 +2011,7 @@ impl State {
     /// descriptors as they are now, not as they were when the title set
     /// the targets (a descriptor rewritten in between names another view).
     pub(crate) fn replay(&mut self, list: &HostList) {
+        self.asked_ahead.set(false);
         self.host_pipeline = 0;
         self.host_roots = [0; 2];
         self.host_heaps = [0; 2];
@@ -2809,13 +2853,38 @@ impl State {
     /// writes through a picked unordered access view stays in the host
     /// copy. A list refreshes them where it first runs such a shader;
     /// title writes recorded later in the same list are not seen.
+    /// (Neptune) Records into `list`, a list of ours that runs ahead of a frame's first
+    /// submission, what the frame's lists find done ([`passes_ahead`]): the heap's buffer
+    /// views brought up to date and the textures picked by index uploaded. `false`: no
+    /// draw has had a view heap set yet.
+    pub(crate) fn passes_ahead(&mut self, list: &HostList, what: u8) -> bool {
+        let at = VIEW_HEAP.load(Ordering::Relaxed);
+        if at == 0 {
+            return false;
+        }
+        let began = std::time::Instant::now();
+        self.heaps = [at, 0];
+        AHEAD.set(what);
+        if self.heap_buffers(list).is_none() && what != AHEAD_BUFFERS {
+            // No shader has picked a buffer from the heap yet: the textures' pass alone.
+            let heap = crate::descriptor::heap(at as This);
+            if let Some(host) = heap.host() {
+                let _ = Self::heap_textures(Into::List(list), heap, host, None);
+            }
+        }
+        AHEAD.set(0);
+        AHEAD_STATS[usize::from(what == AHEAD_SINCE) * 2].fetch_add(1, Ordering::Relaxed);
+        AHEAD_STATS[usize::from(what == AHEAD_SINCE) * 2 + 1].fetch_add(began.elapsed().as_micros() as u64, Ordering::Relaxed);
+        true
+    }
+
     fn heap_buffers(&self, list: &HostList) -> Option<u64> {
-        let heap = self
+        let at = self
             .heaps
             .iter()
-            .filter(|&&h| h != 0)
-            .map(|&h| crate::descriptor::heap(h as This))
-            .find(|h| !h.samplers())?;
+            .copied()
+            .find(|&h| h != 0 && !crate::descriptor::heap(h as This).samplers())?;
+        let heap = crate::descriptor::heap(at as This);
         let host = heap.host()?;
         let gpu = host.strides_gpu()?;
         // Stride buffers have aligned GPU addresses. Tag the list key so it
@@ -2826,6 +2895,16 @@ impl State {
         // The list may outlive the title's heap object, which owns the table.
         if let Some(buffer) = host.strides_buffer() {
             list.keep(buffer);
+        }
+        // (Neptune) The pass is the list's that runs ahead of the frame ([`passes_ahead`]).
+        let what = AHEAD.get();
+        let ahead = what != 0;
+        if !ahead && passes_ahead() {
+            if VIEW_HEAP.load(Ordering::Relaxed) != at {
+                VIEW_HEAP.store(at, Ordering::Relaxed);
+            }
+            list.wants_ahead();
+            return Some(gpu);
         }
         // The pass itself once per frame: per list it ran up to 51 times a
         // frame over 81,000 views and 4,100 host copies, 18 s of every
@@ -2868,7 +2947,9 @@ impl State {
         #[cfg(feature = "diagnostics")]
         let refreshed = std::time::Instant::now();
         stage.next("the heap pass: textures");
-        let _ = Self::heap_textures(Into::List(list), heap, host, None);
+        if what != AHEAD_BUFFERS {
+            let _ = Self::heap_textures(Into::List(list), heap, host, None);
+        }
         stage.end();
         #[cfg(feature = "diagnostics")]
         HEAP_SPLIT[2].fetch_add(refreshed.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -3134,7 +3215,8 @@ impl State {
             shadow.refresh(list, *from, *to - *from);
         }
         let textures_began = std::time::Instant::now();
-        if !crate::heap_worker::kick(heap) {
+        let what = AHEAD.get();
+        if what != AHEAD_BUFFERS && !crate::heap_worker::kick(heap) {
             Self::heap_textures(Into::List(list), heap, host, None);
         }
         HEAP_PASS_PARTS[0].fetch_add(textures_began.elapsed().as_micros() as u64, Ordering::Relaxed);
@@ -3204,7 +3286,19 @@ impl State {
         if first {
             BAKED_MS.store(0, Ordering::Relaxed);
         }
-        if !is_bake && !(first && early_ms > 0) {
+        let ahead = passes_ahead();
+        if ahead {
+            if let Some(&at) = self.heaps.iter().filter(|&&h| h != 0).find(|&&h| !crate::descriptor::heap(h as This).samplers())
+                && VIEW_HEAP.load(Ordering::Relaxed) != at
+            {
+                VIEW_HEAP.store(at, Ordering::Relaxed);
+            }
+            // A list that draws may pick textures from the heap: behind the list ahead.
+            if !self.asked_ahead.replace(true) {
+                list.wants_ahead();
+            }
+        }
+        if !is_bake && (ahead || !(first && early_ms > 0)) {
             return;
         }
         let Some(heap) = self
