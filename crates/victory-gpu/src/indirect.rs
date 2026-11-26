@@ -8,18 +8,6 @@
 //! shader with its root signature inside), leaving the title's argument and
 //! count buffers untouched.
 //!
-<<<<<<< HEAD
-//! The scratch buffer is left readable as indirect arguments after a clamp
-//! and stays so until the next clamp into it, which moves it straight back
-//! to unordered access; it goes back to the common state once, when the
-//! list closes. The executions that read it record no barrier of their
-//! own, so draws that read records clamped together (`crate::draw`'s
-//! windows) follow each other with nothing between them. Before, each
-//! execution was followed by a move of the scratch buffer back to the
-//! common state, which drivers may treat as a full wait.
-//!
-||||||| a26859fc
-=======
 //! The scratch buffer is left readable as indirect arguments after a clamp
 //! and stays so until the next clamp into it, which moves it straight back
 //! to unordered access; it goes back to the common state once, when the
@@ -33,7 +21,6 @@
 //! are clamped in batches ([`batch`], `VICTORY_INDIRECT_BATCH`): the rest of
 //! this is for the others.
 //!
->>>>>>> avatar/main
 //! When a count buffer is given, threads at or past `min(max, count)` return
 //! immediately without charging the list's budget or reading uninitialized
 //! tail slots. Each list has a budget (2^27 vertex instances or threads,
@@ -87,7 +74,6 @@ static const uint BUDGET = 1u << 27;
 static const uint MOST_DRAW = 1u << 23;
 // Groups of one dispatch; more run empty.
 static const uint GROUPS = 1u << 20;
-<<<<<<< HEAD
 static const uint SPLIT = 2;
 // Each active record charges the budget once, saturating without 32-bit
 // wraparound. A compare and swap per record, 64 threads racing for one
@@ -99,20 +85,6 @@ static const uint SPLIT = 2;
 // which no barrier orders: see the note where the records charge.
 groupshared uint largest_asked;
 groupshared uint all_asked;
-||||||| a26859fc
-=======
-// Each group charges the budget once: the costs of its records go here,
-// one thread charges their sum, saturating as each record would in lane
-// order, and every thread then reads whether its own record fitted. A
-// compare and swap per record, 64 threads racing for one word, cost a
-// round for each record of a window, and in memory the CPU maps (where the
-// budget was, and is with VICTORY_INDIRECT_CARD_BUDGET=0) every atomic
-// crosses the bus on a card of its own.
-groupshared uint costs[64];
-groupshared uint fits[64];
-groupshared uint largest_asked;
-groupshared uint all_asked;
->>>>>>> avatar/main
 [RootSignature(RS)]
 [numthreads(64, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
@@ -122,7 +94,6 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
     if ((has_count & 1u) != 0) {
         eff_count = min(eff_count, count_buf.Load(count_offset));
     }
-<<<<<<< HEAD
     // The record this thread clamps: the caller runs one group per 64
     // records, and `base` says which 64.
     uint index = base + gi;
@@ -139,20 +110,6 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
     uint dst_at = index * stride;
     uint cost = 0;
     uint asked = 0;
-||||||| a26859fc
-    if (id.x >= eff_count) return;
-    uint src_at = args_offset + id.x * stride;
-    uint dst_at = id.x * stride;
-    uint cost;
-=======
-    // Threads past the records take part in the group's charge (cost 0)
-    // and store nothing.
-    bool active = id.x < eff_count;
-    uint src_at = args_offset + id.x * stride;
-    uint dst_at = id.x * stride;
-    uint cost = 0;
-    uint asked = 0;
->>>>>>> avatar/main
     uint2 draw_counts = uint2(0, 0);
     uint3 groups = uint3(0, 0, 0);
     if (gi == 0) {
@@ -165,25 +122,9 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
         if (ahead && (want.x > (1u << 24) || want.y > (1u << 24))) {
             want = uint2(0, 0);
         }
-<<<<<<< HEAD
         uint count = min(want.x, 1u << 24);
         uint instances = min(want.y, (1u << 26) / max(count, 1u));
-||||||| a26859fc
-        uint count = min(asked.x, 1u << 24);
-        uint instances = min(asked.y, (1u << 26) / max(count, 1u));
-=======
-        // A record of MOST_DRAW vertices or indices an instance, or more, is
-        // no draw of the title's (a slot it has not filled): it runs empty
-        // and charges nothing (victory-fork f85101b6, its window checker
-        // found 90 of 2^24 vertices in one list).
-        if (want.x >= MOST_DRAW) {
-            want = uint2(0, 0);
-        }
-        uint count = want.x;
-        uint instances = min(want.y, (1u << 26) / max(count, 1u));
->>>>>>> avatar/main
         cost = count * instances;
-<<<<<<< HEAD
         // A record that asks for MOST_DRAW vertices or indices an instance
         // or more is no draw of the title's (no mesh of a console title has
         // 2.8 million triangles): it runs empty and charges nothing. Run
@@ -210,34 +151,6 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
         }
         // x * y fits 32 bits; the whole count may not.
         if (g.z != 0 && g.x * g.y > GROUPS / g.z) {
-||||||| a26859fc
-        draw_counts = uint2(count, instances);
-    } else if (kind == 2) {
-        uint3 asked = src_args.Load3(src_at);
-        // Diagnostics, in the budget buffer's words after the mesh ones:
-        // the largest x a compute record asked for, and the records that
-        // asked for more groups in x than one dispatch runs (they are cut
-        // to 65,535 below, so the groups past it never run). Not the
-        // garbage of a slot nothing wrote.
-        if (asked.x <= (1u << 24) && asked.y <= 64u && asked.z <= 64u) {
-            uint noted;
-            budget.InterlockedMax(12, asked.x, noted);
-            if (asked.x > 65535u) {
-                budget.InterlockedAdd(16, 1u, noted);
-            }
-        }
-        uint3 g = min(asked, uint3(65535u, 65535u, 65535u));
-        // x * y fits 32 bits; the whole count may not.
-        if (g.z != 0 && g.x * g.y > GROUPS / g.z) {
-=======
-        draw_counts = uint2(count, instances);
-    } else if (active && kind == 2) {
-        uint3 g = src_args.Load3(src_at);
-        // Up to WIDEST groups in x run as asked (`widest`).
-        g = min(g, uint3(g.x <= WIDEST ? WIDEST : 65535u, 65535u, 65535u));
-        // x * y fits 32 bits where it is looked at; the whole count may not.
-        if ((g.y != 0 && g.x > GROUPS / g.y) || (g.z != 0 && g.x * g.y > GROUPS / g.z)) {
->>>>>>> avatar/main
             g = uint3(0, 0, 0);
         }
         cost = g.x * g.y * g.z * 64u;
@@ -257,7 +170,6 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
         cost = g.x * g.y * g.z * 128u;
         groups = g;
     }
-<<<<<<< HEAD
     GroupMemoryBarrierWithGroupSync();
     if (active && kind > 2) {
         // Diagnostics, in the budget buffer's next words (below): the
@@ -278,73 +190,18 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
     // thousands and count a few).
     bool over = false;
     if (active && cost > 0) {
-||||||| a26859fc
-    bool over = false;
-    if (cost > 0) {
-=======
-    costs[gi] = cost;
-    GroupMemoryBarrierWithGroupSync();
-    if (active && kind > 2) {
-        // Diagnostics, in the budget buffer's next words (below): the
-        // largest group count a mesh record asked for, and the groups
-        // asked in all.
-        uint was;
-        InterlockedMax(largest_asked, asked, was);
-        InterlockedAdd(all_asked, min(asked, 1u << 24), was);
-    }
-    // The group's own records: none for a group past a count buffer's
-    // count (an execution may ask for thousands and count a few), which
-    // touches the budget not at all, as its threads did not before.
-    uint first = id.x - gi;
-    uint n = eff_count > first ? min(64u, eff_count - first) : 0u;
-    if (gi == 0 && n > 0) {
-        // What the records charge, from `before` on, in lane order: a
-        // record that does not fit whole runs empty and takes the rest
-        // (`rest`).
-        // Only the group's own records are walked (one, clamped alone).
->>>>>>> avatar/main
         uint before;
         budget.InterlockedOr(0, 0, before);
         [allow_uav_condition]
         while (before < BUDGET) {
-            uint next = before;
-            for (uint j = 0; j < n; j++) {
-                uint c = costs[j];
-                if (c > 0 && next < BUDGET) {
-                    next = (BUDGET - next < c) ? (REST ? BUDGET : next) : (next + c);
-                }
-            }
-            if (next == before) break;
+            uint next = (BUDGET - before <= cost) ? BUDGET : (before + cost);
             uint prev;
             budget.InterlockedCompareExchange(0, before, next, prev);
             if (prev == before) break;
             before = prev;
         }
-        uint at = before;
-        uint refused = 0;
-        uint biggest = 0;
-        for (uint k = 0; k < n; k++) {
-            uint c = costs[k];
-            uint fit = 1;
-            if (c > 0) {
-                fit = (at < BUDGET && BUDGET - at >= c) ? 1u : 0u;
-                at = (at >= BUDGET || BUDGET - at < c) ? (REST ? BUDGET : at) : (at + c);
-                refused += 1 - fit;
-                biggest = max(biggest, c);
-            }
-            fits[k] = fit;
-        }
-        // Diagnostics: the records that run empty for want of budget, and
-        // the largest cost there was (small ones are not told).
-        uint told;
-        if (refused > 0) {
-            budget.InterlockedAdd(12, refused, told);
-        }
-        if (biggest >= (1u << 22)) {
-            budget.InterlockedMax(16, biggest, told);
-        }
+        over = before >= BUDGET || BUDGET - before < cost;
     }
-<<<<<<< HEAD
     GroupMemoryBarrierWithGroupSync();
     if (gi == 0 && kind > 2) {
         uint was;
@@ -354,19 +211,6 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
     if (!active) {
         return;
     }
-||||||| a26859fc
-=======
-    GroupMemoryBarrierWithGroupSync();
-    if (gi == 0 && kind > 2 && n > 0) {
-        uint was;
-        budget.InterlockedMax(4, largest_asked, was);
-        budget.InterlockedAdd(8, all_asked, was);
-    }
-    if (!active) {
-        return;
-    }
-    bool over = fits[gi] == 0;
->>>>>>> avatar/main
     if (kind <= 1) {
         if (over) {
             draw_counts = uint2(0, 0);
@@ -424,15 +268,6 @@ fn make() -> windows::core::Result<Clamp> {
 }
 
 fn make_for(device: &ID3D12Device) -> windows::core::Result<Clamp> {
-<<<<<<< HEAD
-    make_from(device, SOURCE)
-}
-
-/// The clamp compiled from `source` (ours, or in the benchmark the one it
-/// replaced).
-fn make_from(device: &ID3D12Device, source: &str) -> windows::core::Result<Clamp> {
-||||||| a26859fc
-=======
     make_from(device, SOURCE)
 }
 
@@ -482,7 +317,6 @@ fn make_from(device: &ID3D12Device, source: &str) -> windows::core::Result<Clamp
     #[cfg(feature = "diagnostics")]
     let batched = source == batch::SOURCE;
     let source = &format!("#define WIDEST {}u\n#define REST {}\n{source}", widest(amd(device)), rest());
->>>>>>> avatar/main
     let mut code: Option<ID3DBlob> = None;
     let mut errors: Option<ID3DBlob> = None;
     // SAFETY: the source and names live through the call; out pointers ours.
@@ -633,7 +467,6 @@ fn clamp_recorded(list: &HostList, Waits { before, scoped, .. }: Waits, recorded
 /// Records, in `list`, the non-destructive clamp of up to `records` records of
 /// `kind` (PC argument numbering) `stride` bytes apart from `src` (and bounded
 /// by the 32-bit count in `count` when given) into a device-local scratch
-<<<<<<< HEAD
 /// buffer, at offset `0`. The scratch buffer is left in `INDIRECT_ARGUMENT`
 /// until the next clamp into it: executions read it with no barrier of
 /// their own. Replaces the list's compute root signature and pipeline
@@ -641,17 +474,6 @@ fn clamp_recorded(list: &HostList, Waits { before, scoped, .. }: Waits, recorded
 /// available.
 /// `own`: `src` and `count` are dedicated buffers, not placed over title
 /// memory that another buffer may alias ([`clamp_scoped`]).
-||||||| a26859fc
-/// buffer, leaving that scratch buffer in `INDIRECT_ARGUMENT` at offset `0`.
-/// Replaces the list's compute root signature and pipeline (callers bind
-/// theirs after). `None` if the clamp or alignment is not available.
-=======
-/// buffer, at offset `0`. The scratch buffer is left in `INDIRECT_ARGUMENT`
-/// until the next clamp into it: executions read it with no barrier of
-/// their own. Replaces the list's compute root signature and pipeline
-/// (callers bind theirs after). `None` if the clamp or alignment is not
-/// available.
->>>>>>> avatar/main
 pub(crate) fn bound(
     list: &HostList,
     src: (&ID3D12Resource, u64),
@@ -661,16 +483,10 @@ pub(crate) fn bound(
 ) -> Option<ID3D12Resource> {
     let bytes = validate_layout(spec, src.1, count.map(|(_, off)| off))?;
     let (c, budget, dst) = (clamp()?, list.budget()?, list.indirect_scratch(bytes)?);
-<<<<<<< HEAD
     let waits = clamp_waits(list, own);
     let recorded = clamp_into(list, c, &dst, budget, src, count, spec, 0, waits);
     clamp_recorded(list, waits, recorded);
     recorded.then_some(dst)
-||||||| a26859fc
-    record_clamp(c, &list.list, &dst, budget, src, count, spec).then_some(dst)
-=======
-    clamp_into(list, c, &dst, budget, src, count, spec, false).then_some(dst)
->>>>>>> avatar/main
 }
 
 /// [`bound`] for a window of records clamped ahead of the draws that will
@@ -691,19 +507,12 @@ pub(crate) fn bound_ahead(
 ) -> Option<ID3D12Resource> {
     let bytes = validate_layout(spec, src.1, None)?;
     let (c, budget, dst) = (clamp()?, list.budget()?, list.indirect_scratch(bytes)?);
-<<<<<<< HEAD
     let waits = clamp_waits(list, own);
     let recorded = clamp_into(list, c, &dst, budget, src, None, spec, AHEAD, waits);
     clamp_recorded(list, waits, recorded);
     recorded.then_some(dst)
-||||||| a26859fc
-    record_clamp_as(c, &list.list, &dst, budget, src, None, spec, true).then_some(dst)
-=======
-    clamp_into(list, c, &dst, budget, src, None, spec, true).then_some(dst)
->>>>>>> avatar/main
 }
 
-<<<<<<< HEAD
 /// The parts [`bound_split`] makes of a dispatch, the most groups of each,
 /// and the bytes between them.
 pub(crate) const SPLIT: u32 = 2;
@@ -744,71 +553,33 @@ const GATHERED: u32 = 8;
 #[allow(clippy::too_many_arguments)]
 fn clamp_into(
     list: &HostList,
-||||||| a26859fc
-fn record_clamp(
-=======
-/// [`record_clamp_as`] into `list`'s scratch buffer `dst`, from the state
-/// the list left it in; afterwards the list knows it is readable as
-/// indirect arguments.
-#[allow(clippy::too_many_arguments)]
-fn clamp_into(
-    list: &HostList,
->>>>>>> avatar/main
     c: &Clamp,
     dst: &ID3D12Resource,
     budget: u64,
     src: (&ID3D12Resource, u64),
     count: Option<(&ID3D12Resource, u64)>,
     spec: (u32, u32, u32),
-<<<<<<< HEAD
     how: u32,
     waits: Waits,
-||||||| a26859fc
-=======
-    ahead: bool,
->>>>>>> avatar/main
 ) -> bool {
-<<<<<<< HEAD
     let before = list.indirect_state(dst);
     let recorded = record_clamp_waits(c, &list.list, (dst, before), budget, src, count, spec, how, waits);
     if recorded {
         list.indirect_readable(dst);
     }
     recorded
-||||||| a26859fc
-    record_clamp_as(c, l, dst, budget, src, count, spec, false)
-=======
-    let before = list.indirect_state(dst);
-    let recorded = record_clamp_as(c, &list.list, (dst, before), budget, src, count, spec, ahead);
-    if recorded {
-        list.indirect_readable(dst);
-    }
-    recorded
->>>>>>> avatar/main
 }
 
-<<<<<<< HEAD
 /// Records the clamp into `dst`, which is in state `before` (common, or
 /// indirect arguments after an earlier clamp into it), and leaves `dst` in
 /// `INDIRECT_ARGUMENT`. `ahead`: the records are a window clamped ahead of
 /// their draws ([`bound_ahead`]). False, with nothing recorded, if the
 /// layout or the addresses do not fit the clamp.
 #[cfg(test)]
-||||||| a26859fc
-/// [`record_clamp`]; `ahead`: the records are a window clamped ahead of
-/// their draws ([`bound_ahead`]).
-=======
-/// Records the clamp into `dst`, which is in state `before` (common, or
-/// indirect arguments after an earlier clamp into it), and leaves `dst` in
-/// `INDIRECT_ARGUMENT`. `ahead`: the records are a window clamped ahead of
-/// their draws ([`bound_ahead`]). False, with nothing recorded, if the
-/// layout or the addresses do not fit the clamp.
->>>>>>> avatar/main
 #[allow(clippy::too_many_arguments)]
 fn record_clamp_as(
     c: &Clamp,
     l: &ID3D12GraphicsCommandList,
-<<<<<<< HEAD
     (dst, before): (&ID3D12Resource, D3D12_RESOURCE_STATES),
     budget: u64,
     src: (&ID3D12Resource, u64),
@@ -834,11 +605,6 @@ fn record_clamp_waits(
     c: &Clamp,
     l: &ID3D12GraphicsCommandList,
     (dst, before_state): (&ID3D12Resource, D3D12_RESOURCE_STATES),
-||||||| a26859fc
-    dst: &ID3D12Resource,
-=======
-    (dst, before): (&ID3D12Resource, D3D12_RESOURCE_STATES),
->>>>>>> avatar/main
     budget: u64,
     (src, src_offset): (&ID3D12Resource, u64),
     count: Option<(&ID3D12Resource, u64)>,
@@ -893,17 +659,9 @@ fn record_clamp_waits(
     // SAFETY: an open list; our root signature and pipeline; live source,
     // count, scratch destination, and budget buffers. `src` and `count` stay
     // in `COMMON` / `GENERIC_READ` via implicit buffer promotion while `dst`
-<<<<<<< HEAD
     // transitions `before_state -> UNORDERED_ACCESS -> INDIRECT_ARGUMENT`. Moving
     // it out of `INDIRECT_ARGUMENT` orders this clamp's writes after every
     // earlier execution's reads of the scratch buffer; nothing else writes it.
-||||||| a26859fc
-    // transitions `COMMON -> UNORDERED_ACCESS -> INDIRECT_ARGUMENT`.
-=======
-    // transitions `before -> UNORDERED_ACCESS -> INDIRECT_ARGUMENT`. Moving
-    // it out of `INDIRECT_ARGUMENT` orders this clamp's writes after every
-    // earlier execution's reads of the scratch buffer; nothing else writes it.
->>>>>>> avatar/main
     // Diagnostics: counted; `VICTORY_BARRIER_TEST=indirect` leaves the two
     // waits for every earlier shader write out (the state changes stay).
     #[cfg(feature = "diagnostics")]
@@ -912,7 +670,6 @@ fn record_clamp_waits(
     let waits = crate::copystat::barrier_test() & 2 == 0;
     #[cfg(not(feature = "diagnostics"))]
     let waits = true;
-<<<<<<< HEAD
     // Build `first` on the stack: at most 2 UAV barriers + 1 transition.
     let mut first_buf: [std::mem::MaybeUninit<D3D12_RESOURCE_BARRIER>; 3] =
         [const { std::mem::MaybeUninit::uninit() }; 3];
@@ -936,21 +693,6 @@ fn record_clamp_waits(
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
     ));
     first_len += 1;
-||||||| a26859fc
-    let first = [
-        uav_barrier(),
-        transition(
-            dst,
-            D3D12_RESOURCE_STATE_COMMON,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        ),
-    ];
-=======
-    let first = [
-        uav_barrier(),
-        transition(dst, before, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
-    ];
->>>>>>> avatar/main
     let second = [
         uav_barrier(),
         transition(
@@ -1000,7 +742,6 @@ fn record_clamp_waits(
     true
 }
 
-<<<<<<< HEAD
 /// After indirect execution (or if preparation failed after [`bound`]):
 /// returns the scratch buffer to the common state for the next call.
 pub(crate) fn done(list: &HostList, scratch: &ID3D12Resource) {
@@ -1008,12 +749,19 @@ pub(crate) fn done(list: &HostList, scratch: &ID3D12Resource) {
         done_on(&list.list, scratch);
         list.indirect_common(scratch);
     }
-||||||| a26859fc
-/// After indirect execution (or if preparation failed after [`bound`]):
-/// returns the scratch buffer to the common state for the next call.
-pub(crate) fn done(list: &HostList, scratch: &ID3D12Resource) {
-    done_on(&list.list, scratch);
-=======
+}
+
+fn done_on(list: &ID3D12GraphicsCommandList, scratch: &ID3D12Resource) {
+    // SAFETY: an open list and a live scratch buffer in INDIRECT_ARGUMENT.
+    unsafe {
+        list.ResourceBarrier(&[transition(
+            scratch,
+            D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
+            D3D12_RESOURCE_STATE_COMMON,
+        )])
+    };
+}
+
 /// The batched clamp's pipeline ([`batch`]).
 fn batch_clamp() -> Option<&'static Clamp> {
     static CLAMP: std::sync::OnceLock<Option<Clamp>> = std::sync::OnceLock::new();
@@ -1029,7 +777,6 @@ fn batch_clamp() -> Option<&'static Clamp> {
             }
         })
         .as_ref()
->>>>>>> avatar/main
 }
 
 /// Opens a batch in `list` ([`batch`]): a pass that clamps the records of
@@ -1822,14 +1569,8 @@ void main() {
                 warp.list.SetComputeRootShaderResourceView(1, now_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(2, hashes_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(3, differs_gpu);
-<<<<<<< HEAD
                 warp.list.SetComputeRootUnorderedAccessView(4, inline_gpu);
                 warp.list.Dispatch(PIECES, 1, 1);
-||||||| a26859fc
-                warp.list.Dispatch(PIECES.div_ceil(64), 1, 1);
-=======
-                warp.list.Dispatch(PIECES, 1, 1);
->>>>>>> avatar/main
             }
             warp.submit_and_wait();
             // SAFETY: as above.
@@ -1869,7 +1610,6 @@ void main() {
         assert_eq!(run(&mut warp, 2), [0, 0, 0]);
     }
 
-<<<<<<< HEAD
     /// WARP D3D12 execution test for `CARD_COMPARE` inline readback (`mode=4`),
     /// non-16-byte-aligned `skew`, and graceful overflow fallback (`differs=1`).
     #[test]
@@ -2061,8 +1801,6 @@ void main() {
         assert_eq!(slot(PIECE - SKEW as usize), piece0);
     }
 
-||||||| a26859fc
-=======
     /// What the passes over copies in the card's memory cost on the card
     /// (ignored: a measurement): rounds of a few passes of some pieces and a
     /// wait, as a frame has them. `VICTORY_BENCH_CS=<file>` times another
@@ -3159,7 +2897,6 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         }
     }
 
->>>>>>> avatar/main
     /// The clamp compiles with the system's compiler and the host takes it.
     #[test]
     fn argument_clamp_builds() {
