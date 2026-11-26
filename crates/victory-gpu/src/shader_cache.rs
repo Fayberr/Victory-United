@@ -99,7 +99,6 @@ fn build() -> [u8; 32] {
     *hash.finalize().as_bytes()
 }
 
-<<<<<<< HEAD
 /// What tells one set of translations from another ([`build`]).
 pub(crate) fn translation() -> [u8; 32] {
     build()
@@ -117,23 +116,6 @@ pub fn precompile(container: &[u8]) -> Result<bool, String> {
     Ok(MISSES.load(Ordering::Relaxed) == misses)
 }
 
-||||||| 085ee7c4c
-/// The offline warm-up (`victory translate --warm`): `container` is
-/// translated into the cache unless it is there already. `Ok(true)`: it
-/// was translated now. Needs [`use_shader_cache`] and the same host facts
-/// the run will have (`victory_shader::emit::translation_fingerprint`).
-pub fn warm(container: &[u8]) -> Result<bool, String> {
-    let cache = CACHE.get().ok_or("no shader cache")?;
-    let ran = AtomicBool::new(false);
-    let translate = |c: &[u8]| {
-        ran.store(true, Ordering::Relaxed);
-        victory_shader::emit::translate(c).map_err(|e| e.to_string())
-    };
-    cached(cache, &build(), container, translate).map(|_| ran.load(Ordering::Relaxed))
-}
-
-=======
->>>>>>> origin/exp/vitoriabr-head
 /// The translation of a console shader container, from the cache when
 /// there is one.
 pub(crate) fn host_shader(container: &[u8]) -> Result<HostShader, String> {
@@ -143,34 +125,8 @@ pub(crate) fn host_shader(container: &[u8]) -> Result<HostShader, String> {
     }
 }
 
-<<<<<<< HEAD
-/// The cache entry's converter: the build and container in, the encoded
-/// translation out. Keep the result in memory for the caller on a miss.
-||||||| 085ee7c4c
-/// The cache entry's converter: the build and the container in, the
-/// encoded translation out. `ran` tells a miss from a hit.
-=======
 fn translate(container: &[u8]) -> Result<HostShader, String> {
     victory_shader::emit::translate(container).map_err(|e| e.to_string())
-}
-
-/// Translates `container` into the cache before a run (`victory warm` /
-/// `victory translate --warm`), so the run finds it there instead of
-/// translating it while the title waits.
-///
-/// `Ok(true)`: translated and stored now; `Ok(false)`: it was cached
-/// already. An `Err` is a shader that does not translate (a run drops its
-/// draws as well), or one whose entry did not read back.
-pub fn warm(container: &[u8]) -> Result<bool, String> {
-    crate::descriptor::host::probe_view_limit();
-    let cache = CACHE
-        .get()
-        .ok_or("no shader cache folder (use_shader_cache)")?;
-    match cached(cache, &build(), container, translate)?.1 {
-        Outcome::Hit => Ok(false),
-        Outcome::Stored => Ok(true),
-        Outcome::Unstored => Err("translated, but the cache entry did not read back".to_owned()),
-    }
 }
 
 /// Where [`cached`]'s translation came from.
@@ -184,9 +140,8 @@ enum Outcome {
     Unstored,
 }
 
-/// The cache entry's converter: the build and the container in, the
-/// encoded translation out. `ran` tells a miss from a hit.
->>>>>>> origin/exp/vitoriabr-head
+/// The cache entry's converter: the build and container in, the encoded
+/// translation out. Keep the result in memory for the caller on a miss.
 struct Translate<F> {
     translate: F,
     made: Mutex<Option<HostShader>>,
@@ -232,33 +187,13 @@ fn cached(
                     }
                 }
             }
-            return Ok(shader);
+            return Ok((shader, Outcome::Stored));
         }
         let path = entry.map_err(|e| format!("{e:#}"))?;
         if let Some(shader) = std::fs::read(&path).ok().and_then(|b| decode(&b)) {
-<<<<<<< HEAD
             HITS.fetch_add(1, Ordering::Relaxed);
             tracing::debug!(path = %path.display(), "shader from the cache");
-            return Ok(shader);
-||||||| 085ee7c4c
-            let (counter, what) = if converter.ran.load(Ordering::Relaxed) {
-                (&MISSES, "translated and cached")
-            } else {
-                (&HITS, "from the cache")
-            };
-            counter.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!(path = %path.display(), "shader {what}");
-            return Ok(shader);
-=======
-            let (counter, what, outcome) = if converter.ran.load(Ordering::Relaxed) {
-                (&MISSES, "translated and cached", Outcome::Stored)
-            } else {
-                (&HITS, "from the cache", Outcome::Hit)
-            };
-            counter.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!(path = %path.display(), "shader {what}");
-            return Ok((shader, outcome));
->>>>>>> origin/exp/vitoriabr-head
+            return Ok((shader, Outcome::Hit));
         }
         tracing::debug!(path = %path.display(), "unreadable shader cache entry; translating again");
         let _ = std::fs::remove_file(&path);
@@ -543,13 +478,13 @@ mod tests {
             runs.fetch_add(1, Ordering::Relaxed);
             Ok(shader())
         };
-        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
+        assert_eq!(cached(&cache, &build, container, translate), Ok((shader(), Outcome::Stored)));
         let entries = walk(dir.path());
         assert_eq!(entries.len(), 1);
         std::fs::remove_file(&entries[0]).unwrap();
         std::fs::create_dir(&entries[0]).unwrap();
 
-        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
+        assert_eq!(cached(&cache, &build, container, translate), Ok((shader(), Outcome::Stored)));
         assert_eq!(runs.load(Ordering::Relaxed), 2);
         assert!(entries[0].is_dir());
         let fail = |_: &[u8]| Err::<HostShader, _>("unsupported".to_owned());
