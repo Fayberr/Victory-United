@@ -108,14 +108,10 @@ extern "system" fn set_event_on_completion(this: This, value: u64, event: *mut c
         pace::ready();
         return S_OK;
     }
-<<<<<<< HEAD
     #[cfg(all(windows, feature = "diagnostics"))]
     pace::waits(this, &fence.asked, value, fence.value.load(Ordering::Acquire));
-||||||| a26859fc
-=======
     #[cfg(all(windows, feature = "diagnostics"))]
     crate::timeline::told("an event asked for", this as usize, value);
->>>>>>> avatar/main
     if event.is_null() {
         // With submissions sent to the card and not waited for
         // (`crate::host::late`) the signal may be behind them: they are
