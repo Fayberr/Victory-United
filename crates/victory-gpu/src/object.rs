@@ -71,7 +71,6 @@ pub(crate) extern "system" fn add_ref(this: This) -> u32 {
     unsafe { &*this }.refs.fetch_add(1, Ordering::Relaxed) + 1
 }
 
-<<<<<<< HEAD
 /// Increments the reference count only if it is currently non-zero, preventing
 /// resurrection of an object whose last `Release` is already dropping it.
 /// The caller must prevent deallocation (for instance by holding the table lock
@@ -87,8 +86,6 @@ pub(crate) fn try_add_ref(this: This) -> bool {
         .is_ok()
 }
 
-||||||| 465b94f5
-=======
 /// Adds a reference to an object that has one; false if it has none any
 /// more (its last one is being released).
 #[cfg(windows)]
@@ -98,7 +95,6 @@ pub(crate) fn add_ref_alive(this: This) -> bool {
     refs.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| (n > 0).then(|| n + 1)).is_ok()
 }
 
->>>>>>> vertex/main
 pub(crate) extern "system" fn release(this: This) -> u32 {
     // SAFETY: `this` is one of our objects.
     let refs = &unsafe { &*this }.refs;
