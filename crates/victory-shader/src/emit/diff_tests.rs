@@ -718,22 +718,12 @@ fn translated_shaders_draw_as_pc_ones() {
         crate::emit::test_skip::skip("no console or PC compiler; skipped");
         return;
     };
-<<<<<<< HEAD
     let host = match Host::new(false) {
         Ok(host) => host,
         Err(e) => {
-            eprintln!("no SM 6.6 device ({e}); skipped");
+            crate::emit::test_skip::skip(&format!("no SM 6.6 device ({e}); skipped"));
             return;
         }
-||||||| 085ee7c4
-    let Ok(host) = Host::new(false) else {
-        eprintln!("no SM 6.6 device; skipped");
-        return;
-=======
-    let Ok(host) = Host::new(false) else {
-        crate::emit::test_skip::skip("no SM 6.6 device; skipped");
-        return;
->>>>>>> vitoriabr/main
     };
     let dir = std::env::temp_dir().join(format!("victory-diff-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -887,22 +877,12 @@ fn translated_mesh_shaders_draw_as_pc_ones() {
         crate::emit::test_skip::skip("no console or PC compiler; skipped");
         return;
     };
-<<<<<<< HEAD
     let host = match Host::new(false) {
         Ok(host) => host,
         Err(e) => {
-            eprintln!("no SM 6.6 device ({e}); skipped");
+            crate::emit::test_skip::skip(&format!("no SM 6.6 device ({e}); skipped"));
             return;
         }
-||||||| 085ee7c4
-    let Ok(host) = Host::new(false) else {
-        eprintln!("no SM 6.6 device; skipped");
-        return;
-=======
-    let Ok(host) = Host::new(false) else {
-        crate::emit::test_skip::skip("no SM 6.6 device; skipped");
-        return;
->>>>>>> vitoriabr/main
     };
     let dir = std::env::temp_dir().join(format!("victory-diff-ms-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -1017,22 +997,12 @@ fn float_semantics_are_the_consoles() {
         crate::emit::test_skip::skip("no console compiler; skipped");
         return;
     };
-<<<<<<< HEAD
     let host = match Host::new(false) {
         Ok(host) => host,
         Err(e) => {
-            eprintln!("no SM 6.6 device ({e}); skipped");
+            crate::emit::test_skip::skip(&format!("no SM 6.6 device ({e}); skipped"));
             return;
         }
-||||||| 085ee7c4
-    let Ok(host) = Host::new(false) else {
-        eprintln!("no SM 6.6 device; skipped");
-        return;
-=======
-    let Ok(host) = Host::new(false) else {
-        crate::emit::test_skip::skip("no SM 6.6 device; skipped");
-        return;
->>>>>>> vitoriabr/main
     };
     let dir = std::env::temp_dir().join(format!("victory-float-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -1119,22 +1089,12 @@ fn translated_compute_matches_pc() {
         crate::emit::test_skip::skip("no console or PC compiler; skipped");
         return;
     };
-<<<<<<< HEAD
     let host = match Host::new(false) {
         Ok(host) => host,
         Err(e) => {
-            eprintln!("no SM 6.6 device ({e}); skipped");
+            crate::emit::test_skip::skip(&format!("no SM 6.6 device ({e}); skipped"));
             return;
         }
-||||||| 085ee7c4
-    let Ok(host) = Host::new(false) else {
-        eprintln!("no SM 6.6 device; skipped");
-        return;
-=======
-    let Ok(host) = Host::new(false) else {
-        crate::emit::test_skip::skip("no SM 6.6 device; skipped");
-        return;
->>>>>>> vitoriabr/main
     };
     let dir = std::env::temp_dir().join(format!("victory-diff-cs-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
