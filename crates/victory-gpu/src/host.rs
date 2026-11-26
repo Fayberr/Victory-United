@@ -988,7 +988,6 @@ fn create() -> windows::core::Result<Host> {
     }
 }
 
-<<<<<<< HEAD
 impl Host {
     /// The driver's version, as the system counts it (0: not known).
     pub(crate) fn driver(&self) -> i64 {
@@ -998,15 +997,11 @@ impl Host {
     }
 }
 
-||||||| 085ee7c4c
-=======
 /// Serializes unit tests that open the singleton `EnumWarpAdapter()` D3D12
 /// device so `d3d10warp.dll` does not race across concurrent `VirtualFree`,
 /// `OpenExistingHeapFromAddress`, and queue/PSO teardown calls.
 #[cfg(test)]
 pub(crate) static WARP_SERIAL: Mutex<()> = Mutex::new(());
-
->>>>>>> origin/exp/vitoriabr-head
 /// DXGI may return hardware for `EnumWarpAdapter` (notably under Proton).
 /// Reject it before creating a device in diagnostics' software-only mode.
 pub(crate) fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
@@ -2887,16 +2882,10 @@ struct Sent {
     number: u64,
     card: Option<CardPlan>,
     back: Vec<Declared>,
-<<<<<<< HEAD
     /// What was taken off it to be done on the card.
     own: Option<card_steps::Taken>,
     /// Title-memory ranges written when its shader textures are copied back.
     texture_back_ranges: Vec<(usize, usize)>,
-||||||| 085ee7c4c
-=======
-    /// Title-memory ranges written when its shader textures are copied back.
-    texture_back_ranges: Vec<(usize, usize)>,
->>>>>>> origin/exp/vitoriabr-head
     /// Its bottom-of-pipe writes.
     writes: Vec<(usize, crate::queue::Written, usize)>,
 }
@@ -2912,14 +2901,9 @@ struct Flight {
     order: Vec<usize>,
     card: Option<CardPlan>,
     back: Vec<Declared>,
-<<<<<<< HEAD
     /// The list of ours that ran ahead of them ([`card_steps`]).
     own: Option<card_steps::Taken>,
     texture_back_ranges: Vec<(usize, usize)>,
-||||||| 085ee7c4c
-=======
-    texture_back_ranges: Vec<(usize, usize)>,
->>>>>>> origin/exp/vitoriabr-head
 }
 
 /// One thing in the line of what waits for the card, in order. (A flight
@@ -5259,17 +5243,7 @@ impl Host {
                         CARD_PASSES[0].fetch_add(runs.len() as u64, Ordering::Relaxed);
                         CARD_PASSES[1].fetch_add(runs.iter().map(|r| u64::from(r.pieces)).sum::<u64>(), Ordering::Relaxed);
                         for run in runs {
-<<<<<<< HEAD
                             card_pass(list, &run, size as u32, 0, 0);
-||||||| 085ee7c4c
-                            let constants = [run.first, run.skew, size as u32, run.pieces, 0, 0];
-                            list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
-                            list.Dispatch(run.pieces.div_ceil(64), 1, 1);
-=======
-                            let constants = [run.first, run.skew, size as u32, run.pieces, 0, 0];
-                            list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
-                            list.Dispatch(card_compare_groups(run.pieces), 1, 1);
->>>>>>> origin/exp/vitoriabr-head
                         }
                     }
                     list.Close()?;
@@ -5374,15 +5348,9 @@ impl Host {
                         };
                         list.SetComputeRootShaderResourceView(1, r.shadow.buffer.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(2, before.GetGPUVirtualAddress());
-<<<<<<< HEAD
                         // (What is only looked at keeps its hashes: what
                         // changed there is the next declared range's to land.)
                         card_pass(list, &r.span, size as u32, r.at, if flown && !r.picked { 2 } else { 1 });
-||||||| 085ee7c4c
-                        list.Dispatch(r.span.pieces.div_ceil(64), 1, 1);
-=======
-                        list.Dispatch(card_compare_groups(r.span.pieces), 1, 1);
->>>>>>> origin/exp/vitoriabr-head
                         CARD_PASSES[2].fetch_add(1, Ordering::Relaxed);
                     }
                     list.Close()?;
@@ -5774,7 +5742,6 @@ impl Host {
                         }
                     }
                 }
-<<<<<<< HEAD
                 let mut hand_back = relay_hand_back(&back);
                 stage.next("landing: copies in the card's memory");
                 self.relay_card_back(&plans, fetch, &mut || {
@@ -5796,20 +5763,6 @@ impl Host {
                 }
                 crate::land::spent(crate::land::stat::DONE, finishing);
                 COPY_BACK[0].fetch_add(landing.elapsed().as_micros() as u64, Ordering::Relaxed);
-||||||| 085ee7c4c
-                relay_hand_back(&back);
-                // Only now, and flight by flight: a range another flight
-                // in the air declared too stays closed to refreshes.
-                for flight in &flights {
-                    for (shadow, ranges) in &flight.back {
-                        shadow.copy_back_done(ranges);
-                    }
-                }
-                copy_back(0, landing.elapsed().as_micros() as u64);
-=======
-                relay_hand_back(&back);
-                copy_back(0, landing.elapsed().as_micros() as u64);
->>>>>>> origin/exp/vitoriabr-head
                 RELAY_STATS[0].fetch_add(1, Ordering::Relaxed);
                 RELAY_STATS[1].fetch_add(flights.len() as u64, Ordering::Relaxed);
             }
@@ -5818,17 +5771,7 @@ impl Host {
         stage.next("landing: read-backs, telling the title");
         let mut last = 0;
         let mut landed = Vec::new();
-<<<<<<< HEAD
         let mut telling = std::time::Instant::now();
-||||||| 085ee7c4c
-=======
-        // Collect each flight's back ranges before consuming `items` (without
-        // deduplicating across flights: `Shadow::copy_back_done` decrements
-        // `Flights` per flight!). Calling `copy_back_done` after `line.written`
-        // is updated and waiters are woken ensures no concurrent refresh sees a
-        // range as free while its merge is still in flight.
-        let mut backs: Vec<(std::sync::Arc<crate::shadow::Shadow>, Vec<(usize, usize)>)> = Vec::new();
->>>>>>> origin/exp/vitoriabr-head
         for item in items {
             telling = match item {
                 Late::Run(mut flight) => {
@@ -5846,12 +5789,7 @@ impl Host {
                         detached.release_tables();
                     }
                     landed.push((flight.lists, flight.order));
-<<<<<<< HEAD
                     crate::land::spent(crate::land::stat::READ_BACKS, telling)
-||||||| 085ee7c4c
-=======
-                    backs.extend(flight.back);
->>>>>>> origin/exp/vitoriabr-head
                 }
                 Late::Write(at, what, bytes) => {
                     what.write(at as *mut u8, bytes);
@@ -6136,13 +6074,8 @@ impl Host {
                 order,
                 card: sent.card,
                 back: sent.back,
-<<<<<<< HEAD
                 own: sent.own,
                 texture_back_ranges: sent.texture_back_ranges,
-||||||| 085ee7c4c
-=======
-                texture_back_ranges: sent.texture_back_ranges,
->>>>>>> origin/exp/vitoriabr-head
             }));
             items.extend(sent.writes.into_iter().map(|(at, what, bytes)| Late::Write(at, what, bytes)));
             *flying >= late_most()
@@ -6196,13 +6129,8 @@ impl Host {
                 order: Vec::new(),
                 card: sent.card,
                 back: sent.back,
-<<<<<<< HEAD
                 own: sent.own,
                 texture_back_ranges: sent.texture_back_ranges,
-||||||| 085ee7c4c
-=======
-                texture_back_ranges: sent.texture_back_ranges,
->>>>>>> origin/exp/vitoriabr-head
             }));
             items.extend(sent.writes.into_iter().map(|(at, what, bytes)| Late::Write(at, what, bytes)));
         }
@@ -6670,7 +6598,6 @@ impl Host {
             if let Err(e) = signalled {
                 fail(format_args!("a submission sent ahead could not be followed by a signal ({e})"));
             }
-<<<<<<< HEAD
             #[cfg(feature = "diagnostics")]
             split.part(5);
             let back = crate::picked::with(declared, &picked.written);
@@ -6678,15 +6605,6 @@ impl Host {
             for list in runs {
                 texture_back_ranges.extend(list.deferred().readback_ranges());
             }
-||||||| 085ee7c4c
-            let back = declared_writes(runs);
-=======
-            let back = declared_writes(runs);
-            let mut texture_back_ranges = Vec::new();
-            for list in runs {
-                texture_back_ranges.extend(list.deferred().texture_backs.iter().map(crate::texback::Back::range));
-            }
->>>>>>> origin/exp/vitoriabr-head
             let writes = runs.iter().flat_map(|l| l.deferred().writes.clone()).collect();
             SUBMISSION_US[0].fetch_add((prepared - started).saturating_sub(settled).as_micros() as u64, Ordering::Relaxed);
             submitting(0, 0);
@@ -6696,13 +6614,8 @@ impl Host {
                 number: this_submission,
                 card,
                 back,
-<<<<<<< HEAD
                 own,
                 texture_back_ranges,
-||||||| 085ee7c4c
-=======
-                texture_back_ranges,
->>>>>>> origin/exp/vitoriabr-head
                 writes,
             };
             working(was_working);
@@ -7362,17 +7275,9 @@ impl HostList {
     /// as [`HostList::transition`] does a title resource's host copy, and
     /// records the barrier: for textures that are not a title resource's
     /// host copy (colour twins) and for the copies between the two.
-<<<<<<< HEAD
-    fn settle(&self, copy: &std::sync::Arc<crate::resource::HostTexture>, wanted: u32) {
+    pub(crate) fn settle(&self, copy: &std::sync::Arc<crate::resource::HostTexture>, wanted: u32) {
         let wanted = legal_for(copy.flags(), wanted);
         self.changed_something();
-||||||| 085ee7c4c
-    fn settle(&self, copy: &std::sync::Arc<crate::resource::HostTexture>, wanted: u32) {
-        let wanted = legal_state(&copy.texture, wanted);
-=======
-    pub(crate) fn settle(&self, copy: &std::sync::Arc<crate::resource::HostTexture>, wanted: u32) {
-        let wanted = legal_state(&copy.texture, wanted);
->>>>>>> origin/exp/vitoriabr-head
         let mut states = self.states.lock().unwrap_or_else(|e| e.into_inner());
         let before = match states.entry(std::sync::Arc::as_ptr(copy) as usize) {
             std::collections::hash_map::Entry::Vacant(v) => {
@@ -7554,37 +7459,6 @@ impl HostList {
         }
     }
 
-<<<<<<< HEAD
-    /// A draw or dispatch being prepared writes title texture `resource`
-    /// through unordered access: if it is of a kind copied back
-    /// ([`crate::texback`]), the list copies it when it closes.
-    pub(crate) fn texture_written(&self, resource: crate::object::This) {
-        if !crate::texback::wanted(resource) {
-            return;
-        }
-        let mut deferred = self.deferred();
-        if !deferred.back_wanted.iter().any(|target| target.owner() == resource as usize)
-            && let Some(target) = crate::texback::Target::new(resource)
-        {
-            deferred.back_wanted.push(target);
-        }
-    }
-
-    /// Before the list closes: the textures its shaders wrote that are copied
-    /// back go into read-back buffers ([`crate::texback::record`]).
-    fn textures_back(&self) {
-        const COPY_SOURCE: u32 = 0x800;
-        let wanted = std::mem::take(&mut self.deferred().back_wanted);
-        for target in wanted {
-            self.settle(&target.copy, COPY_SOURCE);
-            if let Some(back) = crate::texback::record(&self.list, target) {
-                self.deferred().texture_backs.push(back);
-            }
-        }
-    }
-
-||||||| 085ee7c4c
-=======
     /// A draw or dispatch being prepared writes title texture `resource`
     /// through unordered access: if it is of a kind copied back
     /// ([`crate::texback`]), the list copies it when it closes.
@@ -7606,21 +7480,6 @@ impl HostList {
             deferred.back_wanted.push(target);
         }
     }
-
-    /// Before the list closes: the textures its shaders wrote that are copied
-    /// back go into read-back buffers ([`crate::texback::record`]).
-    fn textures_back(&self) {
-        const COPY_SOURCE: u32 = 0x800;
-        let wanted = std::mem::take(&mut self.deferred().back_wanted);
-        for target in wanted {
-            self.settle(&target.copy, COPY_SOURCE);
-            if let Some(back) = crate::texback::record(&self.list, target) {
-                self.deferred().texture_backs.push(back);
-            }
-        }
-    }
-
->>>>>>> origin/exp/vitoriabr-head
     /// The draw or dispatch just prepared is recorded: the twins it writes
     /// now hold what their depth textures lack.
     pub(crate) fn twins_written(&self) {
@@ -9985,15 +9844,7 @@ impl Host {
     /// shown; else, in diagnostics builds, whether the frame was black.
     #[allow(dead_code)]
     pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-<<<<<<< HEAD
         self.present_planes(texture, state, None, frame)
-||||||| 085ee7c4c
-        let showing = std::time::Instant::now();
-        let shown = self.present_now(texture, state, frame);
-        crate::framelog::add(crate::framelog::T::PresentShowUs, showing.elapsed().as_micros() as u64);
-        shown
-=======
-        self.present_over(texture, state, None, frame)
     }
 
     /// [`Self::present`], with the title's second plane laid over `texture`
@@ -10005,14 +9856,9 @@ impl Host {
         over: Option<(&ID3D12Resource, u32)>,
         frame: u64,
     ) -> Option<bool> {
-        let showing = std::time::Instant::now();
-        let shown = self.present_now(texture, state, over, frame);
-        crate::framelog::add(crate::framelog::T::PresentShowUs, showing.elapsed().as_micros() as u64);
-        shown
->>>>>>> origin/exp/vitoriabr-head
+        self.present_planes(texture, state, over, frame)
     }
 
-<<<<<<< HEAD
     /// Shows `texture`, optionally alpha-compositing a second `overlay` plane
     /// over it (Series S two-plane presentation), and returns them to their states.
     pub(crate) fn present_planes(
@@ -10022,17 +9868,6 @@ impl Host {
         overlay: Option<(&ID3D12Resource, u32)>,
         frame: u64,
     ) -> Option<bool> {
-||||||| 085ee7c4c
-    fn present_now(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-=======
-    fn present_now(
-        &self,
-        texture: &ID3D12Resource,
-        state: u32,
-        over: Option<(&ID3D12Resource, u32)>,
-        frame: u64,
-    ) -> Option<bool> {
->>>>>>> origin/exp/vitoriabr-head
         // SAFETY: a live resource.
         let desc = unsafe { texture.GetDesc() };
         let planes = overlay.and_then(|(over, over_state)| {
@@ -10148,7 +9983,6 @@ impl Host {
             copy.reset();
             copy.keep(texture);
             let list = &copy.list;
-<<<<<<< HEAD
             let composed = if let Some((over, over_state, base_fmt, over_fmt)) = planes {
                 copy.keep(over);
                 if let Some(composer) = p.composer.as_mut() {
@@ -10213,21 +10047,6 @@ impl Host {
                     pre.push(transition(texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE));
                 }
                 pre.push(transition(
-||||||| 085ee7c4c
-            list.ResourceBarrier(&[
-                transition(texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE),
-                transition(
-=======
-            let laid = over.and_then(|(ui, ui_state)| {
-                crate::compose::record(&self.device, list, texture, ui, ui_state)
-            });
-            if let Some(laid) = &laid {
-                copy.keep(laid);
-            }
-            list.ResourceBarrier(&[
-                transition(texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE),
-                transition(
->>>>>>> origin/exp/vitoriabr-head
                     &back,
                     D3D12_RESOURCE_STATE_PRESENT,
                     D3D12_RESOURCE_STATE_COPY_DEST,
