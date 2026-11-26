@@ -10231,26 +10231,13 @@ impl Host {
                     &back,
                     D3D12_RESOURCE_STATE_PRESENT,
                     D3D12_RESOURCE_STATE_COPY_DEST,
-<<<<<<< HEAD
                 ));
                 list.ResourceBarrier(&pre);
                 list.CopyResource(&back, texture);
             }
-||||||| 085ee7c4c
-                ),
-            ]);
-            list.CopyResource(&back, texture);
             // The frame rate, into the corner of what is shown (not of the
             // title's own frame, which the lines below read back).
             crate::fpsbox::draw(self, list, &back, (width, height, format));
-=======
-                ),
-            ]);
-            list.CopyResource(&back, laid.as_ref().unwrap_or(texture));
-            // The frame rate, into the corner of what is shown (not of the
-            // title's own frame, which the lines below read back).
-            crate::fpsbox::draw(self, list, &back, (width, height, format));
->>>>>>> origin/exp/vitoriabr-head
             #[cfg(feature = "diagnostics")]
             let capture = crate::capture::wanted(frame)
                 .then(|| {
