@@ -67,49 +67,7 @@ pub struct Bools {
 }
 
 /// The tables below have small integer keys; SipHash dominated run time.
-<<<<<<< HEAD
-type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fx>>;
-||||||| merged common ancestors
-type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fx>>;
-type Set<K> = HashSet<K, BuildHasherDefault<Fx>>;
-
-/// A set of what a walk has met: a list scan while it is small (most lane
-/// masks are a handful of nodes), a hash set once it grows.
-struct Seen<T> {
-    list: Vec<T>,
-    set: Set<T>,
-}
-
-impl<T> Default for Seen<T> {
-    fn default() -> Self {
-        Seen {
-            list: Vec::new(),
-            set: Set::default(),
-        }
-    }
-}
-
-impl<T: Copy + Eq + std::hash::Hash> Seen<T> {
-    const SCAN: usize = 32;
-
-    /// Adds `x`; false if it was already in.
-    fn insert(&mut self, x: T) -> bool {
-        if self.set.is_empty() {
-            if self.list.contains(&x) {
-                return false;
-            }
-            if self.list.len() < Self::SCAN {
-                self.list.push(x);
-                return true;
-            }
-            self.set.extend(self.list.drain(..));
-        }
-        self.set.insert(x)
-    }
-}
-=======
 pub(crate) type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fx>>;
->>>>>>> vibr/main
 
 /// FxHash's multiply-rotate step.
 #[derive(Default)]
@@ -2049,7 +2007,6 @@ mod tests {
             "{edges:?}"
         );
     }
-<<<<<<< HEAD
 
     #[test]
     fn s_bcnt1_preserves_narrowed_exec_in_exits_and_scc_some() {
@@ -2140,8 +2097,4 @@ mod tests {
             "wave64 must not treat s_bcnt1_i32_b32 as a full wave64 lane-mask test"
         );
     }
-||||||| merged common ancestors
->>>>>>>>> Temporary merge branch 2
-=======
->>>>>>> vibr/main
 }

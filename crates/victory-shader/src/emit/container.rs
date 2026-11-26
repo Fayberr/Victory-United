@@ -204,18 +204,11 @@ pub(crate) fn signature(elements: &[SigElement], input: bool) -> Vec<u8> {
     // Validator 1.6 writes one name per element in element order, repeats
     // included, except that system values share theirs (it keys names by
     // the semantic's string, which is one static string per system value);
-<<<<<<< HEAD
     // the rows sorted by register (unallocated last), then by name offset:
     // of two elements packed into one register, the one first in element
     // order comes first whatever its columns (a sort by column made the
     // validator refuse 72 of the title's vertex, mesh and pixel programs:
     // "does not match expected for module").
-||||||| merged common ancestors
-    // the rows sorted by register (unallocated last).
-=======
-    // the rows sorted by register (unallocated last), keeping element order
-    // within the same register.
->>>>>>> vibr/main
     let mut offsets: Vec<u32> = Vec::new();
     let mut next = 8 + 32 * elements.len() as u32;
     let mut names = Vec::new();
@@ -234,13 +227,7 @@ pub(crate) fn signature(elements: &[SigElement], input: bool) -> Vec<u8> {
         }
     }
     let mut order: Vec<usize> = (0..elements.len()).collect();
-<<<<<<< HEAD
     order.sort_by_key(|&i| (elements[i].row.unwrap_or(u32::MAX), offsets[i]));
-||||||| merged common ancestors
-    order.sort_by_key(|&i| (elements[i].row.unwrap_or(u32::MAX), elements[i].col));
-=======
-    order.sort_by_key(|&i| elements[i].row.unwrap_or(u32::MAX));
->>>>>>> vibr/main
     for i in order {
         let (e, offset) = (&elements[i], offsets[i]);
         let used = e.usage << e.effective_col();
@@ -828,7 +815,6 @@ mod tests {
             .collect();
         assert_eq!(hex, "900150983cd24fb0d6963f7d28e17f72");
     }
-<<<<<<< HEAD
 
     #[test]
     fn signature_keeps_the_console_element_order_within_a_row() {
@@ -864,8 +850,6 @@ mod tests {
         assert_eq!(name_at(0), "TEXCOORD");
         assert_eq!(name_at(1), "COLOR");
     }
-||||||| merged common ancestors
-=======
 
     #[test]
     fn signature_keeps_same_row_order_canonical_sv_names_and_unalloc_mask() {
@@ -907,5 +891,4 @@ mod tests {
         assert_eq!(name_at(3), "SV_SampleIndex");
         assert_eq!(mask_rw(3), (0b0001, 0b0001));
     }
->>>>>>> vibr/main
 }
