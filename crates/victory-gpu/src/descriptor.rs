@@ -145,7 +145,6 @@ static SHADER_HEAPS: std::sync::RwLock<Vec<(u64, u64, usize)>> = std::sync::RwLo
 #[cfg(windows)]
 static SYNCING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-<<<<<<< HEAD
 /// An owned COM reference to a shader-visible [`Heap`], keeping it (and its
 /// host heap and backing memory) alive past the [`SHADER_HEAPS`] lookup.
 #[cfg(windows)]
@@ -168,24 +167,6 @@ impl Drop for HeapRef {
     }
 }
 
-||||||| merged common ancestors
-<<<<<<<<< Temporary merge branch 1
-||||||||| ffe310eb
-/// The shader-visible heap holding `handle`, and the descriptor's index.
-#[cfg(windows)]
-fn shader_slot<'a>(handle: u64) -> Option<(&'a Heap, u32)> {
-    let heaps = SHADER_HEAPS.lock().unwrap_or_else(|e| e.into_inner());
-    let &(_, _, at) = heaps
-        .iter()
-        .find(|&&(start, end, _)| (start..end).contains(&handle))?;
-    // SAFETY: registered heaps are live (removed when dropped).
-    let heap = unsafe { &*(at as *const Heap) };
-    Some((heap, heap.index(handle)?))
-}
-
-=========
-=======
->>>>>>> vibr/main
 /// The shader-visible heap holding `handle`, and the descriptor's index.
 #[cfg(windows)]
 fn shader_slot(handle: u64) -> Option<(HeapRef, u32)> {
@@ -208,7 +189,6 @@ fn shader_slot(handle: u64) -> Option<(HeapRef, u32)> {
 /// is in a shader-visible heap.
 #[cfg(windows)]
 fn mirror(handle: u64) {
-<<<<<<< HEAD
     let heaps = SHADER_HEAPS.read().unwrap_or_else(|e| e.into_inner());
     let Some(&(_, _, at)) = heaps
         .iter()
@@ -220,21 +200,6 @@ fn mirror(handle: u64) {
     // the `SHADER_HEAPS` lock we hold here.
     let heap = unsafe { &*(at as *const Heap) };
     let Some(index) = heap.index(handle) else {
-||||||| merged common ancestors
-    let heaps = SHADER_HEAPS.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(&(_, _, at)) = heaps
-        .iter()
-        .find(|&&(start, end, _)| (start..end).contains(&handle))
-    else {
-        return;
-    };
-    // SAFETY: registered heaps stay alive until `Heap::drop`, which takes
-    // the `SHADER_HEAPS` lock we hold here.
-    let heap = unsafe { &*(at as *const Heap) };
-    let Some(index) = heap.index(handle) else {
-=======
-    let Some((heap, index)) = shader_slot(handle) else {
->>>>>>> vibr/main
         return;
     };
     let mut pending = heap.pending.lock().unwrap_or_else(|e| e.into_inner());
