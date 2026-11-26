@@ -14,16 +14,6 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 use super::{VIEW_TAG, View, view_at};
 use crate::host::host;
 
-/// Outcome of [`HostHeap::mirror_buffer`] for incremental heap-buffer passes.
-pub(crate) enum BufferMirror {
-    /// Slot still mirrors `cached_key` and its title resource is still live.
-    Unchanged,
-    /// Slot was newly mirrored or changed to `(key, view)`.
-    Changed(u64, View),
-    /// Slot is empty or no longer valid.
-    Empty,
-}
-
 pub(crate) struct HostHeap {
     pub(crate) heap: ID3D12DescriptorHeap,
     cpu: usize,
@@ -2070,12 +2060,6 @@ impl HostHeap {
         out
     }
 
-    /// The title slots in rolling bucket `bucket & 63` that hold buffer views.
-    pub(crate) fn buffer_slots_bucket(&self, bucket: u32) -> Vec<u32> {
-        let buffers = self.buffers.lock().unwrap_or_else(|e| e.into_inner());
-        buffers[(bucket & 63) as usize].iter().copied().collect()
-    }
-
     /// The title slots whose buffer view was written, or went, since the
     /// last call.
     pub(crate) fn buffer_changes(&self) -> Vec<u32> {
@@ -2521,33 +2505,6 @@ impl HostHeap {
         let words = |at| u32::from_le_bytes(header[at..at + 4].try_into().unwrap());
         self.mirror_record(index, handle, false, [words(0), words(4), words(8)], false);
         true
-    }
-
-    /// Like [`HostHeap::mirror`] with `for_draw = true`, but returns
-    /// [`BufferMirror::Unchanged`] without rebuilding or re-resolving the
-    /// host copy when slot `index` still holds `cached_key` (`!= 0`), its
-    /// title view is still live, and the host heap already mirrors that key.
-    pub(crate) fn mirror_buffer(&self, index: u32, handle: u64, cached_key: u64) -> BufferMirror {
-        if cached_key != 0 && index < self.count {
-            // SAFETY: the handle is a descriptor slot in title memory.
-            let [tag, i, generation] = unsafe { (handle as *const [u32; 3]).read_unaligned() };
-            let key = u64::from(generation) << 32 | u64::from(i);
-            if tag == VIEW_TAG && key == cached_key && view_at(i, generation).is_some() {
-                let made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-                if made[index as usize] == key {
-                    return BufferMirror::Unchanged;
-                }
-            }
-        }
-        match self.mirror(index, handle, true) {
-            Some(view) => {
-                // SAFETY: `mirror` just read this descriptor slot.
-                let [_, i, generation] = unsafe { (handle as *const [u32; 3]).read_unaligned() };
-                let key = u64::from(generation) << 32 | u64::from(i);
-                BufferMirror::Changed(key, view)
-            }
-            None => BufferMirror::Empty,
-        }
     }
 
     /// [`HostHeap::mirror_copied`] for every record of one changed page of

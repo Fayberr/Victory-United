@@ -1922,107 +1922,48 @@ impl State {
         // materialized for this frame rather than nulled out at `Host::submit`.
         crate::descriptor::sync_heaps();
         // Per host heap: the host copy and range each slot's buffer view
-        // reads, partitioned into 64 buckets with per-bucket cached shadow
-        // spans so steady-state frames only inspect changed slots plus 1/64th
-        // of live slots (and skip unchanged slots without rebuilding spans
-        // across all 83,000 entries every frame).
-        type BucketMap = std::collections::HashMap<u32, (u64, std::sync::Arc<crate::shadow::Shadow>, u64, u64)>;
-        type SpanList = Vec<(std::sync::Arc<crate::shadow::Shadow>, u64, u64)>;
-        struct HeapBufferCache {
-            passes: u64,
-            buckets: [BucketMap; 64],
-            bucket_spans: [SpanList; 64],
-        }
-        impl HeapBufferCache {
-            fn new() -> Self {
-                Self {
-                    passes: 0,
-                    buckets: std::array::from_fn(|_| BucketMap::new()),
-                    bucket_spans: std::array::from_fn(|_| Vec::new()),
-                }
-            }
-            fn rebuild_bucket(&mut self, b: usize) {
-                let mut map: std::collections::HashMap<usize, (std::sync::Arc<crate::shadow::Shadow>, u64, u64)> =
-                    std::collections::HashMap::new();
-                for (_, shadow, from, to) in self.buckets[b].values() {
-                    let key = std::sync::Arc::as_ptr(shadow) as usize;
-                    let span = map.entry(key).or_insert_with(|| (shadow.clone(), *from, *to));
-                    span.1 = span.1.min(*from);
-                    span.2 = span.2.max(*to);
-                }
-                self.bucket_spans[b] = map.into_values().collect();
-            }
-        }
-        static RANGES: std::sync::Mutex<Option<std::collections::HashMap<usize, HeapBufferCache>>> =
+        // reads, kept from pass to pass. Only the slots marked since the
+        // last pass are looked at again (`crate::heap_pass`: written, their
+        // view's resource released, their record copied past the API, no
+        // host copy yet); 83,000 slots a pass otherwise, 0.1 s at best.
+        // `VICTORY_HEAP_PASS_FULL=1`: all of them every 16 passes, as before.
+        type Picked = crate::heap_pass::Picked<std::sync::Arc<crate::shadow::Shadow>>;
+        static RANGES: std::sync::Mutex<Option<std::collections::HashMap<usize, Picked>>> =
             std::sync::Mutex::new(None);
         let mut kept = RANGES.lock().unwrap_or_else(|e| e.into_inner());
-        let cache = kept
-            .get_or_insert_with(Default::default)
+        let heaps = kept.get_or_insert_with(Default::default);
+        // One list of freed table entries for all heaps: each heap's pass is told.
+        let forgotten = crate::descriptor::take_forgotten();
+        for picked in heaps.values_mut() {
+            picked.note_forgotten(forgotten.as_deref());
+        }
+        let ranges = heaps
             .entry(std::ptr::from_ref(host) as usize)
-            .or_insert_with(HeapBufferCache::new);
+            .or_insert_with(|| Picked::new(crate::heap_pass::full_pass()));
         let changed = host.buffer_changes();
-        let mut dirty_buckets: u64 = 0;
-        // Use `cached_key` even for slots reported in `changed`: when the
-        // title rewrites a slot with the same descriptor key (or a mirror
-        // already refreshed it), `mirror_buffer` answers `Unchanged` in O(1)
-        // without re-resolving `buffer_copy`.
-        let slots: Vec<u32> = if cache.passes == 0 {
-            for b in 0..64 {
-                cache.buckets[b].clear();
-                cache.bucket_spans[b].clear();
-            }
-            dirty_buckets = u64::MAX;
-            host.buffer_slots()
-        } else {
-            let bucket = (cache.passes & 63) as usize;
-            let mut batch: Vec<u32> = Vec::with_capacity(changed.len() + 2048);
-            let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::with_capacity(changed.len());
-            for index in changed {
-                if seen.insert(index) {
-                    batch.push(index);
-                }
-            }
-            let rolling = host.buffer_slots_bucket(bucket as u32);
-            let live_bucket: std::collections::HashSet<u32> = rolling.iter().copied().collect();
-            let before_len = cache.buckets[bucket].len();
-            cache.buckets[bucket].retain(|index, _| live_bucket.contains(index));
-            if cache.buckets[bucket].len() != before_len {
-                dirty_buckets |= 1u64 << bucket;
-            }
-            for index in rolling {
-                if seen.insert(index) {
-                    batch.push(index);
-                }
-            }
-            batch
-        };
-        cache.passes += 1;
+        let record = |index: u32| heap.handle(index).map(crate::descriptor::record_at);
+        let slots = ranges.plan(
+            changed,
+            || host.buffer_slots(),
+            record,
+            crate::descriptor::record_entry,
+        );
         if let Some(why) = crate::descriptor::host::device_removed() {
             drop(kept);
             crate::host::fail(format_args!("host device lost before preparing buffer views: {why}"));
         }
         HEAP_PASS_PARTS[1].fetch_add(slots.len() as u64, Ordering::Relaxed);
+        let mut lost: Option<String> = None;
         for (n, &index) in slots.iter().enumerate() {
-            let b = (index & 63) as usize;
+            ranges.forget(index);
             let Some(handle) = heap.handle(index) else {
-                if cache.buckets[b].remove(&index).is_some() {
-                    dirty_buckets |= 1u64 << b;
-                }
                 continue;
             };
-            let cached_key = cache.buckets[b]
-                .get(&index)
-                .filter(|(_, s, _, _)| !s.in_place())
-                .map_or(0, |(k, _, _, _)| *k);
-            let (key, view) = match host.mirror_buffer(index, handle, cached_key) {
-                crate::descriptor::host::BufferMirror::Unchanged => continue,
-                crate::descriptor::host::BufferMirror::Empty => {
-                    if cache.buckets[b].remove(&index).is_some() {
-                        dirty_buckets |= 1u64 << b;
-                    }
-                    continue;
-                }
-                crate::descriptor::host::BufferMirror::Changed(key, view) => (key, view),
+            // Read before the slot is made: a write after it is seen next pass.
+            let record = crate::descriptor::record_at(handle);
+            let entry = crate::descriptor::record_entry(record);
+            let Some(view) = host.mirror(index, handle, true) else {
+                continue;
             };
             // Every 64 views while the device lives (a cheap query).
             if n % 64 == 63
@@ -2033,16 +1974,19 @@ impl State {
                     .filter_map(|&i| crate::descriptor::view(heap.handle(i)?).map(|v| format!("{i}: {v:?}")))
                     .map(|s| s.chars().take(200).collect())
                     .collect();
-                drop(kept);
-                crate::host::fail(format_args!(
+                lost = Some(format!(
                     "host device lost while preparing buffer views at slot {index}: {why}; recent views: {last:#?}"
                 ));
+                break;
             }
             // The copy the slot shows (`buffer_copy`), not the one the
             // view's range alone would find.
             let Some((shadow, address, len)) = crate::descriptor::host::buffer_copy(&view) else {
-                if cache.buckets[b].remove(&index).is_some() {
-                    dirty_buckets |= 1u64 << b;
+                // A buffer view whose memory has no host copy (yet): tried
+                // again every 16 passes. (Other views: left out until
+                // written, as before.)
+                if crate::descriptor::host::buffer_range(&view).is_some_and(|(_, len)| len > 0) {
+                    ranges.orphan(index, record, entry);
                 }
                 continue;
             };
@@ -2050,30 +1994,18 @@ impl State {
             if host.shows(index, &shadow.buffer) == Some(false) {
                 HEAP_VIEWS_ELSEWHERE.fetch_add(1, Ordering::Relaxed);
             }
-            cache.buckets[b].insert(index, (key, shadow, address, address + len));
-            dirty_buckets |= 1u64 << b;
+            let key = std::sync::Arc::as_ptr(&shadow) as usize;
+            ranges.keep(index, key, &shadow, address, address + len, record, entry);
         }
-        let mut mask = dirty_buckets;
-        while mask != 0 {
-            let b = mask.trailing_zeros() as usize;
-            mask &= mask - 1;
-            cache.rebuild_bucket(b);
-        }
-        let views: u32 = cache.buckets.iter().map(|b| b.len() as u32).sum();
-        // Per host copy, the span its picked views cover (merged from 64
-        // pre-aggregated bucket span lists instead of scanning 83,000 slots).
-        let mut spans: std::collections::HashMap<usize, (std::sync::Arc<crate::shadow::Shadow>, u64, u64)> =
-            std::collections::HashMap::new();
-        for bucket_span in &cache.bucket_spans {
-            for (shadow, from, to) in bucket_span {
-                let key = std::sync::Arc::as_ptr(shadow) as usize;
-                let span = spans.entry(key).or_insert_with(|| (shadow.clone(), *from, *to));
-                span.1 = span.1.min(*from);
-                span.2 = span.2.max(*to);
-            }
-        }
+        let views = ranges.views() as u32;
+        // Per host copy, the span its picked views cover (worked out again
+        // only for a copy one of whose slots went).
+        let spans = ranges.spans();
         drop(kept);
-        let bytes: u64 = spans.values().map(|s| s.2 - s.1).sum();
+        if let Some(why) = lost {
+            crate::host::fail(format_args!("{why}"));
+        }
+        let bytes: u64 = spans.iter().map(|s| s.2 - s.1).sum();
         // Memory that is not write-watched is copied whole by every refresh.
         // It was once refreshed only every 120 frames (unmapped pages read
         // one by one cost 14 GB a frame in run 11, before they were
@@ -2086,7 +2018,7 @@ impl State {
         let whole = whole.get_or_insert_with(Default::default);
         let mut eligible: Vec<(&std::sync::Arc<crate::shadow::Shadow>, u64, u64)> =
             Vec::with_capacity(spans.len());
-        for (shadow, from, to) in spans.values() {
+        for (shadow, from, to) in &spans {
             if shadow.unwatched() {
                 // By the copy's number: a copy made where one let go was
                 // (`shadow::let_go_idle`) has never been refreshed.

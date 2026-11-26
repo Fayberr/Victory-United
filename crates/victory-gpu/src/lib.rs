@@ -45,6 +45,8 @@ pub mod frame;
 mod fx;
 #[cfg(windows)]
 pub mod framelog;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod heap_pass;
 #[cfg(windows)]
 mod host;
 #[cfg(windows)]
