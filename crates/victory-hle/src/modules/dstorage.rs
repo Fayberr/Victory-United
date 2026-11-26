@@ -1499,14 +1499,146 @@ fn page_numbers(array: *const usize, n: usize) -> Vec<usize> {
     (0..n).map(|i| unsafe { array.add(i).read_volatile() }).collect()
 }
 
+/// (Neptune) What the page arrays of the requests not yet run held when they were enqueued,
+/// by the array's address, in the order of the requests ([`as_enqueued`]).
+static ENQUEUED: Mutex<Option<HashMap<usize, VecDeque<Vec<usize>>>>> = Mutex::new(None);
+
+/// (Neptune) What each page array held when a request last ran with it, by the array's
+/// address: an array that holds that still at the next request's enqueue has not been
+/// touched since, and only such a one is waited for ([`filled`]). An array the title filled
+/// before it enqueued holds other numbers than its last use's and is taken at once: waiting
+/// for every array that was the same at enqueue and at the run held a seventh of all
+/// requests for 20 ms each (32,389 of 243,651 in a launch, of which three were the stale
+/// ones), and the load took 20 s longer.
+static LAST_RUN: Mutex<Option<HashMap<usize, Vec<usize>>>> = Mutex::new(None);
+
+/// (Neptune) By array: how many requests in a row ran with the pages of the one before after
+/// the whole wait had passed and the array stood unchanged. From [`SAME_TRUSTED`] on the
+/// array is one the title reads into the same pages with every time (its buffers for what it
+/// streams: half of all requests, 22,497 of 135,639 in run ve139, a third of the workers'
+/// time spent waiting on them), and is not waited for any more. A request with other pages
+/// starts the count again.
+static SAME_RUNS: Mutex<Option<HashMap<usize, u32>>> = Mutex::new(None);
+const SAME_TRUSTED: u32 = 3;
+
+fn same_runs(array: usize, set: Option<u32>) -> u32 {
+    let mut all = SAME_RUNS.lock().unwrap_or_else(|e| e.into_inner());
+    let runs = all.get_or_insert_with(HashMap::new).entry(array).or_insert(0);
+    match set {
+        Some(0) => *runs = 0,
+        Some(_) => *runs = runs.saturating_add(1),
+        None => {}
+    }
+    *runs
+}
+
+/// (Neptune) Notes what the page array of `request` holds as it is enqueued.
+///
+/// The title fills the array after it has enqueued the request. Until it has, the array
+/// holds zeros, which [`filled`] waits for, or the numbers of its last use, which nothing
+/// told apart from this request's own: the request then wrote its bytes into the pages of
+/// the texture or model read there before, and the pages it was meant for kept what they
+/// held (a texture of coloured noise on one character's arms, another's face). The faster
+/// the workers reach a request the more often: with a handle of their own for each read
+/// they found the array still zero 16 times in a launch, from none to two before.
+/// `VICTORY_DSTORAGE_STALE_MS=0`: not noted, as before.
+///
+/// Only with `VICTORY_PAGE_LIST=late`, where every list is read after the title's submit
+/// and so every request takes its note back in [`filled`]; with the default `submit` the
+/// list is resolved when it is right and nothing here is kept.
+fn as_enqueued(request: &Request) {
+    if page_list() != PageList::Late
+        || request.options & PAGE_DESTINATION == 0
+        || request.destination.is_null()
+        || stale_wait().is_zero()
+    {
+        return;
+    }
+    let offset = (request.page_offset & 0xffff) as usize;
+    let n = (offset + request.destination_size as usize).div_ceil(PAGE);
+    let array = request.destination.cast::<usize>();
+    let now = page_numbers(array, n);
+    let mut all = ENQUEUED.lock().unwrap_or_else(|e| e.into_inner());
+    all.get_or_insert_with(HashMap::new).entry(array as usize).or_default().push_back(now);
+}
+
+/// How long a request waits for a page array that still holds what it held at enqueue
+/// (`VICTORY_DSTORAGE_STALE_MS`, 10).
+fn stale_wait() -> std::time::Duration {
+    static MS: OnceLock<u64> = OnceLock::new();
+    std::time::Duration::from_millis(*MS.get_or_init(|| {
+        // 10: of the 127 arrays found stale in the runs up to ve135b, 109 were filled within
+        // 2 ms, 7 more within 4 and the last 11 within 6. It was 20, which half of all
+        // requests then waited in full (687 of 1,371 in five seconds, 14 s of workers' time).
+        std::env::var("VICTORY_DSTORAGE_STALE_MS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(10)
+    }))
+}
+
 /// The page numbers of a destination whose list was not resolved at the
 /// title's submit ([`resolve`]): read now that the request runs; a number
 /// that is still zero is waited for, a tenth of a second at most (from
-/// myokex/victory-amd c3723f3).
+/// myokex/victory-amd c3723f3). (Neptune) An array that still holds what it
+/// held at enqueue ([`as_enqueued`]) is waited for too: the title fills the
+/// array after it has enqueued the request, so until it has, the array holds
+/// its last use's numbers, and a request that took them wrote into the pages
+/// of the texture or model read there before.
 fn filled(array: *const usize, n: usize) -> Vec<usize> {
     static LATE: AtomicU64 = AtomicU64::new(0);
     let mut pages = page_numbers(array, n);
+    // (Neptune) What the array held when this request was enqueued ([`as_enqueued`]): while
+    // it holds that still, and that is not zeros, the title has not filled it for this
+    // request yet (or asks for the same pages again, which a short wait does not harm).
+    let before = {
+        let mut all = ENQUEUED.lock().unwrap_or_else(|e| e.into_inner());
+        all.as_mut().and_then(|all| {
+            let line = all.get_mut(&(array as usize))?;
+            let before = line.pop_front();
+            if line.is_empty() {
+                all.remove(&(array as usize));
+            }
+            before
+        })
+    };
+    let untouched = {
+        let last = LAST_RUN.lock().unwrap_or_else(|e| e.into_inner());
+        last.as_ref()
+            .and_then(|last| last.get(&(array as usize)))
+            .is_some_and(|last| last.len() >= n && last[..n] == pages[..])
+    };
+    if !untouched {
+        same_runs(array as usize, Some(0));
+    }
+    if let Some(before) = before
+        && untouched
+        && before.iter().any(|&p| p != 0)
+        && !pages.contains(&0)
+        && before.len() >= n
+        && before[..n] == pages[..]
+    {
+        if same_runs(array as usize, None) >= SAME_TRUSTED {
+            TRUSTED.fetch_add(1, Ordering::Relaxed);
+        } else {
+            STALE[0].fetch_add(1, Ordering::Relaxed);
+            let began = std::time::Instant::now();
+            let most = stale_wait();
+            while before[..n] == pages[..] && began.elapsed() < most {
+                std::thread::sleep(std::time::Duration::from_micros(250));
+                pages = page_numbers(array, n);
+            }
+            STALE[2].fetch_add(began.elapsed().as_micros() as u64, Ordering::Relaxed);
+            if before[..n] != pages[..] {
+                STALE[1].fetch_add(1, Ordering::Relaxed);
+                same_runs(array as usize, Some(0));
+            } else {
+                same_runs(array as usize, Some(1));
+            }
+        }
+    }
     if !pages.contains(&0) {
+        if !stale_wait().is_zero() {
+            let mut last = LAST_RUN.lock().unwrap_or_else(|e| e.into_inner());
+            last.get_or_insert_with(HashMap::new).insert(array as usize, pages.clone());
+        }
         return pages;
     }
     let began = std::time::Instant::now();
@@ -1523,6 +1655,10 @@ fn filled(array: *const usize, n: usize) -> Vec<usize> {
             filled = !pages.contains(&0),
             "dstorage: a request ran before its page array was filled"
         );
+    }
+    if !stale_wait().is_zero() {
+        let mut last = LAST_RUN.lock().unwrap_or_else(|e| e.into_inner());
+        last.get_or_insert_with(HashMap::new).insert(array as usize, pages.clone());
     }
     pages
 }
@@ -2095,11 +2231,11 @@ fn into_destination(
 static DESTINATION_WAITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Queues that submitted themselves, half full (diagnostics).
 static AUTO_SUBMITS: AtomicU32 = AtomicU32::new(0);
-/// (Neptune) The counters klbf's summary line prints for its stale-array wait. This tree reads
-/// a page list at the title's submit (`VICTORY_PAGE_LIST`) and waits in [`filled`] for a number
-/// still zero, so that wait is not carried and these are only ever 0 in the line.
+/// (Neptune) Since the last summary: requests whose page array still held, when they ran, the
+/// numbers it had at enqueue (its last use's); of them, those whose array changed while the
+/// request waited for it; and the microseconds waited in all ([`filled`]).
 static STALE: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
-/// (Neptune) See [`STALE`].
+/// (Neptune) Requests not waited for because their array is trusted ([`SAME_RUNS`]).
 static TRUSTED: AtomicU64 = AtomicU64::new(0);
 
 /// The page numbers `list` holds now, one per 64 KiB of destination.
