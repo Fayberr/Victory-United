@@ -2663,7 +2663,7 @@ impl<'a> Lower<'a> {
 
     fn run(mut self, counted: bool) -> Result<Lowered, Stop> {
         let p = self.x.p;
-<<<<<<< HEAD
+        self.halves_only = self.places_read_as_halves();
         if counted {
             // Before anything else, so that wave counts, reads of the first
             // lane and stores know only the lanes that run.
@@ -2689,10 +2689,6 @@ impl<'a> Lower<'a> {
             self.s.entry = body;
         }
         self.find_coherent();
-||||||| c7daeea5
-=======
-        self.halves_only = self.places_read_as_halves();
->>>>>>> integ/vertex
         let order = crate::ir::reverse_postorder(&p.blocks);
         for (n, &b) in order.iter().enumerate() {
             self.rpo[b] = n;
@@ -3839,15 +3835,7 @@ impl<'a> Lower<'a> {
         };
         let (lo, hi) = (word(self, 0)?, word(self, 1)?);
         let (lo, hi) = self.address_plus(lo, hi, i32::from(*offset));
-<<<<<<< HEAD
-        let guard = self.guard(b, i)?;
-||||||| c7daeea5
-        let guard = self.guard(b, i)?;
-        let c = self.cur;
-=======
         let guard = self.effect_guard(b, i)?;
-        let c = self.cur;
->>>>>>> integ/vertex
         let (i32t, res) = (self.s.t.i32, self.s.t.res_ret);
         let iu = self.s.m.undef(i32t);
         let align = self.s.m.i32(4);
@@ -11695,24 +11683,16 @@ impl<'a> Lower<'a> {
             let mut vals =
                 self.vgprs(inst, data.as_ref().ok_or("buffer store data")?, regs as u8)?;
             if d16 {
-<<<<<<< HEAD
-                // d16 data is taken as f16, widened for the 32-bit float
-                // store; through a view of an integer format it is a 16-bit
-                // integer, zero- or sign-extended (VIctory 4243a96a: the face
-                // network keeps its halves in UINT views; its output was
-                // noise). shortcut: that is known of the views a program
-                // picks from the heap, not of those in its tables; and the
-                // handle stays a float one, whose bits the drivers pass.
-                let integer = if typed { self.integer_view(src)? } else { None };
-||||||| c7daeea5
-                // shortcut: d16 data is taken as f16 (integer formats would
-                // keep 16 bits), widened for the 32-bit float store.
-=======
                 // Through a view of a table each half is stored as it is
-                // (`halves`). Reached another way:
-                // shortcut: d16 data is taken as f16 (integer formats would
-                // keep 16 bits), widened for the 32-bit float store.
->>>>>>> integ/vertex
+                // (`halves`). Otherwise d16 data is taken as f16, widened for
+                // the 32-bit float store; through a view of an integer format
+                // it is a 16-bit integer, zero- or sign-extended (VIctory
+                // 4243a96a: the face network keeps its halves in UINT views;
+                // its output was noise). shortcut: that is known of the views
+                // a program picks from the heap, not of those in its tables;
+                // and the handle stays a float one, whose bits the drivers
+                // pass.
+                let integer = if typed { self.integer_view(src)? } else { None };
                 let mut wide = Vec::new();
                 for k in 0..count {
                     let mut x = vals[(k / 2) as usize];
@@ -11901,45 +11881,31 @@ impl<'a> Lower<'a> {
             return Err("a buffer result");
         };
         if d16 {
-<<<<<<< HEAD
-            // Two f16 channels per VGPR (an odd last high half 0); the low
-            // 16 bits of an integer view's (see the stores above).
-            let integer = if typed { self.integer_view(src)? } else { None };
-||||||| c7daeea5
-            // Two f16 channels per VGPR (an odd last high half 0).
-=======
             // Two f16 channels per VGPR (an odd last high half 0); through
-            // a view of a table, the 16 bits of each as they are.
->>>>>>> integ/vertex
+            // a view of a table the 16 bits of each as they are, and the
+            // low 16 bits of an integer view's (see the stores above).
+            let integer = if typed { self.integer_view(src)? } else { None };
             let k16 = self.s.m.i32(16);
             let i32t = self.s.t.i32;
             for k in 0..count.div_ceil(2) {
                 let mut x = None;
                 for ch in (2 * k..(2 * k + 2).min(count)).rev() {
                     let f = self.s.m.extract(c, r, ch);
-<<<<<<< HEAD
-                    let mut h = self
-                        .s
-                        .op(c, "legacyF32ToF16", Attr::ReadNone, i32t, 130, &[f]);
-                    if let Some((int, _)) = integer {
-                        let bits = self.as_int(f);
-                        let low = self.s.m.i32(0xFFFF);
-                        let low = self.s.m.bin(c, Bin::And, bits, low);
-                        h = self.s.m.select(c, int, low, h);
-                    }
-||||||| c7daeea5
-                    let h = self
-                        .s
-                        .op(c, "legacyF32ToF16", Attr::ReadNone, i32t, 130, &[f]);
-=======
                     let h = if halves {
                         let low = self.s.m.i32(0xffff);
                         self.s.m.bin(c, Bin::And, f, low)
                     } else {
-                        self.s
-                            .op(c, "legacyF32ToF16", Attr::ReadNone, i32t, 130, &[f])
+                        let mut h = self
+                            .s
+                            .op(c, "legacyF32ToF16", Attr::ReadNone, i32t, 130, &[f]);
+                        if let Some((int, _)) = integer {
+                            let bits = self.as_int(f);
+                            let low = self.s.m.i32(0xFFFF);
+                            let low = self.s.m.bin(c, Bin::And, bits, low);
+                            h = self.s.m.select(c, int, low, h);
+                        }
+                        h
                     };
->>>>>>> integ/vertex
                     x = Some(match x {
                         Some(hi) => {
                             let hi = self.s.m.bin(c, Bin::Shl, hi, k16);
