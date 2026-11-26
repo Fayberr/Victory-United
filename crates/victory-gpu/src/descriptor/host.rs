@@ -4322,13 +4322,10 @@ impl HostHeap {
             // (As `mirror`.)
             let stale = self.note_buffer(index, Some(&view), true);
             let old = view_at(shown as u32, (shown >> 32) as u32);
-            let kind = old.as_ref().map(|old| kin(old, &view));
-            let kept = kind.is_some_and(|kind| kind.kept(keep_shown()));
-            // (Neptune) A slot that goes on showing another texture than the
-            // one it is written with, until the new one is made.
-            if kind.is_some_and(|kind| kind != Kin::Same && kind.kept(keep_shown())) {
-                KEPT_OTHER_VIEWS.fetch_add(1, Relaxed);
-            }
+            let kept = old.is_some_and(|old| match kin(&old, &view) {
+                Kin::Same => true,
+                kin => kin.kept(keep_shown()),
+            });
             if shown == 0 || !kept {
                 #[cfg(feature = "diagnostics")]
                 note_before(index, shown, "neutral");
@@ -7923,7 +7920,9 @@ mod changed_records_tests {
 }
 
 /// (Neptune) Writes of a slot with a view of another texture than the one it showed, since
-/// the start: the slot kept showing the old texture until the new one was made.
+/// the start: the slot kept showing the old texture until the new one was made. VU's path
+/// keeps such slots through [`keep_shown`] ([`Kin`]) and counts them in [`REWRITTEN`], so
+/// this stays 0; the line in the log names it all the same.
 pub(crate) static KEPT_OTHER_VIEWS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Whether both are shader views of one texture the title placed in
