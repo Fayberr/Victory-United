@@ -3825,16 +3825,28 @@ impl HostHeap {
                 // time it got sharper.
                 if later
                     && keep_views()
-                    && view_at(shown as u32, (shown >> 32) as u32)
-                        .is_some_and(|old| same_placed_texture(&old, &view))
+                    && let Some(old) = view_at(shown as u32, (shown >> 32) as u32)
                 {
-                    KEPT_VIEWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    drop(_held);
-                    self.unmake_stale(index, stale);
-                    for stale in std::mem::take(&mut stale_unmade) {
-                        self.forget_copied(stale);
+                    let kin = kin(&old, &view);
+                    let mut keep = kin == Kin::Same;
+                    if keep {
+                        KEPT_VIEWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    } else if is_texture_view(&old) {
+                        // And of another texture that can stand for it
+                        // ([`keep_shown`]): black, then grey for a frame or
+                        // two is what popped. (Taken from VIctory-7900XTX,
+                        // lost in the whole-branch merge.)
+                        keep = kin.kept(keep_shown());
+                        rewritten(kin, keep);
                     }
-                    return Some(view);
+                    if keep {
+                        drop(_held);
+                        self.unmake_stale(index, stale);
+                        for stale in std::mem::take(&mut stale_unmade) {
+                            self.forget_copied(stale);
+                        }
+                        return Some(view);
+                    }
                 }
                 self_changed = true;
                 self.quick_is(index, 0);
