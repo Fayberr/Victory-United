@@ -747,7 +747,6 @@ fn packed_add_selects_halves_of_inline_constants() {
 /// place becomes 1 + one place). The doubles come in s0..s3 (v1..v4): a in v[1:2], b in
 /// v[3:4].
 #[test]
-<<<<<<< HEAD
 fn f64_arithmetic_and_conversions_are_ieee() {
     let to_f32 = vop1(0x0F, 0, vgpr(5)); // v_cvt_f32_f64 v0, v[5:6]
     let d = |a: f64, b: f64| {
@@ -773,62 +772,6 @@ fn f64_arithmetic_and_conversions_are_ieee() {
         (&neg_mul, d(3.0, 0.5), -1.5),
         (&half, d(2.0, 0.0), 2.5),
         (&wide, [1.25f32.to_bits(), 0, 0, 0], 2.5),
-||||||| merged common ancestors
-#[ignore = "expects results below the smallest normal float flushed to zero; the IEEE lowering (v_cvt_f32_f64_matches_ieee754) is kept until the console's mode is checked"]
-fn v_cvt_f32_f64_rounds_to_nearest_even() {
-    // v_cvt_f32_f64 v0, v[1:2] (VOP1 opcode 0x0f)
-    let shader = build_valu_cs(&[vop1(0x00f, 0, vgpr(1))]);
-    let tie_even = 1.0f64 + f64::from(f32::EPSILON) / 2.0; // ties to 1.0
-    let tie_odd = 1.0f64 + 1.5 * f64::from(f32::EPSILON); // ties up to 1 + 2 ulp
-    let values = [
-        0.0,
-        -0.0,
-        1.0,
-        -2.5,
-        std::f64::consts::PI,
-        1.0e-3,
-        123_456_789.123,
-        tie_even,
-        tie_odd,
-        1.0 + f64::from(f32::EPSILON) * 0.75,
-        f64::from(f32::MAX),
-        f64::from(f32::MAX) * 1.000_000_1, // rounds to infinity
-        1.0e300,
-        -1.0e300,
-        1.0e-40, // a float denormal: flushed
-        -1.0e-300,
-        f64::from(f32::MIN_POSITIVE),
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NAN,
-=======
-fn v_cvt_f32_f64_rounds_to_nearest_even() {
-    // v_cvt_f32_f64 v0, v[1:2] (VOP1 opcode 0x0f)
-    let shader = build_valu_cs(&[vop1(0x00f, 0, vgpr(1))]);
-    let tie_even = 1.0f64 + f64::from(f32::EPSILON) / 2.0; // ties to 1.0
-    let tie_odd = 1.0f64 + 1.5 * f64::from(f32::EPSILON); // ties up to 1 + 2 ulp
-    let values = [
-        0.0,
-        -0.0,
-        1.0,
-        -2.5,
-        std::f64::consts::PI,
-        1.0e-3,
-        123_456_789.123,
-        tie_even,
-        tie_odd,
-        1.0 + f64::from(f32::EPSILON) * 0.75,
-        f64::from(f32::MAX),
-        f64::from(f32::MAX) * 1.000_000_1, // rounds to infinity
-        1.0e300,
-        -1.0e300,
-        1.0e-40, // a float denormal: flushed
-        -1.0e-300,
-        f64::from(f32::MIN_POSITIVE),
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NAN,
->>>>>>> vibr/main
     ];
     for (body, inputs, want) in cases {
         let shader = build_valu_cs(body);
