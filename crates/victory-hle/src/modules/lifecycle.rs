@@ -110,18 +110,10 @@ pub extern "system" fn CreateWindowExW(
     instance: HINSTANCE,
     param: *const c_void,
 ) -> HWND {
-<<<<<<< HEAD
     let (ex_style, style, (x, y, width, height)) = place(ex_style, style, parent, x, y, width, height);
+    let (ex_style, x, y) = hide(parent, ex_style, x, y);
     // SAFETY: the title's own arguments, forwarded (the size fitted, or the
     // window made full screen).
-||||||| 085ee7c4c
-    let (x, y, width, height) = fit(parent, x, y, width, height);
-    // SAFETY: the title's own arguments, forwarded (the size fitted).
-=======
-    let (x, y, width, height) = fit(parent, x, y, width, height);
-    let (ex_style, x, y) = hide(parent, ex_style, x, y);
-    // SAFETY: the title's own arguments, forwarded (the size fitted).
->>>>>>> origin/exp/vitoriabr-head
     let hwnd = unsafe {
         wm::CreateWindowExW(
             ex_style, class, name, style, x, y, width, height, parent, menu, instance, param,
@@ -146,18 +138,10 @@ pub extern "system" fn CreateWindowExA(
     instance: HINSTANCE,
     param: *const c_void,
 ) -> HWND {
-<<<<<<< HEAD
     let (ex_style, style, (x, y, width, height)) = place(ex_style, style, parent, x, y, width, height);
+    let (ex_style, x, y) = hide(parent, ex_style, x, y);
     // SAFETY: the title's own arguments, forwarded (the size fitted, or the
     // window made full screen).
-||||||| 085ee7c4c
-    let (x, y, width, height) = fit(parent, x, y, width, height);
-    // SAFETY: the title's own arguments, forwarded (the size fitted).
-=======
-    let (x, y, width, height) = fit(parent, x, y, width, height);
-    let (ex_style, x, y) = hide(parent, ex_style, x, y);
-    // SAFETY: the title's own arguments, forwarded (the size fitted).
->>>>>>> origin/exp/vitoriabr-head
     let hwnd = unsafe {
         wm::CreateWindowExA(
             ex_style, class, name, style, x, y, width, height, parent, menu, instance, param,
@@ -167,7 +151,6 @@ pub extern "system" fn CreateWindowExA(
     hwnd
 }
 
-<<<<<<< HEAD
 /// Where a window the title makes goes: full screen ([`full_screen`]), or
 /// fitted to the screen ([`fit`]); with the styles it gets.
 fn place(
@@ -272,8 +255,6 @@ fn full_screen(ex_style: u32, style: u32, parented: bool, screen: (i32, i32)) ->
     Some((ex_style & !frame, wm::WS_POPUP | (style & kept), (0, 0, screen.0, screen.1)))
 }
 
-||||||| 085ee7c4c
-=======
 /// `VICTORY_HIDDEN_WINDOW=1`: the title's top-level window is made off the
 /// screens (right of the virtual desktop), out of the taskbar and never
 /// activated by a click, for unattended runs on a machine in use. The swap
@@ -293,7 +274,6 @@ fn hide(parent: HWND, ex_style: u32, x: i32, y: i32) -> (u32, i32, i32) {
     (ex_style | wm::WS_EX_TOOLWINDOW | wm::WS_EX_NOACTIVATE, right + 64, 0)
 }
 
->>>>>>> origin/exp/vitoriabr-head
 /// A console title sizes its window to its render target (
 /// the title: 3840x2160 on a Series X), which can exceed the host's screen.
 /// A top-level window larger than the work area is shrunk to fit, keeping
