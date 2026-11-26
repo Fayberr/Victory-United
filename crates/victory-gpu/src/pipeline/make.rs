@@ -50,11 +50,15 @@ pub(crate) struct Pending {
     /// A pass over the screen ([`GraphicsState::screen_pass`]) or a confirmed
     /// opening-scene / bake producer that must never sit behind cold RT shaders.
     screen: bool,
-<<<<<<< HEAD
     /// Confirmed first-scene / bake producer prepared early even on a cold cache.
     scene_input: bool,
     /// Why this pipeline is intentionally skipped (e.g. RT resolve without BVH).
     left_out: Option<&'static str>,
+    /// First title frame in which a recording thread waited on this pipeline
+    /// (`u64::MAX`: never waited yet). Caps waiting to one frame per pipeline
+    /// so a slow or hung shader compiles asynchronously without stalling every
+    /// subsequent frame for the full wait budget.
+    waited_frame: AtomicU64,
 }
 
 fn named(shaders: &[Arc<Shader>], name: &[u8]) -> bool {
@@ -105,14 +109,6 @@ fn scene_input(shaders: &[Arc<Shader>]) -> bool {
                 | "369cbe906ea72764"
         ) || crate::draw::BAKE_PIXEL_SHADERS.contains(&s.hash.as_str())
     })
-||||||| merged common ancestors
-=======
-    /// First title frame in which a recording thread waited on this pipeline
-    /// (`u64::MAX`: never waited yet). Caps waiting to one frame per pipeline
-    /// so a slow or hung shader compiles asynchronously without stalling every
-    /// subsequent frame for the full wait budget.
-    waited_frame: AtomicU64,
->>>>>>> origin/exp/vibr-head
 }
 
 // SAFETY: D3D12 objects are free-threaded; the graphics state (whose input
@@ -287,27 +283,17 @@ pub(crate) fn now(p: &Arc<Pending>) -> bool {
 }
 
 /// At the title's creation of a pipeline: starts it at once if an earlier
-<<<<<<< HEAD
 /// run drew with it (during loading, so the world's first frames find it),
-/// or if it is a confirmed opening-scene / bake producer.
-||||||| merged common ancestors
-/// run drew with it (during loading, so the world's first frames find it).
-=======
-/// run drew with it (during loading, so the world's first frames find it),
-/// and every compute pipeline: its first dispatch waits for it, and a frame
-/// that first dispatches hundreds of them (the world's) waited minutes.
->>>>>>> origin/exp/vibr-head
+/// or if it is a confirmed opening-scene / bake producer, or if it is a
+/// compute pipeline: its first dispatch waits for it, and a frame that
+/// first dispatches hundreds of them (the world's) waited minutes.
 pub(crate) fn early(p: &Arc<Pending>) {
-<<<<<<< HEAD
     if p.left_out.is_some() {
         return;
     }
-    if !p.shaders.is_empty() && (p.scene_input || super::library::wanted_early(&p.key)) {
-||||||| merged common ancestors
-    if !p.shaders.is_empty() && super::library::wanted_early(&p.key) {
-=======
-    if !p.shaders.is_empty() && (p.compute() || super::library::wanted_early(&p.key)) {
->>>>>>> origin/exp/vibr-head
+    if !p.shaders.is_empty()
+        && (p.scene_input || p.compute() || super::library::wanted_early(&p.key))
+    {
         super::library::EARLY.fetch_add(1, Ordering::Relaxed);
         start(p, if p.scene_input { REQUESTED } else { EARLY });
     }
