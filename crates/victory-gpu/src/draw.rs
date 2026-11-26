@@ -5031,9 +5031,56 @@ impl State {
                 .filter(|&&(s, _)| s == slot)
                 .map(|&(_, at)| at / 8)
                 .collect();
-        self.end_window(list);
-        self.gather_ends(list, true);
-        #[cfg(windows)]
+<<<<<<< HEAD
+            let single;
+            let mut many;
+            let selected: &[u32] = match (layout.indexed.as_slice(), half_at.is_empty()) {
+                ([], true) => &[],
+                ([expression], true) => {
+                    single = evaluate(expression);
+                    std::slice::from_ref(&single)
+                }
+                (expressions, _) => {
+                    many = expressions
+                        .iter()
+                        .map(evaluate)
+                        .chain(half_at.iter().copied())
+                        .collect::<Vec<_>>();
+                    many.sort_unstable();
+                    many.dedup();
+                    &many
+                }
+            };
+            let n = layout.records.last().map_or(0, |entry| entry.0)
+                .max(selected.last().copied().unwrap_or(0))
+||||||| a66ac212
+            selected.sort_unstable();
+            selected.dedup();
+            let n = entries
+                .iter()
+                .map(|u| u.table_offset_dwords / 8)
+                .chain(selected.last().copied())
+                .max()
+                .unwrap_or(0)
+=======
+            // The descriptors the shader moves halves through are made too,
+            // and the table reaches them: they may lie past the range starts
+            // the entries give (a range of several views names only its
+            // first; review on #927).
+            selected.extend(
+                half.iter()
+                    .filter(|&&(s, _)| s == slot)
+                    .map(|&(_, at)| at / 8),
+            );
+            selected.sort_unstable();
+            selected.dedup();
+            let n = entries
+                .iter()
+                .map(|u| u.table_offset_dwords / 8)
+                .chain(selected.last().copied())
+                .max()
+                .unwrap_or(0)
+>>>>>>> klbf/beta-2
                 + 1;
             let last = table.checked_add(u64::from(n - 1) * 32);
             if n > crate::descriptor::host::DYNAMIC
@@ -5050,17 +5097,16 @@ impl State {
                 for k in 0..n {
                     let at = table + u64::from(k) * 32;
                     // SAFETY: a descriptor slot in title memory.
-        // A program that walks ray-tracing structures nothing has built.
-        if crate::pipeline::walk_held(self.pipeline as This) {
-            #[cfg(feature = "diagnostics")]
-            crate::pipeline::note_why("a walk of ray-tracing structures that are not built (VICTORY_BVH_HOLD=1)".to_owned());
-            return;
-        }
-        // (Neptune) A program that only serves rays that do not run is left out.
-        if crate::pipeline::left_without_rays(self.pipeline as This) {
-            crate::pipeline::LEFT_WITHOUT_RAYS.fetch_add(1, Ordering::Relaxed);
-            return;
-        }
+<<<<<<< HEAD
+                    h.add(unsafe { (at as *const [u32; 3]).read_unaligned() });
+||||||| a66ac212
+                    unsafe { (at as *const [u32; 3]).read_unaligned() }.hash(&mut h);
+=======
+                    unsafe { (at as *const [u32; 3]).read_unaligned() }.hash(&mut h);
+                    // (Another table than the same slots made for a shader
+                    // that reads them in the title's formats.)
+                    half.contains(&(slot, k * 8)).hash(&mut h);
+>>>>>>> klbf/beta-2
                 }
 <<<<<<< HEAD
                 let h = half.iter().filter(|&&(s, _)| s == slot).fold(h.0, |h, &(_, at)| {
