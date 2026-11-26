@@ -2053,7 +2053,6 @@ impl Staging {
         size
     }
 
-<<<<<<< HEAD
     /// A refresh of a texture that has been given nothing yet, while the
     /// runtime is remapping title memory ([`no_wait`]): read around the
     /// pages that are not there, through the kernel, as a partly mapped
@@ -2073,8 +2072,6 @@ impl Staging {
         })
     }
 
-||||||| 85d564167
-=======
     /// `tiled`, read whole, was detiled: a texture of all its levels from
     /// level 0 is given to the store (`crate::texstore`), detiled again
     /// into memory of ours (the staging buffer is the card's to read, slow
@@ -2100,8 +2097,6 @@ impl Staging {
             .collect();
         crate::texstore::keep(self.shape, &self.layout, tiled, parts);
     }
-
->>>>>>> avatar/main
     /// Detiles `tiled` (the texture's memory) into the staging buffer.
     fn detile(&self, tiled: &[u8]) {
         use std::sync::atomic::Ordering::Relaxed;
@@ -2591,7 +2586,13 @@ fn staging(resource: This, copy: &crate::resource::HostTexture, first: u32) -> O
             Some(&mut total),
         );
     }
-<<<<<<< HEAD
+    let speculative = PICKING.get().is_some() && !BAKING.get();
+    if crate::residency::upload_refused()
+        || (speculative && !crate::residency::allow_staging_growth(false))
+    {
+        crate::residency::note_staging_deferred();
+        return None;
+    }
     let (buffer, data, pooled, piece) = staging_buffer(host, total)?;
     if piece.is_none() {
         crate::host::name(&buffer, || {
@@ -2601,44 +2602,6 @@ fn staging(resource: This, copy: &crate::resource::HostTexture, first: u32) -> O
             )
         });
     }
-||||||| 85d564167
-    let (piece, buffer, base, data) = match crate::pool::staging(host, total) {
-        Some((piece, buffer, base, data)) => (Some(piece), buffer, base, data),
-        None => {
-            let (buffer, data) = host.upload_buffer(total)?;
-            crate::host::name(&buffer, || {
-                format!(
-                    "staging of {resource:?} {}x{}x{} f{}",
-                    d.Width, d.Height, d.DepthOrArraySize, d.Format.0
-                )
-            });
-            (None, buffer, 0, data)
-        }
-    };
-=======
-    let (piece, buffer, base, data) = match crate::pool::staging(host, total) {
-        Some((piece, buffer, base, data)) => (Some(piece), buffer, base, data),
-        None => {
-            // (`VICTORY_RESIDENCY=1`: no buffer of its own for a texture
-            // picked by index while commit is short; it stays due.)
-            let speculative = PICKING.get().is_some() && !BAKING.get();
-            if crate::residency::upload_refused()
-                || (speculative && !crate::residency::allow_staging_growth(false))
-            {
-                crate::residency::note_staging_deferred();
-                return None;
-            }
-            let (buffer, data) = host.upload_buffer(total)?;
-            crate::host::name(&buffer, || {
-                format!(
-                    "staging of {resource:?} {}x{}x{} f{}",
-                    d.Width, d.Height, d.DepthOrArraySize, d.Format.0
-                )
-            });
-            (None, buffer, 0, data)
-        }
-    };
->>>>>>> avatar/main
     tracing::debug!(?desc, total, "texture contents uploaded from title memory");
     STAGED[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     STAGED[1].fetch_add(total, std::sync::atomic::Ordering::Relaxed);
