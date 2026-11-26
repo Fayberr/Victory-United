@@ -20,7 +20,8 @@ playable yet. Shadows are missing some light, because the game's ray tracing doe
 
 Measured on one machine: Windows 11 Pro (build 26300), NVIDIA GeForce RTX 3080 Ti with 12 GB
 (driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `33f3c35`, Series S profile, default
-settings, no frame generation.
+settings, no frame generation. The runs used the diagnostics build, which records frames and can
+cost a little speed.
 
 - **Speed:** 4.9 to 5.2 frames per second in the first playable room, standing at the window.
   Two runs of 6 minutes each (median of five-second intervals). The intro cutscenes ran at 3.2
