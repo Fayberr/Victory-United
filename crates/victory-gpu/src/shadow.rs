@@ -184,7 +184,6 @@ struct Card {
     /// With [`relay`]: the offsets that went from `dirty` to the card's
     /// side, each with the number of the send that took it
     /// ([`card_dirty`]), kept until a fetch sent after it has been merged.
-<<<<<<< HEAD
     /// Locked inside `dirty`'s lock. A send's ranges in order and apart
     /// (one list of ranges with the send's number each was walked whole for
     /// every piece merged: with the title's changed dwords sent each on its
@@ -194,17 +193,10 @@ struct Card {
     /// first range, cleared when [`card_dirty`] takes them. Written under
     /// `dirty`'s lock.
     queued: std::sync::atomic::AtomicBool,
-||||||| 085ee7c4
-    /// Locked inside `dirty`'s lock.
-    sent: Mutex<Vec<(usize, usize, u64)>>,
-=======
-    /// Locked inside `dirty`'s lock.
-    sent: Mutex<Vec<(usize, usize, u64)>>,
     /// With [`merge_on_card`]: the title's bytes put into the CPU's side
     /// under flights' shader writes, which go to the card's side through
     /// the merge on the card and not as copies.
     masked: Mutex<Masked>,
->>>>>>> vitoriabr/main
     /// The buffers' bytes (the title buffer's, rounded up to 64 KiB).
     size: u64,
 }
@@ -1277,18 +1269,10 @@ fn sent_over(ranges: &[(usize, usize)], from: usize, to: usize) -> &[(usize, usi
 }
 
 /// Ranges in order, those that overlap or touch as one.
-<<<<<<< HEAD
-fn joined(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+pub(crate) fn joined(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     // (The sort that finds what is in order already: they come as a few
     // stretches of tens of thousands in order, put behind one another.)
     ranges.sort();
-||||||| 085ee7c4
-fn joined(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
-    ranges.sort_unstable();
-=======
-pub(crate) fn joined(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
-    ranges.sort_unstable();
->>>>>>> vitoriabr/main
     let mut out: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
     for (from, to) in ranges {
         match out.last_mut() {
@@ -5390,136 +5374,11 @@ impl Shadow {
             for (i, runs) in done.into_iter().enumerate() {
                 let Some(runs) = runs.into_inner().unwrap_or_else(|e| e.into_inner()) else {
                     continue;
-<<<<<<< HEAD
                 };
                 let (lo, hi) = ((stale[i] * PAGE).max(a), ((stale[i] + 1) * PAGE).min(e));
                 MERGED[1].fetch_add(runs.len() as u64, Ordering::Relaxed);
                 MERGED[2].fetch_add(runs.iter().map(|r| r.1 as u64).sum(), Ordering::Relaxed);
                 self.card_changed_runs(runs.into_iter().map(|(r, m)| (lo - start + r, lo - start + r + m)));
-||||||| 085ee7c4
-                }
-                let n = hi - lo;
-                let title = &mut title[..n];
-                // The lock of the copy's reference (the snapshot, or the
-                // CPU's side of a copy in the card's memory), from before
-                // title memory is read until the title's bytes are in: with
-                // the copy-back on its own thread ([`relay`]) that thread
-                // puts what the card wrote into title memory and into the
-                // reference under the same lock, and a page read before
-                // such a merge and compared after it would take the card's
-                // bytes for the title's.
-                let mut before = self.before.lock().unwrap_or_else(|e| e.into_inner());
-                // A page that is not there is left as it is, and looked at
-                // again next time.
-                if !crate::host::read_into(lo as *const u8, title) {
-                    continue;
-                }
-                MERGED[0].fetch_add(1, Ordering::Relaxed);
-                let at = lo - start;
-                if self.card.is_some() {
-                    // SAFETY: inside the mapping of the copy's CPU side,
-                    // which only the submitting thread writes.
-                    let held = unsafe { std::slice::from_raw_parts_mut(self.data.add(at), n) };
-                    let runs = joined_over(changed_runs(title, held), merge_gap());
-                    if runs.len() > *runs_left {
-                        return true;
-                    }
-                    *runs_left -= runs.len();
-                    for (r, m) in runs {
-                        held[r..r + m].copy_from_slice(&title[r..r + m]);
-                        self.card_changed(at + r, at + r + m);
-                        MERGED[1].fetch_add(1, Ordering::Relaxed);
-                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
-                    }
-                } else {
-                    let Some(snapshot) = before.as_mut() else {
-                        return true;
-                    };
-                    // SAFETY: the snapshot's allocation holds the copy's
-                    // bytes at the copy's offsets (`writing`), and these
-                    // are in a declared range.
-                    let held = unsafe { std::slice::from_raw_parts_mut(snapshot.as_mut_ptr().add(at), n) };
-                    for (r, m) in changed_runs(title, held) {
-                        // SAFETY: inside the copy's mapping. The card may be
-                        // writing the copy beside these bytes; they are
-                        // written here and nothing around them.
-                        unsafe { std::ptr::copy_nonoverlapping(title.as_ptr().add(r), self.data.add(at + r), m) };
-                        held[r..r + m].copy_from_slice(&title[r..r + m]);
-                        MERGED[1].fetch_add(1, Ordering::Relaxed);
-                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
-                    }
-                }
-                drop(before);
-=======
-                }
-                let n = hi - lo;
-                let title = &mut title[..n];
-                // The lock of the copy's reference (the snapshot, or the
-                // CPU's side of a copy in the card's memory), from before
-                // title memory is read until the title's bytes are in: with
-                // the copy-back on its own thread ([`relay`]) that thread
-                // puts what the card wrote into title memory and into the
-                // reference under the same lock, and a page read before
-                // such a merge and compared after it would take the card's
-                // bytes for the title's.
-                let mut before = self.before.lock().unwrap_or_else(|e| e.into_inner());
-                // A page that is not there is left as it is, and looked at
-                // again next time.
-                if !crate::host::read_into(lo as *const u8, title) {
-                    continue;
-                }
-                MERGED[0].fetch_add(1, Ordering::Relaxed);
-                let at = lo - start;
-                if self.card.is_some() {
-                    // SAFETY: inside the mapping of the copy's CPU side,
-                    // which only the submitting thread writes.
-                    let held = unsafe { std::slice::from_raw_parts_mut(self.data.add(at), n) };
-                    // Through the merge on the card: every changed byte,
-                    // however many runs they are, and no other.
-                    if let Some(card) = self.card.as_ref().filter(|_| merge_on_card()) {
-                        let (runs, bytes) = card.masked.lock().unwrap_or_else(|e| e.into_inner()).take(at, title, held);
-                        MERGED[1].fetch_add(runs, Ordering::Relaxed);
-                        MERGED[2].fetch_add(bytes, Ordering::Relaxed);
-                        drop(before);
-                        if (page * PAGE).max(start) >= a && ((page + 1) * PAGE).min(end) <= e {
-                            let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-                            if let Some(at) = copied.get_mut(page - base) {
-                                *at = now;
-                            }
-                        }
-                        continue;
-                    }
-                    let runs = joined_over(changed_runs(title, held), merge_gap());
-                    if runs.len() > *runs_left {
-                        return true;
-                    }
-                    *runs_left -= runs.len();
-                    for (r, m) in runs {
-                        held[r..r + m].copy_from_slice(&title[r..r + m]);
-                        self.card_changed(at + r, at + r + m);
-                        MERGED[1].fetch_add(1, Ordering::Relaxed);
-                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
-                    }
-                } else {
-                    let Some(snapshot) = before.as_mut() else {
-                        return true;
-                    };
-                    // SAFETY: the snapshot's allocation holds the copy's
-                    // bytes at the copy's offsets (`writing`), and these
-                    // are in a declared range.
-                    let held = unsafe { std::slice::from_raw_parts_mut(snapshot.as_mut_ptr().add(at), n) };
-                    for (r, m) in changed_runs(title, held) {
-                        // SAFETY: inside the copy's mapping. The card may be
-                        // writing the copy beside these bytes; they are
-                        // written here and nothing around them.
-                        unsafe { std::ptr::copy_nonoverlapping(title.as_ptr().add(r), self.data.add(at + r), m) };
-                        held[r..r + m].copy_from_slice(&title[r..r + m]);
-                        MERGED[1].fetch_add(1, Ordering::Relaxed);
-                        MERGED[2].fetch_add(m as u64, Ordering::Relaxed);
-                    }
-                }
-                drop(before);
->>>>>>> vitoriabr/main
                 // Taken, if the range holds all of the page that is in the
                 // copy; else the rest of it is the refresh's, which notes
                 // only whole pages, and the page is looked at again.
@@ -5572,6 +5431,15 @@ impl Shadow {
             // SAFETY: the caller's.
             let held = unsafe { std::slice::from_raw_parts_mut(held.add(at), n) };
             if self.card.is_some() {
+                // Through the merge on the card: every changed byte,
+                // however many runs, and no other: noted one by one and
+                // sent as a mask, so no run is copied up here.
+                if let Some(card) = self.card.as_ref().filter(|_| merge_on_card()) {
+                    let (runs, bytes) = card.masked.lock().unwrap_or_else(|e| e.into_inner()).take(at, title, held);
+                    MERGED[1].fetch_add(runs, Ordering::Relaxed);
+                    MERGED[2].fetch_add(bytes, Ordering::Relaxed);
+                    return Ok(Some(Vec::new()));
+                }
                 // Whole words go up as pairs, all of them in one
                 // dispatch: only what is a copy of its own counts.
                 let runs = if crate::host::words_under() { word_runs(lo, title, held) } else { changed_runs(title, held) };
@@ -6649,6 +6517,7 @@ impl Shadow {
                 dirty: Mutex::default(),
                 sent: Mutex::default(),
                 queued: std::sync::atomic::AtomicBool::new(false),
+                masked: Mutex::default(),
                 size: len.next_multiple_of(PIECE as u64),
             });
         }
@@ -6805,6 +6674,7 @@ mod land_tests {
             dirty: Mutex::default(),
             sent: Mutex::default(),
             queued: std::sync::atomic::AtomicBool::new(false),
+            masked: Mutex::default(),
             size: len as u64,
         });
         Some(shadow)
@@ -7333,12 +7203,8 @@ fn lookup_tables(
                     before: Mutex::default(),
                     dirty: Mutex::default(),
                     sent: Mutex::default(),
-<<<<<<< HEAD
                     queued: std::sync::atomic::AtomicBool::new(false),
-||||||| 085ee7c4
-=======
                     masked: Mutex::default(),
->>>>>>> vitoriabr/main
                     size,
                 };
                 (on_card, Some(card))
@@ -7593,6 +7459,7 @@ pub(crate) fn by_address(start: u64, len: u64) -> Option<Arc<Shadow>> {
         dirty: Mutex::default(),
         sent: Mutex::default(),
         queued: std::sync::atomic::AtomicBool::new(false),
+        masked: Mutex::default(),
         size: len,
     });
     let shadow = Arc::new(shadow);
@@ -7721,12 +7588,8 @@ fn loose(
                 before: Mutex::default(),
                 dirty: Mutex::default(),
                 sent: Mutex::default(),
-<<<<<<< HEAD
                 queued: std::sync::atomic::AtomicBool::new(false),
-||||||| 085ee7c4
-=======
                 masked: Mutex::default(),
->>>>>>> vitoriabr/main
                 size: len,
             };
             (on_card, Some(card))
@@ -8095,15 +7958,9 @@ mod card_merge_tests {
                 staging: staging.clone(),
                 before: Mutex::new(None),
                 dirty: Mutex::default(),
-<<<<<<< HEAD
                 sent: Mutex::new(super::SentRuns::of(&[(title_byte, title_byte + 1, 7)])),
                 queued: std::sync::atomic::AtomicBool::new(false),
-||||||| 085ee7c4
-                sent: Mutex::new(vec![(title_byte, title_byte + 1, 7)]),
-=======
-                sent: Mutex::new(vec![(title_byte, title_byte + 1, 7)]),
                 masked: Mutex::default(),
->>>>>>> vitoriabr/main
                 // 0: no card bytes counted (`Drop` takes them off again).
                 size: 0,
             });
