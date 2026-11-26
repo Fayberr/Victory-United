@@ -1,32 +1,17 @@
-<<<<<<< HEAD
-//! Translated shaders kept on disk (decision 0003): under the configured
-//! cache folder, keyed by the container's content and by the translator
-//! that translated it (its source fingerprint and settings, see `build`), so
-//! a changed translator never serves an old translation. Entries go through
-//! `victory-pipeline`'s content-addressed cache, which writes them
-//! atomically; an entry that does not read back is translated again. Runtime
-//! pipelines can use the translation even when the cache cannot store it.
+//! Translated shaders kept on disk (decision 0003): offline warm-up and title
+//! execution share the same shader cache, under the configured cache folder.
+//! A key includes the console container, translator sources and configuration
+//! (its source fingerprint and settings, see `build`), and the host wave width
+//! and descriptor-heap limit used by the emitter, so a changed translator or
+//! host never serves an old translation. Entries go through
+//! `victory-pipeline`'s content-addressed cache, which writes them atomically;
+//! an entry that does not read back is translated again. Translated DXIL and
+//! deterministic unsupported results are persisted. Runtime pipelines can use
+//! the translation even when the cache cannot store it.
 //!
 //! The entry is our own encoding of [`HostShader`]: a field added to it
 //! must be added to `encode` and `decode` too (entries of older builds
 //! are ignored anyway).
-||||||| 465b94f5
-//! Translated shaders kept on disk (decision 0003): under the configured
-//! cache folder, keyed by the container's content and by the translator
-//! that translated it (its source fingerprint and settings, see `build`), so
-//! a changed translator never serves an old translation. Entries go through
-//! `victory-pipeline`'s content-addressed cache, which writes them
-//! atomically; an entry that does not read back is translated again.
-//!
-//! The entry is our own encoding of [`HostShader`]: a field added to it
-//! must be added to `encode` and `decode` too (entries of older builds
-//! are ignored anyway).
-=======
-//! Offline warm-up and title execution share the same shader cache. A key
-//! includes the console container, translator sources and configuration,
-//! and the host wave width and descriptor-heap limit used by the emitter.
-//! Translated DXIL and deterministic unsupported results are persisted.
->>>>>>> vertex/main
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -128,40 +113,22 @@ fn build() -> [u8; 32] {
     *h.finalize().as_bytes()
 }
 
-<<<<<<< HEAD
 /// The offline warm-up (`victory translate --warm`): `container` is
 /// translated into the cache unless it is there already. `Ok(true)`: it
 /// was translated now. Needs [`use_shader_cache`] and the same host facts
 /// the run will have (`victory_shader::emit::translation_fingerprint`).
 pub fn warm(container: &[u8]) -> Result<bool, String> {
     let cache = CACHE.get().ok_or("no shader cache")?;
-    cached(cache, &build(), container, Persistence::Required, translate).map(|(_, fresh)| fresh)
+    let (result, status) = lookup(cache, container);
+    match status {
+        CacheStatus::Failed(error) => Err(error),
+        _ => result.map(|_| status != CacheStatus::Hit),
+    }
 }
 
 /// The translation of a console shader container, from the cache when
 /// there is one.
-||||||| 465b94f5
-/// The offline warm-up (`victory translate --warm`): `container` is
-/// translated into the cache unless it is there already. `Ok(true)`: it
-/// was translated now. Needs [`use_shader_cache`] and the same host facts
-/// the run will have (`victory_shader::emit::translation_fingerprint`).
-pub fn warm(container: &[u8]) -> Result<bool, String> {
-    let cache = CACHE.get().ok_or("no shader cache")?;
-    let ran = AtomicBool::new(false);
-    let translate = |c: &[u8]| {
-        ran.store(true, Ordering::Relaxed);
-        victory_shader::emit::translate(c).map_err(|e| e.to_string())
-    };
-    cached(cache, &build(), container, translate).map(|_| ran.load(Ordering::Relaxed))
-}
-
-/// The translation of a console shader container, from the cache when
-/// there is one.
-=======
-/// Uses an in-memory translation when the disk cache cannot be written.
->>>>>>> vertex/main
 pub(crate) fn host_shader(container: &[u8]) -> Result<HostShader, String> {
-<<<<<<< HEAD
     host_shader_cached(container).map(|(shader, _)| shader)
 }
 
@@ -171,20 +138,6 @@ pub(crate) fn host_shader_cached(container: &[u8]) -> Result<(HostShader, bool),
     if let Some(s) = stand_in(container) {
         return Ok((s, false));
     }
-    let r = match CACHE.get() {
-        Some(cache) => cached(cache, &build(), container, Persistence::BestEffort, translate)
-            .map(|(shader, fresh)| (shader, !fresh)),
-        None => translate(container).map(|shader| (shader, false)),
-    };
-    match r {
-        Err(e) => exposure_stub(container).map(|s| (s, false)).ok_or(e),
-        ok => ok,
-||||||| 465b94f5
-    let translate = |c: &[u8]| victory_shader::emit::translate(c).map_err(|e| e.to_string());
-    match CACHE.get() {
-        Some(cache) => cached(cache, &build(), container, translate),
-        None => translate(container),
-=======
     let (result, status) = match CACHE.get() {
         Some(cache) => lookup(cache, container),
         None => (
@@ -195,7 +148,6 @@ pub(crate) fn host_shader_cached(container: &[u8]) -> Result<(HostShader, bool),
     if let CacheStatus::Failed(error) = &status {
         static WARNED: OnceLock<()> = OnceLock::new();
         WARNED.get_or_init(|| tracing::warn!(%error, "shader cache unavailable for an entry"));
->>>>>>> vertex/main
     }
     if result.is_ok() {
         let counter = if status == CacheStatus::Hit {
@@ -205,12 +157,14 @@ pub(crate) fn host_shader_cached(container: &[u8]) -> Result<(HostShader, bool),
         };
         counter.fetch_add(1, Ordering::Relaxed);
     }
-    let shader = result?;
+    let shader = match result {
+        Err(e) => exposure_stub(container).ok_or(e)?,
+        Ok(shader) => shader,
+    };
     validate_runtime(&shader.dxil)?;
-    Ok(shader)
+    Ok((shader, status == CacheStatus::Hit))
 }
 
-<<<<<<< HEAD
 /// Optional stand-ins from `victory_shader::emit::stand_in`:
 /// - `VICTORY_AMBIENT_STUB=1`: replaces diffuse GI temporal resolve passes with
 ///   a constant ambient light floor (`VICTORY_AMBIENT_STUB_VALUE`, default 0.1).
@@ -261,13 +215,8 @@ fn stand_in(container: &[u8]) -> Option<HostShader> {
         }
     }
     None
-||||||| 465b94f5
-/// The cache entry's converter: the build and the container in, the
-/// encoded translation out. `ran` tells a miss from a hit.
-struct Translate<F> {
-    translate: F,
-    ran: AtomicBool,
-=======
+}
+
 /// Optional validation of translated title shaders, including cache hits.
 /// Normal runs do not load the validator or change the translation.
 fn validate_runtime(dxil: &[u8]) -> Result<(), String> {
@@ -285,43 +234,15 @@ fn validate_runtime(dxil: &[u8]) -> Result<(), String> {
     let mut bytes = dxil.to_vec();
     validator.lock().unwrap_or_else(|e| e.into_inner())
         .validate(&mut bytes).map_err(|e| format!("DXIL validation rejected shader: {e}"))
->>>>>>> vertex/main
 }
 
-<<<<<<< HEAD
 /// `VICTORY_EXPOSURE_STUB=1`: replaces untranslatable auto-exposure shader
 /// with a constant mid-grey luminance stand-in.
 fn exposure_stub(container: &[u8]) -> Option<HostShader> {
     use victory_shader::emit::exposure;
     if std::env::var("VICTORY_EXPOSURE_STUB").ok()?.trim() != "1" {
         return None;
-||||||| 465b94f5
-impl<F: Fn(&[u8]) -> Result<HostShader, String> + Send + Sync> Converter for Translate<F> {
-    fn id(&self) -> &'static str {
-        "shader.dxil"
-=======
-fn target() -> [u32; 2] {
-    [
-        victory_shader::emit::host_max_wave(),
-        victory_shader::emit::view_heap_limit(),
-    ]
-}
-
-/// DXBC's declared size excludes trailing allocation padding. Keep the title's
-/// original bytes for pipeline identity, but use this slice for translation.
-fn canonical_container(bytes: &[u8]) -> &[u8] {
-    if bytes.starts_with(b"DXBC")
-        && let Some(size) = bytes.get(0x18..0x1c)
-    {
-        let size = u32::from_le_bytes(size.try_into().expect("four bytes")) as usize;
-        if size >= 0x20
-            && let Some(container) = bytes.get(..size)
-        {
-            return container;
-        }
->>>>>>> vertex/main
     }
-<<<<<<< HEAD
     let hash = blake3::hash(container).to_hex()[..16].to_owned();
     let listed = match std::env::var("VICTORY_EXPOSURE_STUB_HASHES") {
         Ok(v) => v
@@ -345,16 +266,29 @@ fn canonical_container(bytes: &[u8]) -> &[u8] {
             tracing::warn!(%hash, error = %e, "exposure stand-in does not translate either");
             None
         }
-||||||| 465b94f5
-    fn version(&self) -> u32 {
-        // The build fingerprint in the input does the versioning.
-        1
     }
-    fn convert(&self, input: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.ran.store(true, Ordering::Relaxed);
-        let shader = (self.translate)(&input[32..]).map_err(anyhow::Error::msg)?;
-        Ok(encode(&shader))
-=======
+}
+
+fn target() -> [u32; 2] {
+    [
+        victory_shader::emit::host_max_wave(),
+        victory_shader::emit::view_heap_limit(),
+    ]
+}
+
+/// DXBC's declared size excludes trailing allocation padding. Keep the title's
+/// original bytes for pipeline identity, but use this slice for translation.
+fn canonical_container(bytes: &[u8]) -> &[u8] {
+    if bytes.starts_with(b"DXBC")
+        && let Some(size) = bytes.get(0x18..0x1c)
+    {
+        let size = u32::from_le_bytes(size.try_into().expect("four bytes")) as usize;
+        if size >= 0x20
+            && let Some(container) = bytes.get(..size)
+        {
+            return container;
+        }
+    }
     bytes
 }
 
@@ -383,7 +317,6 @@ fn lookup(cache: &Cache, container: &[u8]) -> (Translation, CacheStatus) {
         if target() == expected {
             return translated;
         }
->>>>>>> vertex/main
     }
     let error = "host shader capabilities changed during translation".to_owned();
     (Err(error.clone()), CacheStatus::Failed(error))
@@ -407,58 +340,11 @@ fn translate(container: &[u8]) -> Result<HostShader, String> {
     victory_shader::emit::translate(container).map_err(|e| e.to_string())
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Persistence {
-    /// Runtime only needs the translated shader, not a file on disk.
-    BestEffort,
-    /// Warm-up reports a new entry only after successful publication.
-    Required,
-}
-
 fn cached(
     cache: &Cache,
     build: &[u8; 32],
     target: [u32; 2],
     container: &[u8],
-<<<<<<< HEAD
-    persistence: Persistence,
-    translate: impl FnOnce(&[u8]) -> Result<HostShader, String>,
-) -> Result<(HostShader, bool), String> {
-    // The build fingerprint in the input does the versioning.
-    let key = CacheKey::from_parts("shader.dxil", 1, &[build, container]);
-    let path = cache.path_for(&key);
-    if let Ok(bytes) = std::fs::read(&path) {
-        if let Some(shader) = decode(&bytes) {
-            HITS.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!(path = %path.display(), "shader from the cache");
-            return Ok((shader, false));
-        }
-        tracing::debug!(path = %path.display(), "unreadable shader cache entry; translating again");
-||||||| 465b94f5
-    translate: impl Fn(&[u8]) -> Result<HostShader, String> + Send + Sync,
-) -> Result<HostShader, String> {
-    let input = [&build[..], container].concat();
-    let converter = Translate {
-        translate,
-        ran: AtomicBool::new(false),
-    };
-    for _ in 0..2 {
-        let path = cache
-            .get_or_convert(&converter, &input)
-            .map_err(|e| format!("{e:#}"))?;
-        if let Some(shader) = std::fs::read(&path).ok().and_then(|b| decode(&b)) {
-            let (counter, what) = if converter.ran.load(Ordering::Relaxed) {
-                (&MISSES, "translated and cached")
-            } else {
-                (&HITS, "from the cache")
-            };
-            counter.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!(path = %path.display(), "shader {what}");
-            return Ok(shader);
-        }
-        tracing::debug!(path = %path.display(), "unreadable shader cache entry; translating again");
-        let _ = std::fs::remove_file(&path);
-=======
     translate: impl FnOnce(&[u8]) -> Result<HostShader, ShaderError>,
     still_current: impl FnOnce() -> bool,
 ) -> (Translation, CacheStatus) {
@@ -471,28 +357,7 @@ fn cached(
     };
     if let Some(entry) = read() {
         return (entry, CacheStatus::Hit);
->>>>>>> vertex/main
     }
-<<<<<<< HEAD
-    let shader = translate(container)?;
-    MISSES.fetch_add(1, Ordering::Relaxed);
-    match cache.store(&key, &encode(&shader)) {
-        Ok(()) => tracing::debug!(path = %path.display(), "shader translated and cached"),
-        Err(error) if persistence == Persistence::Required => {
-            return Err(format!("could not cache shader at {}: {error:#}", path.display()));
-        }
-        Err(error) => {
-            static WARNED: std::sync::Once = std::sync::Once::new();
-            WARNED.call_once(|| {
-                tracing::warn!(path = %path.display(), error = %error, "shader cache write failed; using the translated shader");
-            });
-        }
-    }
-    Ok((shader, true))
-||||||| 465b94f5
-    MISSES.fetch_add(1, Ordering::Relaxed);
-    (converter.translate)(container)
-=======
     let translated = translate(container);
     let persist = matches!(translated, Ok(_) | Err(ShaderError::Unsupported { .. }));
     let result = translated.map_err(|e| e.to_string());
@@ -530,7 +395,6 @@ fn decode_record(bytes: &[u8]) -> Option<Translation> {
         return Some(Err(std::str::from_utf8(reason).ok()?.to_owned()));
     }
     decode(payload).map(Ok)
->>>>>>> vertex/main
 }
 
 const MAGIC: &[u8; 4] = b"VSH1";
@@ -758,42 +622,6 @@ mod tests {
         let build = [7u8; 32];
         let target = [32, 999_999];
         let container = b"a console container".as_slice();
-<<<<<<< HEAD
-        let runs = AtomicU64::new(0);
-        let translate = |_: &[u8]| {
-            runs.fetch_add(1, Ordering::Relaxed);
-            Ok(shader())
-        };
-        let lookup = |build| cached(&cache, build, container, Persistence::Required, translate);
-        assert_eq!(lookup(&build), Ok((shader(), true)));
-        assert_eq!(lookup(&build), Ok((shader(), false)));
-        assert_eq!(runs.load(Ordering::Relaxed), 1, "the second came from disk");
-
-        // Another build translates again.
-        assert_eq!(lookup(&[8; 32]), Ok((shader(), true)));
-        assert_eq!(runs.load(Ordering::Relaxed), 2);
-
-        // A damaged entry is a miss, translated and stored again.
-        for e in walk(dir.path()) {
-            std::fs::write(e, b"VSH1 broken").unwrap();
-||||||| 465b94f5
-        let runs = AtomicU64::new(0);
-        let translate = |_: &[u8]| {
-            runs.fetch_add(1, Ordering::Relaxed);
-            Ok(shader())
-        };
-        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
-        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
-        assert_eq!(runs.load(Ordering::Relaxed), 1, "the second came from disk");
-
-        // Another build translates again.
-        assert_eq!(cached(&cache, &[8; 32], container, translate), Ok(shader()));
-        assert_eq!(runs.load(Ordering::Relaxed), 2);
-
-        // A damaged entry is a miss, translated and stored again.
-        for e in walk(dir.path()) {
-            std::fs::write(e, b"VSH1 broken").unwrap();
-=======
         let translate = |_: &[u8]| Ok(shader());
         let entry = || cached(&cache, &build, target, container, translate, || true);
         assert_eq!(entry(), (Ok(shader()), CacheStatus::Stored));
@@ -803,67 +631,18 @@ mod tests {
                 cached(&cache, &build, other_target, container, translate, || true),
                 (Ok(shader()), CacheStatus::Stored)
             );
->>>>>>> vertex/main
         }
-<<<<<<< HEAD
-        assert_eq!(lookup(&build), Ok((shader(), true)));
-        assert_eq!(runs.load(Ordering::Relaxed), 3);
-        assert_eq!(lookup(&build), Ok((shader(), false)));
-        assert_eq!(runs.load(Ordering::Relaxed), 3);
-||||||| 465b94f5
-        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
-        assert_eq!(runs.load(Ordering::Relaxed), 3);
-        assert_eq!(cached(&cache, &build, container, translate), Ok(shader()));
-        assert_eq!(runs.load(Ordering::Relaxed), 3);
-=======
         assert_eq!(
             cached(&cache, &[8; 32], target, container, translate, || true),
             (Ok(shader()), CacheStatus::Stored)
         );
->>>>>>> vertex/main
 
-<<<<<<< HEAD
-        // Failures are not stored.
-        let fail = |_: &[u8]| Err("unsupported".to_owned());
-        assert_eq!(
-            cached(&cache, &build, b"other", Persistence::BestEffort, fail),
-            Err("unsupported".to_owned())
-        );
-    }
-
-    #[test]
-    fn runtime_keeps_the_translation_when_cache_publication_fails() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("cache");
-        let cache = Cache::open(&root).unwrap();
-        // The cache opened successfully, but subsequent writes cannot
-        // create a bucket below this regular file.
-        std::fs::remove_dir(&root).unwrap();
-        std::fs::write(&root, b"not a directory").unwrap();
-
-        let runs = AtomicU64::new(0);
-        let translate = |_: &[u8]| {
-            runs.fetch_add(1, Ordering::Relaxed);
-            Ok(shader())
-        };
-        let lookup = |persistence| cached(&cache, &[7; 32], b"synthetic", persistence, translate);
-        assert_eq!(lookup(Persistence::BestEffort), Ok((shader(), true)));
-        assert_eq!(runs.load(Ordering::Relaxed), 1);
-        let error = lookup(Persistence::Required).unwrap_err();
-        assert!(error.contains("could not cache shader"), "{error}");
-        assert_eq!(runs.load(Ordering::Relaxed), 2);
-||||||| 465b94f5
-        // Failures are not stored.
-        let fail = |_: &[u8]| Err::<HostShader, _>("unsupported".to_owned());
-        assert!(cached(&cache, &build, b"other", fail).is_err());
-=======
         let path = cache.path_for(&shader_key(&build, target, container));
         let mut damaged = std::fs::read(&path).unwrap();
         damaged[40] ^= 1;
         std::fs::write(&path, damaged).unwrap();
         assert_eq!(entry(), (Ok(shader()), CacheStatus::Stored));
         assert_eq!(entry(), (Ok(shader()), CacheStatus::Hit));
->>>>>>> vertex/main
     }
 
     #[test]

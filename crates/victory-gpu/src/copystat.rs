@@ -1180,14 +1180,8 @@ pub(crate) fn log(frames: f64) {
     let due = crate::watch::DUE.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / frames;
     tracing::info!(
         "guards over several views of a page, since the start: {together} blocks guarded with their other views, \
-<<<<<<< HEAD
-         {written} views noted written by a write through another, {mapped} ranges opened because a view of them was mapped"
-||||||| 465b94f5
-         {written} views opened by a write through another, {mapped} ranges opened because a view of them was mapped"
-=======
-         {written} views opened by a write through another, {mapped} ranges opened because a view of them was mapped; \
+         {written} views noted written by a write through another, {mapped} ranges opened because a view of them was mapped; \
          {due:.0} clean blocks a frame looked at again with no write seen (VICTORY_VIEW_RECHECK)"
->>>>>>> vertex/main
     );
     // Where the wall clock of a frame goes: the phases of a frame, the
     // processor time of the whole process, and what each submitting and
