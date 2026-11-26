@@ -184,29 +184,15 @@ pub(crate) fn host_shader(container: &[u8]) -> Result<HostShader, String> {
     }
 }
 
-<<<<<<< HEAD
 /// The cache entry's converter: the build and the container in, the
 /// encoded translation out. `ran` tells a miss from a hit.
 struct Translate<'a, F> {
-||||||| 0a4356653
-/// The cache entry's converter: the build and the container in, the
-/// encoded translation out. `ran` tells a miss from a hit.
-struct Translate<F> {
-=======
-/// The cache entry's converter: the build and container in, the encoded
-/// translation out. Keep the result in memory for the caller on a miss.
-struct Translate<F> {
->>>>>>> vicetay/main
     translate: F,
-<<<<<<< HEAD
     /// The build of the translator, written into the entry.
     source: &'a str,
     ran: AtomicBool,
-||||||| 0a4356653
-    ran: AtomicBool,
-=======
+    /// The translation just made, for a cache that cannot be written.
     made: Mutex<Option<HostShader>>,
->>>>>>> vicetay/main
 }
 
 impl<F: Fn(&[u8]) -> Result<HostShader, String> + Send + Sync> Converter for Translate<'_, F> {
@@ -218,16 +204,11 @@ impl<F: Fn(&[u8]) -> Result<HostShader, String> + Send + Sync> Converter for Tra
         1
     }
     fn convert(&self, input: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.ran.store(true, Ordering::Relaxed);
         let shader = (self.translate)(&input[32..]).map_err(anyhow::Error::msg)?;
-<<<<<<< HEAD
-        Ok(encode(&shader, self.source))
-||||||| 0a4356653
-        Ok(encode(&shader))
-=======
-        let entry = encode(&shader);
+        let entry = encode(&shader, self.source);
         *self.made.lock().unwrap_or_else(|err| err.into_inner()) = Some(shader);
         Ok(entry)
->>>>>>> vicetay/main
     }
 }
 
@@ -253,23 +234,30 @@ fn cached_by(
     refresh: bool,
 ) -> Result<HostShader, String> {
     let input = [&build[..], container].concat();
-    let mut converter = Translate {
+    let converter = Translate {
         translate,
-<<<<<<< HEAD
         source,
         ran: AtomicBool::new(false),
-||||||| 0a4356653
-        ran: AtomicBool::new(false),
-=======
         made: Mutex::new(None),
->>>>>>> vicetay/main
     };
-<<<<<<< HEAD
     let mut old: Option<HostShader> = None;
     for _ in 0..3 {
-        let path = cache
-            .get_or_convert(&converter, &input)
-            .map_err(|e| format!("{e:#}"))?;
+        let path = match cache.get_or_convert(&converter, &input) {
+            Ok(path) => path,
+            Err(error) => {
+                // (A cache that cannot be written to still has the
+                // translation in hand: it is served from memory.)
+                static WARNED: AtomicBool = AtomicBool::new(false);
+                if !WARNED.swap(true, Ordering::Relaxed) {
+                    tracing::warn!(%error, "shader cache write failed; using the translation in memory");
+                }
+                if let Some(shader) = converter.made.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    MISSES.fetch_add(1, Ordering::Relaxed);
+                    return Ok(shader);
+                }
+                return Err(format!("{error:#}"));
+            }
+        };
         if let Some((shader, made_by)) = std::fs::read(&path).ok().and_then(|b| decode(&b)) {
             let ran = converter.ran.load(Ordering::Relaxed);
             if !ran && made_by != source.as_bytes() {
@@ -300,40 +288,6 @@ fn cached_by(
             };
             counter.fetch_add(1, Ordering::Relaxed);
             tracing::debug!(path = %path.display(), "shader {what}");
-||||||| 0a4356653
-    for _ in 0..2 {
-        let path = cache
-            .get_or_convert(&converter, &input)
-            .map_err(|e| format!("{e:#}"))?;
-        if let Some(shader) = std::fs::read(&path).ok().and_then(|b| decode(&b)) {
-            let (counter, what) = if converter.ran.load(Ordering::Relaxed) {
-                (&MISSES, "translated and cached")
-            } else {
-                (&HITS, "from the cache")
-            };
-            counter.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!(path = %path.display(), "shader {what}");
-=======
-    for _ in 0..2 {
-        let entry = cache.get_or_convert(&converter, &input);
-        if let Some(shader) = converter.made.get_mut().unwrap_or_else(|err| err.into_inner()).take() {
-            MISSES.fetch_add(1, Ordering::Relaxed);
-            match entry {
-                Ok(path) => tracing::debug!(path = %path.display(), "shader translated and cached"),
-                Err(error) => {
-                    static WARNED: AtomicBool = AtomicBool::new(false);
-                    if !WARNED.swap(true, Ordering::Relaxed) {
-                        tracing::warn!(%error, "shader cache write failed; using the translation in memory");
-                    }
-                }
-            }
-            return Ok(shader);
-        }
-        let path = entry.map_err(|e| format!("{e:#}"))?;
-        if let Some(shader) = std::fs::read(&path).ok().and_then(|b| decode(&b)) {
-            HITS.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!(path = %path.display(), "shader from the cache");
->>>>>>> vicetay/main
             return Ok(shader);
         }
         tracing::debug!(path = %path.display(), "unreadable shader cache entry; translating again");
