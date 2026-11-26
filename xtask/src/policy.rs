@@ -10,15 +10,9 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-<<<<<<< HEAD
-// (The translator's one file is 570 KiB of source.)
-const MAX_FILE_SIZE: usize = 640 * 1024;
-||||||| merged common ancestors
-const MAX_FILE_SIZE: usize = 512 * 1024;
-=======
-// The shader lowering source passed 512 KiB; binary and encoded data stay barred below.
+// (The translator's one file is 570 KiB of source; the shader lowering
+// source is larger still, so binary and encoded data stay barred below.)
 const MAX_FILE_SIZE: usize = 1024 * 1024;
->>>>>>> vibr/main
 const MAX_ENCODED_RUN: usize = 512;
 
 const ALLOWED_EXTENSIONS: &[&str] = &[
