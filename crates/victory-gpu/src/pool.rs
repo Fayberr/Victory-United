@@ -42,7 +42,6 @@ static SPARES: AtomicUsize = AtomicUsize::new(SPARE);
 /// [`SPARE_KEPT`] below 85 % ([`crate::host::keep_freed`]), else [`SPARE`].
 /// Asked once a second.
 pub(crate) fn room(memory: Option<[u64; 4]>) {
-<<<<<<< HEAD
     if !crate::residency::on() {
         SPARES.store(spares(memory, crate::host::keep_freed()), Ordering::Relaxed);
         return;
@@ -50,26 +49,6 @@ pub(crate) fn room(memory: Option<[u64; 4]>) {
     // (`VICTORY_RESIDENCY=1`, codec-d/cool_fox c64fc9b4/e94d277a: fewer
     // spares while the system is short of memory, and idle blocks let go now,
     // not at the pool's next allocation.)
-    let pressure = crate::residency::pressured();
-    let limit = spares(memory, crate::host::keep_freed() && !pressure);
-    SPARES.store(limit, Ordering::Relaxed);
-    let tick = now();
-    if let Ok(mut pool) = TEXTURES.try_lock() {
-        pool.reclaim(tick, limit, true);
-    }
-    if let Ok(mut pool) = STAGING.try_lock() {
-        let staging_limit = if crate::residency::critical_commit() {
-            0
-        } else if pressure {
-            1
-        } else {
-            limit
-        };
-        pool.reclaim(tick, staging_limit, true);
-    }
-||||||| 0a4356653
-    SPARES.store(spares(memory, crate::host::keep_freed()), Ordering::Relaxed);
-=======
     let pressure = crate::residency::pressured();
     let limit = spares(memory, crate::host::keep_freed() && !pressure);
     SPARES.store(limit, Ordering::Relaxed);
@@ -89,7 +68,6 @@ pub(crate) fn room(memory: Option<[u64; 4]>) {
         };
         pool.reclaim(tick, staging_limit, true);
     }
->>>>>>> vicetay/main
 }
 
 fn spares(memory: Option<[u64; 4]>, keep: bool) -> usize {
@@ -227,14 +205,9 @@ struct Pool<B> {
     /// The empty blocks it was last told to keep, and the most it keeps.
     spare: usize,
     most: usize,
-<<<<<<< HEAD
     /// No new block is asked for before this time after one was refused
     /// ([`Pool::grow`]).
     retry_growth_at: u64,
-||||||| 0a4356653
-=======
-    retry_growth_at: u64,
->>>>>>> vicetay/main
 }
 
 impl<B: Clone> Pool<B> {
@@ -311,7 +284,6 @@ impl<B: Clone> Pool<B> {
         Some((Piece { block: i, start, len }, block.memory.clone(), again))
     }
 
-<<<<<<< HEAD
     /// A new block from `make`, unless one was refused less than 500 ms ago
     /// (codec-d/cool_fox 08e4574d: a refused 64 MiB block is not asked for
     /// again for each small texture; the blocks there are still used).
@@ -326,20 +298,6 @@ impl<B: Clone> Pool<B> {
         block
     }
 
-||||||| 0a4356653
-=======
-    fn grow(&mut self, now: u64, make: &mut impl FnMut() -> Option<B>) -> Option<B> {
-        if now < self.retry_growth_at {
-            return None;
-        }
-        let block = make();
-        if block.is_none() {
-            self.retry_growth_at = now.saturating_add(500);
-        }
-        block
-    }
-
->>>>>>> vicetay/main
     fn add(&mut self, memory: B, made: u64) -> usize {
         let i = match self.blocks.iter().position(Option::is_none) {
             Some(i) => i,
@@ -359,20 +317,12 @@ impl<B: Clone> Pool<B> {
     /// Makes the pieces that rested long enough free, and lets go of empty
     /// blocks past [`SPARE`].
     fn rested(&mut self, now: u64) {
-<<<<<<< HEAD
         self.reclaim(now, SPARES.load(Ordering::Relaxed), false);
     }
 
     /// [`Pool::rested`] with at most `limit` empty blocks kept; `sweep`: the
     /// empty blocks are looked at even if no piece came back.
     fn reclaim(&mut self, now: u64, limit: usize, sweep: bool) {
-||||||| 0a4356653
-=======
-        self.reclaim(now, SPARES.load(Ordering::Relaxed), false);
-    }
-
-    fn reclaim(&mut self, now: u64, limit: usize, sweep: bool) {
->>>>>>> vicetay/main
         let mut any = false;
         while let Some(&(ready, piece)) = self.resting.front()
             && ready <= now
@@ -384,19 +334,9 @@ impl<B: Clone> Pool<B> {
             }
         }
         // (Without a piece given back too, once there is less room.)
-<<<<<<< HEAD
         let most = limit.min(self.most);
         if sweep || any || most < self.spare {
             self.spare = most;
-||||||| 0a4356653
-        let most = SPARES.load(Ordering::Relaxed).min(self.most);
-        if any || most < self.spare {
-            self.spare = most;
-=======
-        let most = limit.min(self.most);
-        let previous = std::mem::replace(&mut self.spare, most);
-        if sweep || any || most < previous {
->>>>>>> vicetay/main
             let mut spare = 0;
             for block in &mut self.blocks {
                 if block.as_ref().is_some_and(|b| b.free.whole(BLOCK)) {
@@ -460,23 +400,15 @@ pub(crate) fn staging(host: &crate::host::Host, bytes: u64) -> Option<(StagingPi
     // Copies from a buffer begin at multiples of 512.
     let bytes = bytes.next_multiple_of(512);
     let (piece, memory, again) = lock(&STAGING).take(bytes, 512, now(), || {
-<<<<<<< HEAD
+        // Only gate speculative bindless prefetch on staging-pool growth
+        // headroom; table-bound textures and decoration bakes are sampled
+        // immediately and would otherwise read uninitialized/reused VRAM.
         // (`VICTORY_RESIDENCY=1`: no new block for a texture picked by index
         // while commit is short; those a draw samples now still get one.)
         let speculative = crate::texture::PICKING.get().is_some() && !crate::texture::BAKING.get();
         if speculative && !crate::residency::allow_staging_growth(false) {
             return None;
         }
-||||||| 0a4356653
-=======
-        // Only gate speculative bindless prefetch on staging-pool growth
-        // headroom; table-bound textures and decoration bakes are sampled
-        // immediately and would otherwise read uninitialized/reused VRAM.
-        let speculative = crate::texture::PICKING.get().is_some() && !crate::texture::BAKING.get();
-        if speculative && !crate::residency::allow_staging_growth(false) {
-            return None;
-        }
->>>>>>> vicetay/main
         let (buffer, data) = host.upload_buffer(BLOCK)?;
         crate::host::name(&buffer, || "staging of textures (a block)".into());
         Some(Upload(buffer, data))
