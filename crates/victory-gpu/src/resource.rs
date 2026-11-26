@@ -1189,7 +1189,7 @@ pub(crate) struct HostTexture {
     /// [`KINDS`] while it lives.
     filled: bool,
     /// The title's mip count and how many of its most detailed mips the
-    /// host copy lacks ([`compute_mip_drop`]); 0 for copies never dropped.
+    /// host copy lacks ([`drop_levels`]); 0 for copies never dropped.
     pub(crate) title_mips: u16,
     pub(crate) mip_drop: u16,
     /// Made without memory of its own (`crate::tiles`): the tiles its
@@ -1789,7 +1789,6 @@ fn hosted(this: This, make: bool) -> Option<Made> {
             Some(tiled) => HostTexture::new_tiled(texture, state, tiled),
             None => HostTexture::new(texture, state),
         };
-<<<<<<< HEAD
         host.base = base;
         host.grown.store(r.host.grown.swap(false, Relaxed), Relaxed);
         if base > 0 {
@@ -1798,11 +1797,8 @@ fn hosted(this: This, make: bool) -> Option<Made> {
             HELD[3].fetch_add(footprint(&r.desc).map_or(0, |f| f.size), Relaxed);
         }
         host.cut = range;
-||||||| merged common ancestors
-=======
         host.title_mips = r.desc.mip_levels;
-        host.mip_drop = compute_mip_drop(&r.desc) as u16;
->>>>>>> vibr/main
+        host.mip_drop = drop_levels(&r.desc) as u16;
         host.filled = fills(&r.desc);
         if host.filled {
             KINDS[0].fetch_add(1, Relaxed);
@@ -1891,27 +1887,12 @@ fn texture_floor_bytes(vram_budget: Option<u64>) -> u64 {
 
 /// Whether more host copies of textures the title fills may be made for
 /// shaders that pick textures by index (`draw.rs` `heap_textures`): always
-<<<<<<< HEAD
 /// up to [`texture_floor_bytes`] bytes of them, beyond that while the card's
 /// memory in use by this process is under nine tenths of the budget the system
 /// gives it ([`room_percent`] says another share; `VICTORY_TEXTURE_BUDGET_MB`
 /// sets a limit on those copies' bytes instead). Past the budget the system moves the card's memory into the PC's,
-/// which ended runs 20 and 24.
-||||||| merged common ancestors
-/// up to `FLOOR` bytes of them, beyond that while the card's memory in use
-/// by this process is under nine tenths of the budget the system gives it
-/// ([`room_percent`] says another share; `VICTORY_TEXTURE_BUDGET_MB` sets a
-/// limit on those copies' bytes instead). Past the budget the system moves
-/// the card's memory into the PC's, which ended runs 20 and 24.
-=======
-/// up to `FLOOR` bytes of them, beyond that while the card's memory in use
-/// by this process is under nine tenths of the budget the system gives it
-/// ([`room_percent`] says another share; `VICTORY_TEXTURE_BUDGET_MB` sets a
-/// limit on those copies' bytes instead). Past the budget the system moves
-/// the card's memory into the PC's, which ended runs 20 and 24; the pass
-/// lets the least recently used go first, and spills only when it cannot
+/// which ended runs 20 and 24; the pass lets the least recently used go first, and spills only when it cannot
 /// ([`spill_room`]).
->>>>>>> vibr/main
 #[cfg(windows)]
 pub(crate) fn room(memory: Option<[u64; 4]>) -> bool {
     use std::sync::atomic::Ordering::Relaxed;
@@ -2417,24 +2398,21 @@ pub(crate) fn let_go_idle() {
         // SAFETY: a texture leaves the table before it is freed, under the
         // lock held here (`Drop for Resource`).
         let r = unsafe { &*(at as *const Resource) };
-<<<<<<< HEAD
         // (Without its lock first: most were used lately or have none.)
         let used = r.host.used.load(Relaxed);
-        if used == 0 || !fills(&r.desc) || !crate::host::long_ago(used, idle_ms, IDLE_FRAMES) || crate::texture::host_wrote(at) {
-||||||| merged common ancestors
-        if !fills(&r.desc) || crate::texture::host_wrote(at) {
-=======
+        if used == 0 || !crate::host::long_ago(used, idle_ms, IDLE_FRAMES) {
+            continue;
+        }
         // A target, depth or unordered access texture holds what the host
         // drew; it goes only once the title has unmapped the memory under it
         // (what was drawn there is gone on the console too). Port of
         // fxceless #194, for textures at title addresses as well as views.
         let title_filled = fills(&r.desc) && !crate::texture::host_wrote(at);
-        let unmapped = |r: &Resource| {
+        let unmapped_memory = |r: &Resource| {
             !matches!(r.backing, Backing::Committed(_))
                 && !crate::texture::committed(r.data().cast_const(), 1)
         };
         if !title_filled && fills(&r.desc) {
->>>>>>> vibr/main
             continue;
         }
         // A placed texture whose source the title unmapped: no need to wait
@@ -2452,32 +2430,20 @@ pub(crate) fn let_go_idle() {
         };
         let gone = {
             let mut made = r.host.made.lock().unwrap_or_else(|e| e.into_inner());
-<<<<<<< HEAD
-            let idle = made.as_ref().is_some_and(|(host, _)| {
-                (source_gone
-                    || crate::host::long_ago(r.host.used.load(Relaxed), idle_ms, IDLE_FRAMES))
-                    && std::sync::Arc::strong_count(host) == 1
-                    && crate::host::references(&host.texture) == 1
-||||||| merged common ancestors
-            let idle = made.as_ref().is_some_and(|(host, _)| {
-                crate::host::long_ago(r.host.used.load(Relaxed), idle_ms, IDLE_FRAMES)
-                    && std::sync::Arc::strong_count(host) == 1
-                    && crate::host::references(&host.texture) == 1
-=======
             let alone = |t: &std::sync::Arc<HostTexture>| {
                 std::sync::Arc::strong_count(t) == 1 && crate::host::references(&t.texture) == 1
             };
             // Cheap checks first: the memory question last.
             let idle = made.as_ref().is_some_and(|(host, twin)| {
-                crate::host::long_ago(r.host.used.load(Relaxed), idle_ms, IDLE_FRAMES)
+                (source_gone
+                    || crate::host::long_ago(r.host.used.load(Relaxed), idle_ms, IDLE_FRAMES))
                     && alone(host)
                     && twin.as_ref().is_none_or(|t| {
                         std::sync::Arc::strong_count(t) == 1
                             && alone(&t.colour)
                             && t.plane.as_ref().is_none_or(alone)
                     })
-                    && (title_filled || unmapped(r))
->>>>>>> vibr/main
+                    && (title_filled || unmapped_memory(r))
             });
             if idle {
                 // Under the lock: the next use must not find the staging
@@ -3020,7 +2986,6 @@ impl HostTexture {
             bytes: 0,
             filled: false,
             tiled: Some(tiled),
-<<<<<<< HEAD
             base: 0,
             serial: SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
             grown: Default::default(),
@@ -3028,11 +2993,8 @@ impl HostTexture {
             ahead: crate::texture::ahead::fresh(),
             flags,
             cut: None,
-||||||| merged common ancestors
-=======
             title_mips: 0,
             mip_drop: 0,
->>>>>>> vibr/main
         }
     }
 
@@ -3407,7 +3369,6 @@ pub(crate) fn host_copy(this: This) -> Option<std::sync::Arc<HostTexture>> {
     hosted(this, true).map(|made| made.0)
 }
 
-<<<<<<< HEAD
 /// A title texture's host copy if it is made; not made here.
 #[cfg(windows)]
 pub(crate) fn made_copy(this: This) -> Option<std::sync::Arc<HostTexture>> {
@@ -3417,11 +3378,11 @@ pub(crate) fn made_copy(this: This) -> Option<std::sync::Arc<HostTexture>> {
     hosted(this, false).map(|made| made.0)
 }
 
-||||||| merged common ancestors
-=======
 /// Computes the number of mips to drop for this texture under the current
 /// mip drop setting. Pure sampled textures with sufficient mips and size
 /// are scaled down to reduce VRAM consumption on low-VRAM GPUs.
+/// (The host copies drop theirs by [`drop_levels`].)
+#[allow(dead_code)]
 pub(crate) fn compute_mip_drop(desc: &ResourceDesc) -> u32 {
     let drop = crate::texture::texture_mip_drop();
     if drop == 0 {
@@ -3474,7 +3435,6 @@ pub(crate) fn compute_mip_drop_explicit(desc: &ResourceDesc, drop: u32, min_size
     0
 }
 
->>>>>>> vibr/main
 /// A host texture like the title's: same description, in GPU memory,
 /// without the console's layout and flags.
 #[cfg(windows)]
@@ -3519,25 +3479,12 @@ fn host_texture_in(
     d.layout = 0;
     d.alignment = 0;
     d.flags &= PC_FLAGS;
-<<<<<<< HEAD
     let drop = drop_levels(desc);
     if drop > 0 {
         d.width >>= drop;
         d.height >>= drop;
         d.mip_levels -= drop as u16;
     }
-||||||| merged common ancestors
-=======
-    let drop = compute_mip_drop(desc);
-    if drop > 0 {
-        d.width = (d.width >> drop).max(1);
-        d.height = (d.height >> drop).max(1);
-        if d.dimension == TEXTURE_3D {
-            d.depth_or_array_size = (d.depth_or_array_size >> drop).max(1);
-        }
-        d.mip_levels -= drop as u16;
-    }
->>>>>>> vibr/main
     // PC refuses depth targets that are also unordered-access (the console
     // allows both; the title's shadow maps ask for it).
     // The host copy loses the unordered access: shaders write a colour
@@ -3657,15 +3604,8 @@ fn host_texture_in(
             )
         }
     };
-<<<<<<< HEAD
     crate::census::made(if reserved { 5 } else { 4 }, 0);
     if let Err(e) = &made {
-||||||| merged common ancestors
-    if let Err(e) = made {
-=======
-    crate::census::made(if reserved { 5 } else { 4 }, 0);
-    if let Err(e) = made {
->>>>>>> vibr/main
         tracing::warn!(error = %e, desc = ?d, reserved, "no host texture");
     }
     if !reserved
@@ -3740,13 +3680,7 @@ impl OnDemand {
         let Some(tiled) = &self.0.tiled else {
             return false;
         };
-<<<<<<< HEAD
-        let (changed, waiting) = tiled.uploaded(&self.0.texture, held, room(crate::host::host().and_then(|h| h.video_memory())));
-||||||| merged common ancestors
-        let (changed, waiting) = tiled.uploaded(&self.0.texture, held, room());
-=======
-        let (changed, waiting) = tiled.uploaded(&self.0.texture, held, whatever || room());
->>>>>>> vibr/main
+        let (changed, waiting) = tiled.uploaded(&self.0.texture, held, whatever || room(crate::host::host().and_then(|h| h.video_memory())));
         if changed {
             crate::descriptor::host::levels_changed(memory);
         }
@@ -4104,16 +4038,8 @@ static PLACED_RAW: std::sync::Mutex<std::collections::BTreeSet<(u64, [u32; 14])>
 #[cfg(windows)]
 static PLACED_TWINS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-<<<<<<< HEAD
 /// See [`PLACED_TWINS`]. Read by the diagnostics' memory report only.
 #[cfg(all(windows, feature = "diagnostics"))]
-||||||| merged common ancestors
-/// See [`PLACED_TWINS`].
-#[cfg(windows)]
-=======
-/// See [`PLACED_TWINS`].
-#[cfg(all(windows, feature = "diagnostics"))]
->>>>>>> vibr/main
 pub(crate) fn placed_filler_twins() -> u64 {
     PLACED_TWINS.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -4588,7 +4514,6 @@ mod tests {
     }
     use crate::object::slot;
 
-<<<<<<< HEAD
     #[test]
     fn a8_unorm_is_not_in_the_r8_typeless_family() {
         // DXGI_FORMAT values: 60 R8_TYPELESS, 61 R8_UNORM, 62 R8_UINT,
@@ -4623,25 +4548,6 @@ mod tests {
         assert_eq!(shifted(0, 3, 2, 1.0), (3, 2, 1.0));
     }
 
-||||||| merged common ancestors
-=======
-    #[test]
-    fn a8_unorm_is_not_in_the_r8_typeless_family() {
-        // DXGI_FORMAT values: 60 R8_TYPELESS, 61 R8_UNORM, 62 R8_UINT,
-        // 63 R8_SNORM, 64 R8_SINT, 65 A8_UNORM. The R8 typeless family is
-        // 60..=64; A8_UNORM has no typeless family and cannot be cast to R8,
-        // so it must stand alone rather than fold into R8_TYPELESS.
-        assert_eq!(family(60), 60);
-        for f in 61..=64 {
-            assert_eq!(family(f), 60);
-        }
-        assert_eq!(family(65), 65);
-        // Boundaries: 59 belongs to the preceding family, 66 is unmapped.
-        assert_eq!(family(59), 53);
-        assert_eq!(family(66), 66);
-    }
-
->>>>>>> vibr/main
     type Release = extern "system" fn(This) -> u32;
     type Map = extern "system" fn(This, u32, *const c_void, *mut *mut u8) -> HRESULT;
     type Address = extern "system" fn(This) -> u64;
@@ -6342,7 +6248,6 @@ float4 lit() : SV_Target { return 1.0; }
         assert_eq!(slot::<Release>(heap, 0x10)(heap), 1);
         assert_eq!(slot::<Release>(placed, 0x10)(placed), 0);
     }
-<<<<<<< HEAD
 
     #[test]
     fn texture_floor_scales_with_vram_budget() {
@@ -6388,8 +6293,6 @@ float4 lit() : SV_Target { return 1.0; }
         assert_eq!((more.base, d.Width, d.MipLevels), (0, 256, 9));
         assert!(more.serial != copy.serial && more.grown.load(std::sync::atomic::Ordering::Relaxed));
     }
-||||||| merged common ancestors
-=======
 
     /// Subresource index remapping prunes dropped guest mips and correctly maps surviving mips.
     #[test]
@@ -6418,5 +6321,4 @@ float4 lit() : SV_Target { return 1.0; }
         // Zero drop -> pass through
         assert_eq!(map_subresource(15, GUEST_MIPS, 0), Some(15));
     }
->>>>>>> vibr/main
 }
