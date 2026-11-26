@@ -753,17 +753,9 @@ fn write_out(dir: &std::path::Path, library: &Library) {
         };
         (bytes, used_changed)
     };
-<<<<<<< HEAD
     // Through `used`: a process that asked for none yet (`victory shaders`)
     // must not write the earlier runs' list over with nothing.
     let used: Vec<String> = used().iter().flatten().cloned().collect();
-    let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
-||||||| c7daeea5
-    let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
-=======
-    // With what earlier runs listed: a run that asks for no title pipeline
-    // (`victory warm`) wrote an empty list over theirs, and the next world
-    // began with every pipeline still to be asked for.
     let library_written = if bytes > 0 {
         replace_library(dir, &tmp).inspect_err(|_| {
             let _ = std::fs::remove_file(&tmp);
@@ -771,7 +763,6 @@ fn write_out(dir: &std::path::Path, library: &Library) {
     } else {
         Ok(())
     };
->>>>>>> integ/vertex
     if bytes > 0 && library_written.is_ok() {
         // In place unless the system refused and the new one waits beside it.
         let in_place = !dir.join(NEXT_FILE).exists();
@@ -948,20 +939,16 @@ fn used() -> std::sync::MutexGuard<'static, Option<HashSet<String>>> {
     used
 }
 
-/// Whether the title pipeline with `key` was requested in this or an earlier run.
-<<<<<<< HEAD
-///
-/// `VICTORY_EARLY_ALL=1`: every title pipeline is started at creation,
-/// requested before or not, so that the driver's own cache holds it for
-/// later runs.
-||||||| c7daeea5
-=======
 /// Open the early list before a cache save that has no title draws.
 pub(crate) fn keep_early_list() {
     drop(used());
 }
 
->>>>>>> integ/vertex
+/// Whether the title pipeline with `key` was requested in this or an earlier run.
+///
+/// `VICTORY_EARLY_ALL=1`: every title pipeline is started at creation,
+/// requested before or not, so that the driver's own cache holds it for
+/// later runs.
 pub(crate) fn wanted_early(key: &str) -> bool {
     static ALL: OnceLock<bool> = OnceLock::new();
     if *ALL.get_or_init(|| std::env::var_os("VICTORY_EARLY_ALL").is_some_and(|v| v == "1")) {

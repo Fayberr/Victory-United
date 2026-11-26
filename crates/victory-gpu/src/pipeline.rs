@@ -117,31 +117,7 @@ fn shader(stage: &'static str, bytes: &[u8]) -> Arc<Shader> {
         .or_insert_with(|| {
             KEPT[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             KEPT[1].fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
-<<<<<<< HEAD
-            Arc::new(Shader {
-                stage,
-                hash: full.to_hex()[..16].to_owned(),
-                container: bytes.to_vec(),
-                #[cfg(windows)]
-                ambient: (stage == "compute").then(|| crate::ambient::role(bytes)).flatten(),
-                #[cfg(windows)]
-                translated: OnceLock::new(),
-                #[cfg(windows)]
-                walks: OnceLock::new(),
-            })
-||||||| c7daeea5
-            Arc::new(Shader {
-                stage,
-                hash: full.to_hex()[..16].to_owned(),
-                container: bytes.to_vec(),
-                #[cfg(windows)]
-                translated: OnceLock::new(),
-                #[cfg(windows)]
-                walks: OnceLock::new(),
-            })
-=======
             Arc::new(Shader::new(stage, bytes, full))
->>>>>>> integ/vertex
         })
         .clone()
 }
@@ -152,6 +128,8 @@ impl Shader {
             stage,
             hash: hash.to_hex()[..16].to_owned(),
             container: bytes.to_vec(),
+            #[cfg(windows)]
+            ambient: (stage == "compute").then(|| crate::ambient::role(bytes)).flatten(),
             #[cfg(windows)]
             translated: OnceLock::new(),
             #[cfg(windows)]
@@ -177,22 +155,11 @@ pub(crate) struct Translated {
     /// True when its code is not known. What `VICTORY_BARRIER_MERGE` asks
     /// of an op before it counts it as unordered writes to wait for.
     pub(crate) writes: bool,
-<<<<<<< HEAD
     /// Whether it can store through raw addresses ([`stores_by_address`]).
     pub(crate) stores_by_address: bool,
     /// Whether it stores through a view it picks from the heap by an index,
     /// once asked (`crate::picked`).
     pub(crate) picks: std::sync::atomic::AtomicU8,
-||||||| c7daeea5
-=======
-    /// Whether it can store to title memory by address
-    /// ([`stores_by_address`]): not through a view, so anywhere.
-    pub(crate) stores_by_address: bool,
-    /// Compute thread-group dimensions `[x, y, z]` (`[0; 3]` for non-compute).
-    pub(crate) threads: [u32; 3],
-    /// Whether the shader walks ray-tracing structures ([`walks`]).
-    pub(crate) walks: bool,
->>>>>>> integ/vertex
 }
 
 #[cfg(windows)]
@@ -265,7 +232,6 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
     let host = crate::shader_cache::host_shader(container)?;
     let stores = programs.is_empty() || programs.iter().any(stores);
     let writes = stores || programs.iter().any(image_stores);
-<<<<<<< HEAD
     let threads = programs.iter().find_map(|p| match &p.io {
         victory_shader::native::StageIo::Cs(cs) if cs.threads.iter().all(|&n| n > 0) => Some(cs.threads),
         _ => None,
@@ -290,42 +256,6 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         stores_by_address,
         picks: Default::default(),
     })
-||||||| c7daeea5
-    let used = programs
-        .into_iter()
-        .find(|p| {
-            matches!(
-                p.stage,
-                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-            )
-        })
-        .map(|p| p.used)
-        .unwrap_or_default();
-    Ok(Translated { host, used, stores, writes })
-=======
-    let stores_by_address = programs.is_empty() || programs.iter().any(stores_by_address);
-    let walks = programs.iter().any(walks);
-    let main = programs.into_iter().find(|p| {
-        matches!(
-            p.stage,
-            HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-        )
-    });
-    let threads = match main.as_ref().map(|p| &p.io) {
-        Some(victory_shader::native::StageIo::Cs(cs)) => cs.threads,
-        _ => [0; 3],
-    };
-    let used = main.map(|p| p.used).unwrap_or_default();
-    Ok(Translated {
-        host,
-        used,
-        stores,
-        writes,
-        stores_by_address,
-        threads,
-        walks,
-    })
->>>>>>> integ/vertex
 }
 
 /// Whether a console program has an image store or atomic (it writes a
@@ -370,32 +300,18 @@ struct Builder {
     pipelines: Vec<Arc<make::Pending>>,
     /// Every one of `pipelines` has a host pipeline.
     whole: bool,
-<<<<<<< HEAD
-    /// One could not be made, of so many (0: none).
-    off: usize,
-    /// No stage runs before this frame.
-    rests: u64,
-||||||| c7daeea5
-    /// One could not be made.
-    off: bool,
-=======
     /// Why none runs for the rest of the run.
     off: Option<&'static str>,
->>>>>>> integ/vertex
+    /// No stage runs before this frame.
+    rests: u64,
 }
 
 #[cfg(windows)]
 static BUILDER: Mutex<Builder> = Mutex::new(Builder {
     pipelines: Vec::new(),
     whole: false,
-<<<<<<< HEAD
-    off: 0,
-    rests: 0,
-||||||| c7daeea5
-    off: false,
-=======
     off: None,
->>>>>>> integ/vertex
+    rests: 0,
 });
 
 /// Whether `shaders` are a pipeline of the structure builder.
@@ -589,12 +505,6 @@ pub(crate) fn is_builder(this: This) -> bool {
     !this.is_null() && pipeline(this).builder
 }
 
-<<<<<<< HEAD
-/// A stage of the builder was dropped after all: none runs for the rest of
-/// this frame and the next (what it fed is not there).
-||||||| c7daeea5
-/// A stage of the builder was dropped after all: none runs from here on.
-=======
 /// Set while the builder's stages run: from the first dispatch that found
 /// every builder pipeline made, until one is dropped.
 #[cfg(windows)]
@@ -640,26 +550,18 @@ fn builder_census() {
     );
 }
 
-/// A stage of the builder was dropped after all: none runs from here on.
->>>>>>> integ/vertex
+/// A stage of the builder was dropped after all: none runs for the rest of
+/// this frame and the next (what it fed is not there).
 #[cfg(windows)]
 pub(crate) fn builder_rests(why: &'static str) {
     let mut b = BUILDER.lock().unwrap_or_else(|e| e.into_inner());
-<<<<<<< HEAD
     b.rests = crate::frame::current() + 2;
+    // What it fed is not there: the structures in title memory are not ones
+    // the builder built, until it runs whole again.
+    BUILDER_LIVE.store(false, std::sync::atomic::Ordering::Relaxed);
     static SAID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     if SAID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 20 {
         tracing::warn!(why, "the ray-tracing structure builder rests for this frame and the next: its stages run all or none");
-||||||| c7daeea5
-    if !b.off {
-        b.off = true;
-        tracing::warn!(why, "the ray-tracing structure builder is turned off for the rest of the run: its stages run all or none");
-=======
-    if b.off.is_none() {
-        b.off = Some(why);
-        BUILDER_LIVE.store(false, std::sync::atomic::Ordering::Relaxed);
-        tracing::warn!(why, "the ray-tracing structure builder is turned off for the rest of the run: its stages run all or none");
->>>>>>> integ/vertex
     }
 }
 
@@ -691,26 +593,16 @@ pub(crate) fn builder_runs() -> bool {
         builder_census();
         return false;
     }
-<<<<<<< HEAD
-    let mut b = BUILDER.lock().unwrap_or_else(|e| e.into_inner());
-    if b.off == b.pipelines.len() || crate::frame::current() < b.rests {
-        return false;
-    }
-    if b.whole {
-||||||| c7daeea5
-    let mut b = BUILDER.lock().unwrap_or_else(|e| e.into_inner());
-    if b.off {
-        return false;
-    }
-    if b.whole {
-=======
     loop {
         let pipelines = {
             let b = BUILDER.lock().unwrap_or_else(|e| e.into_inner());
-            if b.off.is_some() {
+            if b.off.is_some() || crate::frame::current() < b.rests {
                 return false;
             }
             if b.whole {
+                // It runs again after a rest, and what the walkers read is
+                // then a structure the builder built.
+                BUILDER_LIVE.store(true, std::sync::atomic::Ordering::Relaxed);
                 return true;
             }
             b.pipelines.clone()
@@ -725,7 +617,7 @@ pub(crate) fn builder_runs() -> bool {
             make::now(p);
         }
         let mut b = BUILDER.lock().unwrap_or_else(|e| e.into_inner());
-        if b.off.is_some() {
+        if b.off.is_some() || crate::frame::current() < b.rests {
             return false;
         }
         let missing = make::failures(&pipelines);
@@ -751,55 +643,8 @@ pub(crate) fn builder_runs() -> bool {
             b.whole = true;
             BUILDER_LIVE.store(true, std::sync::atomic::Ordering::Relaxed);
         }
->>>>>>> integ/vertex
         return true;
     }
-<<<<<<< HEAD
-    let missing: Vec<String> = b.pipelines.iter().filter(|p| !make::now(p)).map(|p| make::hashes(p)).collect();
-    if !missing.is_empty() {
-        b.off = b.pipelines.len();
-        tracing::warn!(
-            missing = missing.len(),
-            of = b.pipelines.len(),
-            which = ?missing,
-            "the ray-tracing structure builder stays off: not all of its programs have a host pipeline, and its stages run all or none"
-        );
-        return false;
-    }
-    b.off = 0;
-    tracing::info!(
-        pipelines = b.pipelines.len(),
-        "the ray-tracing structure builder runs: all of its programs have host pipelines"
-    );
-    b.whole = true;
-    true
-||||||| c7daeea5
-    let missing = b.pipelines.iter().filter(|p| !make::now(p)).count();
-    if missing > 0 {
-        b.off = true;
-        tracing::warn!(
-            missing,
-            of = b.pipelines.len(),
-            "the ray-tracing structure builder stays off: not all of its programs have a host pipeline, and its stages run all or none"
-        );
-        return false;
-    }
-    tracing::info!(
-        pipelines = b.pipelines.len(),
-        "the ray-tracing structure builder runs: all of its programs have host pipelines"
-    );
-    b.whole = true;
-    true
-=======
-}
-
-/// Whether a console program walks ray-tracing structures: it has one of
-/// the two instructions that test a ray against a node of one.
-#[cfg(windows)]
-fn walks(program: &victory_shader::NativeProgram) -> bool {
-    victory_shader::gfx10::decode(&program.code)
-        .is_ok_and(|code| code.iter().any(|i| i.name().is_some_and(|n| n.starts_with("image_bvh"))))
->>>>>>> integ/vertex
 }
 
 /// Whether a console program can store to buffer memory: it has a buffer,
@@ -831,34 +676,10 @@ fn stores(program: &victory_shader::NativeProgram) -> bool {
     })
 }
 
-<<<<<<< HEAD
 /// Whether a console program can store to memory through raw addresses
-/// (`crate::memory`): a flat or global store or atomic, or code that does
-/// not decode. The programs that only walk ray-tracing structures do not,
-/// whatever they store through views.
-#[cfg(windows)]
-fn stores_by_address(program: &victory_shader::NativeProgram) -> bool {
-    use victory_shader::gfx10::{Encoding, decode};
-    let Ok(code) = decode(&program.code) else {
-        return true;
-    };
-    code.iter().any(|i| {
-        matches!(i.encoding, Encoding::Flat | Encoding::Global)
-            && i.name()
-                .is_none_or(|n| (n.contains("store") || n.contains("atomic")) && !n.contains("scratch"))
-    })
-}
-
-||||||| c7daeea5
-=======
-/// Whether a console program can store to title memory by address: it has
-/// a global or flat store or atomic, or code that is not all known (as
-/// [`stores`]). Only such a program can have written any copy that title
-/// memory by address leads to; one that walks ray-tracing structures loads
-/// by address and stores through views. Taken for every program that can
-/// store at all, 8.1 GB of windows were snapshotted and compared a frame
-/// with the structure builder on (run 16: 2 to 2.5 s a frame, the card at
-/// 2 %).
+/// (`crate::memory`): a flat or global store or atomic, a call or jump to
+/// code not seen here, or code that does not decode. The programs that only
+/// walk ray-tracing structures do not, whatever they store through views.
 #[cfg(windows)]
 fn stores_by_address(program: &victory_shader::NativeProgram) -> bool {
     use victory_shader::gfx10::{Encoding, decode};
@@ -874,7 +695,6 @@ fn stores_by_address(program: &victory_shader::NativeProgram) -> bool {
     })
 }
 
->>>>>>> integ/vertex
 #[repr(C)]
 struct Pipeline {
     object: Object,
@@ -1057,17 +877,11 @@ fn hand_out(
     #[cfg(all(windows, not(feature = "diagnostics")))]
     let skipped = false;
     #[cfg(windows)]
-<<<<<<< HEAD
     known::note(host.key(), &shaders, host.graphics.as_deref());
     #[cfg(windows)]
-    make::early(&host);
-||||||| c7daeea5
-    make::early(&host);
-=======
     if !skipped {
         make::early(&host);
     }
->>>>>>> integ/vertex
     #[cfg(windows)]
     let builder = of_builder(&shaders);
     #[cfg(windows)]

@@ -158,8 +158,8 @@ pub(crate) enum C {
     /// Clamps recorded into lists' preludes (`crate::indirect::early`).
     IndirectEarly,
 }
-<<<<<<< HEAD
-const COUNTERS: usize = 80;
+/// One past the last counter (it was a number kept by hand).
+const COUNTERS: usize = C::IndirectEarly as usize + 1;
 /// One of some sets of counters, each in lines of the processor's memory of
 /// its own: a set for all threads had them wait for each other's lines at
 /// every list call (what counts here is summed up for the log alone).
@@ -185,14 +185,6 @@ fn bank() -> usize {
     })
     .unwrap_or(0)
 }
-||||||| c7daeea5
-const COUNTERS: usize = 80;
-static COUNT: [AtomicU64; COUNTERS] = [const { AtomicU64::new(0) }; COUNTERS];
-=======
-/// One past the last counter (it was a number kept by hand).
-const COUNTERS: usize = C::IndirectEarly as usize + 1;
-static COUNT: [AtomicU64; COUNTERS] = [const { AtomicU64::new(0) }; COUNTERS];
->>>>>>> integ/vertex
 
 pub(crate) fn add(c: C, n: u64) {
     COUNT[bank()].0[c as usize].fetch_add(n, Relaxed);
