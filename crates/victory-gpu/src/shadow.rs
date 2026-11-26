@@ -4865,7 +4865,6 @@ impl Shadow {
         list.defer_refresh(self, address as usize, len as usize);
     }
 
-<<<<<<< HEAD
     /// As [`Shadow::refresh`], for several spans of one list: the spans are
     /// clamped as `refresh` clamps them, and all their steps go in under one
     /// lock of the list (`HostList::defer_refreshes`).
@@ -4886,29 +4885,9 @@ impl Shadow {
     }
 
     fn new(buffer: ID3D12Resource, data: *mut u8, gpu: u64, start: u64, len: u64) -> Shadow {
-||||||| merged common ancestors
-    fn new(buffer: ID3D12Resource, data: *mut u8, gpu: u64, start: u64, len: u64) -> Shadow {
-=======
-    fn new(
-        buffer: ID3D12Resource,
-        data: *mut u8,
-        gpu: u64,
-        start: u64,
-        len: u64,
-        card: Option<Arc<crate::card::CardState>>,
-    ) -> Shadow {
->>>>>>> belobug/main
         let pages = (start + len).div_ceil(PAGE as u64) - start / PAGE as u64;
-<<<<<<< HEAD
         LIVE[0].fetch_add(1, Ordering::Relaxed);
         LIVE[1].fetch_add(len, Ordering::Relaxed);
-||||||| merged common ancestors
-=======
-        // SAFETY: a live resource.
-        let bytes = unsafe { buffer.GetDesc() }.Width;
-        crate::memstat::add(&crate::memstat::SHADOWS, bytes);
-        crate::memstat::add(&crate::memstat::SHADOW_COUNT, 1);
->>>>>>> belobug/main
         Shadow {
             landings: Mutex::default(),
             landing: Default::default(),
@@ -4924,7 +4903,6 @@ impl Shadow {
             pending: Mutex::default(),
             flights: Mutex::default(),
             before: Mutex::default(),
-<<<<<<< HEAD
             merging: RwLock::default(),
             kept: Mutex::default(),
             used: AtomicU64::new(crate::host::moment()),
@@ -4936,6 +4914,10 @@ impl Shadow {
                 static NEXT: AtomicU64 = AtomicU64::new(1);
                 NEXT.fetch_add(1, Ordering::Relaxed)
             },
+            direct: None,
+            unwatched: Mutex::default(),
+            clean_spans: Mutex::default(),
+            sparse: None,
             card: None,
             window: false,
             uploaded: 0,
@@ -4943,14 +4925,6 @@ impl Shadow {
             mapped: false,
             place: None,
             rebar: 0,
-||||||| merged common ancestors
-=======
-            direct: None,
-            unwatched: Mutex::default(),
-            clean_spans: Mutex::default(),
-            sparse: None,
-            card,
->>>>>>> belobug/main
         }
     }
 
@@ -5152,7 +5126,6 @@ impl Shadow {
     /// before the submission (a copy per declared range and submission);
     /// a GPU-side dirty mask would save that if big ranges make it slow.
     pub(crate) fn gpu_writes(self: &Arc<Self>, list: &HostList, address: u64, len: u64) {
-<<<<<<< HEAD
         // The list's prelude takes no record of this copy from here on
         // (`crate::indirect::gather_by_copy`); a copy in place is written
         // by the shaders as any other.
@@ -5166,12 +5139,6 @@ impl Shadow {
             return;
         }
         self.written.store(true, Ordering::Relaxed);
-||||||| merged common ancestors
-=======
-        if self.direct.is_some() {
-            return;
-        }
->>>>>>> belobug/main
         let len = len.min(self.left(address));
         if !crate::readback::copy_back(address, len) {
             return;
@@ -5188,56 +5155,7 @@ impl Shadow {
     /// memory (fresh snapshots cost ~2.3 million page faults per world
     /// frame).
     pub(crate) fn writing(&self, address: usize, len: usize) {
-<<<<<<< HEAD
         if self.place.is_some() {
-||||||| merged common ancestors
-        self.pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push((address, address + len));
-        let (from, to) = self.inside(address, len);
-        // SAFETY: inside the mapping.
-        let host = |a: usize, b: usize| unsafe { std::slice::from_raw_parts(self.data.add(a), b - a) };
-        let mut before = self.before.lock().unwrap_or_else(|e| e.into_inner());
-        let (start, end) = match &*before {
-            Some((at, bytes)) => ((*at).min(from), (at + bytes.len()).max(to)),
-            None => (from, to),
-        };
-        if let Some((at, bytes)) = &*before
-            && (*at, at + bytes.len()) == (start, end)
-        {
-=======
-        if self.direct.is_some() {
-            return;
-        }
-        if self.card.is_some() {
-            self.pending
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push((address, address + len));
-            return;
-        }
-        if let Some((root, s)) = self.sparse_root() {
-            return root.sparse_writing(s, address, len);
-        }
-        self.pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push((address, address + len));
-        let (from, to) = self.inside(address, len);
-        // SAFETY: inside the mapping.
-        let host =
-            |a: usize, b: usize| unsafe { std::slice::from_raw_parts(self.data.add(a), b - a) };
-        let mut before = self.before.lock().unwrap_or_else(|e| e.into_inner());
-        let before = &mut before.snapshot;
-        let (start, end) = match &*before {
-            Some((at, bytes)) => ((*at).min(from), (at + bytes.len()).max(to)),
-            None => (from, to),
-        };
-        if let Some((at, bytes)) = &*before
-            && (*at, at + bytes.len()) == (start, end)
-        {
->>>>>>> belobug/main
             return;
         }
         let range = (address, address + len);
@@ -5349,7 +5267,6 @@ impl Shadow {
     /// union of a submission's ranges, each byte once, then calls
     /// [`Shadow::copy_back_done`].
     pub(crate) fn copy_back(&self, address: usize, len: usize) -> usize {
-<<<<<<< HEAD
         self.copy_back_with(address, len, None)
     }
 
@@ -5360,21 +5277,6 @@ impl Shadow {
             return 0;
         }
         let snapshot = self.before.lock().unwrap_or_else(|e| e.into_inner());
-||||||| merged common ancestors
-        let mut snapshot = self.before.lock().unwrap_or_else(|e| e.into_inner());
-=======
-        if self.direct.is_some() || self.card.is_some() {
-            return 0;
-        }
-        if let Some((root, s)) = self.sparse_root() {
-            return root.sparse_back(s, address, len);
-        }
-        let mut before = self.before.lock().unwrap_or_else(|e| e.into_inner());
-        let Before {
-            snapshot,
-            unchanged,
-        } = &mut *before;
->>>>>>> belobug/main
         let mut written = 0;
         let (from, to) = self.inside(address, len);
         let start = self.start as usize;
@@ -5382,18 +5284,10 @@ impl Shadow {
         if let Some(before) = &*snapshot
             && from < to
         {
-<<<<<<< HEAD
             // SAFETY: `writing` set the snapshot's bytes of every declared
             // range, at the copy's offsets.
             let before = unsafe { std::slice::from_raw_parts(before.as_ptr().add(from), to - from) };
-||||||| merged common ancestors
-            let before = &before[from - taken..to - taken];
-=======
-            unchanged.begin(start + taken, start + taken + before.len());
-            let before = &before[from - taken..to - taken];
->>>>>>> belobug/main
             // By 64 KiB piece: the copy compared with its bytes before the
-<<<<<<< HEAD
             // submission (on several threads: gigabytes a frame, bound by
             // memory speed), title memory read only where the GPU wrote.
             #[cfg(feature = "diagnostics")]
@@ -5419,30 +5313,10 @@ impl Shadow {
             // work for small ranges.
             let (mut title, mut mask, mut runs) = (Vec::new(), Vec::new(), Vec::new());
             for (at, n) in differing {
-||||||| merged common ancestors
-            // submission, title memory read only where the GPU wrote.
-            const PIECE: usize = 64 << 10;
-            let mut title = vec![0u8; PIECE];
-            let mut synced = Vec::new();
-            let mut at = from;
-            while at < to {
-                let n = (PIECE - (start + at) % PIECE).min(to - at);
-=======
-            // submission, title memory read only where the GPU wrote.
-            // An unchanged page is never modified by copy-back, so later
-            // overlapping ranges can skip it for the rest of the submission.
-            let mode = self.watched.load(Ordering::Relaxed);
-            let mut title: Option<Vec<u8>> = None;
-            let mut synced = Vec::new();
-            let mut at = from;
-            while at < to {
-                let n = (PAGE - (start + at) % PAGE).min(to - at);
->>>>>>> belobug/main
                 // SAFETY: inside the mapping; only the submitting thread
                 // writes it.
                 let host = unsafe { std::slice::from_raw_parts_mut(self.data.add(at), n) };
                 let old = &before[at - from..at - from + n];
-<<<<<<< HEAD
                 let read = |first: usize, title: &mut [u8]| crate::host::read_into((start + at + first) as *const u8, title);
                 let Some((first, n)) = back_piece(host, old, &mut title, &mut mask, &mut runs, read) else {
                     continue;
@@ -5626,50 +5500,8 @@ impl Shadow {
                             if crate::watch::clean(page) {
                                 OWN_WRITES[6].fetch_add(1, Ordering::Relaxed);
                             }
-||||||| merged common ancestors
-                let title = &mut title[..n];
-                if host != old && crate::host::read_into((start + at) as *const u8, title) {
-                    // Title memory with the GPU's bytes put in; the copy
-                    // takes the title's bytes in turn.
-                    let mut changed = false;
-                    for ((t, h), o) in title.iter_mut().zip(host.iter_mut()).zip(old) {
-                        if *h != *o && *t != *h {
-                            *t = *h;
-                            changed = true;
-=======
-                if unchanged.differs(start + at, host, old) {
-                    let buf = title.get_or_insert_with(|| {
-                        let mut v = pooled(PAGE);
-                        v.resize(PAGE, 0);
-                        v
-                    });
-                    let title_slice = &mut buf[..n];
-                    if crate::host::read_into((start + at) as *const u8, title_slice) {
-                        // Title memory with the GPU's bytes put in; the copy
-                        // takes the title's bytes in turn.
-                        if let Some((dirty_start, dirty_end)) =
-                            merge_gpu_writes(title_slice, host, old)
-                        {
-                            let dirty_len = dirty_end - dirty_start;
-                            if mode != 1 {
-                                crate::watch::writing(start + at + dirty_start, dirty_len);
-                            }
-                            crate::host::write_mapped(
-                                (start + at + dirty_start) as *mut u8,
-                                title_slice[dirty_start..].as_ptr(),
-                                dirty_len,
-                            );
-                            written += dirty_len;
->>>>>>> belobug/main
                         }
-<<<<<<< HEAD
-||||||| merged common ancestors
-                        *h = *t;
-=======
-                        synced.push((start + at) / PAGE);
->>>>>>> belobug/main
                     }
-<<<<<<< HEAD
                 }
             }
         }
@@ -5705,19 +5537,9 @@ impl Shadow {
                 let host = unsafe { std::slice::from_raw_parts((data + at) as *const u8, n) };
                 if host != &before[at - from..at - from + n] {
                     found.push((at, n));
-||||||| merged common ancestors
-                    if changed {
-                        crate::watch::writing(start + at, n);
-                        crate::host::write_mapped((start + at) as *mut u8, title.as_ptr(), n);
-                        written += n;
-                    }
-                    synced.push((start + at) / PAGE);
-=======
->>>>>>> belobug/main
                 }
                 at += n;
             }
-<<<<<<< HEAD
             found
         };
         const PER_THREAD: usize = 16 << 20;
@@ -5782,41 +5604,6 @@ impl Shadow {
                     kept.1 = true;
                 } else {
                     KEPT_BYTES.fetch_sub(self.len, Ordering::Relaxed);
-||||||| merged common ancestors
-            // Pages made equal to title memory are current in the copy, so
-            // our own write is not taken for the title's; others keep what
-            // they had (a title write there shows at the next refresh).
-            let (first, last) = ((start + from).div_ceil(PAGE), (start + to) / PAGE);
-            if first < last
-                && !synced.is_empty()
-                && self.watched.load(Ordering::Relaxed) != NOT_WATCHED
-                && let Some((now, _)) = crate::watch::writes(first * PAGE, last * PAGE, true)
-            {
-                let base = start / PAGE;
-                let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-                for page in synced.into_iter().filter(|p| (first..last).contains(p)) {
-                    copied[page - base] = now;
-=======
-            if let Some(buf) = title {
-                give_back(buf);
-            }
-            // Pages made equal to title memory are current in the copy, so
-            // our own write is not taken for the title's; others keep what
-            // they had (a title write there shows at the next refresh).
-            let (first, last) = ((start + from).div_ceil(PAGE), (start + to) / PAGE);
-            if first < last && !synced.is_empty() && mode != NOT_WATCHED {
-                let res = if mode == WATCHED_GUARDED {
-                    crate::watch::writes_guarded(first * PAGE, last * PAGE)
-                } else {
-                    crate::watch::writes(first * PAGE, last * PAGE, true)
-                };
-                if let Some((now, _)) = res {
-                    let base = start / PAGE;
-                    let mut copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-                    for page in synced.into_iter().filter(|p| (first..last).contains(p)) {
-                        copied[page - base] = now;
-                    }
->>>>>>> belobug/main
                 }
             }
             if kept.1 {
@@ -5827,26 +5614,7 @@ impl Shadow {
             // the snapshot's.)
             kept.0.clear();
         }
-<<<<<<< HEAD
         if let Some(bytes) = self.before.lock().unwrap_or_else(|e| e.into_inner()).take() {
-||||||| merged common ancestors
-        // Every submitted step that declared the range is done with it (one
-        // submission runs at a time), and the snapshot with the last range.
-        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        pending.retain(|&r| r != (address, address + len));
-        if pending.is_empty()
-            && let Some((_, bytes)) = snapshot.take()
-        {
-=======
-        // Every submitted step that declared the range is done with it (one
-        // submission runs at a time), and the snapshot with the last range.
-        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        pending.retain(|&r| r != (address, address + len));
-        if pending.is_empty()
-            && let Some((_, bytes)) = snapshot.take()
-        {
-            unchanged.clear();
->>>>>>> belobug/main
             give_back(bytes);
         }
     }
@@ -6208,13 +5976,6 @@ impl Shadow {
     /// since it was last copied (all of it if the memory is not
     /// write-watched). Returns the bytes copied.
     pub(crate) fn update(&self, address: usize, len: usize) -> usize {
-<<<<<<< HEAD
-        // In place: the card reads title memory itself.
-        if self.place.is_some() {
-            return 0;
-        }
-||||||| merged common ancestors
-=======
         self.update_lazily(address, len, false)
     }
 
@@ -6227,7 +5988,6 @@ impl Shadow {
         if let Some(root) = self.sparse.as_ref().and_then(|s| s.of.as_ref()) {
             return root.update_lazily(address, len, lazy);
         }
->>>>>>> belobug/main
         let (start, end) = (self.start as usize, (self.start + self.len) as usize);
         let (from, to) = (address.max(start), (address + len).min(end));
         if from >= to {
@@ -6245,7 +6005,7 @@ impl Shadow {
             if seq.is_some_and(|seq| self.stamp.current(seq, a, e, start, end)) {
                 return;
             }
-            bytes += self.update_free(a, e);
+            bytes += self.update_free(a, e, lazy);
             if let Some(seq) = seq {
                 self.stamp.mark(seq, a, e, start, end);
             }
@@ -6264,53 +6024,14 @@ impl Shadow {
             .copied()
             .filter(|&(a, e)| a < to && e > from)
             .collect();
-<<<<<<< HEAD
         busy.sort_unstable();
         let mut at = from;
         for (a, e) in busy {
             if a > at {
                 f(at, a);
-||||||| merged common ancestors
-        if !busy.is_empty() {
-            // Around ranges shaders are writing: the gaps, each as below
-            // (in the world most submissions have such ranges; copying the
-            // gaps whole cost ~1 s per frame).
-            busy.sort_unstable();
-            let (mut at, mut bytes) = (from, 0);
-            for (a, e) in busy {
-                if a > at {
-                    bytes += self.update_free(at, a);
-                }
-                at = at.max(e);
-=======
-        if !busy.is_empty() {
-            // Around ranges shaders are writing: the gaps, each as below
-            // (in the world most submissions have such ranges; copying the
-            // gaps whole cost ~1 s per frame).
-            busy.sort_unstable();
-            let (mut at, mut bytes) = (from, 0);
-            for (a, e) in busy {
-                if a > at {
-                    bytes += self.update_free(at, a, lazy);
-                }
-                at = at.max(e);
->>>>>>> belobug/main
             }
-<<<<<<< HEAD
             at = at.max(e);
-||||||| merged common ancestors
-            if at < to {
-                bytes += self.update_free(at, to);
-            }
-            return bytes;
-=======
-            if at < to {
-                bytes += self.update_free(at, to, lazy);
-            }
-            return bytes;
->>>>>>> belobug/main
         }
-<<<<<<< HEAD
         if at < to {
             f(at, to);
         }
@@ -6370,35 +6091,10 @@ impl Shadow {
     fn ranged(&self, from: usize, to: usize) -> u64 {
         let ranged = self.ranged.lock().unwrap_or_else(|e| e.into_inner());
         ranged.iter().filter(|r| r.0 <= from && to <= r.1).map(|r| r.2).max().unwrap_or(0)
-||||||| merged common ancestors
-        self.update_free(from, to)
-=======
-        self.update_free(from, to, lazy)
->>>>>>> belobug/main
     }
 
     /// [`Shadow::update`] of `[from, to)` (inside the buffer) where no
     /// shader writes.
-<<<<<<< HEAD
-    fn update_free(&self, from: usize, to: usize) -> usize {
-        let mode = self.watched.load(Ordering::Relaxed);
-        if mode != NOT_WATCHED {
-            let result = if mode == GUARDED {
-                crate::watch::writes_guarded(from, to).map(|(now, w)| (now, w, true))
-            } else {
-                crate::watch::writes_kind(from, to, true)
-            };
-            if let Some((now, written, is_view)) = result {
-                let next = if is_view { GUARDED } else { 1 };
-                if mode != next {
-                    self.watched.store(next, Ordering::Relaxed);
-                }
-||||||| merged common ancestors
-    fn update_free(&self, from: usize, to: usize) -> usize {
-        if self.watched.load(Ordering::Relaxed) != NOT_WATCHED {
-            if let Some((now, written)) = crate::watch::writes(from, to, true) {
-                self.watched.store(1, Ordering::Relaxed);
-=======
     fn update_free(&self, from: usize, to: usize, lazy: bool) -> usize {
         // Diagnostics (`VICTORY_ALWAYS_COPY`): 1 no write watch and no
         // guard, every copy taken again once a frame, every tile looked at
@@ -6431,6 +6127,7 @@ impl Shadow {
             }
             if let Some((now, written)) = crate::watch::writes_guarded(from, to) {
                 let copied = self.copy_stale(from, to, now, &written);
+                self.refresh_check(from, to);
                 if crate::watch::region_epoch(from, to) == ge {
                     let mut spans = self.clean_spans.lock().unwrap_or_else(|e| e.into_inner());
                     if spans.len() >= 8192 {
@@ -6451,7 +6148,6 @@ impl Shadow {
             // this shadow as guarded so subsequent calls skip GetWriteWatch.
             if let Some((now, written)) = crate::watch::writes(from, to, false) {
                 self.watched.store(1, Ordering::Relaxed);
->>>>>>> belobug/main
                 let copied = self.copy_stale(from, to, now, &written);
                 self.refresh_check(from, to);
                 #[cfg(feature = "diagnostics")]
@@ -6511,7 +6207,6 @@ impl Shadow {
         to - from
     }
 
-<<<<<<< HEAD
     /// Diagnostic (`VICTORY_REFRESH_CHECK=1`; off by default): after a
     /// refresh of `[from, to)` that trusted the write watch or the guards,
     /// the first 256 bytes of every 64 KiB block of it are read from title
@@ -6569,8 +6264,6 @@ impl Shadow {
         }
     }
 
-||||||| merged common ancestors
-=======
     /// Copies title memory `[from, to)` into the tiles of a sparse copy where
     /// the title changed it since the last time: what shaders wrote into the
     /// copy only is left as it is. `lazy`: not the tiles whose turn it is not.
@@ -6673,7 +6366,6 @@ impl Shadow {
         bytes
     }
 
->>>>>>> belobug/main
     /// Copies the pages of `[from, to)` written after their last copy
     /// (`written`: last writes by page, in page order; `now`: this
     /// asking), whole pages within the buffer.
@@ -6821,7 +6513,6 @@ impl Shadow {
         bytes
     }
 
-<<<<<<< HEAD
     /// [`Shadow::take`] of `runs` (from, to, known), on several threads if
     /// they are long: the big heap's copy has some 4 MB of them in each of
     /// 14 refreshes a frame, on one thread while the others had nothing.
@@ -6930,32 +6621,6 @@ impl Shadow {
                 }
             }
         });
-||||||| merged common ancestors
-    /// Copies title memory `[from, to)`, cut to the buffer, into the copy.
-    fn copy(&self, from: usize, to: usize) -> usize {
-        let (start, end) = (self.start as usize, (self.start + self.len) as usize);
-        let (from, to) = (from.max(start), to.min(end));
-        // SAFETY: inside the mapping (`from` and `to` are within the buffer).
-        let at = unsafe { self.data.add(from - start) };
-        crate::host::copy_mapped(at, from as *const u8, to - from, false);
-=======
-    /// Copies title memory `[from, to)`, cut to the buffer, into the copy.
-    fn copy(&self, from: usize, to: usize) -> usize {
-        let (start, end) = (self.start as usize, (self.start + self.len) as usize);
-        let (from, to) = (from.max(start), to.min(end));
-        if let Some(s) = &self.sparse {
-            self.each_tile(s, from, to, |at, data, n| {
-                crate::host::copy_mapped(data, at as *const u8, n, false);
-            });
-            return to - from;
-        }
-        // SAFETY: inside the mapping (`from` and `to` are within the buffer).
-        let at = unsafe { self.data.add(from - start) };
-        crate::host::copy_mapped(at, from as *const u8, to - from, false);
-        if let Some(card) = &self.card {
-            card.mark_dirty(from - start, to - start);
-        }
->>>>>>> belobug/main
         to - from
     }
 
@@ -9284,41 +8949,37 @@ pub(crate) fn buffer_parts(from: u64, to: u64) -> Vec<(u64, u64)> {
 
 /// A title buffer exists at `start` (`len` bytes).
 pub(crate) fn register(resource: usize, start: u64, len: u64) {
-<<<<<<< HEAD
     let mut map = buffers_write();
-    map.insert(
-||||||| merged common ancestors
-    buffers().insert(
-=======
-    let before = buffers().insert(
->>>>>>> belobug/main
+    let before = map.insert(
         (start, resource),
         Entry {
             end: start + len,
             shadow: None,
         },
     );
-<<<<<<< HEAD
     // After the insert, with the table's lock still held ([`TABLES_CHANGED`];
     // fork pull request #1245: said before it, a thread that asked between
     // the two kept the old table's answer under the new count for good).
     tables_changed();
-||||||| merged common ancestors
-=======
+    drop(map);
     // A buffer made again at the same place and address: its old copy may
     // still be named by lists and descriptors, as one the title released.
     if let Some(shadow) = before.and_then(|e| e.shadow) {
         crate::host::retire(shadow);
     }
->>>>>>> belobug/main
 }
 
 /// The title released it; lists that still hold its copy keep it alive.
 pub(crate) fn unregister(resource: usize, start: u64) {
-<<<<<<< HEAD
     let mut map = buffers_write();
     tables_changed();
-    map.remove(&(start, resource));
+    let before = map.remove(&(start, resource));
+    drop(map);
+    // A buffer made again at the same place and address: its old copy may
+    // still be named by lists and descriptors, as one the title released.
+    if let Some(shadow) = before.and_then(|e| e.shadow) {
+        crate::host::retire(shadow);
+    }
 }
 
 /// The title buffer holding `address`, as (start, length), without making
@@ -9380,17 +9041,8 @@ pub(crate) fn spans() -> Vec<(u64, u64, bool)> {
     let loose = LOOSE.read().unwrap_or_else(|e| e.into_inner());
     spans.extend(loose.keys().map(|&(start, len)| (start, len, true)));
     spans
-||||||| merged common ancestors
-    buffers().remove(&(start, resource));
-=======
-    let gone = buffers().remove(&(start, resource));
-    if let Some(shadow) = gone.and_then(|e| e.shadow) {
-        crate::host::retire(shadow);
-    }
->>>>>>> belobug/main
 }
 
-<<<<<<< HEAD
 /// The copy of the innermost title buffer holding `[address, address +
 /// len)`, made on first use. A `len` of 0 or 1 is an ask without a length
 /// (a root view: the caller reads on to the copy's end).
@@ -9571,58 +9223,10 @@ fn lookup_tables(
     }
     let mut map = buffers_write();
     let key = map
-||||||| merged common ancestors
-/// The copy of the innermost title buffer holding `[address, address +
-/// len)`, made on first use.
-pub(crate) fn find(address: u64, len: u64) -> Option<Arc<Shadow>> {
-    let end = address.checked_add(len.max(1))?;
-    let mut map = buffers();
-    let key = map
-=======
-/// Whether a title buffer holds `[address, address + len)` (its memory is
-/// the title's, without asking the kernel).
-pub(crate) fn in_buffer(address: u64, len: u64) -> bool {
-    let Some(end) = address.checked_add(len.max(1)) else {
-        return false;
-    };
-    buffers()
->>>>>>> belobug/main
         .range(..=(address, usize::MAX))
         .rev()
         .take(64)
-        .any(|(_, e)| e.end >= end)
-}
-
-/// The copy of a title buffer holding `[address, address + len)`: of one
-/// whose copy is made already if there is one (a buffer inside another,
-/// say in the world's 174 MB heap, then shares its copy instead of paying
-/// for its bytes twice, and the GPU's writes land in one copy), else of
-/// the innermost, made now.
-pub(crate) fn find(address: u64, len: u64) -> Option<Arc<Shadow>> {
-    let end = address.checked_add(len.max(1))?;
-    if let Some(window) = direct(address, end) {
-        return Some(window);
-    }
-    find_copy(address, len)
-}
-
-fn find_copy(address: u64, len: u64) -> Option<Arc<Shadow>> {
-    let end = address.checked_add(len.max(1))?;
-    if let Some(copy) = sparse(address, end) {
-        return Some(copy);
-    }
-    let mut map = buffers();
-    let holding: Vec<((u64, usize), bool)> = map
-        .range(..=(address, usize::MAX))
-        .rev()
-        .take(64)
-        .filter(|(_, e)| e.end >= end)
-        .map(|(k, e)| (*k, e.shadow.is_some()))
-        .collect();
-    let key = holding
-        .iter()
-        .find(|(_, made)| *made)
-        .or(holding.first())
+        .find(|(_, e)| e.end >= end)
         .map(|(k, _)| *k);
     let Some(key) = key else {
         drop(map);
@@ -9634,10 +9238,8 @@ fn find_copy(address: u64, len: u64) -> Option<Arc<Shadow>> {
     }
     if entry.shadow.is_none() {
         let len = entry.end - key.0;
-        let size = len.next_multiple_of(1 << 16);
         // Rounded up so that views ending in the buffer's last 256 bytes fit.
         // Shaders write some buffers (unordered access), so not upload memory.
-<<<<<<< HEAD
         let size = len.next_multiple_of(1 << 16);
         // In place, if asked for and the memory can be opened
         // (`crate::inplace::place_for`): the buffer is the title's own
@@ -9679,45 +9281,8 @@ fn find_copy(address: u64, len: u64) -> Option<Arc<Shadow>> {
             None => (buffer, None),
         };
         placed_count(size, card.is_some());
-||||||| merged common ancestors
-        let (buffer, data) = host()?.shared_buffer(len.next_multiple_of(1 << 16))?;
-        crate::host::name(&buffer, || format!("title buffer {:#x}+{len:#x}", key.0));
-=======
-        let h = host()?;
-        let (staging, data) = h.shared_buffer(size)?;
-        crate::host::name(&staging, || format!("title buffer {:#x}+{len:#x}", key.0));
-        let (buffer, card) = match crate::card::CardState::try_new(h, &staging, size) {
-            Some(card) => {
-                let vram = card.vram.clone();
-                crate::host::name(&vram, || format!("title buffer {:#x}+{len:#x} VRAM", key.0));
-                tracing::info!(
-                    start = format_args!("{:#x}", key.0),
-                    len,
-                    "large buffer placed in VRAM (card buffer)"
-                );
-                (vram, Some(card))
-            }
-            None => {
-                if len >= 16 << 20 {
-                    tracing::info!(
-                        start = format_args!("{:#x}", key.0),
-                        len,
-                        "large buffer copied to the host"
-                    );
-                } else {
-                    tracing::debug!(
-                        start = format_args!("{:#x}", key.0),
-                        len,
-                        "buffer copied to the host"
-                    );
-                }
-                (staging, None)
-            }
-        };
->>>>>>> belobug/main
         // SAFETY: a live buffer.
         let gpu = unsafe { buffer.GetGPUVirtualAddress() };
-<<<<<<< HEAD
         if len >= 16 << 20 {
             tracing::info!(
                 start = format_args!("{:#x}", key.0),
@@ -9738,29 +9303,10 @@ fn find_copy(address: u64, len: u64) -> Option<Arc<Shadow>> {
             note_carded(&shadow);
         }
         entry.shadow = Some(shadow);
-||||||| merged common ancestors
-        if len >= 16 << 20 {
-            tracing::info!(
-                start = format_args!("{:#x}", key.0),
-                len,
-                "large buffer copied to the host"
-            );
-        } else {
-            tracing::debug!(
-                start = format_args!("{:#x}", key.0),
-                len,
-                "buffer copied to the host"
-            );
-        }
-        entry.shadow = Some(Arc::new(Shadow::new(buffer, data, gpu, key.0, len)));
-=======
-        entry.shadow = Some(Arc::new(Shadow::new(buffer, data, gpu, key.0, len, card)));
->>>>>>> belobug/main
     }
     entry.shadow.clone().map(|shadow| (shadow, false))
 }
 
-<<<<<<< HEAD
 /// A host copy in CPU-visible card memory (`D3D12_HEAP_TYPE_GPU_UPLOAD`,
 /// `crate::rebar`), if enabled, supported and within budget.
 fn rebar_copy(kind: crate::rebar::Kind, start: u64, len: u64, size: u64, window: bool) -> Option<Arc<Shadow>> {
@@ -9786,19 +9332,9 @@ fn rebar_copy(kind: crate::rebar::Kind, start: u64, len: u64, size: u64, window:
     Some(Arc::new(shadow))
 }
 
-/// Titles also use memory outside any buffer object as GPU memory (
-/// the title's interface vertices, from its own allocator). Such memory
-||||||| merged common ancestors
-/// Titles also use memory outside any buffer object as GPU memory (Grand
-/// Theft Auto VI's interface vertices, from its own allocator). Such memory
-=======
-/// The copy holding `address` for a view without a size (a root view, which
-/// the host does not bound): in memory outside buffers, one with at least
-/// `reach` bytes after `address`. A window ending sooner than the data read
-/// through the view is a GPU page fault.
 /// Where the innermost title buffer holding `address` ends, if one does.
 pub(crate) fn buffer_end(address: u64) -> Option<u64> {
-    buffers()
+    buffers_read()
         .range(..=(address, usize::MAX))
         .rev()
         .take(64)
@@ -9806,27 +9342,30 @@ pub(crate) fn buffer_end(address: u64) -> Option<u64> {
         .find(|&e| e > address)
 }
 
+/// The copy holding `address` for a view without a size (a root view, which
+/// the host does not bound): of the innermost title buffer holding it, or a
+/// window with at least `reach` bytes after `address`. A copy ending sooner
+/// than the data read through the view is a GPU page fault.
 pub(crate) fn find_reaching(address: u64, reach: u64) -> Option<Arc<Shadow>> {
     // To the end of the innermost buffer holding it: a window ending sooner
     // faults.
-    let end = buffers()
+    let end = buffers_read()
         .range(..=(address, usize::MAX))
         .rev()
         .take(64)
         .map(|(_, e)| e.end)
         .find(|&e| e > address);
     if let Some(end) = end {
-        return direct(address, end).or_else(|| find_copy(address, 1));
+        return direct(address, end).or_else(|| find(address, 1));
     }
     if let Some(window) = direct(address, address.checked_add(reach)?) {
         return Some(window);
     }
-    loose(address, address.checked_add(reach)?)
+    loose(address, address.checked_add(reach)?, false, false, None).map(|(shadow, _)| shadow)
 }
 
-/// Titles also use memory outside any buffer object as GPU memory (Grand
-/// Theft Auto VI's interface vertices, from its own allocator). Such memory
->>>>>>> belobug/main
+/// Titles also use memory outside any buffer object as GPU memory (
+/// the title's interface vertices, from its own allocator). Such memory
 /// gets copies of the aligned windows it touches.
 /// A window nothing names any more is let go ([`let_go_idle`]).
 /// shortcut: a window is 4 MiB however little of it is read (the memory
@@ -9853,7 +9392,6 @@ fn window() -> u64 {
     })
 }
 
-<<<<<<< HEAD
 /// The window grid in bytes for a setting in KiB: a power of two from
 /// 64 KiB to 4 MiB, 4 MiB for anything else.
 fn grid(kb: Option<u64>) -> u64 {
@@ -10138,34 +9676,7 @@ fn loose(
         note(&shadow);
         map.insert((start, len), shadow.clone());
         return Some((shadow, false));
-||||||| merged common ancestors
-fn loose(address: u64, end: u64) -> Option<Arc<Shadow>> {
-    let start = address & !(WINDOW - 1);
-    let len = end.next_multiple_of(WINDOW) - start;
-    let mut map = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(shadow) = map.get(&(start, len)) {
-        return Some(shadow.clone());
-=======
-fn loose(address: u64, end: u64) -> Option<Arc<Shadow>> {
-    if let Some(copy) = sparse(address, end) {
-        return Some(copy);
     }
-    let start = address & !(WINDOW - 1);
-    let len = end.next_multiple_of(WINDOW) - start;
-    let mut map = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-    // Any window copied already that holds the range: a range crossing a
-    // window's end used to get a second copy of the same bytes.
-    if let Some(shadow) = map
-        .range(..=(start, u64::MAX))
-        .rev()
-        .take(64)
-        .find(|((s, l), _)| *s <= address && s + l >= end)
-        .map(|(_, shadow)| shadow.clone())
-    {
-        return Some(shadow);
->>>>>>> belobug/main
-    }
-<<<<<<< HEAD
     let (buffer, data) = host()?.shared_buffer(len)?;
     crate::host::name(&buffer, || format!("title memory {start:#x}+{len:#x}"));
     // With room for windows on the card (`window_card_most`): shaders get a
@@ -10182,31 +9693,15 @@ fn loose(address: u64, end: u64) -> Option<Arc<Shadow>> {
                 masked: Mutex::default(),
                 size: len,
             };
-            (on_card, Some(card))
-        }
-        None => (buffer, None),
-    };
-||||||| merged common ancestors
-    let (buffer, data) = host()?.shared_buffer(len)?;
-    crate::host::name(&buffer, || format!("title memory {start:#x}+{len:#x}"));
-=======
-    let h = host()?;
-    let (staging, data) = h.shared_buffer(len)?;
-    crate::host::name(&staging, || format!("title memory {start:#x}+{len:#x}"));
-    let (buffer, card) = match crate::card::CardState::try_new(h, &staging, len) {
-        Some(card) => {
-            let vram = card.vram.clone();
-            crate::host::name(&vram, || format!("title memory {start:#x}+{len:#x} VRAM"));
             tracing::info!(
                 start = format_args!("{start:#x}"),
                 len,
                 "loose memory placed in VRAM (card buffer)"
             );
-            (vram, Some(card))
+            (on_card, Some(card))
         }
-        None => (staging, None),
+        None => (buffer, None),
     };
->>>>>>> belobug/main
     // SAFETY: a live buffer.
     let gpu = unsafe { buffer.GetGPUVirtualAddress() };
     tracing::debug!(
@@ -10214,7 +9709,6 @@ fn loose(address: u64, end: u64) -> Option<Arc<Shadow>> {
         len,
         "loose memory copied to the host"
     );
-<<<<<<< HEAD
     let mut shadow = Shadow::new(buffer, data, gpu, start, len);
     shadow.window = true;
     shadow.card = card;
@@ -10223,11 +9717,6 @@ fn loose(address: u64, end: u64) -> Option<Arc<Shadow>> {
         note_carded(&shadow);
     }
     note(&shadow);
-||||||| merged common ancestors
-    let shadow = Arc::new(Shadow::new(buffer, data, gpu, start, len));
-=======
-    let shadow = Arc::new(Shadow::new(buffer, data, gpu, start, len, card));
->>>>>>> belobug/main
     map.insert((start, len), shadow.clone());
     tables_changed();
     Some((shadow, false))
@@ -10713,7 +10202,6 @@ pub(crate) fn near(va: u64) -> String {
     }
     text
 }
-<<<<<<< HEAD
 
 #[cfg(test)]
 mod mask_runs_tests {
@@ -10801,143 +10289,3 @@ mod mask_runs_tests {
         }
     }
 }
-||||||| merged common ancestors
-=======
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::ops::Range;
-
-    #[test]
-    fn partial_match_leaves_unchecked_bytes_visible() {
-        let mut unchanged = UnchangedPages::default();
-        let before = vec![0; PAGE];
-        let mut host = before.clone();
-        host[PAGE - 1] = 1;
-        unchanged.begin(PAGE, 2 * PAGE);
-
-        assert!(!unchanged.differs(PAGE, &host[..4], &before[..4]));
-        assert!(!unchanged.pages[0]);
-        assert!(unchanged.differs(PAGE, &host, &before));
-        assert!(!unchanged.pages[0]);
-    }
-
-    #[test]
-    fn snapshot_edges_are_cacheable_and_survive_later_ranges() {
-        let mut unchanged = UnchangedPages::default();
-        unchanged.begin(PAGE - 3, PAGE + 4);
-        assert!(!unchanged.differs(PAGE - 3, &[1; 3], &[1; 3]));
-        assert!(!unchanged.differs(PAGE, &[2; 4], &[2; 4]));
-        assert_eq!(unchanged.pages, [true, true]);
-
-        unchanged.begin(PAGE - 3, PAGE + 4);
-        assert!(!unchanged.differs(PAGE - 2, &[1; 2], &[1; 2]));
-        assert!(!unchanged.differs(PAGE + 1, &[2; 2], &[2; 2]));
-        assert_eq!(unchanged.pages, [true, true]);
-    }
-
-    #[test]
-    fn next_submission_checks_the_same_page_again() {
-        let mut unchanged = UnchangedPages::default();
-        unchanged.begin(0, 4);
-        assert!(!unchanged.differs(0, &[0; 4], &[0; 4]));
-        unchanged.clear();
-        unchanged.begin(0, 4);
-        assert!(unchanged.differs(0, &[0, 0, 0, 1], &[0; 4]));
-    }
-
-    // Both versions walk exactly the same declared ranges, in their
-    // original order. Only the page comparison differs.
-    fn scan(
-        host: &[u8],
-        before: &[u8],
-        ranges: &[Range<usize>],
-        mut differs: impl FnMut(usize, &[u8], &[u8]) -> bool,
-    ) -> usize {
-        let mut changed = 0;
-        for range in ranges {
-            let mut at = range.start;
-            while at < range.end {
-                let n = (PAGE - at % PAGE).min(range.end - at);
-                changed += usize::from(differs(at, &host[at..at + n], &before[at..at + n]));
-                at += n;
-            }
-        }
-        changed
-    }
-
-    #[test]
-    fn overlapping_ranges_match_uncached_comparisons() {
-        let before = vec![0; 4 * PAGE];
-        let mut host = before.clone();
-        for at in [2, PAGE - 1, PAGE + 5, 3 * PAGE + 7] {
-            host[at] = 1;
-        }
-        let ranges = [
-            0..4,
-            2..2 * PAGE + 3,
-            PAGE - 2..4 * PAGE,
-            2 * PAGE..3 * PAGE,
-        ];
-        let uncached = scan(&host, &before, &ranges, |_, host, before| host != before);
-        let mut unchanged = UnchangedPages::default();
-        unchanged.begin(0, before.len());
-        let cached = scan(&host, &before, &ranges, |at, host, before| {
-            unchanged.differs(at, host, before)
-        });
-        assert_eq!(uncached, 6);
-        assert_eq!(cached, uncached);
-        assert_eq!(unchanged.pages, [false, false, true, false]);
-    }
-
-    // cargo test --release -p victory-gpu benchmark_overlapping_copy_back -- --ignored --nocapture
-    #[test]
-    #[ignore = "synthetic CPU release benchmark"]
-    fn benchmark_overlapping_copy_back() {
-        use std::hint::black_box;
-        use std::time::{Duration, Instant};
-
-        const SIZE: usize = 128 << 20;
-        let before = vec![0xA5; SIZE];
-        let mut host = before.clone();
-        for page in (0..SIZE / PAGE).step_by(64) {
-            host[page * PAGE + PAGE / 2] ^= 0xFF;
-        }
-        let ranges: Vec<_> = (0..24).map(|i| i * PAGE + i..SIZE - i * 13).collect();
-        let mut baseline = [Duration::ZERO; 5];
-        let mut cached = [Duration::ZERO; 5];
-        let mut unchanged = UnchangedPages::default();
-        for (baseline, cached) in baseline.iter_mut().zip(&mut cached) {
-            let started = Instant::now();
-            let expected = scan(
-                black_box(&host),
-                black_box(&before),
-                black_box(&ranges),
-                |_, host, before| host != before,
-            );
-            *baseline = started.elapsed();
-
-            unchanged.clear();
-            let started = Instant::now();
-            unchanged.begin(0, before.len());
-            let actual = scan(
-                black_box(&host),
-                black_box(&before),
-                black_box(&ranges),
-                |at, host, before| unchanged.differs(at, host, before),
-            );
-            *cached = started.elapsed();
-            assert_eq!(actual, expected);
-        }
-        baseline.sort_unstable();
-        cached.sort_unstable();
-        println!(
-            "median of five runs, 24 overlapping ranges across 128 MiB: {:?} -> {:?} ({:.1}x)",
-            baseline[2],
-            cached[2],
-            baseline[2].as_secs_f64() / cached[2].as_secs_f64(),
-        );
-    }
-}
->>>>>>> belobug/main

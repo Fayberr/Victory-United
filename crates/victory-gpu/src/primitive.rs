@@ -22,15 +22,6 @@
 /// vertices each in `dst`: `(v0, v1, v2)` and `(v0, v2, v3)`, so both
 /// triangles turn the same way. `elements` are (byte offset, format).
 pub(crate) fn expand_rects(src: &[u8], dst: &mut [u8], stride: usize, elements: &[(u32, u32)]) {
-<<<<<<< HEAD
-    if stride == 0 {
-        return;
-    }
-    let (Some(in_rect), Some(out_rect)) = (stride.checked_mul(3), stride.checked_mul(6)) else {
-        return;
-    };
-||||||| merged common ancestors
-=======
     if stride == 12
         && matches!(
             elements,
@@ -84,7 +75,12 @@ fn expand_position_color(src: &[u8], dst: &mut [u8], elements: &[(u32, u32)]) {
 }
 
 fn expand_rects_generic(src: &[u8], dst: &mut [u8], stride: usize, elements: &[(u32, u32)]) {
->>>>>>> belobug/main
+    if stride == 0 {
+        return;
+    }
+    let (Some(in_rect), Some(out_rect)) = (stride.checked_mul(3), stride.checked_mul(6)) else {
+        return;
+    };
     for (rect, out) in src
         .chunks_exact(in_rect)
         .zip(dst.chunks_exact_mut(out_rect))
@@ -298,7 +294,6 @@ mod tests {
         assert_eq!(dst[40..], vertex(4.0, 6.0)[..]);
     }
 
-<<<<<<< HEAD
     #[test]
     fn normalized_attributes_are_interpolated_in_their_own_range() {
         let vertex = |rg: [u8; 2], u16_value: u16, u8_value: u8, snorm8: i8, snorm16: i16| {
@@ -326,8 +321,6 @@ mod tests {
         assert_eq!(dst[40..], vertex([15, 255], 10500, 107, -127, -32767));
     }
 
-||||||| merged common ancestors
-=======
     #[test]
     fn packed_position_color_matches_generic_expansion() {
         let mut src = packed_rectangles(4096);
@@ -437,7 +430,6 @@ mod tests {
         src
     }
 
->>>>>>> belobug/main
     /// `half_to_f32` reads subnormals, so an f16 rectangle output must be
     /// able to write them back instead of flushing every one to zero.
     #[test]
