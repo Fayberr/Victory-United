@@ -687,7 +687,23 @@ fn card_piece_of(start: usize, len: usize, span: &CardSpan, i: u32) -> (usize, u
 
 #[cfg(test)]
 mod card_tests {
-    use super::{CardSpan, PIECE, card_piece_of, card_span_of, joined, joined_piece_runs};
+    use super::{CardSpan, PIECE, card_piece_of, card_span_of, joined, joined_piece_runs, scratch_prefix};
+
+    #[test]
+    fn card_merge_reuses_initialized_scratch_for_smaller_reads() {
+        let mut scratch = Vec::new();
+        scratch_prefix(&mut scratch, 128).fill(0xcc);
+        let allocation = scratch.as_ptr();
+        let source = [1u8, 2, 3];
+        let prefix = scratch_prefix(&mut scratch, source.len());
+        assert_eq!(prefix.len(), source.len());
+        assert!(crate::host::read_into(source.as_ptr(), prefix));
+        assert_eq!(prefix, &source);
+        assert_eq!(scratch.as_ptr(), allocation);
+        assert_eq!(scratch.len(), 128);
+        assert!(scratch[source.len()..].iter().all(|&byte| byte == 0xcc));
+        assert_eq!(scratch_prefix(&mut scratch, 129)[128], 0);
+    }
 
     /// Joined runs hold every piece of the runs given, once, and no other.
     #[test]
@@ -4113,13 +4129,12 @@ impl Shadow {
         let last = last_difference(gpu, old).unwrap_or(first);
         let (at, n) = (at + first, last + 1 - first);
         let (gpu, old) = (&gpu[first..=last], &mut old[first..=last]);
-        title.clear();
-        title.resize(n, 0);
+        let title = scratch_prefix(title, n);
         let mut written = 0;
         if crate::host::read_into((start + at) as *const u8, title) {
             // The stretch as read: what the card did not change is the
             // title's, and may have been written again since.
-            let as_read = merge_race_on().then(|| title.clone());
+            let as_read = merge_race_on().then(|| title.to_vec());
             // As in `copy_back`: the card's byte where it is not what it
             // was before the submission, else the title's.
             let mut differs = 0u8;
@@ -4261,6 +4276,15 @@ impl Shadow {
         crate::backreads::stored(self.id, (self.start, self.len), start + at, n, false);
         n
     }
+}
+
+/// Keep the initialized allocation across reads. A successful guest read
+/// fills the returned prefix before the merge consumes any of it.
+fn scratch_prefix(scratch: &mut Vec<u8>, len: usize) -> &mut [u8] {
+    if scratch.len() < len {
+        scratch.resize(len, 0);
+    }
+    &mut scratch[..len]
 }
 
 struct Entry {

@@ -1770,6 +1770,8 @@ struct CardWork {
     inline_tail: u32,
     /// Where the pieces that differ are fetched to on fallback: PC memory, mapped.
     fetched: Option<(ID3D12Resource, usize, u64)>,
+    /// Reused by the serial copyback path while CARD_WORK is locked.
+    merge_scratch: Vec<u8>,
     /// The dwords of `differs` taken by plans whose results were not read
     /// yet.
     taken: u32,
@@ -4550,6 +4552,7 @@ impl Host {
                 inline_slots,
                 inline_tail: 0,
                 fetched: None,
+                merge_scratch: Vec::new(),
                 taken: 0,
                 out: 0,
                 inflight: if inflight_fetch() { self.make_card_inflight(RESULTS) } else { None },
@@ -5985,12 +5988,11 @@ impl Host {
                     *written += count.load(Ordering::Relaxed);
                 }
             } else {
-                let mut title = Vec::new();
                 for &(i, lo, hi, at) in &pieces {
                     // SAFETY: the mapping of the fetched bytes, `total` of
                     // them; the copy into it has run.
                     let gpu = unsafe { std::slice::from_raw_parts((*data + at as usize) as *const u8, hi - lo) };
-                    let merged = plan.ranges[i].shadow.card_merge(lo, gpu, &mut title);
+                    let merged = plan.ranges[i].shadow.card_merge(lo, gpu, &mut work.merge_scratch);
                     plan.ranges[i].shadow.walls_merged(gpu.len(), merged);
                     written[i] += merged;
                 }
@@ -8904,13 +8906,15 @@ pub(crate) fn read_into(src: *const u8, dst: &mut [u8]) -> bool {
 
 /// Copies `len` bytes from `src` to `dst` unless a source page is not
 /// readable. Uses `NtReadVirtualMemory` directly to avoid the `kernelbase`
-/// wrapper overhead on every refresh copy.
+/// wrapper overhead on every refresh copy. A read that stops short is not
+/// a success: the destination is then partly the old bytes, which merges
+/// reuse (`crate::shadow`'s scratch).
 fn read(src: *const u8, dst: *mut u8, len: usize) -> bool {
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
     let mut done = 0;
     // SAFETY: the destination is mapped writable memory of `len` bytes; the
     // kernel checks the source.
-    unsafe { NtReadVirtualMemory(GetCurrentProcess(), src.cast(), dst.cast(), len, &mut done) >= 0 }
+    unsafe { NtReadVirtualMemory(GetCurrentProcess(), src.cast(), dst.cast(), len, &mut done) >= 0 && done == len }
 }
 
 #[link(name = "ntdll", kind = "raw-dylib")]
