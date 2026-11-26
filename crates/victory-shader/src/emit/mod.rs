@@ -102,16 +102,12 @@ mod threading;
 #[cfg(windows)]
 pub mod validator;
 #[cfg(all(test, windows))]
-<<<<<<< HEAD
 mod probe_tests;
 #[cfg(all(test, windows))]
 mod size_tests;
 #[cfg(all(test, windows))]
-||||||| 085ee7c4c
-=======
 mod test_skip;
 #[cfg(all(test, windows))]
->>>>>>> origin/exp/vitoriabr-head
 mod valu_tests;
 #[cfg(all(test, windows))]
 mod waterfall_tests;
@@ -125,29 +121,12 @@ use crate::{ShaderError, io, ir, resource, structure};
 
 pub use bitcode::census;
 pub use sampler::StaticSampler;
-<<<<<<< HEAD
-pub use lower::{host_settings, set_host_max_wave, set_host_rdna};
-||||||| 085ee7c4c
-pub use lower::set_host_max_wave;
-=======
-pub use lower::{host_max_wave, set_host_max_wave};
->>>>>>> origin/exp/vitoriabr-head
+pub use lower::{host_max_wave, host_settings, set_host_max_wave, set_host_rdna};
 pub use rect::rect_list_gs;
 pub use shader::{
-<<<<<<< HEAD
     MEMORY_FAULTS, MEMORY_PAGES, MEMORY_READ_ONLY, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-    SLOT_STRIDES_COUNT, SLOT_TABLE_STRIDES, USER_DATA_SPACE, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS_X, USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
+    SLOT_STRIDES_COUNT, SLOT_TABLE_STRIDES, SLOT_VIEW_BYTES, SLOT_VIEWS, SLOT_VIEWS_COUNT, USER_DATA_SPACE, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS_X, USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
     raw_views, set_raw_views, set_view_heap_limit, view_heap_limit,
-||||||| 085ee7c4c
-    MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-    SLOT_STRIDES_COUNT, USER_DATA_SPACE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
-    set_view_heap_limit, view_heap_limit,
-=======
-    MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
-    SLOT_STRIDES_COUNT, SLOT_VIEW_BYTES, SLOT_VIEWS, SLOT_VIEWS_COUNT, USER_DATA_SPACE,
-    USER_DISPATCH_THREADS_X, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
-    set_view_heap_limit, view_heap_limit,
->>>>>>> origin/exp/vitoriabr-head
 };
 
 /// The loop limit without an override: 4096.
@@ -1752,22 +1731,12 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn stub_pipeline_is_created() {
-<<<<<<< HEAD
         let host = match super::host::Host::new(false) {
             Ok(host) => host,
             Err(e) => {
-                eprintln!("no SM 6.6 device ({e}); skipped");
+                crate::emit::test_skip::skip(&format!("no SM 6.6 device ({e}); skipped"));
                 return;
             }
-||||||| 085ee7c4c
-        let Ok(host) = super::host::Host::new(false) else {
-            eprintln!("no SM 6.6 device; skipped");
-            return;
-=======
-        let Ok(host) = super::host::Host::new(false) else {
-            crate::emit::test_skip::skip("no SM 6.6 device; skipped");
-            return;
->>>>>>> origin/exp/vitoriabr-head
         };
         let ps = super::HostShader {
             stage: crate::HwStage::Ps,
