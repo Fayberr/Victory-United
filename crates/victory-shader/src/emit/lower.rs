@@ -1006,12 +1006,7 @@ fn lds_meetings(p: &crate::ir::Program, st: &Structured, all: &[bool]) -> Option
             }
         }
     }
-<<<<<<< HEAD
     if (0..n).any(|r| reads[r] && writes[r]) && !super::loose_lds::on() {
-||||||| 9c184b35b
-    if (0..n).any(|r| reads[r] && writes[r]) {
-=======
-    if (0..n).any(|r| reads[r] && writes[r]) {
         if std::env::var_os("VICTORY_WAVE_WHY").is_some() {
             for r in (0..n).filter(|&r| reads[r] && writes[r]) {
                 let mut list = Vec::new();
@@ -1044,7 +1039,6 @@ fn lds_meetings(p: &crate::ir::Program, st: &Structured, all: &[bool]) -> Option
                 eprintln!("WAVE64-LDS region with reads and writes: {}", list.join("; "));
             }
         }
->>>>>>> origin/exp/fork-head
         return None;
     }
     let mut meet = vec![(false, false); n];
