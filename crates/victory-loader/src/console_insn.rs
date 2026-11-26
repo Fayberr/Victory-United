@@ -46,7 +46,6 @@ static EMULATED: AtomicU64 = AtomicU64::new(0);
 static ASKED: AtomicU64 = AtomicU64::new(0);
 static ZEROED: AtomicU64 = AtomicU64::new(0);
 
-<<<<<<< HEAD
 /// Exceptions taken by kind since the last line: a lone `clzero`, the 12-byte loop, the
 /// 15-byte loop taken whole, `monitorx`, `mwaitx`, everything else; and the 64-byte lines the
 /// 15-byte loops zeroed (each was an exception of its own before they were taken whole).
@@ -176,8 +175,6 @@ fn line() {
     );
 }
 
-||||||| a26859fc
-=======
 /// Whether `monitorx` and `mwaitx` are replaced in the title's code the first time they fault
 /// (`monitorx` by a 3-byte no-op, `mwaitx` by `pause` and a no-op), so that they never fault
 /// again. Emulated, each pass of such a wait loop is two trips into Windows and back, through
@@ -430,8 +427,6 @@ mod sites {
         );
     }
 }
-
->>>>>>> avatar/main
 fn readable(va: usize, bytes: usize) -> bool {
     use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_GUARD, PAGE_NOACCESS, VirtualQuery};
     // SAFETY: plain data filled in by the query.
@@ -627,14 +622,36 @@ pub(crate) unsafe fn emulate(ctx: &mut CONTEXT) -> i32 {
                 }
             }
         }
-<<<<<<< HEAD
         ConsoleOnly::Monitorx => {
             KINDS[K_MONITORX].fetch_add(1, Relaxed);
             MONITOR.with(|m| m.set((ctx.Rax as usize, ctx.Rsi)));
+            // Without a prefix, so 3 bytes: replaced, the next pass does not fault.
+            if len == 3
+                && patches_waits()
+                && let Some(new) = wait_patch(what)
+                // SAFETY: the title's code, where the instruction just faulted; both
+                // replacements are waits that wait for nothing, as the emulation is.
+                && unsafe { patch(rip, [code[0], code[1], code[2]], new) }
+            {
+                #[cfg(feature = "diagnostics")]
+                sites::patched();
+            }
+            std::hint::spin_loop()
         }
         ConsoleOnly::Mwaitx => {
             KINDS[K_MWAITX].fetch_add(1, Relaxed);
             wait_step();
+            // Without a prefix, so 3 bytes: replaced, the next pass does not fault.
+            if len == 3
+                && patches_waits()
+                && let Some(new) = wait_patch(what)
+                // SAFETY: the title's code, where the instruction just faulted; both
+                // replacements are waits that wait for nothing, as the emulation is.
+                && unsafe { patch(rip, [code[0], code[1], code[2]], new) }
+            {
+                #[cfg(feature = "diagnostics")]
+                sites::patched();
+            }
             std::hint::spin_loop()
         }
         ConsoleOnly::Clzero | ConsoleOnly::ClzeroStep { .. } => {
@@ -655,27 +672,6 @@ pub(crate) unsafe fn emulate(ctx: &mut CONTEXT) -> i32 {
                 return CONTINUE_EXECUTION;
             }
             KINDS[K_CLZERO].fetch_add(1, Relaxed);
-||||||| a26859fc
-        ConsoleOnly::Monitorx => {}
-        ConsoleOnly::Mwaitx => std::hint::spin_loop(),
-        ConsoleOnly::Clzero => {
-=======
-        ConsoleOnly::Monitorx | ConsoleOnly::Mwaitx => {
-            // Without a prefix, so 3 bytes: replaced, the next pass does not fault.
-            if len == 3
-                && patches_waits()
-                && let Some(new) = wait_patch(what)
-                // SAFETY: the title's code, where the instruction just faulted; both
-                // replacements are waits that wait for nothing, as the emulation is.
-                && unsafe { patch(rip, [code[0], code[1], code[2]], new) }
-            {
-                #[cfg(feature = "diagnostics")]
-                sites::patched();
-            }
-            std::hint::spin_loop();
-        }
-        ConsoleOnly::Clzero => {
->>>>>>> avatar/main
             // with an address-size prefix (0x67) the line is at EAX, zero-extended
             let a32 = code[..len - 3].contains(&0x67);
             let line = (if a32 { ctx.Rax & 0xFFFF_FFFF } else { ctx.Rax } as usize) & !63;
@@ -796,7 +792,6 @@ pub(crate) unsafe fn emulate(ctx: &mut CONTEXT) -> i32 {
     }
     CONTINUE_EXECUTION
 }
-<<<<<<< HEAD
 
 #[cfg(test)]
 mod tests {
@@ -895,13 +890,6 @@ mod tests {
         assert!(block[at..at + 64].iter().all(|&b| b == 0));
         assert!(block[at + 64..].iter().all(|&b| b == 0xAA), "one line only");
     }
-}
-||||||| a26859fc
-=======
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn wait_instructions_are_replaced_inside_sixteen_aligned_bytes() {
@@ -1015,4 +1003,3 @@ mod tests {
         assert!(jump(0x1000, 0x9000_0000_0000).is_none(), "out of reach");
     }
 }
->>>>>>> avatar/main

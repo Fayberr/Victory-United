@@ -140,22 +140,12 @@ pub(crate) fn frames_of(thread: HANDLE) -> (Vec<u64>, (i32, i32, usize)) {
         priority: 0,
         base_priority: 0,
     };
-<<<<<<< HEAD
-    // Suspended first: a running thread may exit and free its TEB between
-    // the query and the read below.
-    // SAFETY: a thread of this process that is not this one.
-    if unsafe { SuspendThread(thread) } == u32::MAX {
-        return (frames, (0, 0));
-    }
-||||||| a26859fc
-=======
     // Suspended first: a running thread may exit and free its TEB between
     // the query and the read below.
     // SAFETY: a thread of this process that is not this one.
     if unsafe { SuspendThread(thread) } == u32::MAX {
         return (frames, (0, 0, 0));
     }
->>>>>>> avatar/main
     // SAFETY: writes `info`, whose layout and size are the system's.
     let status = unsafe {
         NtQueryInformationThread(
@@ -167,17 +157,9 @@ pub(crate) fn frames_of(thread: HANDLE) -> (Vec<u64>, (i32, i32, usize)) {
         )
     };
     if status != 0 || info.teb.is_null() {
-<<<<<<< HEAD
-        // SAFETY: suspended above.
-        unsafe { ResumeThread(thread) };
-        return (frames, (0, 0));
-||||||| a26859fc
-        return (frames, (0, 0));
-=======
         // SAFETY: suspended above.
         unsafe { ResumeThread(thread) };
         return (frames, (0, 0, 0));
->>>>>>> avatar/main
     }
     // SAFETY: the TEB of a suspended thread of this process: its NT_TIB
     // holds the stack base at +8 and the stack limit at +0x10.
