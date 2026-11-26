@@ -1304,7 +1304,6 @@ impl Host {
                         );
                         keep.push(tex);
                     }
-<<<<<<< HEAD
                     View::MsaaDepth {
                         width,
                         height,
@@ -1434,12 +1433,7 @@ impl Host {
                         keep_any.push(root.into());
                         keep_any.extend(masks.into_iter().map(Into::into));
                     }
-                    View::RawUav(_) | View::HalfUav(_) => {
-||||||| 465b94f5
-                    View::RawUav(_) | View::HalfUav(_) => {
-=======
                     View::RawUav(_) | View::HalfUav(_) | View::HalfUintUav(_) => {
->>>>>>> vertex/main
                         // (dwords, format, elements, flags)
                         let (n, format, elements, flags) = match *v {
                             View::HalfUav(e) => (
