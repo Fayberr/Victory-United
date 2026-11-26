@@ -590,7 +590,7 @@ pub(crate) fn pipeline_with_status(
     // Stored after the fact: the pipeline is there to be drawn with, and a
     // store waits for a save in progress, which writes the whole library.
     to_store(name, &pso);
-    Ok(pso)
+    Ok((pso, false))
 }
 
 /// Pipelines made and not yet stored in the library.
@@ -647,11 +647,6 @@ fn store(name: &str, pso: &ID3D12PipelineState) {
     if unsafe { library.library.StorePipeline(PCWSTR(wide.as_ptr()), pso) }.is_ok() {
         library.added.fetch_add(1, Ordering::Relaxed);
     }
-<<<<<<< HEAD
-    Ok((pso, false))
-||||||| 465b94f5
-    Ok(pso)
-=======
 }
 
 /// Stores what waits to be stored, on this thread, and waits for a store in
@@ -680,7 +675,6 @@ fn save_pause(took: std::time::Duration) -> std::time::Duration {
     const LEAST: Duration = Duration::from_secs(20);
     const MOST: Duration = Duration::from_secs(600);
     (took * 20).clamp(LEAST, MOST).max(took * 4)
->>>>>>> vertex/main
 }
 
 /// Writes the library and the early list if pipelines were added since the
@@ -754,16 +748,9 @@ fn write_out(dir: &std::path::Path, library: &Library) {
         };
         (bytes, used_changed)
     };
-<<<<<<< HEAD
-    let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
-||||||| 465b94f5
-    let used: Vec<String> = USED.lock().unwrap_or_else(|e| e.into_inner()).iter().flatten().cloned().collect();
-    let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
-=======
     // With what earlier runs listed: a run that asks for no title pipeline
     // (`victory warm`) wrote an empty list over theirs, and the next world
     // began with every pipeline still to be asked for.
-    let used: Vec<String> = used().iter().flatten().cloned().collect();
     let library_written = if bytes > 0 {
         replace_library(dir, &tmp).inspect_err(|_| {
             let _ = std::fs::remove_file(&tmp);
@@ -771,7 +758,6 @@ fn write_out(dir: &std::path::Path, library: &Library) {
     } else {
         Ok(())
     };
->>>>>>> vertex/main
     if bytes > 0 && library_written.is_ok() {
         // In place unless the system refused and the new one waits beside it.
         let in_place = !dir.join(NEXT_FILE).exists();
@@ -875,25 +861,8 @@ fn temp_path(path: &std::path::Path) -> std::path::PathBuf {
 /// `path`: a reader never sees a part. Serialised so concurrent worker and
 /// shutdown saves do not race on the same staging file or target rename.
 fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-<<<<<<< HEAD
-    use std::sync::atomic::AtomicU64;
     static WRITING: Mutex<()> = Mutex::new(());
-    static NEXT: AtomicU64 = AtomicU64::new(0);
     let _guard = WRITING.lock().unwrap_or_else(|e| e.into_inner());
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".tmp-{}-{n}", std::process::id()));
-    let tmp = path.with_file_name(name);
-    let res = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
-    if res.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    res
-||||||| 465b94f5
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
-=======
     let tmp = temp_path(path);
     if let Err(e) = std::fs::write(&tmp, bytes) {
         let _ = std::fs::remove_file(&tmp);
@@ -902,7 +871,6 @@ fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>
     std::fs::rename(&tmp, path).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })
->>>>>>> vertex/main
 }
 
 /// Title pipeline keys requested by draws or dispatches (this run and the last).
@@ -947,15 +915,12 @@ mod tests {
     use super::*;
 
     #[test]
-<<<<<<< HEAD
     fn a_save_buffer_the_host_cannot_give_is_refused() {
         assert!(zeroed(usize::MAX / 2).is_none());
         assert_eq!(zeroed(100).as_deref(), Some(&[0u8; 100][..]));
     }
 
     #[test]
-||||||| 465b94f5
-=======
     fn saves_take_a_small_part_of_the_time_whatever_the_library_weighs() {
         use std::time::Duration;
         let s = Duration::from_secs;
@@ -971,7 +936,6 @@ mod tests {
     }
 
     #[test]
->>>>>>> vertex/main
     fn names_change_with_what_goes_into_the_pipeline() {
         let a = name("graphics", b"root", &[b"vs", b"ps"], "state");
         assert_eq!(a, name("graphics", b"root", &[b"vs", b"ps"], "state"));
@@ -1141,7 +1105,6 @@ mod tests {
             assert!(bytes == &expected[..], "page {page} of the replaced library no longer reads as the old file");
         }
     }
-<<<<<<< HEAD
 
     #[test]
     fn concurrent_write_atomically_never_fails_or_truncates() {
@@ -1165,8 +1128,6 @@ mod tests {
         assert_eq!(final_bytes.len(), 4096);
         assert!(final_bytes.iter().all(|&b| b == final_bytes[0]));
     }
-||||||| 465b94f5
-=======
 
     #[test]
     fn temp_paths_are_unique_and_write_atomically_cleans_up() {
@@ -1191,5 +1152,4 @@ mod tests {
             .collect();
         assert!(leftovers.is_empty(), "leftover tmp files: {leftovers:?}");
     }
->>>>>>> vertex/main
 }
