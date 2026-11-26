@@ -229,22 +229,12 @@ fn run_cases_on(
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let mut ran = 0;
     for &(label, warp) in devices {
-<<<<<<< HEAD
         let host = match Host::new(warp) {
             Ok(host) => host,
             Err(e) => {
-                eprintln!("no SM 6.6 {label} device ({e}); skipped");
+                crate::emit::test_skip::skip(&format!("no SM 6.6 {label} device ({e}); skipped"));
                 continue;
             }
-||||||| 085ee7c4c
-        let Ok(host) = Host::new(warp) else {
-            eprintln!("no SM 6.6 {label} device; skipped");
-            continue;
-=======
-        let Ok(host) = Host::new(warp) else {
-            crate::emit::test_skip::skip(&format!("no SM 6.6 {label} device; skipped"));
-            continue;
->>>>>>> origin/exp/vitoriabr-head
         };
         let (root, pso) = host
             .compute_pipeline(shader)
@@ -1995,7 +1985,6 @@ fn whole_wave_f64_sum_and_cvt_f32_f64() {
         }
     }
 }
-<<<<<<< HEAD
 
 /// Whether the hardware adapter is an AMD RDNA card's: what the translator
 /// writes for one ([`super::rdna`]) holds there.
@@ -2526,8 +2515,6 @@ fn v_fmac_f32_takes_the_accumulator_modifiers() {
         });
     }
 }
-||||||| 085ee7c4c
-=======
 
 #[test]
 fn packed_dot_products_and_clamps_execute_cleanly() {
@@ -2663,4 +2650,3 @@ fn packed_dot_products_and_clamps_execute_cleanly() {
         },
     );
 }
->>>>>>> origin/exp/vitoriabr-head
