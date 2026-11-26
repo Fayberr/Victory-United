@@ -28,7 +28,6 @@ enum Cmd {
     },
     /// Point git at .githooks/ so every commit runs the policy check.
     InstallHooks,
-<<<<<<< HEAD
     /// Run what the CI workflow runs: on Windows the `check` job, elsewhere
     /// the `portable` job and a type-check of the Windows build.
     Ci {
@@ -36,23 +35,16 @@ enum Cmd {
         #[arg(long)]
         no_windows_check: bool,
     },
-||||||| merged common ancestors
-=======
     /// Write the README's progress tracker from docs/progress/progress.json.
     Progress,
->>>>>>> vibr/main
 }
 
 fn main() -> Result<()> {
     let root = workspace_root();
     match Cli::parse().command {
         Cmd::Policy { staged } => policy::run(&root, staged),
-<<<<<<< HEAD
         Cmd::Ci { no_windows_check } => ci::run(&root, !no_windows_check),
-||||||| merged common ancestors
-=======
         Cmd::Progress => progress::run(&root),
->>>>>>> vibr/main
         Cmd::InstallHooks => {
             let status = Command::new("git")
                 .args(["config", "core.hooksPath", ".githooks"])
