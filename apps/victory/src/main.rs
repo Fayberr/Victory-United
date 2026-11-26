@@ -257,9 +257,6 @@ fn main() -> Result<()> {
             ..
         } => {
             apply_host_shader_overrides_from_env();
-            if let Some(file) = warm {
-                return translate::warm(paths, &file, jobs);
-            }
             translate::run(paths, validate, pipelines, list, jobs)
         }
         Command::Precompile {
