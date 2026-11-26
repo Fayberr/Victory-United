@@ -5504,7 +5504,6 @@ impl Host {
                                 );
                             }
                         }
-                        }
                     }
                     crate::shadow::CARD_STATS[2].fetch_add(u64::from(r.span.pieces), Ordering::Relaxed);
                     crate::census::compared(r.shadow.title_start(), u64::from(r.span.pieces));
