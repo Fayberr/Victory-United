@@ -143,14 +143,11 @@ pub(crate) struct Translated {
     /// Whether the shader's code can store to buffer memory ([`stores`]);
     /// true when its code is not known.
     pub(crate) stores: bool,
-<<<<<<< HEAD
     /// Whether the code can write anything through unordered access:
     /// [`stores`], or an image store or atomic (a texture shaders write).
     /// True when its code is not known. What `VICTORY_BARRIER_MERGE` asks
     /// of an op before it counts it as unordered writes to wait for.
     pub(crate) writes: bool,
-||||||| 465b94f5
-=======
     /// Whether it can store to title memory by address
     /// ([`stores_by_address`]): not through a view, so anywhere.
     pub(crate) stores_by_address: bool,
@@ -158,7 +155,6 @@ pub(crate) struct Translated {
     pub(crate) threads: [u32; 3],
     /// Whether the shader walks ray-tracing structures ([`walks`]).
     pub(crate) walks: bool,
->>>>>>> vertex/main
 }
 
 #[cfg(windows)]
@@ -219,46 +215,7 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
     };
     let host = crate::shader_cache::host_shader(container)?;
     let stores = programs.is_empty() || programs.iter().any(stores);
-<<<<<<< HEAD
     let writes = stores || programs.iter().any(image_stores);
-    let used = programs
-        .into_iter()
-        .find(|p| {
-            matches!(
-                p.stage,
-                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-            )
-        })
-        .map(|p| p.used)
-        .unwrap_or_default();
-    Ok(Translated { host, used, stores, writes })
-}
-
-/// Whether a console program has an image store or atomic (it writes a
-/// texture through unordered access), or code that does not decode.
-#[cfg(windows)]
-fn image_stores(program: &victory_shader::NativeProgram) -> bool {
-    use victory_shader::gfx10::{Encoding, decode};
-    let Ok(code) = decode(&program.code) else {
-        return true;
-    };
-    code.iter().any(|i| {
-        matches!(i.encoding, Encoding::Mimg)
-            && i.name().is_none_or(|n| n.contains("store") || n.contains("atomic"))
-    })
-||||||| 465b94f5
-    let used = programs
-        .into_iter()
-        .find(|p| {
-            matches!(
-                p.stage,
-                HwStage::Vs | HwStage::Ps | HwStage::Ms | HwStage::Cs
-            )
-        })
-        .map(|p| p.used)
-        .unwrap_or_default();
-    Ok(Translated { host, used, stores })
-=======
     let stores_by_address = programs.is_empty() || programs.iter().any(stores_by_address);
     let walks = programs.iter().any(walks);
     let main = programs.into_iter().find(|p| {
@@ -276,11 +233,25 @@ fn image_stores(program: &victory_shader::NativeProgram) -> bool {
         host,
         used,
         stores,
+        writes,
         stores_by_address,
         threads,
         walks,
     })
->>>>>>> vertex/main
+}
+
+/// Whether a console program has an image store or atomic (it writes a
+/// texture through unordered access), or code that does not decode.
+#[cfg(windows)]
+fn image_stores(program: &victory_shader::NativeProgram) -> bool {
+    use victory_shader::gfx10::{Encoding, decode};
+    let Ok(code) = decode(&program.code) else {
+        return true;
+    };
+    code.iter().any(|i| {
+        matches!(i.encoding, Encoding::Mimg)
+            && i.name().is_none_or(|n| n.contains("store") || n.contains("atomic"))
+    })
 }
 
 /// The compute pipelines of the console's ray-tracing structure builder
@@ -430,12 +401,9 @@ pub(crate) fn walk_held(this: This) -> bool {
     true
 }
 
-<<<<<<< HEAD
 #[cfg(windows)]
 pub(crate) use make::frame_drew;
 
-||||||| 465b94f5
-=======
 /// Whether what the structure builder's stages store into title memory
 /// outside title buffer objects stays in the host's copies
 /// (`VICTORY_BVH_BOUND`, on unless `0`).
@@ -507,7 +475,6 @@ pub(crate) fn builder_writes(
     }
 }
 
->>>>>>> vertex/main
 /// Whether the title's pipeline `this` is one of the structure builder's.
 #[cfg(windows)]
 pub(crate) fn is_builder(this: This) -> bool {
@@ -1057,18 +1024,10 @@ fn read_stream(
     shader: impl Fn(&'static str, &Bytecode) -> Option<Arc<Shader>>,
 ) -> (Vec<Arc<Shader>>, Graphics) {
     let mut shaders = Vec::new();
-<<<<<<< HEAD
-    #[cfg(windows)]
-    let mut graphics = host::GraphicsState::default();
-    #[cfg(windows)]
-    let mut view_instancing = None;
-||||||| 465b94f5
-    #[cfg(windows)]
-    let mut graphics = host::GraphicsState::default();
-=======
     #[allow(unused_mut, clippy::let_unit_value)]
     let mut graphics = Graphics::default();
->>>>>>> vertex/main
+    #[cfg(windows)]
+    let mut view_instancing = None;
     let mut at = 0;
     while at + 8 <= stream.len() {
         let kind = u32::from_le_bytes(stream[at..at + 4].try_into().expect("4 bytes"));
@@ -1080,64 +1039,34 @@ fn read_stream(
             );
             break;
         };
-<<<<<<< HEAD
-        if at.checked_add(size).is_none_or(|end| end > desc.size) {
+        if at.checked_add(size).is_none_or(|end| end > stream.len()) {
             tracing::warn!(
                 kind,
                 at,
                 size,
-                total = desc.size,
+                total = stream.len(),
                 "truncated pipeline subobject; the rest is ignored"
             );
             break;
         }
-||||||| 465b94f5
-=======
-        if at + size > stream.len() {
-            break;
-        }
->>>>>>> vertex/main
         if let Some(stage) = stage {
-<<<<<<< HEAD
-            // SAFETY: `at + size <= desc.size`, and a shader subobject is 24 bytes
-            // with `Bytecode` at +8.
-            let code = unsafe { desc.stream.add(at + 8).cast::<Bytecode>().read_unaligned() };
-            shaders.extend(copy(stage, &code));
-||||||| 465b94f5
-            // SAFETY: a shader subobject has its bytecode at +8.
-            let code = unsafe { &*desc.stream.add(at + 8).cast::<Bytecode>() };
-            shaders.extend(copy(stage, code));
-=======
-            // SAFETY: a shader subobject has its bytecode at +8.
+            // SAFETY: `at + size <= stream.len()`, and a shader subobject is
+            // 24 bytes with `Bytecode` at +8.
             let code = unsafe { stream.as_ptr().add(at + 8).cast::<Bytecode>().read_unaligned() };
             shaders.extend(shader(stage, &code));
->>>>>>> vertex/main
         }
         #[cfg(windows)]
-<<<<<<< HEAD
         if kind == VIEW_INSTANCING {
-            if size > desc.size - at {
+            if size > stream.len() - at {
                 break;
             }
             view_instancing = Some(at);
         } else {
             // SAFETY: a whole subobject of this kind lies at `at`.
-            unsafe { graphics.read(kind, desc.stream.add(at)) };
+            unsafe { graphics.read(kind, stream.as_ptr().add(at)) };
         }
-||||||| 465b94f5
-        // SAFETY: a whole subobject of this kind lies at `at`.
-        unsafe {
-            graphics.read(kind, desc.stream.add(at))
-        };
-=======
-        // SAFETY: a whole subobject of this kind lies at `at`.
-        unsafe {
-            graphics.read(kind, stream.as_ptr().add(at))
-        };
->>>>>>> vertex/main
         at += size;
     }
-<<<<<<< HEAD
     // The stream can declare its view locations before its shaders.
     #[cfg(windows)]
     if let Some(at) = view_instancing
@@ -1146,26 +1075,9 @@ fn read_stream(
     {
         // SAFETY: the full descriptor is in the stream. The caller keeps
         // its referenced locations alive through this call.
-        unsafe { graphics.read_view_instancing(desc.stream.add(at)) };
+        unsafe { graphics.read_view_instancing(stream.as_ptr().add(at)) };
     }
-    hand_out(
-        shaders,
-        #[cfg(windows)]
-        Some(Box::new(graphics)),
-        iid,
-        out,
-    )
-||||||| 465b94f5
-    hand_out(
-        shaders,
-        #[cfg(windows)]
-        Some(Box::new(graphics)),
-        iid,
-        out,
-    )
-=======
     (shaders, graphics)
->>>>>>> vertex/main
 }
 
 extern "system" fn query(this: This, iid: *const Iid, out: *mut This) -> HRESULT {
@@ -1435,7 +1347,6 @@ mod tests {
             );
         }
     }
-<<<<<<< HEAD
 
     #[test]
     fn truncated_and_unaligned_streams_do_not_read_out_of_bounds() {
@@ -1495,8 +1406,6 @@ mod tests {
             }
         }
     }
-||||||| 465b94f5
-=======
 
     /// The pre-build reads a stream as the title's creation does: the same
     /// shaders and state, so the same key and the same host pipeline name.
@@ -1552,5 +1461,4 @@ mod tests {
         // SAFETY: as above.
         assert_ne!(unsafe { Prebuild::graphics(&stream) }.key(), title.host.key);
     }
->>>>>>> vertex/main
 }
