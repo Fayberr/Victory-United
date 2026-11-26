@@ -21,7 +21,6 @@ mod ambient;
 mod backreads;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod capture;
-<<<<<<< HEAD
 #[cfg(windows)]
 mod cardmeter;
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -30,11 +29,6 @@ mod renderdoc;
 mod shot;
 #[cfg(windows)]
 mod compose;
-||||||| 0a4356653
-=======
-#[cfg(windows)]
-mod compose;
->>>>>>> vicetay/main
 pub mod console;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod copystat;
