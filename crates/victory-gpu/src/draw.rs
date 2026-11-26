@@ -3658,7 +3658,7 @@ impl State {
         // returned here, and a slot whose texture had been streamed out
         // kept its host copy for as long as the card was full).
         let light = PASS_LIGHT.get();
-        let mut room = crate::resource::room(memory);
+        let mut room = if light { crate::resource::room_lately() } else { crate::resource::room(memory) };
         // Bytes uploaded by this pass since the card was last asked
         // whether it has room: asked again every 32 MiB (a pass may upload
         // 192 MB and more, and one asking a pass let the queue run some
