@@ -99,7 +99,6 @@ impl Hasher for Fx {
 
 const TERMINAL: u32 = u32::MAX;
 const MAX_NODES: usize = 1 << 21;
-<<<<<<< HEAD
 /// Case splits [`Bools::meet`] makes before it gives up.
 const MAX_MEET: usize = 1 << 16;
 /// Conditions [`Meets`] keeps; past that, they are searched anew.
@@ -112,12 +111,10 @@ const MAX_MEETS: usize = 1 << 18;
 pub struct Meets {
     none: Map<Box<[u32]>, usize>,
 }
-||||||| merged common ancestors
-=======
+
 /// Cap the `ite` memo table so complex shaders cannot trigger multi-tens-of-MB
 /// HashMap resizes (e.g. 35 MB at 2^21 buckets) under concurrent compilation.
 const MAX_MEMO: usize = 1 << 18;
->>>>>>> belobug/main
 
 impl Bools {
     fn new() -> Self {
@@ -440,15 +437,11 @@ pub struct Structured {
     pub reach: Vec<Bool>,
     /// The lane's bit of each lane-mask value, by its low dword's value.
     pub masks: HashMap<Value, Bool>,
-<<<<<<< HEAD
     /// Exact Wave64 pairs for checking masks at their uses.
     paired_masks: Map<Key, Bool>,
-||||||| merged common ancestors
-=======
     /// Symbolic select conditions, keyed by the destination SSA value.
     /// A wave64 condition belongs to the exact pair read by the select.
     pub(crate) select_masks: HashMap<Value, Bool>,
->>>>>>> belobug/main
     /// Wave64 masks: low dword's value by the high dword's.
     pub highs: HashMap<Value, Value>,
     /// Masks (low dwords) set only in lanes whose EXEC bit is set where
@@ -456,7 +449,6 @@ pub struct Structured {
     /// ballot there gives the mask as data. No split low dword, as in
     /// `masks`.
     pub active: HashSet<Value>,
-<<<<<<< HEAD
     /// Incoming lane boolean per predecessor edge (in block predecessor order)
     /// for each [`Atom::Phi`] id.
     pub phi_masks: HashMap<Value, Vec<Bool>>,
@@ -469,18 +461,6 @@ pub struct Structured {
     /// SCC values a mask operation sets when some lane's bit of its result is set, with that
     /// lane bit: as data such an SCC is "some lane of the wave has it".
     pub scc_some: HashMap<Value, Bool>,
-}
-
-impl Structured {
-    pub(crate) fn mask_bits(&self, low: Value, high: Option<Value>) -> Option<Bool> {
-        match high {
-            Some(high) => self.paired_masks.get(&(low, high)),
-            None => self.masks.get(&low),
-        }
-        .copied()
-    }
-||||||| merged common ancestors
-=======
     /// Per block and instruction: the lane's EXEC bit at each vector
     /// instruction, whatever path the lane took (`None` for scalar ones).
     /// What a program run as the console runs it, every lane through every
@@ -491,12 +471,20 @@ impl Structured {
     /// low dword. What a mask join takes on an edge such a value arrives by:
     /// a loop's exit mask starts as a constant 0 before lanes are added.
     pub others: HashMap<Value, Bool>,
->>>>>>> belobug/main
+}
+
+impl Structured {
+    pub(crate) fn mask_bits(&self, low: Value, high: Option<Value>) -> Option<Bool> {
+        match high {
+            Some(high) => self.paired_masks.get(&(low, high)),
+            None => self.masks.get(&low),
+        }
+        .copied()
+    }
 }
 
 /// Builds the per-lane form of `program`.
 pub fn structure(program: &Program) -> Result<Structured, ShaderError> {
-<<<<<<< HEAD
     structure_wide(program, &HashSet::new())
 }
 
@@ -509,12 +497,9 @@ pub fn structure(program: &Program) -> Result<Structured, ShaderError> {
 /// run as two host waves, which exchange that decision and can then meet (a group barrier)
 /// inside the branch.
 pub fn structure_wide(program: &Program, wide: &HashSet<usize>) -> Result<Structured, ShaderError> {
-    let mut l = Lanes::new(program)?;
+    let mut l = Lanes::new(program, false)?;
     l.wide = wide.clone();
-||||||| merged common ancestors
-    let mut l = Lanes::new(program)?;
-=======
-    run(Lanes::new(program, false)?)
+    run(l)
 }
 
 /// The same for a program run as the console runs it: every lane of the
@@ -522,13 +507,12 @@ pub fn structure_wide(program: &Program, wide: &HashSet<usize>) -> Result<Struct
 /// joined at a block are never resolved from what the lanes arriving there
 /// know, since lanes outside EXEC arrive too: each join that differs
 /// between edges is a phi ([`Atom::Phi`]). Guard vector instructions with
-/// [`Structured::execs`] and ignore [`Structured::exits`]' conditions.
+/// [`Structured::execs`] and ignore [`Structured::exits`] conditions.
 pub fn structure_console(program: &Program) -> Result<Structured, ShaderError> {
     run(Lanes::new(program, true)?)
 }
 
 fn run(mut l: Lanes) -> Result<Structured, ShaderError> {
->>>>>>> belobug/main
     loop {
         let execs = l.masks_in_order();
         let cond = l.paths()?;
@@ -572,14 +556,10 @@ struct Lanes<'a> {
     masks: Map<Key, Bool>,
     /// Other values read as masks: constants, uniform selects, opaque ones.
     other: Map<Key, Bool>,
-<<<<<<< HEAD
     /// Pairs read as masks that `mask` does not see: carry-ins, and pairs
     /// joins take over back edges.
     seen: Vec<Key>,
-||||||| merged common ancestors
-=======
     select_masks: HashMap<Value, Bool>,
->>>>>>> belobug/main
     /// For branches: SCC of a mask operation ("some lane is set") as the
     /// lane's own bit.
     scc_lane: Map<Value, Bool>,
@@ -672,12 +652,8 @@ impl<'a> Lanes<'a> {
             b: Bools::new(),
             masks: Map::default(),
             other: Map::default(),
-<<<<<<< HEAD
             seen: Vec::new(),
-||||||| merged common ancestors
-=======
             select_masks: HashMap::new(),
->>>>>>> belobug/main
             scc_lane: Map::default(),
             joins: Vec::new(),
             phi_joins: Vec::new(),
@@ -695,12 +671,8 @@ impl<'a> Lanes<'a> {
         self.b = Bools::new();
         self.masks.clear();
         self.other.clear();
-<<<<<<< HEAD
         self.seen.clear();
-||||||| merged common ancestors
-=======
         self.select_masks.clear();
->>>>>>> belobug/main
         self.scc_lane.clear();
         self.scc_every.clear();
         self.wave_any.fill(None);
@@ -933,12 +905,8 @@ impl<'a> Lanes<'a> {
                 .filter(|(lo, hi)| lo != hi)
                 .map(|&(lo, hi)| (hi, lo))
                 .collect(),
-<<<<<<< HEAD
             paired_masks: if self.p.wave64 { self.masks } else { Map::default() },
-||||||| merged common ancestors
-=======
             select_masks: self.select_masks,
->>>>>>> belobug/main
             active: self.active,
             wide: self.wide,
             wave_any: self.wave_any,
@@ -952,13 +920,9 @@ impl<'a> Lanes<'a> {
             bools: self.b,
             exits,
             guards,
-<<<<<<< HEAD
             reach: cond.to_vec(),
-||||||| merged common ancestors
-=======
             execs: execs.to_vec(),
             others: self.other.iter().map(|(&(lo, _), &m)| (lo, m)).collect(),
->>>>>>> belobug/main
         })
     }
 
