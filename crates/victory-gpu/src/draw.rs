@@ -1962,22 +1962,24 @@ impl State {
             .or_insert_with(HeapBufferCache::new);
         let changed = host.buffer_changes();
         let mut dirty_buckets: u64 = 0;
-        // `(index, force_refresh)`: changed slots always re-mirror; rolling
-        // slots use the fast unchanged check against their cached descriptor key.
-        let slots: Vec<(u32, bool)> = if cache.passes == 0 {
+        // Use `cached_key` even for slots reported in `changed`: when the
+        // title rewrites a slot with the same descriptor key (or a mirror
+        // already refreshed it), `mirror_buffer` answers `Unchanged` in O(1)
+        // without re-resolving `buffer_copy`.
+        let slots: Vec<u32> = if cache.passes == 0 {
             for b in 0..64 {
                 cache.buckets[b].clear();
                 cache.bucket_spans[b].clear();
             }
             dirty_buckets = u64::MAX;
-            host.buffer_slots().into_iter().map(|i| (i, true)).collect()
+            host.buffer_slots()
         } else {
             let bucket = (cache.passes & 63) as usize;
-            let mut batch: Vec<(u32, bool)> = Vec::with_capacity(changed.len() + 2048);
+            let mut batch: Vec<u32> = Vec::with_capacity(changed.len() + 2048);
             let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::with_capacity(changed.len());
             for index in changed {
                 if seen.insert(index) {
-                    batch.push((index, true));
+                    batch.push(index);
                 }
             }
             let rolling = host.buffer_slots_bucket(bucket as u32);
@@ -1989,7 +1991,7 @@ impl State {
             }
             for index in rolling {
                 if seen.insert(index) {
-                    batch.push((index, false));
+                    batch.push(index);
                 }
             }
             batch
@@ -2000,7 +2002,7 @@ impl State {
             crate::host::fail(format_args!("host device lost before preparing buffer views: {why}"));
         }
         HEAP_PASS_PARTS[1].fetch_add(slots.len() as u64, Ordering::Relaxed);
-        for (n, &(index, force)) in slots.iter().enumerate() {
+        for (n, &index) in slots.iter().enumerate() {
             let b = (index & 63) as usize;
             let Some(handle) = heap.handle(index) else {
                 if cache.buckets[b].remove(&index).is_some() {
@@ -2008,14 +2010,10 @@ impl State {
                 }
                 continue;
             };
-            let cached_key = if force {
-                0
-            } else {
-                cache.buckets[b]
-                    .get(&index)
-                    .filter(|(_, s, _, _)| !s.in_place())
-                    .map_or(0, |(k, _, _, _)| *k)
-            };
+            let cached_key = cache.buckets[b]
+                .get(&index)
+                .filter(|(_, s, _, _)| !s.in_place())
+                .map_or(0, |(k, _, _, _)| *k);
             let (key, view) = match host.mirror_buffer(index, handle, cached_key) {
                 crate::descriptor::host::BufferMirror::Unchanged => continue,
                 crate::descriptor::host::BufferMirror::Empty => {
@@ -2032,7 +2030,7 @@ impl State {
             {
                 let last: Vec<String> = slots[n - 63..=n]
                     .iter()
-                    .filter_map(|&(i, _)| crate::descriptor::view(heap.handle(i)?).map(|v| format!("{i}: {v:?}")))
+                    .filter_map(|&i| crate::descriptor::view(heap.handle(i)?).map(|v| format!("{i}: {v:?}")))
                     .map(|s| s.chars().take(200).collect())
                     .collect();
                 drop(kept);
