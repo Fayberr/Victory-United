@@ -4934,7 +4934,6 @@ impl HostHeap {
     }
 
     /// Makes slot `index` (a dynamic one) a constant buffer view of host
-<<<<<<< HEAD
     /// memory, `size` bytes at `gpu` of `buffer`, which the slot holds.
     ///
     /// The list holds it too, until it is reset; the slot shows it until it
@@ -4946,26 +4945,11 @@ impl HostHeap {
     pub(crate) fn constant_at(&self, index: u32, buffer: &ID3D12Resource, gpu: u64, size: u32) {
         static HOLDS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         let holds = *HOLDS.get_or_init(|| std::env::var_os("VICTORY_SLOT_HOLDS").is_none_or(|v| v != "0"));
-||||||| merged common ancestors
-    /// memory (the list's own, which it holds).
-    pub(crate) fn constant_at(&self, index: u32, gpu: u64, size: u32) {
-        self.keep(index, None);
-=======
-    /// memory (the list's own, which it holds).
-    pub(crate) fn constant_at(&self, index: u32, gpu: u64, size: u32) {
-        self.keep(index, None);
         self.set_stride(index, 0);
->>>>>>> belobug/main
         let Some(host) = host() else { return };
         let desc = D3D12_CONSTANT_BUFFER_VIEW_DESC {
             BufferLocation: gpu,
-<<<<<<< HEAD
             SizeInBytes: constant_bytes(size),
-||||||| merged common ancestors
-            SizeInBytes: size.next_multiple_of(256),
-=======
-            SizeInBytes: size.min(65_536).next_multiple_of(256),
->>>>>>> belobug/main
         };
         // SAFETY: a slot of our heap; the memory is the caller's.
         unsafe {
@@ -5376,7 +5360,6 @@ impl HostHeap {
     fn mirror_words(&self, index: u32, handle: u64, [tag, i, generation]: [u32; 3], for_draw: bool, forget: bool) -> Option<View> {
         // Generations start at 1, so a made slot's key is never 0.
         let key = u64::from(generation) << 32 | u64::from(i);
-<<<<<<< HEAD
         // Fast path: the slot already holds this exact made descriptor, so
         // the heap-wide lock is not taken (port of fxceless/victory-fork
         // PR #867, ca1379c6).
@@ -5569,6 +5552,18 @@ impl HostHeap {
         for stale in stale_unmade {
             self.forget_copied(stale);
         }
+        // The bindless pass makes and refreshes the slots of buffer views
+        // (and of placed textures) from the record they are made from, and
+        // forgets those of other views.
+        if !self.sampler {
+            match (tag == VIEW_TAG).then(|| view_at(i, generation)).flatten() {
+                Some(view) if view.is_buffer() => {
+                    let placed = matches!(&view, View::Placed(false, r, _) if r[0] != 1);
+                    self.track_bindless(index, (i, generation), placed);
+                }
+                _ => self.untrack_bindless(index),
+            }
+        }
         result
     }
 
@@ -5623,84 +5618,6 @@ impl HostHeap {
                 w.mapped,
                 textures.rechecks.contains_key(&index)
             ),
-||||||| merged common ancestors
-        let mut made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-        let view = (tag == VIEW_TAG).then(|| view_at(i, generation)).flatten();
-        let Some(view) = view else {
-            // Not a view of ours (never written, or of a resource the
-            // title released): nothing to read.
-            if made[index as usize] != 0 {
-                made[index as usize] = 0;
-                self.make_null(index);
-            }
-            return None;
-        };
-        if made[index as usize] != key {
-            let later = !for_draw && view.is_buffer();
-            made[index as usize] = if later { 0 } else { key };
-            let kept = if later {
-                None
-            } else {
-                make(&view, self.cpu(index))
-            };
-            if kept.is_none() && !self.sampler {
-                null_for(&view, self.cpu(index));
-            }
-            self.keep(index, kept.flatten());
-=======
-        let view = (tag == VIEW_TAG).then(|| view_at(i, generation)).flatten();
-        let Some(view) = view else {
-            // Not a view of ours (never written, or of a resource the
-            // title released): nothing to read.
-            {
-                let mut made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-                if made[index as usize] != 0 {
-                    made[index as usize] = 0;
-                    self.make_null(index);
-                }
-            }
-            if !self.sampler {
-                self.untrack_bindless(index);
-            }
-            return None;
-        };
-        let is_buf = !self.sampler && view.is_buffer();
-        {
-            let mut made = self.made.lock().unwrap_or_else(|e| e.into_inner());
-            let gone = is_buf
-                && for_draw
-                && self
-                    .kept
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .get(index as usize)
-                    .and_then(Option::as_ref)
-                    .is_some_and(crate::shadow::gone);
-            if made[index as usize] != key || gone {
-                let later = !for_draw && is_buf;
-                made[index as usize] = if later { 0 } else { key };
-                let kept = if later {
-                    None
-                } else {
-                    make(&view, self.cpu(index))
-                };
-                if kept.is_none() && !self.sampler {
-                    null_for(&view, self.cpu(index));
-                }
-                self.keep_with_view(index, kept.flatten(), &view);
-                // The stride is the title view's, however and whenever the
-                // host view is made.
-                self.set_stride_count(index, view_stride(&view), view_count(&view));
-            }
-        }
-        if !self.sampler {
-            if is_buf {
-                let placed = matches!(&view, View::Placed(false, r, _) if r[0] != 1);
-                self.track_bindless(index, (i, generation), placed);
-            } else {
-                self.untrack_bindless(index);
-            }
->>>>>>> belobug/main
         }
     }
 
@@ -6663,17 +6580,7 @@ impl HostHeap {
     }
 
     pub(crate) fn describe_slot(&self, index: u32) -> Option<String> {
-<<<<<<< HEAD
         let key = self.made.get(index)?;
-||||||| merged common ancestors
-        let key = *self.made.lock().unwrap_or_else(|e| e.into_inner()).get(index as usize)?;
-=======
-        let key = *self
-            .made
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(index as usize)?;
->>>>>>> belobug/main
         if key == 0 {
             return Some("null".into());
         }
@@ -6687,7 +6594,6 @@ impl HostHeap {
     }
 }
 
-<<<<<<< HEAD
 /// Slots of this thread's own in heaps the card does not see, two of views
 /// and two of samplers (`which` 0 or 1): descriptors are made there and
 /// copied whole into the heaps it does see. Made in place they are seen half
@@ -6821,8 +6727,6 @@ impl SlotKeys {
     }
 }
 
-||||||| merged common ancestors
-=======
 /// Whether `[address, address + len)` may be title memory: inside the
 /// title's address range, not null.
 fn plausible(address: u64, len: u64) -> bool {
@@ -6842,7 +6746,6 @@ fn valid_title_address(address: u64, len: u64) -> bool {
             || crate::texture::committed(address as *const u8, 1))
 }
 
->>>>>>> belobug/main
 /// Logs `what` the first time it happens.
 macro_rules! once {
     ($($arg:tt)*) => {{
@@ -7198,7 +7101,6 @@ fn raw_start_fits(first: u64) -> bool {
 /// The host resource a slot made by [`make`] views, if any.
 type Kept = Option<ID3D12Resource>;
 
-<<<<<<< HEAD
 /// Whether the pass over records copied in as bytes also mirrors slots
 /// that draws read through tables lately (`VICTORY_HEAP_SYNC_TABLES=1`;
 /// off by default: [`HostHeap::mirror_copied`]).
@@ -7588,40 +7490,6 @@ fn twin_window(format: DXGI_FORMAT, first: u64, count: u32, stride: u32, raw: bo
     Some((from / 4, dwords, (start - from) as u32))
 }
 
-||||||| merged common ancestors
-=======
-/// A structured view's bytes as a raw view of its host copy: the first
-/// dword and the dword count, for a view `offset` bytes into the copy whose
-/// description starts at element `first` and has `count` elements of
-/// `stride` bytes.
-///
-/// The host places structured element `i` at byte `i * stride` of the
-/// resource, so a structured view whose start in the copy is not a multiple
-/// of its stride (a title buffer's view 16 bytes past a 32-byte element)
-/// cannot be made there. A raw view of the same bytes can if its start is
-/// 16-byte aligned (`D3D12_RAW_UAV_SRV_BYTE_ALIGNMENT`; the host removes the
-/// device for one that is not), and it reads and writes the copy every other
-/// view of that memory uses. Translated shaders read buffer views raw unless
-/// they index them (`victory-shader`, "Buffer views in the heap").
-fn raw_window(offset: u64, first: u64, count: u32, stride: u32) -> Option<(u64, u32)> {
-    if stride == 0 || !stride.is_multiple_of(4) {
-        return None;
-    }
-    let start = offset.checked_add(first.checked_mul(u64::from(stride))?)?;
-    if !start.is_multiple_of(u64::from(D3D12_RAW_UAV_SRV_BYTE_ALIGNMENT)) {
-        return None;
-    }
-    let dwords = u64::from(count) * u64::from(stride / 4);
-    Some((start / 4, u32::try_from(dwords).ok()?))
-}
-
-/// Whether structured buffers of this stride are raw views on the host (as
-/// the shaders take them: `emit::lower`).
-fn raw_stride(stride: u32) -> bool {
-    stride >= 16 && stride.is_multiple_of(16)
-}
-
->>>>>>> belobug/main
 fn buffer_srv(
     address: u64,
     len: u64,
@@ -7629,7 +7497,6 @@ fn buffer_srv(
     at: D3D12_CPU_DESCRIPTOR_HANDLE,
     twin: Option<D3D12_CPU_DESCRIPTOR_HANDLE>,
 ) -> Option<Kept> {
-<<<<<<< HEAD
     let mut shadow = crate::shadow::find(address, len)?;
     let mut offset = shadow.offset(address);
     let unit = element_size(&desc);
@@ -7659,18 +7526,8 @@ fn buffer_srv(
         };
     }
     let element = element_size(&desc);
-||||||| merged common ancestors
-    let shadow = crate::shadow::find(address, len)?;
-    let element = element_size(&desc);
-=======
-    // SAFETY: a buffer view's union member.
-    let structured = raw_stride(unsafe { desc.Anonymous.Buffer }.StructureByteStride);
-    let element = if structured { 0 } else { element_size(&desc) };
-    let shadow = crate::shadow::for_view(address, len, element)?;
->>>>>>> belobug/main
     // SAFETY: a buffer view's union member.
     let buffer = unsafe { &mut desc.Anonymous.Buffer };
-<<<<<<< HEAD
     if window.is_none() {
         if element == 0 || offset % element != 0 {
             left_null("not on an element of their host copy", false, address, len, element, buffer.FirstElement);
@@ -7693,37 +7550,6 @@ fn buffer_srv(
         REFUSED_VIEWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let why = if raw { "raw, refused by the host" } else { "refused by the host" };
         left_null(why, false, address, len, element, first);
-||||||| merged common ancestors
-    let offset = shadow.offset(address);
-    if element == 0 || offset % element != 0 {
-=======
-    let offset = shadow.offset(address);
-    if element != 0 && offset % element == 0 {
-        buffer.FirstElement += offset / element;
-        if buffer.Flags.0 & D3D12_BUFFER_SRV_FLAG_RAW.0 != 0
-            && !raw_start_fits(buffer.FirstElement)
-        {
-            let first = buffer.FirstElement;
-            once!(first, "raw buffer view not on 16 bytes of its host copy");
-            return None;
-        }
-    } else if let Some((first, count)) = raw_window(
-        offset,
-        buffer.FirstElement,
-        buffer.NumElements,
-        buffer.StructureByteStride,
-    ) {
-        // Shaders read all structured buffers as raw ones (AMD reads element
-        // 0 for every element of a raw view through a structured buffer).
-        *buffer = D3D12_BUFFER_SRV {
-            FirstElement: first,
-            NumElements: count,
-            StructureByteStride: 0,
-            Flags: D3D12_BUFFER_SRV_FLAG_RAW,
-        };
-        desc.Format = DXGI_FORMAT_R32_TYPELESS;
-    } else {
->>>>>>> belobug/main
         once!(
             format = desc.Format.0,
             first,
@@ -7735,19 +7561,10 @@ fn buffer_srv(
         );
         return None;
     }
-<<<<<<< HEAD
     // The console has no component mapping; one the host does not know is the default's.
     if desc.Shader4ComponentMapping != D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING {
         desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     }
-||||||| merged common ancestors
-    buffer.FirstElement += offset / element;
-=======
-    let size = if buffer.StructureByteStride > 0 { u64::from(buffer.StructureByteStride) } else { element_size_of(buffer.Flags.0 & D3D12_BUFFER_SRV_FLAG_RAW.0 != 0, element) };
-    if !fits_buffer(&shadow, buffer.FirstElement, buffer.NumElements, size) {
-        return None;
-    }
->>>>>>> belobug/main
     let host = host()?;
     // SAFETY: a live buffer and a slot of our heap.
     unsafe {
@@ -7811,7 +7628,6 @@ fn buffer_uav(
     at: D3D12_CPU_DESCRIPTOR_HANDLE,
     twin: Option<D3D12_CPU_DESCRIPTOR_HANDLE>,
 ) -> Option<Kept> {
-<<<<<<< HEAD
     let mut shadow = crate::shadow::find(address, len)?;
     let unit = {
         // SAFETY: a buffer view's union member.
@@ -7836,14 +7652,6 @@ fn buffer_uav(
         (shadow, address) = (home, start);
         own.FirstElement = 0;
     }
-||||||| merged common ancestors
-    let shadow = crate::shadow::find(address, len)?;
-=======
-    // SAFETY: a buffer view's union member.
-    let structured = raw_stride(unsafe { desc.Anonymous.Buffer }.StructureByteStride);
-    let whole = if structured { 0 } else { uav_element_size(&desc).unwrap_or(0) };
-    let shadow = crate::shadow::for_view(address, len, whole)?;
->>>>>>> belobug/main
     // SAFETY: a live buffer.
     let flags = unsafe { shadow.buffer.GetDesc() }.Flags;
     if flags.0 & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS.0 == 0 {
@@ -7852,9 +7660,7 @@ fn buffer_uav(
     }
     // SAFETY: a buffer view's union member.
     let buffer = unsafe { &mut desc.Anonymous.Buffer };
-    let element = if structured {
-        0
-    } else if buffer.StructureByteStride > 0 {
+    let element = if buffer.StructureByteStride > 0 {
         u64::from(buffer.StructureByteStride)
     } else if buffer.Flags.0 & D3D12_BUFFER_UAV_FLAG_RAW.0 != 0 {
         4
@@ -7862,7 +7668,6 @@ fn buffer_uav(
         crate::resource::element(desc.Format.0 as u32).map_or(0, |(bytes, _)| bytes)
     };
     let offset = shadow.offset(address);
-<<<<<<< HEAD
     // A structured view as a raw view of the same bytes (see `raw_window`).
     let window = (desc.Format == DXGI_FORMAT_UNKNOWN)
         .then(|| raw_window(offset, buffer.FirstElement, buffer.NumElements, buffer.StructureByteStride))
@@ -7905,54 +7710,8 @@ fn buffer_uav(
             width,
             "unordered buffer view the host would refuse left null"
         );
-||||||| merged common ancestors
-    if element == 0 || offset % element != 0 {
-        once!(offset, element, "unordered buffer view not on an element of its host copy");
-=======
-    buffer.CounterOffsetInBytes = 0;
-    if element != 0 && offset % element == 0 {
-        buffer.FirstElement += offset / element;
-        if buffer.Flags.0 & D3D12_BUFFER_UAV_FLAG_RAW.0 != 0
-            && !raw_start_fits(buffer.FirstElement)
-        {
-            let first = buffer.FirstElement;
-            once!(
-                first,
-                "raw unordered buffer view not on 16 bytes of its host copy"
-            );
-            return None;
-        }
-    } else if let Some((first, count)) = raw_window(
-        offset,
-        buffer.FirstElement,
-        buffer.NumElements,
-        buffer.StructureByteStride,
-    ) {
-        // As in `buffer_srv`; what shaders write lands in the shared copy,
-        // in the range `buffer_range` gives (copied back to title memory).
-        *buffer = D3D12_BUFFER_UAV {
-            FirstElement: first,
-            NumElements: count,
-            StructureByteStride: 0,
-            CounterOffsetInBytes: 0,
-            Flags: D3D12_BUFFER_UAV_FLAG_RAW,
-        };
-        desc.Format = DXGI_FORMAT_R32_TYPELESS;
-    } else {
-        once!(offset, element, "unordered buffer view not on an element of its host copy");
->>>>>>> belobug/main
         return None;
     }
-<<<<<<< HEAD
-||||||| merged common ancestors
-    buffer.FirstElement += offset / element;
-    buffer.CounterOffsetInBytes = 0;
-=======
-    let size = if buffer.StructureByteStride > 0 { u64::from(buffer.StructureByteStride) } else { element_size_of(buffer.Flags.0 & D3D12_BUFFER_UAV_FLAG_RAW.0 != 0, element) };
-    if !fits_buffer(&shadow, buffer.FirstElement, buffer.NumElements, size) {
-        return None;
-    }
->>>>>>> belobug/main
     let host = host()?;
     // SAFETY: a live buffer and a slot of our heap.
     unsafe {
@@ -8048,17 +7807,6 @@ fn fits(texture: &ID3D12Resource, mut format: Option<&mut DXGI_FORMAT>, unordere
     if view == 0 {
         return !typeless;
     }
-<<<<<<< HEAD
-    // A view of a target whose format the host refuses, in the title's
-    // format: in the stand-in the host copy has.
-    if view != own && crate::resource::target_format(view) == own {
-        if let Some(format) = format {
-            *format = d.Format;
-        }
-        return true;
-    }
-||||||| merged common ancestors
-=======
     // A 32-bit texture shaders write, read as shared-exponent colors.
     if view == crate::resource::SHARED_EXPONENT
         && family(own) == 39
@@ -8074,7 +7822,6 @@ fn fits(texture: &ID3D12Resource, mut format: Option<&mut DXGI_FORMAT>, unordere
         }
         return true;
     }
->>>>>>> belobug/main
     if family(view) != family(own) {
         once!(view, own, "view format of another family");
         return false;
@@ -8088,7 +7835,6 @@ fn fits(texture: &ID3D12Resource, mut format: Option<&mut DXGI_FORMAT>, unordere
     true
 }
 
-<<<<<<< HEAD
 /// Whether the host stores to typed unordered views of `format`.
 fn typed_store(format: u32) -> bool {
     static KNOWN: Mutex<Vec<(u32, bool)>> = Mutex::new(Vec::new());
@@ -8211,45 +7957,6 @@ fn constant_bytes(size: u32) -> u32 {
     size.next_multiple_of(256)
 }
 
-||||||| merged common ancestors
-=======
-/// `d` made a view of a texture without the `skip` largest mips.
-fn without_mips(d: &mut D3D12_SHADER_RESOURCE_VIEW_DESC, skip: u32) {
-    let cut = |first: &mut u32, levels: &mut u32, clamp: Option<&mut f32>| {
-        if *levels != u32::MAX {
-            let end = (*first + *levels).saturating_sub(skip).max(1);
-            *levels = end - first.saturating_sub(skip).min(end - 1);
-        }
-        *first = first.saturating_sub(skip);
-        if let Some(clamp) = clamp {
-            *clamp = (*clamp - skip as f32).max(0.0);
-        }
-    };
-    // SAFETY: the member the dimension names.
-    unsafe {
-        match d.ViewDimension {
-            D3D12_SRV_DIMENSION_TEXTURE2D => {
-                let t = &mut d.Anonymous.Texture2D;
-                cut(&mut t.MostDetailedMip, &mut t.MipLevels, Some(&mut t.ResourceMinLODClamp));
-            }
-            D3D12_SRV_DIMENSION_TEXTURE2DARRAY => {
-                let t = &mut d.Anonymous.Texture2DArray;
-                cut(&mut t.MostDetailedMip, &mut t.MipLevels, Some(&mut t.ResourceMinLODClamp));
-            }
-            D3D12_SRV_DIMENSION_TEXTURECUBE => {
-                let t = &mut d.Anonymous.TextureCube;
-                cut(&mut t.MostDetailedMip, &mut t.MipLevels, Some(&mut t.ResourceMinLODClamp));
-            }
-            D3D12_SRV_DIMENSION_TEXTURECUBEARRAY => {
-                let t = &mut d.Anonymous.TextureCubeArray;
-                cut(&mut t.MostDetailedMip, &mut t.MipLevels, Some(&mut t.ResourceMinLODClamp));
-            }
-            _ => {}
-        }
-    }
-}
-
->>>>>>> belobug/main
 /// Makes the host descriptor for `view` at `at`: the host resource it
 /// views, or `None` if it cannot.
 fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Built> {
@@ -8268,21 +7975,11 @@ fn make_twinned(
     let device = &host.device;
     match view {
         &View::Constant(address, size) => {
-<<<<<<< HEAD
             let size = constant_view_bytes(size).next_multiple_of(D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
             if size == 0 || address == 0 {
                 return None;
             }
             let shadow = crate::shadow::find(address, u64::from(size))?;
-||||||| merged common ancestors
-            let shadow = crate::shadow::find(address, u64::from(size))?;
-=======
-            if address == 0 || size == 0 {
-                return None;
-            }
-            let capped = size.min(65_536);
-            let shadow = crate::shadow::find(address, u64::from(capped))?;
->>>>>>> belobug/main
             let gpu = shadow.gpu(address);
             if gpu % 256 != 0 {
                 once!(
@@ -8293,13 +7990,7 @@ fn make_twinned(
             }
             let desc = D3D12_CONSTANT_BUFFER_VIEW_DESC {
                 BufferLocation: gpu,
-<<<<<<< HEAD
                 SizeInBytes: constant_bytes(size),
-||||||| merged common ancestors
-                SizeInBytes: size.next_multiple_of(256),
-=======
-                SizeInBytes: capped.next_multiple_of(256),
->>>>>>> belobug/main
             };
             // SAFETY: slots of our heap; the range lies in the host copy.
             unsafe {
@@ -8345,7 +8036,6 @@ fn make_twinned(
                 if !fits(texture, desc.as_mut().map(|d| &mut d.Format), false) {
                     return None;
                 }
-<<<<<<< HEAD
                 // Levels on demand (`crate::tiles`): a texture made level by
                 // level is shown from the first level that is the title's
                 // and has memory, if the title's view starts before it (a
@@ -8379,15 +8069,6 @@ fn make_twinned(
                 {
                     from_base(desc, copy.base);
                 }
-||||||| merged common ancestors
-=======
-                let skip = crate::resource::skipped_mips(resource);
-                if skip > 0
-                    && let Some(d) = &mut desc
-                {
-                    without_mips(d, skip);
-                }
->>>>>>> belobug/main
                 // SAFETY: a live texture and a slot of our heap.
                 unsafe {
                     device.CreateShaderResourceView(
@@ -8418,7 +8099,6 @@ fn make_twinned(
                     _ => None,
                 };
             };
-<<<<<<< HEAD
             // Views of depth textures are logged once each, as the title
             // describes them (format, dimension, then mip, first slice,
             // slices and plane): they say which planes shaders write, and
@@ -8439,12 +8119,6 @@ fn make_twinned(
                     tracing::info!(?resource, view = ?words, "unordered access view of a depth texture (first time for this view)");
                 }
             }
-||||||| merged common ancestors
-=======
-            if let Some(twin) = crate::resource::depth_twin(resource) {
-                return crate::twin::view(twin, desc.as_ref(), at).map(Some);
-            }
->>>>>>> belobug/main
             let mut desc = desc.as_ref().map(uav_desc);
             // A depth texture's unordered access is its colour twin's: the
             // host gives a depth texture none.
@@ -8503,7 +8177,6 @@ fn make_twinned(
                 // shortcut: unordered access to a texture the title placed
                 // itself is not mirrored; give it a resource as shader
                 // views of such textures get when a dispatch writes one.
-<<<<<<< HEAD
                 // Each texture is said once (the first 64), with how many times
                 // such a view was asked for so far: what shaders write through
                 // them is lost.
@@ -8520,14 +8193,6 @@ fn make_twinned(
                         &desc[..10]
                     );
                 }
-||||||| merged common ancestors
-                once!(dimension = resource[0], "placed unordered texture view not mirrored");
-=======
-                once!(
-                    dimension = resource[0],
-                    "placed unordered texture view not mirrored"
-                );
->>>>>>> belobug/main
                 return None;
             }
             // The resource description's width, after the alignment.
@@ -8548,7 +8213,6 @@ fn make_twinned(
     }
 }
 
-<<<<<<< HEAD
 /// The view `desc` of a texture, of a host copy of its levels from `base`
 /// on (`crate::resource::held_only`). What it shows of larger ones, if any,
 /// is left out.
@@ -8884,73 +8548,6 @@ fn same_placed_texture(a: &View, b: &View) -> bool {
 /// A shader or unordered access view of a texture the title placed in
 /// memory itself, as a view of the resource made for that memory (on first
 /// use).
-||||||| merged common ancestors
-/// A shader view of a texture the title placed in memory itself, as a view
-/// of the resource made for that memory (on first use).
-=======
-/// The largest mip of a placed 2D texture (or array, or cube) that a shader
-/// view reads, if the host texture can do without the larger ones.
-fn largest_mip(resource: &[u32; 14], desc: &[u32; 16]) -> u32 {
-    const TEXTURE2D: u32 = 3;
-    // Textures, arrays, cubes and arrays of cubes: their descriptions start
-    // with the largest mip.
-    if resource[0] != TEXTURE2D || !matches!(desc[1], 4 | 5 | 9 | 10) || cfg!(test) {
-        return 0;
-    }
-    let (width, height) = (resource[4], resource[6]);
-    let (format, mips) = (resource[8], resource[7] >> 16);
-    // The view may also say so with a least level of detail while it
-    // starts at mip 0: the title streams the larger mips in later, and their
-    // memory holds nothing yet (`VICTORY_LOD_CLAMP=0`: as before, when the
-    // host texture was made whole for such a view).
-    let clamp = {
-        let words: &[u32; 10] = desc[..10].try_into().unwrap_or(&[0; 10]);
-        let d = srv_desc(words);
-        // SAFETY: the member the dimension names.
-        let clamp = unsafe {
-            match d.ViewDimension {
-                D3D12_SRV_DIMENSION_TEXTURE2D => d.Anonymous.Texture2D.ResourceMinLODClamp,
-                D3D12_SRV_DIMENSION_TEXTURE2DARRAY => d.Anonymous.Texture2DArray.ResourceMinLODClamp,
-                D3D12_SRV_DIMENSION_TEXTURECUBE => d.Anonymous.TextureCube.ResourceMinLODClamp,
-                D3D12_SRV_DIMENSION_TEXTURECUBEARRAY => d.Anonymous.TextureCubeArray.ResourceMinLODClamp,
-                _ => 0.0,
-            }
-        };
-        if clamp.is_finite() && clamp >= 1.0 { clamp.floor().min(32.0) as u32 } else { 0 }
-    };
-    static CLAMPED: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let on = *ON.get_or_init(|| std::env::var_os("VICTORY_LOD_CLAMP").is_none_or(|v| v != "0"));
-    let n = CLAMPED[usize::from(clamp > desc[4])].fetch_add(1, Ordering::Relaxed);
-    if clamp > desc[4] && n.is_power_of_two() {
-        tracing::info!(
-            views = n + 1,
-            others = CLAMPED[0].load(Ordering::Relaxed),
-            clamp,
-            first = desc[4],
-            width,
-            height,
-            on,
-            "a placed texture's view holds its detail back"
-        );
-    }
-    let mut first = desc[4].max(if on { clamp } else { 0 }).min(mips.saturating_sub(1));
-    let block = (70..=84).contains(&format) || (94..=99).contains(&format);
-    let fits = |k: u32| {
-        (width >> k) > 0
-            && (height >> k) > 0
-            && (!block || (width >> k).is_multiple_of(4) && (height >> k).is_multiple_of(4))
-    };
-    while first > 0 && !fits(first) {
-        first -= 1;
-    }
-    // Not textures the host GPU writes.
-    if resource[12] & 7 != 0 { 0 } else { first }
-}
-
-/// A shader view of a texture the title placed in memory itself, as a view
-/// of the resource made for that memory (on first use).
->>>>>>> belobug/main
 pub(crate) fn placed_texture(view: &View) -> Option<View> {
     const BUFFER: u32 = 1;
     const TARGET_DEPTH_UNORDERED: u32 = 0x7;
@@ -8961,7 +8558,8 @@ pub(crate) fn placed_texture(view: &View) -> Option<View> {
         return None;
     }
     let address = u64::from(desc[10]) | u64::from(desc[11]) << 32;
-<<<<<<< HEAD
+    #[cfg(feature = "diagnostics")]
+    crate::texture::flips::view(address, &resource, *desc);
     let words = desc[..10].try_into().ok();
     if unordered {
         let texture = crate::resource::uav_texture_at(address, &resource, desc[0])?;
@@ -9076,15 +8674,6 @@ pub(crate) static NULLS_SKIPPED: std::sync::atomic::AtomicU64 = std::sync::atomi
 fn null_skip() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_SYNC_NULL_SKIP").is_none_or(|v| v != "0"))
-||||||| merged common ancestors
-    let texture = crate::resource::texture_at(address, resource)?;
-    Some(View::Shader(texture as usize, desc[..10].try_into().ok()))
-=======
-    #[cfg(feature = "diagnostics")]
-    crate::texture::flips::view(address, resource, *desc);
-    let texture = crate::resource::texture_at(address, resource, largest_mip(resource, desc))?;
-    Some(View::Shader(texture as usize, desc[..10].try_into().ok()))
->>>>>>> belobug/main
 }
 
 /// A null view of the kind `view` is, for a slot whose view the host
@@ -11241,8 +10830,8 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
             let heap = HostHeap::new(false, count).expect("a view heap on the live device");
             // SAFETY: a plain query of a live heap.
             assert_eq!(unsafe { heap.heap.GetDesc().NumDescriptors }, null + 1);
-            assert_eq!(heap.dynamic, DYNAMIC);
-            assert!(heap.count + heap.dynamic <= null);
+            assert_eq!(heap.spare, DYNAMIC);
+            assert!(heap.count + heap.spare <= null);
             let first = heap.dynamic(DYNAMIC).expect("the whole dynamic range");
             assert!(first + DYNAMIC - 1 < null);
             assert_eq!(heap.dynamic(1), None);
@@ -11269,7 +10858,7 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         // Slots 0..8 and 8..16 of the ring: the search now starts at 16.
         assert_eq!((heap.dynamic(8), heap.dynamic(8)), (Some(4), Some(12)));
         // Everything after them, so that only what is given back is free.
-        let rest = heap.dynamic - 16;
+        let rest = heap.spare - 16;
         assert_eq!(heap.dynamic(rest), Some(4 + 16));
         // The search starts at 0 again. Slots 0..16 back, then 0..12 taken:
         // it starts at 12, with 12..16 free.
@@ -11288,27 +10877,14 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         let Some(heap) = HostHeap::new(false, 4) else {
             return; // no host GPU
         };
-<<<<<<< HEAD
-        let a = heap.dynamic(heap.dynamic - 101).unwrap(); // the last slot is never given
-||||||| merged common ancestors
-        let a = heap.dynamic(heap.dynamic - 100).unwrap();
-=======
-        let a = heap.dynamic(heap.spare - 100).unwrap();
->>>>>>> belobug/main
+        let a = heap.dynamic(heap.spare - 101).unwrap(); // the last slot is never given
         let b = heap.dynamic(60).unwrap();
-<<<<<<< HEAD
-        assert_eq!((a, b), (4, 4 + heap.dynamic - 101));
-||||||| merged common ancestors
-        assert_eq!((a, b), (4, 4 + heap.dynamic - 100));
-=======
-        assert_eq!((a, b), (4, 4 + heap.spare - 100));
->>>>>>> belobug/main
+        assert_eq!((a, b), (4, 4 + heap.spare - 101));
         // 40 left at the end: 50 do not fit until something is given back.
         assert_eq!(heap.dynamic(50), None);
         heap.release(a, 50);
         assert_eq!(heap.dynamic(50), Some(4));
-<<<<<<< HEAD
-        assert_eq!(heap.dynamic(40), Some(4 + heap.dynamic - 41));
+        assert_eq!(heap.dynamic(40), Some(4 + heap.spare - 41));
     }
 
     #[test]
@@ -11430,7 +11006,7 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         let Some(heap) = HostHeap::new(false, 4) else {
             return; // no host GPU
         };
-        let first = heap.dynamic(heap.dynamic).unwrap();
+        let first = heap.dynamic(heap.spare).unwrap();
         heap.release(first, 12);
         assert_eq!(heap.dynamic(12), Some(first));
 
@@ -11453,7 +11029,7 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         let a = heap.dynamic(8).unwrap();
         let b = heap.dynamic(8).unwrap();
         assert_eq!((a, b), (4, 12));
-        let rest = heap.dynamic - 16;
+        let rest = heap.spare - 16;
         assert_eq!(heap.dynamic(rest), Some(20));
         heap.release(4, 12);
         assert_eq!(heap.dynamic(12), Some(4));
@@ -11464,10 +11040,6 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         heap.release(14, 4);
         let c = heap.dynamic(4);
         assert_eq!(c, Some(14));
-||||||| merged common ancestors
-        assert_eq!(heap.dynamic(40), Some(4 + heap.dynamic - 40));
-=======
-        assert_eq!(heap.dynamic(40), Some(4 + heap.spare - 40));
     }
 
     /// A sampler heap past the host's limit is capped, not lost, and keeps
@@ -11632,10 +11204,10 @@ void main(uint3 id : SV_DispatchThreadID) {
         // Views the host refuses are left null, as `HostHeap::mirror` leaves them.
         let mut placed = [0; 14];
         placed[0] = 1; // a buffer
-        if buffer_srv(start + 16, 128, srv, at(0)).is_none() {
+        if buffer_srv(start + 16, 128, srv, at(0), None).is_none() {
             null_for(&View::Placed(false, placed, [0; 16]), at(0));
         }
-        if buffer_uav(start + 272, 128, uav(written), at(1)).is_none() {
+        if buffer_uav(start + 272, 128, uav(written), at(1), None).is_none() {
             null_for(&View::Placed(true, placed, [0; 16]), at(1));
         }
         // What the shader read, as a raw view of 32 dwords of our own.
@@ -11829,7 +11401,7 @@ void main(uint3 id : SV_DispatchThreadID) {
         // `View::is_buffer()` slots (`made[idx] == 0`).
         for idx in 0..=5 {
             assert_eq!(
-                host_heap.made.lock().unwrap()[idx],
+                host_heap.made_key(idx as u32),
                 0,
                 "slot {idx} starts deferred"
             );
@@ -11957,7 +11529,7 @@ void main(uint3 id : SV_DispatchThreadID) {
         assert!(reused, "unchanged slots reuse the plan");
 
         // Slot 0 marked unmade: were it made again, it would be made anew.
-        host_heap.made.lock().unwrap()[0] = 0;
+        host_heap.made.set(0, 0);
         cbv(mem.address() + 0x1000, 1);
         let second = host_heap.bindless_plan().unwrap();
         assert!(
@@ -11968,11 +11540,11 @@ void main(uint3 id : SV_DispatchThreadID) {
         assert_eq!(second.reads[0].1, mem.address() as usize);
         assert_eq!(second.reads[0].2, 0x1100);
         assert_eq!(
-            host_heap.made.lock().unwrap()[0],
+            host_heap.made_key(0),
             0,
             "only the written slot is made again"
         );
-        assert_ne!(host_heap.made.lock().unwrap()[1], 0);
+        assert_ne!(host_heap.made_key(1), 0);
 
         let release = |o: This| slot::<extern "system" fn(This) -> u32>(o, 0x10)(o);
         assert_eq!(release(title_heap), 0);
@@ -12059,8 +11631,8 @@ void main(uint3 id : SV_DispatchThreadID) {
             0,
         ];
 
-        assert!(crate::resource::texture_at(addr_a, &desc, 0).is_some());
-        assert!(crate::resource::texture_at(addr_b, &desc, 0).is_some());
+        assert!(crate::resource::texture_at(addr_a, &desc).is_some());
+        assert!(crate::resource::texture_at(addr_b, &desc).is_some());
         assert!(crate::resource::has_placed_texture(addr_a, &desc));
         assert!(crate::resource::has_placed_texture(addr_b, &desc));
 
@@ -12081,7 +11653,6 @@ void main(uint3 id : SV_DispatchThreadID) {
         // Clean up `addr_b` too.
         crate::watch::title_memory_remapped(addr_b as usize, 64 << 10);
         assert!(!crate::resource::has_placed_texture(addr_b, &desc));
->>>>>>> belobug/main
     }
 }
 
@@ -12278,7 +11849,7 @@ mod own_copy_tests {
         let first = heap.dynamic(1).unwrap();
         let left = heap.dynamic(2).unwrap();
         let right = heap.dynamic(2).unwrap();
-        let rest = heap.dynamic(heap.dynamic - 5).unwrap();
+        let rest = heap.dynamic(heap.spare - 5).unwrap();
         assert_eq!((first, left, right, rest), (4, 5, 7, 9));
 
         // Reallocating the left half puts the cursor back in the middle.
@@ -12291,7 +11862,7 @@ mod own_copy_tests {
 
         // A free slot at each physical end does not form a two-slot range.
         heap.release(first, 1);
-        let last = first + heap.dynamic - 1;
+        let last = first + heap.spare - 1;
         heap.release(last, 1);
         assert_eq!(heap.dynamic(2), None);
     }
