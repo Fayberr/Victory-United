@@ -127,7 +127,6 @@ pub const USER_VIEW_ADDRESS: u32 = 0x101;
 /// 4 and c). The shader adds the dword to every byte offset through that
 /// view. Asked for every root UAV.
 pub const USER_VIEW_BIAS: u32 = 0x103;
-<<<<<<< HEAD
 /// `RootType::Other` code of a user-data dword the host sets: the number of
 /// the first thread group in x. The console dispatches any number of groups
 /// in one dimension; the host at most 65,535, so a larger dispatch runs in
@@ -154,40 +153,24 @@ pub const USER_DISPATCH_THREADS_X: u32 = 0x106;
 /// `DispatchX` call with `USE_THREAD_DIMENSIONS` (`flags & 0x20`), or 0
 /// for a normal thread-group dispatch (all threads in every group active).
 pub const USER_DISPATCH_THREADS: u32 = 0x105;
-||||||| merged common ancestors
-=======
 /// `RootType::Other` code of a user-data dword the host computes: the
 /// threads along x of a dispatch by thread count (`DispatchX` with the
 /// console's thread-dimensions flag), `u32::MAX` for a dispatch by group
 /// count. A program [`crate::spill::limit_threads`] changed runs only the
-/// lanes below it.
-pub const USER_THREAD_LIMIT: u32 = 0x104;
->>>>>>> vibr/main
+/// lanes below it. 0x104 is taken by [`USER_GROUP_BASE`].
+pub const USER_THREAD_LIMIT: u32 = 0x109;
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {
-<<<<<<< HEAD
-    /// ForceEarlyDepthStencil (`[earlydepthstencil]`; no `SFI0` bit).
-    pub const EARLY_DEPTH: u64 = 1 << 3;
-||||||| merged common ancestors
-    pub const RAW_BUFFERS: u64 = 1 << 4;
-=======
-    pub const RAW_BUFFERS: u64 = 1 << 4;
     pub const VIEWPORT_RT_INDEX: u64 = 1 << 9;
->>>>>>> vibr/main
     pub const DOUBLES: u64 = 1 << 2;
     pub const RAW_BUFFERS: u64 = 1 << 4;
     pub const STENCIL_REF: u64 = 1 << 11;
     pub const EARLY_DEPTH: u64 = 1 << 3;
     pub const TYPED_UAV_LOADS: u64 = 1 << 13;
-<<<<<<< HEAD
     /// Unordered views in a vertex, geometry or mesh program.
     pub const UAVS_EVERY_STAGE: u64 = 1 << 16;
     pub const ROVS: u64 = 1 << 18;
-||||||| merged common ancestors
-=======
-    pub const ROVS: u64 = 1 << 18;
->>>>>>> vibr/main
     pub const WAVE_OPS: u64 = 1 << 19;
     pub const BARYCENTRICS: u64 = 1 << 22;
     pub const INT64: u64 = 1 << 20;
@@ -412,7 +395,6 @@ impl Shader {
         opcode: u32,
         args: &[V],
     ) -> V {
-<<<<<<< HEAD
         // Raw root UAVs are also legal inputs. Only a read through a handle
         // is known to leave it unchanged; any other use, including atomics,
         // is treated conservatively.
@@ -423,10 +405,7 @@ impl Shader {
         {
             self.written_root_uavs.push(slot);
         }
-||||||| merged common ancestors
-=======
         self.discards |= opcode == 82;
->>>>>>> vibr/main
         let mut params = vec![self.t.i32];
         params.extend(args.iter().map(|&a| self.m.type_of(a)));
         let fty = self.m.func_ty(ret, params);
@@ -1166,19 +1145,12 @@ impl Shader {
         if self.flags & flags::TYPED_UAV_LOADS != 0 {
             features |= 0x800;
         }
-<<<<<<< HEAD
-        if self.flags & flags::ROVS != 0 {
-            features |= 0x1000;
-        }
-||||||| merged common ancestors
-=======
         if self.flags & flags::ROVS != 0 {
             features |= 0x1000;
         }
         if self.flags & flags::VIEWPORT_RT_INDEX != 0 {
             features |= 0x2000;
         }
->>>>>>> vibr/main
         if self.flags & flags::WAVE_OPS != 0 {
             features |= 0x4000;
         }
@@ -1280,7 +1252,6 @@ impl Shader {
         Some(self.m.md_node(list))
     }
 }
-<<<<<<< HEAD
 
 /// Ensures elements sharing a signature row declare one DXIL interpolation
 /// mode. Any integer or `SV_IsFrontFace` element forces the row to `constant`
@@ -1470,76 +1441,3 @@ mod tests {
         assert_eq!(elems[3].interp, 3);
     }
 }
-||||||| merged common ancestors
-=======
-
-/// Ensures elements sharing a signature row declare one DXIL interpolation
-/// mode. Any integer or `SV_IsFrontFace` element forces the row to `constant`
-/// (`1`); otherwise, a used element's mode overrides unread siblings.
-fn reconcile_row_interp(elems: &mut [SigElement]) {
-    let mut row_mode: std::collections::HashMap<u32, (bool, Option<u8>)> =
-        std::collections::HashMap::new();
-    for e in elems.iter() {
-        let Some(row) = e.row else { continue };
-        if e.interp == 0 {
-            continue;
-        }
-        let entry = row_mode.entry(row).or_insert((false, None));
-        if e.kind == 13 || e.comp != 9 {
-            entry.0 = true;
-        } else if e.usage != 0 && entry.1.is_none() {
-            entry.1 = Some(e.interp);
-        }
-    }
-    for e in elems.iter_mut() {
-        let Some(row) = e.row else { continue };
-        if e.interp == 0 {
-            continue;
-        }
-        if let Some(&(force_const, used_mode)) = row_mode.get(&row) {
-            if force_const {
-                e.interp = 1;
-            } else if e.usage == 0
-                && let Some(m) = used_mode
-            {
-                e.interp = m;
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn elem(name: &str, kind: u8, comp: u8, interp: u8, row: u32, col: u8, usage: u8) -> SigElement {
-        SigElement {
-            name: name.into(),
-            index: 0,
-            kind,
-            comp,
-            interp,
-            row: Some(row),
-            col,
-            cols: 1,
-            usage,
-            half: false,
-        }
-    }
-
-    #[test]
-    fn reconcile_row_interp_matches_constant_and_used_siblings() {
-        let mut elems = vec![
-            elem("TEXCOORD", 0, 9, 2, 7, 0, 0),
-            elem("SV_IsFrontFace", 13, 5, 1, 7, 1, 1),
-            elem("TEXCOORD", 0, 9, 2, 8, 0, 0),
-            elem("TEXCOORD", 0, 9, 3, 8, 1, 1),
-        ];
-        reconcile_row_interp(&mut elems);
-        assert_eq!(elems[0].interp, 1);
-        assert_eq!(elems[1].interp, 1);
-        assert_eq!(elems[2].interp, 3);
-        assert_eq!(elems[3].interp, 3);
-    }
-}
->>>>>>> vibr/main
