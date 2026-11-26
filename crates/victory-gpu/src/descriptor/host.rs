@@ -2523,17 +2523,10 @@ impl HostHeap {
         self.mirror(index, handle, true);
     }
 
-<<<<<<< HEAD
-    fn flip(&self, list: &crate::host::HostList, index: u32, handle: u64, late: Option<u64>) {
-        let (heap, key) = (std::ptr::from_ref(self) as usize, record_key(handle));
-        let asked = crate::host::now_ms();
-||||||| 0a4356653
-    fn flip(&self, list: &crate::host::HostList, index: u32, handle: u64, late: Option<u64>) {
-        let (heap, key) = (std::ptr::from_ref(self) as usize, record_key(handle));
-=======
     fn flip(&self, list: &crate::host::HostList, index: u32, handle: u64, key: u64, late: Option<u64>) {
         use std::sync::atomic::Ordering::{Relaxed, Release};
         let heap = std::ptr::from_ref(self) as usize;
+        let asked = crate::host::now_ms();
         let id = NEXT_PENDING_FLIP.fetch_add(1, Relaxed);
         let origin = (std::ptr::from_ref(list) as usize, list.epoch());
         {
@@ -2541,7 +2534,7 @@ impl HostHeap {
             pending.push(PendingListFlip {
                 id,
                 origin,
-                flip: Flip { after: 0, heap, index, handle, key, late },
+                flip: Flip { after: 0, heap, index, handle, key, late, asked },
             });
             PENDING_LIST_COUNT.store(pending.len(), Release);
         }
@@ -2557,15 +2550,7 @@ impl HostHeap {
             }
         }
         let guard = PendingGuard(id);
->>>>>>> vicetay/main
         list.defer_host(move || {
-<<<<<<< HEAD
-            let after = crate::host::submissions().0;
-            let flip = Flip { after, heap, index, handle, key, late, asked };
-||||||| 0a4356653
-            let after = crate::host::submissions().0;
-            let flip = Flip { after, heap, index, handle, key, late };
-=======
             // Call a `&self` method so Rust 2021+ moves the whole `guard`
             // into this closure rather than copying `guard.0` and dropping
             // `guard` immediately at the end of `flip()`.
@@ -2573,7 +2558,6 @@ impl HostHeap {
                 return;
             };
             flip.after = crate::host::submissions().0;
->>>>>>> vicetay/main
             FLIPS.lock().unwrap_or_else(|e| e.into_inner()).push(flip);
         });
     }
@@ -3011,31 +2995,11 @@ impl HostHeap {
                 textures.remove(slot);
             }
         }
-<<<<<<< HEAD
-        let stride = view.and_then(view_stride);
-        let kind = view.map_or(0, view_kind);
-        if let Some((_, _, data)) = &self.strides
-            && index < victory_shader::emit::SLOT_STRIDES_COUNT
-        {
-            // SAFETY: inside the mapping; shaders read it while we write (a
-            // dword, either value is one the slot had).
-            unsafe { (*data as *mut u32).add(index as usize).write_volatile(stride.unwrap_or(0) | kind) };
-            write_view_address(*data, index, view);
-        }
-||||||| 0a4356653
-        let stride = view.and_then(view_stride);
-        let kind = view.map_or(0, view_kind);
-        if let Some((_, _, data)) = &self.strides
-            && index < victory_shader::emit::SLOT_STRIDES_COUNT
-        {
-            // SAFETY: inside the mapping; shaders read it while we write (a
-            // dword, either value is one the slot had).
-            unsafe { (*data as *mut u32).add(index as usize).write_volatile(stride.unwrap_or(0) | kind) };
-        }
-=======
         let (stride, kind) = view.map_or((None, 0), view_stride_and_kind);
         self.write_stride(index, stride.unwrap_or(0) | kind);
->>>>>>> vicetay/main
+        if let Some((_, _, data)) = &self.strides {
+            write_view_address(*data, index, view);
+        }
         let was = if stride.is_some() {
             self.buffers.put(index);
             true
