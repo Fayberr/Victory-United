@@ -1275,7 +1275,7 @@ impl Queued {
 
 /// Slots due of a [`TextureQueue`], of those looked at before and of the
 /// others: the frame each was written in, the slot and its write's number.
-type Due = [Vec<(u64, u32, u64)>; 2];
+type TextureDue = [Vec<(u64, u32, u64)>; 2];
 
 impl TextureQueue {
     fn insert(&mut self, index: u32, waiting: Waiting) {
@@ -1374,8 +1374,8 @@ impl TextureQueue {
     }
 
     /// The slots due at `frame`, for [`TextureQueue::in_order`].
-    fn all_due(&self, frame: u64) -> Due {
-        let mut due = Due::default();
+    fn all_due(&self, frame: u64) -> TextureDue {
+        let mut due = TextureDue::default();
         for (&index, w) in self.slots.iter().filter(|(_, w)| w.due <= frame) {
             due[usize::from(w.looks == 0 && w.mapped == 0)].push((w.written, index, w.write));
         }
@@ -1384,7 +1384,7 @@ impl TextureQueue {
 
     /// What [`TextureQueue::due`] says of `due` (with nothing held: some
     /// ten thousand slots are sorted).
-    fn in_order([mut again, mut fresh]: Due, max: usize) -> Vec<(u32, u64)> {
+    fn in_order([mut again, mut fresh]: TextureDue, max: usize) -> Vec<(u32, u64)> {
         // By the number of the write, counted over the run.
         let newest_first = |a: &(u64, u32, u64), b: &(u64, u32, u64)| b.2.cmp(&a.2);
         again.sort_unstable_by(newest_first);
@@ -2203,7 +2203,7 @@ impl HostHeap {
     pub(crate) fn texture_slots_due(&self, frame: u64, max: usize) -> (Vec<(u32, u64)>, [u64; 5]) {
         let (due, census) = {
             let textures = self.textures.lock().unwrap_or_else(|e| e.into_inner());
-            (if max == 0 { Due::default() } else { textures.all_due(frame) }, textures.census(frame))
+            (if max == 0 { TextureDue::default() } else { textures.all_due(frame) }, textures.census(frame))
         };
         (TextureQueue::in_order(due, max), census)
     }

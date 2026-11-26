@@ -3000,7 +3000,7 @@ fn word_runs_put(at: usize, title: &[u8], held: &mut [u8]) -> Vec<(usize, usize)
         // SAFETY: the processor has AVX2, and the lengths are the same.
         return unsafe { word_runs_put_avx2(title, held) };
     }
-    let runs = dword_runs(at, title, held, 0);
+    let runs = changed_dword_runs(at, title, held, 0);
     for &(r, m) in &runs {
         held[r..r + m].copy_from_slice(&title[r..r + m]);
     }
