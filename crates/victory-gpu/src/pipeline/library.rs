@@ -457,8 +457,9 @@ static LIBRARY: Mutex<Option<Option<Arc<Library>>>> = Mutex::new(None);
 
 fn library() -> Option<Arc<Library>> {
     LIBRARY
-<<<<<<< HEAD
-        .get_or_init(|| {
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(|| {
             // With RenderDoc loaded the device is RenderDoc's: the card's
             // library is not for it, and what it would save is not for
             // the card. Neither read nor written in such a run.
@@ -467,20 +468,7 @@ fn library() -> Option<Arc<Library>> {
                 tracing::info!("RenderDoc is loaded: the host pipeline library is neither read nor saved in this run");
                 return None;
             }
-            let device = crate::host::host()?.device.cast::<ID3D12Device1>().ok()?;
-            let blob = DIR.get().map_or(Blob::None, |d| Blob::of(d));
-            let library = open(&device, blob);
-||||||| a66ac212
-        .get_or_init(|| {
-            let device = crate::host::host()?.device.cast::<ID3D12Device1>().ok()?;
-            let blob = DIR.get().map_or(Blob::None, |d| Blob::of(d));
-            let library = open(&device, blob);
-=======
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get_or_insert_with(|| {
             let library = open_from_disk();
->>>>>>> klbf/beta-2
             if library.is_none() {
                 tracing::warn!("no host pipeline library: pipelines are not kept");
             }
@@ -602,14 +590,8 @@ pub(crate) fn pipeline_with_status(
     let wide = HSTRING::from(name);
     let Some(library) = library() else {
         MADE.fetch_add(1, Ordering::Relaxed);
-<<<<<<< HEAD
-        return create().map(|pso| (pso, false));
-||||||| a66ac212
-        return create();
-=======
         let _all = one_call();
-        return create();
->>>>>>> klbf/beta-2
+        return create().map(|pso| (pso, false));
     };
     let began = std::time::Instant::now();
     let loaded = {
@@ -818,17 +800,6 @@ fn write_out(dir: &std::path::Path, library: &Library) {
     } else {
         Ok(())
     };
-<<<<<<< HEAD
-||||||| a66ac212
-    let used: Vec<String> = USED.lock().unwrap_or_else(|e| e.into_inner()).iter().flatten().cloned().collect();
-    let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
-=======
-    // With what earlier runs listed: a run that asks for no title pipeline
-    // (`victory warm`) wrote an empty list over theirs, and the next world
-    // began with every pipeline still to be asked for.
-    let used: Vec<String> = used().iter().flatten().cloned().collect();
-    let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
->>>>>>> klbf/beta-2
     if bytes > 0 && library_written.is_ok() {
         // In place unless the system refused and the new one waits beside it.
         let in_place = !dir.join(NEXT_FILE).exists();
@@ -945,7 +916,6 @@ fn write_atomically(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>
     })
 }
 
-<<<<<<< HEAD
 /// How long each title pipeline that took long to make took, in ms (beside
 /// the early list; a key may be there more than once).
 const SLOW_FILE: &str = "slow-pipelines.txt";
@@ -989,11 +959,6 @@ pub(crate) fn note_time(key: &str, ms: u64) {
 }
 
 /// Title pipeline keys requested by draws or dispatches (this run and the last).
-||||||| a66ac212
-/// Title pipeline keys drawn or dispatched with (this run and the last).
-=======
-/// Title pipeline keys requested by draws or dispatches (this run and the last).
->>>>>>> klbf/beta-2
 static USED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 static USED_CHANGED: AtomicBool = AtomicBool::new(false);
 
@@ -1011,20 +976,11 @@ fn used() -> std::sync::MutexGuard<'static, Option<HashSet<String>>> {
     used
 }
 
-<<<<<<< HEAD
 /// Open the early list before a cache save that has no title draws.
 pub(crate) fn keep_early_list() {
     drop(used());
 }
 
-/// Whether the title pipeline with `key` was requested in this or an earlier run.
-///
-/// `VICTORY_EARLY_ALL=1`: every title pipeline is started at creation,
-/// requested before or not, so that the driver's own cache holds it for
-/// later runs.
-||||||| a66ac212
-/// Whether the title pipeline with `key` was drawn with in an earlier run.
-=======
 /// Whether the host driver died making the title pipeline with `key` in
 /// a pre-build (`translate --cache --pipelines` lists it in
 /// `prebuild-crashed.txt`): a run skips it as `VICTORY_SKIP_PIPELINES` does
@@ -1046,7 +1002,10 @@ pub(crate) fn crashed(key: &str) -> bool {
 }
 
 /// Whether the title pipeline with `key` was requested in this or an earlier run.
->>>>>>> klbf/beta-2
+///
+/// `VICTORY_EARLY_ALL=1`: every title pipeline is started at creation,
+/// requested before or not, so that the driver's own cache holds it for
+/// later runs.
 pub(crate) fn wanted_early(key: &str) -> bool {
     static ALL: OnceLock<bool> = OnceLock::new();
     if *ALL.get_or_init(|| std::env::var_os("VICTORY_EARLY_ALL").is_some_and(|v| v == "1")) {
