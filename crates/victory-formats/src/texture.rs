@@ -274,10 +274,20 @@ pub struct Layout {
     /// The first mip in the tail; `mips.len()` without one.
     pub first_tail_mip: u32,
     pub mips: Vec<Mip>,
-<<<<<<< HEAD
     /// Byte offsets inside a block for each coordinate, per axis.
     /// Empty for linear and unsupported modes.
     pattern: &'static SwizzlePattern,
+    /// The pipe configuration the XOR modes' addresses follow.
+    pub pipes: Pipes,
+    /// The base swizzle (addrlib's `pipeBankXor`) of an XOR mode, 0 for the
+    /// others: pipe bits, then bank bits, XORed into every block from
+    /// address bit 8.
+    pub pipe_bank_xor: u32,
+    /// The pattern, read by coordinate bit; `None` for linear and the
+    /// layouts without addressing.
+    flips: Option<Flips>,
+    /// `pipe_bank_xor` as it lands in a block's offset.
+    xor: u32,
 }
 
 type SwizzlePattern = [Vec<u32>; 3];
@@ -349,91 +359,6 @@ fn spread(bits: &[u32]) -> Vec<u32> {
                 .sum()
         })
         .collect()
-||||||| 085ee7c4c
-    /// Byte offsets inside a block of each element coordinate bit, per
-    /// axis; empty for linear and unsupported modes.
-    pattern: [Vec<u32>; 3],
-}
-
-/// Micro tile (256 bytes) patterns by log2 of the element size: for each
-/// address bit, the element coordinate bit it takes (`x0`, `y1`, `z0`...),
-/// `--` for the bits inside an element. Thin `S`, thin `D`, thick `S`
-/// (also the `D` 3D modes). From addrlib's `GFX10_SW_256_S_RBPLUS`,
-/// `GFX10_SW_256_D_RBPLUS` and `GFX10_SW_4K_S3_RBPLUS` patterns; the larger
-/// blocks add bits Y, X (thin) or Y, X, Z (thick) in turn.
-const MICRO: [[&[u8; 16]; 5]; 3] = [
-    [
-        b"x0x1x2x3y0y1y2y3",
-        b"--x0x1x2y0y1y2x3",
-        b"----x0x1y0y1y2x2",
-        b"------x0y0y1x1x2",
-        b"--------y0y1x0x1",
-    ],
-    [
-        b"x0x1x2y1y0y2x3y3",
-        b"--x0x1x2y0y1y2x3",
-        b"----x0x1y0y1x2y2",
-        b"------x0y0x1x2y1",
-        b"--------x0y0x1y1",
-    ],
-    [
-        b"x0x1z0y0z1y1x2z2",
-        b"--x0z0y0z1y1x1z2",
-        b"----x0y0z0y1x1z1",
-        b"------x0z0y0x1z1",
-        b"--------z0y0x0z1",
-    ],
-];
-
-/// For each axis, the address bit each coordinate bit lands on.
-fn pattern(kind: usize, element_log2: u32, block_log2: u32) -> [Vec<u32>; 3] {
-    let mut axes: [Vec<u32>; 3] = Default::default();
-    let micro = MICRO[kind][element_log2 as usize];
-    for bit in 0..8u32 {
-        let (axis, index) = (micro[2 * bit as usize], micro[2 * bit as usize + 1]);
-        let axis = match axis {
-            b'x' => 0,
-            b'y' => 1,
-            b'z' => 2,
-            _ => continue,
-        };
-        let index = usize::from(index - b'0');
-        let to = &mut axes[axis];
-        if to.len() <= index {
-            to.resize(index + 1, 0);
-        }
-        to[index] = bit;
-    }
-    let order: &[usize] = if kind == 2 { &[1, 0, 2] } else { &[1, 0] };
-    for (bit, axis) in (8..block_log2).zip(order.iter().cycle()) {
-        axes[*axis].push(bit);
-    }
-    axes
-}
-
-/// Byte offsets inside a block for coordinates 0..2^bits of one axis.
-fn spread(bits: &[u32]) -> Vec<u32> {
-    (0..1u32 << bits.len())
-        .map(|c| {
-            bits.iter()
-                .enumerate()
-                .map(|(i, &to)| ((c >> i) & 1) << to)
-                .sum()
-        })
-        .collect()
-=======
-    /// The pipe configuration the XOR modes' addresses follow.
-    pub pipes: Pipes,
-    /// The base swizzle (addrlib's `pipeBankXor`) of an XOR mode, 0 for the
-    /// others: pipe bits, then bank bits, XORed into every block from
-    /// address bit 8.
-    pub pipe_bank_xor: u32,
-    /// The pattern, read by coordinate bit; `None` for linear and the
-    /// layouts without addressing.
-    flips: Option<Flips>,
-    /// `pipe_bank_xor` as it lands in a block's offset.
-    xor: u32,
->>>>>>> origin/exp/vitoriabr-head
 }
 
 /// Tables depend only on the micro-tile kind, block size and element size.
@@ -532,16 +457,11 @@ impl Layout {
             alignment: 256,
             first_tail_mip: d.mips,
             mips,
-<<<<<<< HEAD
             pattern: &EMPTY_PATTERN,
-||||||| 085ee7c4c
-            pattern: Default::default(),
-=======
             pipes,
             pipe_bank_xor: 0,
             flips: None,
             xor: 0,
->>>>>>> origin/exp/vitoriabr-head
         }
     }
 
@@ -702,7 +622,6 @@ impl Layout {
         let slab = if thick { u64::from(block[2]) } else { 1 };
         let slice_size = slice_size * slab;
         let slices = slices / block[2];
-<<<<<<< HEAD
         let addressable = !d.swizzle.xor() && d.samples == 1;
         let pattern = if addressable {
             let kind = if thick {
@@ -711,25 +630,12 @@ impl Layout {
                 usize::from(d.swizzle.display())
             };
             shared_pattern(kind, element_log2, block_log2)
-||||||| 085ee7c4c
-        let addressable = !d.swizzle.xor() && d.samples == 1;
-        let pattern = if addressable {
-            let kind = if thick {
-                2
-            } else {
-                usize::from(d.swizzle.display())
-            };
-            pattern(kind, element_log2, block_log2).map(|bits| spread(&bits))
-=======
+        } else {
+            &EMPTY_PATTERN
+        };
         let flips = if d.samples == 1 {
             flips(d.swizzle, thick, element_log2, pipes)
->>>>>>> origin/exp/vitoriabr-head
         } else {
-<<<<<<< HEAD
-            &EMPTY_PATTERN
-||||||| 085ee7c4c
-            Default::default()
-=======
             None
         };
         // ComputeSurfaceAddrFromCoordMacroTiled: the pipe bits and the bank
@@ -742,7 +648,6 @@ impl Layout {
             ((pipe_bank_xor & mask) << 8) & ((1 << block_log2) - 1)
         } else {
             0
->>>>>>> origin/exp/vitoriabr-head
         };
         Layout {
             desc: d,
@@ -943,14 +848,8 @@ impl Layout {
         } else {
             (dst.len(), src.len())
         };
-<<<<<<< HEAD
         let tiled_need = if DETILE { self.bytes_from(mip) } else { self.size };
         if tiled_len < tiled_need as usize || linear_len < need || row_pitch < bytes {
-||||||| 085ee7c4c
-        if tiled_len < self.size as usize || linear_len < need || row_pitch < bytes {
-=======
-        if tiled_len < self.bytes_from(mip) as usize || linear_len < need || row_pitch < bytes {
->>>>>>> origin/exp/vitoriabr-head
             return Err(Error::TooSmall);
         }
         // The row and slice add whole blocks to every column and XOR the same
@@ -1217,7 +1116,6 @@ mod tests {
         }
     }
 
-<<<<<<< HEAD
     #[test]
     fn linear_layouts_require_one_sample() {
         let linear = desc(256, 256, 1, 4, Swizzle::LINEAR);
@@ -1238,8 +1136,6 @@ mod tests {
         }
     }
 
-||||||| 085ee7c4c
-=======
     #[test]
     fn console_formats_use_the_expected_color_layouts() {
         for swizzle in [Swizzle::LINEAR, Swizzle::SW_64KB_D_X] {
@@ -1261,7 +1157,6 @@ mod tests {
         }
     }
 
->>>>>>> origin/exp/vitoriabr-head
     /// Sizes past the hardware's 16384 texels per side are refused instead
     /// of overflowing the size arithmetic (found by random-input testing).
     #[test]
