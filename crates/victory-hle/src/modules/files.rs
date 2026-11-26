@@ -570,72 +570,10 @@ pub extern "system" fn ReadFile(
 /// own writes. Returns the items read, as the CRT does; the bytes of a
 /// partial last item are copied too, as the CRT leaves them.
 pub extern "C" fn fread(buffer: *mut u8, size: usize, count: usize, stream: File) -> usize {
-<<<<<<< HEAD
-    let read = host!("ucrtbase.dll", "fread": extern "C" fn(*mut u8, usize, usize, File) -> usize);
-    let total = size.saturating_mul(count);
-    if buffer.is_null() || total == 0 {
-        // The CRT's own checks and answer (EINVAL, or nothing to read).
-        return read(buffer, size, count, stream);
-    }
-    const CHUNK: usize = 1 << 20;
-    // One buffer a thread, not a megabyte of zeros allocated for every
-    // call: the title reads its assets through here, and the allocation
-    // (and the zeroing of it) was paid per call.
-    thread_local! {
-        static BESIDE: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
-    }
-    let mut beside = BESIDE.with(|b| std::mem::take(&mut *b.borrow_mut()));
-    if beside.len() < total.min(CHUNK) {
-        beside.resize(total.min(CHUNK), 0);
-    }
-    let mut done = 0;
-    while done < total {
-        let want = (total - done).min(CHUNK);
-        let n = read(beside.as_mut_ptr(), 1, want, stream);
-        if n > 0 {
-            victory_gpu::kernel_will_write(buffer as usize + done, n);
-            // SAFETY: the caller's buffer holds `size * count` bytes, and
-            // `done + n` is at most that.
-            unsafe { std::ptr::copy_nonoverlapping(beside.as_ptr(), buffer.add(done), n) };
-            done += n;
-        }
-        if n < want {
-            break;
-        }
-    }
-    BESIDE.with(|b| *b.borrow_mut() = beside);
-    done / size
-||||||| a26859fc
-    let read = host!("ucrtbase.dll", "fread": extern "C" fn(*mut u8, usize, usize, File) -> usize);
-    let total = size.saturating_mul(count);
-    if buffer.is_null() || total == 0 {
-        // The CRT's own checks and answer (EINVAL, or nothing to read).
-        return read(buffer, size, count, stream);
-    }
-    const CHUNK: usize = 1 << 20;
-    let mut beside = vec![0u8; total.min(CHUNK)];
-    let mut done = 0;
-    while done < total {
-        let want = (total - done).min(CHUNK);
-        let n = read(beside.as_mut_ptr(), 1, want, stream);
-        if n > 0 {
-            victory_gpu::kernel_will_write(buffer as usize + done, n);
-            // SAFETY: the caller's buffer holds `size * count` bytes, and
-            // `done + n` is at most that.
-            unsafe { std::ptr::copy_nonoverlapping(beside.as_ptr(), buffer.add(done), n) };
-            done += n;
-        }
-        if n < want {
-            break;
-        }
-    }
-    done / size
-=======
     let _writing = victory_gpu::kernel_writing(buffer as usize, size.saturating_mul(count));
     host!("ucrtbase.dll", "fread": extern "C" fn(*mut u8, usize, usize, File) -> usize)(
         buffer, size, count, stream,
     )
->>>>>>> avatar/main
 }
 
 pub extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> File {
