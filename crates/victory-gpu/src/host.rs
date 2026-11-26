@@ -7171,7 +7171,7 @@ impl Host {
         working(was_working);
     }
 
- detile must wait for the last GPU read of its staging buffer.
+    /// A CPU detile must wait for the last GPU read of its staging buffer.
     /// Called with the submission lock held, so no newer upload can race it.
     pub(crate) fn wait_for_staging(&self, target: u64) {
         // SAFETY: the fence belongs to this host. A null event waits inline.
