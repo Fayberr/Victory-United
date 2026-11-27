@@ -21,7 +21,7 @@ own count, in the opening scenes unless noted.
 | Opening, gameplay | 34-37 ms (27-30 fps); our CPU work per frame sets it |
 | Opening, cutscenes | median 36-38 ms, 95th percentile 49-58 ms, no second over 100 ms |
 | Open water (first boat ride) | about 47 ms (21 fps); the GPU sets it there |
-| With `-FrameGen` | every frame the title renders is shown twice (2x presented) |
+| With `-FrameGen` (2x) | every frame the title renders is shown twice; 4x-6x on RTX 50 or with `-FrameGenX`, as the card allows |
 | Memory | about 8 GB of VRAM; 32 GB of RAM is enough, 64 GB is more comfortable |
 
 What is known to be wrong:
@@ -33,9 +33,45 @@ What is known to be wrong:
 - **Left out:** the heat-haze / in-scattering pass (it smears blocks of pixels, also on water) and the decal
   heap's defragmentation (5.6 ms of GPU a frame). `VICTORY_LEAVE_OUT` names them.
 - **Hitches:** some single frames of 70-190 ms in cutscenes while the title streams.
-- **Frame rate:** the title runs at 30 fps. `-Fps 60` lets frames start every 1/60 s, but the layer itself costs
-  about 33 ms a frame today, so it stays near 30. 60 fps is the goal.
+- **Frame rate:** the launcher no longer caps at 30 fps by default (`-Fps 1000`); `-Fps 30` restores the title's
+  own rate. The layer's CPU work still keeps most scenes near 30, so 60 fps remains the goal.
 - **The first run of every new build stutters** while the driver compiles pipelines (see *Warming up* below).
+
+## What this port adds
+
+This tree carries the work after `02fc18a` from
+[trustno1-coder/VIctory-NVIDIA](https://github.com/trustno1-coder/VIctory-NVIDIA), ported here. The fork's
+automatic NVIDIA SDK downloader is deliberately left out; install Streamline yourself (below).
+
+- **F1 settings menu, in every build.** DLSS mode and model, frame generation, the frame-rate cap, console profile,
+  picture size, the light estimates and the main speed switches. It writes `victory-settings.txt` (or the file
+  `VICTORY_MENU_FILE` names), applies it at the next start, and can save and restart. While it is open the title
+  gets no keyboard; a pad still works.
+- **Frame generation from 2x to 6x, live.** `VICTORY_FRAMEGEN_X=2..6` chooses the starting amount; `0` makes it
+  ready but off. The layer asks the driver for the card's maximum and uses no more. The F1 menu changes the amount
+  while the title runs; the launcher's `-FrameGenX` and `-FrameGen` select the starting amount.
+- **No frame-rate cap by default.** `-Fps` defaults to 1000 (`VICTORY_FRAME_INTERVAL_US=1000`); `-Fps 30` restores
+  the title's own rate. The caption and the top-left line show rendered and presented rates when frame generation
+  is on.
+- **FPS line and F3 stats panel.** The FPS line is on by default (`VICTORY_FPS_LINE=0` hides it). F3 toggles the
+  stats panel in every build now (`VICTORY_PANEL=1`), not only in the diagnostics build; it also shows the
+  frame-generation multiplier.
+- **`victory play`, or double-click.** `target\release\victory.exe play <path to game_scarlett_master.exe>` uses
+  the same settings as the PowerShell launcher. Put `victory.exe` beside the title's executable and start it with
+  no arguments to play. Settings and logs stay under `%LOCALAPPDATA%\victory`; nothing is downloaded.
+- **Window and input, off by default.** `VICTORY_FULLSCREEN=1` (with `VICTORY_FULLSCREEN_RES=WxH`),
+  `VICTORY_IME_ENGLISH=1` for an English keyboard layout, and `VICTORY_MOUSE_CAPTURE=1` to keep the pointer inside
+  and read relative motion (`VICTORY_MOUSE_WARP=1` recentres it). The F1 menu can turn them on for the next start.
+- **PS5 pads.** DualSense and DualSense Edge are read from HID over USB or Bluetooth. `VICTORY_DUALSENSE=0` turns
+  them off and `=1` keeps them beside a remapper; by default they fill the slots XInput leaves free (a remapper's
+  XInput pad wins).
+- **Open water without dark blocks.** On a 32-lane-wave host the two tiled water-light programs are left out;
+  `VICTORY_WATER_LIGHT=1` runs them as before (green water, dark blocks).
+- **One-click launcher and extreme modes.** `PLAY_FRAMEGEN.bat` (or `scripts\play-framegen.ps1 -Mode 1..6`)
+  finds the dump, backs up and verifies the saves, tunes the worker pools by CPU count, and starts through
+  `play-foxhound.ps1`. On RTX 50 frame generation starts at 4x (`TITLE_FRAMEGEN_X=2..6` overrides;
+  `TITLE_NO_TUNE=1` skips the pool tuning); modes 5 and 6 raise the game to High priority. NVIDIA's files are
+  checked for, never downloaded.
 
 ## What you need
 
@@ -107,22 +143,38 @@ The diagnostics build (frame timelines, captures, GPU timing) is optional:
 
 ## Run
 
+The short way is the built-in launcher:
+
+```powershell
+target\release\victory.exe play 'D:\Games\MyDump\game_scarlett_master.exe'
+```
+
+or put `victory.exe` beside `game_scarlett_master.exe` and double-click it. The PowerShell launcher has the same
+settings and more options:
+
 ```powershell
 .\scripts\play-foxhound.ps1 -Exe 'D:\Games\MyDump\game_scarlett_master.exe'
 ```
 
 | Option | What |
 |---|---|
-| *(none)* | Series X profile, 2560x1440, DLSS Quality (if Streamline is set up), all fixes on |
+| *(none)* | Series X profile, 2560x1440, DLSS Quality (if Streamline is set up), no frame-rate cap, all fixes on |
 | `-Dlss off` / `dlaa` / `balanced` / `performance` | the title's own upscaling, or another DLSS mode |
 | `-FrameGen` | DLSS Frame Generation (RTX 40 or later, or RTX 30 / 20 with the add-on; about +1.4 GB of VRAM) |
+| `-FrameGenX 2..6` | frames shown per rendered frame with `-FrameGen` (the card's maximum wins) |
+| `-NoFrameGenReady` | do not make frame generation ready at start; only `-FrameGen` turns it on |
+| `-Fps 30` / `60` / `1000` | frame-rate cap; 1000 is the default (no cap), 30 is the title's own |
 | `-SeriesS` | the Series S profile: 1280x720 inside, faster, softer |
 | `-Res 1080to1440` / `4k` | scene at 1080p upscaled by the title / the stock 3840x2160 output |
 | `-Build diag` | the diagnostics build |
 | `-More @{VICTORY_X='1'}` | add or override any switch |
 
-Full screen: start the game, then run `.\scripts\fullscreen.ps1` in another window (borderless, the size of the
-monitor the game is on).
+In the game: **F1** is the settings menu (Up/Down pick, Left/Right change, Enter runs the line), **F3** shows and
+hides the stats panel. The `victory play` options mirror the launcher: `--res`, `--dlss`, `--framegen N`,
+`--no-framegen-ready`, `--fps`, `--series-s` and `--set VICTORY_X=1`.
+
+Full screen: `VICTORY_FULLSCREEN=1` (or the F1 menu) makes the window borderless at the monitor's size;
+`VICTORY_FULLSCREEN_RES=2560x1440` asks for another size. The older `.\scripts\fullscreen.ps1` still works.
 
 Logs go to `%LOCALAPPDATA%\victory\logs`, saves to `%LOCALAPPDATA%\victory\data`. Close the game window to quit.
 
@@ -146,7 +198,15 @@ Every `VICTORY_...` switch is described in a comment where the code reads it. Th
 | Switch | Launcher | What |
 |---|---|---|
 | `VICTORY_DLSS`, `VICTORY_DLSS_MODE` | `quality` | DLSS Super Resolution through the title's FidelityFX dispatch |
-| `VICTORY_FRAMEGEN` | off (`-FrameGen`) | DLSS Frame Generation, with the picture before the HUD tagged |
+| `VICTORY_FRAMEGEN` | ready (`-FrameGen` turns on) | DLSS Frame Generation, with the picture before the HUD tagged |
+| `VICTORY_FRAMEGEN_X` | `0` (ready, off) | frames shown per rendered frame: 2-6, or 0 for ready but off |
+| `VICTORY_FPS_LINE` | on | FPS line at the top left; `0` hides it |
+| `VICTORY_PANEL` | off | F3 stats panel in every build |
+| `VICTORY_FULLSCREEN`, `VICTORY_FULLSCREEN_RES` | off | borderless fullscreen at the monitor's size, or `WxH` |
+| `VICTORY_IME_ENGLISH` | off | switch to the en-US keyboard layout while the game has focus |
+| `VICTORY_MOUSE_CAPTURE`, `VICTORY_MOUSE_WARP` | off | keep the pointer inside and read relative motion; recentre it |
+| `VICTORY_DUALSENSE` | auto | PS5 pads from HID: `0` off, `1` beside XInput |
+| `VICTORY_WATER_LIGHT` | off | run the tiled water light (green water, dark blocks) |
 | `VICTORY_NATIVE_1440P` | on | Series X renders and outputs 2560x1440 (image patched) |
 | `VICTORY_SOFT_VIEWS` | `copies` | the title's tiled-heap page mappings kept without Windows views: no freezes at scene cuts |
 | `VICTORY_WC_NO_BACK`, `_MIN_KB` | `1`, `1024` | shader writes into big write-combined copies are not copied back |
@@ -155,7 +215,7 @@ Every `VICTORY_...` switch is described in a comment where the code reads it. Th
 | `VICTORY_PRELUDE_UPLOADS`, `VICTORY_SHOW_NEW_LATER`, `VICTORY_TABLED_REREAD` | on | texture upload order and slot changes (flicker, device losses) |
 | `VICTORY_SYNC_IN_PLACE`, `VICTORY_SPANS_QUICK`, `VICTORY_HEAP_SYNC_AT_SUBMIT` | on | cheaper descriptor-heap bookkeeping |
 | `VICTORY_PORT_CONSTANTS` | off | the title's constants heap read in place: less CPU, but on a 12 GB card the GPU then waits (slower overall) |
-| `VICTORY_FRAME_INTERVAL_MS` | off | experimental: the title's own 30 fps setting patched to a higher rate |
+| `VICTORY_FRAME_INTERVAL_MS`, `_US` | from `-Fps` | patch the title's own rate, or set our frame clock; the launcher sets `_US` |
 | `VICTORY_BVH_BUILDER` | off | the title's ray tracing (slow, broken) |
 
 ## How it works, and the findings
@@ -193,6 +253,10 @@ commit and its author.
   (with Spexivus, joroyt and tightfall), Joshua Odom, **Geckomacabre** and **cxy0072019-sketch**.
 - **[XCL](https://github.com/ivall/xcl)** (GPL-2.0-only) was read for how the same title behaves under another
   layer; no code of it is here.
+- **[trustno1-coder/VIctory-NVIDIA](https://github.com/trustno1-coder/VIctory-NVIDIA)** and its contributors
+  (superboynick, Blitzball996, LucaruluDev): the F1 settings menu, live 2x-6x frame generation, built-in
+  `victory play`, window/input controls, PS5 pads, the stats panel in every build and the open-water fix. The
+  NVIDIA SDK downloader from that fork is not included.
 - **[sdli1995/dlssg_for_sm86](https://github.com/sdli1995/dlssg_for_sm86)** (MIT) makes DLSS Frame Generation
   run on RTX 30 and 20; its release is loaded at run time from a folder you supply, and nothing of it is here.
 - NVIDIA Streamline, DLSS and Reflex are NVIDIA's; they are loaded at run time from a folder you supply.
