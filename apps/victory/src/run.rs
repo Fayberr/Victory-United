@@ -152,7 +152,18 @@ pub fn run(
     }
     let fsr = fsr_4k::FsrPreset::requested("VICTORY_FSR_4K")?;
     let dlss = fsr_4k::FsrPreset::requested("VICTORY_DLSS_4K")?;
-    let series_s_dlss = fsr_4k::FsrPreset::requested("VICTORY_DLSS")?;
+    let streamline_asked = std::env::var_os("VICTORY_DLSS").is_some_and(|v| v == "1");
+    let series_s_dlss = if streamline_asked {
+        None
+    } else {
+        fsr_4k::FsrPreset::requested("VICTORY_DLSS")?
+    };
+    let streamline_preset = if streamline_asked {
+        Some(fsr_4k::FsrPreset::requested("VICTORY_DLSS_MODE")?
+            .unwrap_or(fsr_4k::FsrPreset::Quality))
+    } else {
+        None
+    };
     let series_s_fsr = fsr_4k::FsrPreset::requested("VICTORY_FSR")?;
     let framegen = fidelityfx::framegen_requested();
     anyhow::ensure!(
@@ -160,6 +171,12 @@ pub fn run(
         "VICTORY_FRAMEGEN requires Series S"
     );
     let series_s_preset = series_s_dlss.or(series_s_fsr);
+    if streamline_asked {
+        anyhow::ensure!(
+            dlss.or(fsr).or(series_s_fsr).is_none(),
+            "VICTORY_DLSS=1 selects Streamline; clear VICTORY_DLSS_4K, VICTORY_FSR_4K and VICTORY_FSR"
+        );
+    }
     if series_s_preset.is_some() {
         anyhow::ensure!(
             matches!(console, Console::SeriesS) && fsr.is_none() && dlss.is_none(),
@@ -169,9 +186,11 @@ pub fn run(
             series_s_fsr.is_none() || series_s_dlss.is_none(),
             "choose either VICTORY_FSR or VICTORY_DLSS"
         );
+    }
+    if series_s_preset.is_some() || streamline_asked {
         anyhow::ensure!(
             std::env::var_os("VICTORY_FFX_SCALE").is_none() && std::env::var_os("VICTORY_UPSCALER").is_none(),
-            "the Series S upscaler preset sets the scale and upscaler. Clear VICTORY_FFX_SCALE and VICTORY_UPSCALER."
+            "the upscaler preset sets the scale and upscaler. Clear VICTORY_FFX_SCALE and VICTORY_UPSCALER."
         );
     }
     let original = std::fs::read(exe).with_context(|| format!("reading {}", exe.display()))?;
@@ -195,6 +214,29 @@ pub fn run(
             profile = Some(preset);
         }
     }
+    let streamline_preset = if execute {
+        streamline_preset.filter(|preset| match fidelityfx::start_streamline(preset.mode()) {
+            Ok(()) => {
+                if let Some(dir) = cfg.fidelityfx_dir.as_deref() {
+                    let fallback = match console {
+                        Console::SeriesS => fidelityfx::use_host_fsr3(dir, u32::from(preset.mode())),
+                        Console::SeriesX => fidelityfx::use_host_dir(dir).map(|_| ()),
+                    };
+                    if let Err(error) = fallback {
+                        tracing::warn!(%error, "Streamline DLSS: could not load the AMD FSR fallback");
+                    }
+                }
+                tracing::info!(preset = preset.name(), "Streamline DLSS: selected the FidelityFX renderer");
+                true
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Streamline DLSS unavailable; using the title's upscaler");
+                false
+            }
+        })
+    } else {
+        None
+    };
     let image = if let Some(preset) = profile {
         fsr_4k::prepare_fsr_4k(&mut prepared, preset)?;
         // SAFETY: Windows supports setting the environment across threads.
@@ -202,10 +244,17 @@ pub fn run(
         unsafe { std::env::set_var("VICTORY_DISPLAY_MODE", "3840x2160") };
         let cache = cfg.cache_subdir(&format!("images/fsr-{}-4k-sdr", preset.name()))?;
         victory_loader::load(&prepared, &cache)?
+    } else if let Some(preset) = streamline_preset
+        && matches!(console, Console::SeriesX)
+    {
+        fsr_4k::prepare_fsr(&mut prepared, preset)?;
+        let cache = cfg.cache_subdir(&format!("images/streamline-{}", preset.name()))?;
+        victory_loader::load(&prepared, &cache)?
     } else {
         victory_loader::load(&prepared, &images)?
     };
-    if let Some(preset) = series_s_preset {
+    let streamline_series_s = streamline_preset.filter(|_| matches!(console, Console::SeriesS));
+    if let Some(preset) = series_s_preset.or(streamline_series_s) {
         if execute {
             use victory_loader::frame_rate::Patched;
             use victory_loader::resolution::write;
@@ -220,7 +269,9 @@ pub fn run(
                 );
             }
         }
-        series_s_upscaler(&cfg, preset, series_s_dlss.is_some())?;
+        if series_s_preset.is_some() {
+            series_s_upscaler(&cfg, preset, series_s_dlss.is_some())?;
+        }
     }
     // The program is mapped from the copy `load` wrote: the file's bytes
     // and their patched copy are not read again, and were held for the

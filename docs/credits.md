@@ -7,6 +7,10 @@ VIctory is. The trees this one is built from are listed in the
 [README](../README.md#credits), with the people whose work came over by hand
 (their commits name them).
 
+The Streamline port uses work by whiteh4cker-tr and readmet3xt-lab from
+[VIctory_sm86](https://github.com/whiteh4cker-tr/VIctory_sm86), building on
+DexNom's FidelityFX work. See [port provenance](../PROVENANCE.md).
+
 Everyone with a commit in this history, by number of commits (merge commits
 left out; `git shortlog -sn --no-merges` gives it for any revision):
 

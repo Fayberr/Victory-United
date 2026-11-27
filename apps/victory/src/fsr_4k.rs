@@ -91,9 +91,20 @@ impl FsrPreset {
 }
 
 pub(super) fn prepare_fsr_4k(image: &mut PreparedImage, preset: FsrPreset) -> Result<()> {
+    prepare_fsr(image, preset)?;
+    tracing::info!(
+        preset = preset.name(),
+        expected_render = ?preset.render_size(),
+        output = ?[3840, 2160],
+        "Selected Series X FSR with the stock 4K frontend"
+    );
+    Ok(())
+}
+
+pub(super) fn prepare_fsr(image: &mut PreparedImage, preset: FsrPreset) -> Result<()> {
     ensure!(
         image.original_hash.to_hex().as_str() == RETAIL_BUILD,
-        "FSR at 4K is unavailable for this retail game build"
+        "The FidelityFX profile is unavailable for this retail game build"
     );
     ensure!(
         *field::<16>(image, SDR_MODE)? == STOCK_SDR_MODE,
@@ -154,14 +165,6 @@ pub(super) fn prepare_fsr_4k(image: &mut PreparedImage, preset: FsrPreset) -> Re
         let displacement = local_scale as i32 - (QUALITY_LOAD as i32 + 8);
         *field::<4>(image, QUALITY_LOAD + 4)? = displacement.to_le_bytes();
     }
-    tracing::info!(
-        renderer = 7,
-        preset = preset.name(),
-        quality = preset.mode(),
-        expected_render = ?preset.render_size(),
-        output = ?[3840, 2160],
-        "Selected Series X FSR with the stock 4K frontend"
-    );
     Ok(())
 }
 

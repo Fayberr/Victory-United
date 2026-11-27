@@ -11079,9 +11079,12 @@ impl Host {
             let framegen = generated.is_some();
             let swap_chain = match generated {
                 Some(swap_chain) => swap_chain,
-                None => factory
-                    .CreateSwapChainForHwnd(&self.queue, hwnd, &desc, None, None)?
-                    .cast::<IDXGISwapChain3>()?,
+                None => {
+                    let swap_chain = factory
+                        .CreateSwapChainForHwnd(&self.queue, hwnd, &desc, None, None)?
+                        .cast::<IDXGISwapChain3>()?;
+                    crate::streamline::upgrade_swap_chain(swap_chain)
+                }
             };
             // Alt+Enter is the title window's own switch to and from full
             // screen (frameless, the swap chain stretched); DXGI's would make
@@ -11132,6 +11135,12 @@ fn title_window() -> Option<HWND> {
     // SAFETY: the callback only writes `found`, which outlives the call.
     let _ = unsafe { EnumWindows(Some(visit), LPARAM(&raw mut found as isize)) };
     found
+}
+
+pub(crate) fn release_streamline_presenter() {
+    if let Some(host) = host() {
+        drop(host.presenter.lock().unwrap_or_else(|e| e.into_inner()).take());
+    }
 }
 
 /// `state` without the bits the host texture's flags forbid: the console

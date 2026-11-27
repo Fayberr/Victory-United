@@ -263,6 +263,7 @@ mod resource_states;
 use resource_states::{Binding, SetupError, with_resource_states};
 
 pub use victory_gpu::framegen::{requested as framegen_requested, set_dir as set_framegen_dir};
+pub use victory_gpu::streamline::start as start_streamline;
 
 /// Select the best supported PC provider before the title's imports are bound.
 pub fn use_host_dir(dir: &Path) -> Result<&'static str, String> {
@@ -330,6 +331,7 @@ pub fn serving() -> bool {
 pub fn shut_down() {
     victory_gpu::framegen::shut_down();
     dlss::shut_down();
+    victory_gpu::streamline::shut_down();
 }
 
 fn load(

@@ -649,7 +649,7 @@ struct InitData {
 
 /// Whether DLSS serves the title's FidelityFX calls.
 pub(super) fn active() -> bool {
-    NGX.get().is_some()
+    NGX.get().is_some() || victory_gpu::streamline::quality().is_some()
 }
 
 /// Starts NGX on the host device for DLSS at `quality` (an
@@ -1302,7 +1302,9 @@ pub(super) fn query(context: *mut *mut c_void, desc: *mut Header) -> u32 {
     if let Some((host, mut fallback)) = context_of(context).as_deref().and_then(fallback_of) {
         return super::query_on_host(host, &mut fallback, desc);
     }
-    query_dlss(desc, NGX.get().and_then(|ngx| ngx.ffx_quality))
+    let quality = NGX.get().and_then(|ngx| ngx.ffx_quality)
+        .or_else(|| victory_gpu::streamline::quality().map(u32::from));
+    query_dlss(desc, quality)
 }
 
 fn query_dlss(desc: *mut Header, quality: Option<u32>) -> u32 {
@@ -1417,9 +1419,7 @@ fn refused(ctx: &Context, desc: *mut Header, code: u32, why: &str) -> u32 {
 }
 
 pub(super) fn dispatch(context: *mut *mut c_void, desc: *mut Header) -> u32 {
-    let Some(ngx) = NGX.get() else {
-        return NO_PROVIDER;
-    };
+    let ngx = NGX.get();
     if desc.is_null() {
         return PARAMETER;
     }
@@ -1446,7 +1446,9 @@ pub(super) fn dispatch(context: *mut *mut c_void, desc: *mut Header) -> u32 {
     }
     // SAFETY: a plain query; after a device removal nothing more is made
     // or evaluated, and nothing can run what was.
-    if let Err(error) = unsafe { ngx.device.GetDeviceRemovedReason() } {
+    if let Some(ngx) = ngx
+        && let Err(error) = unsafe { ngx.device.GetDeviceRemovedReason() }
+    {
         stop(&ctx, &format!("the device was removed ({error})"), true);
         return NO_PROVIDER;
     }
@@ -1568,7 +1570,7 @@ fn inputs(
 
 fn record_dispatch(
     list: &victory_gpu::external::Recording<'_>,
-    ngx: &Ngx,
+    ngx: Option<&Ngx>,
     ctx: &Context,
     dispatch: &DispatchUpscale,
     output_size: [u32; 2],
@@ -1582,7 +1584,8 @@ fn record_dispatch(
     // Two title arguments can refer to the same host texture. Validate all
     // bindings before recording any transitions: one backing cannot be both
     // an input and the output, or be returned in two different states.
-    for index in inputs(dispatch, flags, ngx.reactive) {
+    let reactive = ngx.map_or_else(victory_gpu::streamline::reactive, |ngx| ngx.reactive);
+    for index in inputs(dispatch, flags, reactive) {
         let resource = dispatch.resources[index].resource.cast::<Object>().cast_const();
         let declared = host_state(dispatch.resources[index].state);
         let used = state_for(index == 6, declared);
@@ -1649,15 +1652,35 @@ fn record_dispatch(
             let _ = list.texture(dispatch.resources[index].resource.cast::<Object>(), state);
         },
         |textures| {
-            evaluate(
-                list,
-                ngx,
-                ctx,
-                &mut feature,
-                dispatch,
-                output_size,
-                textures,
-            )
+            if let Some(ngx) = ngx {
+                evaluate(list, ngx, ctx, &mut feature, dispatch, output_size, textures)
+            } else {
+                let values = Evaluation::of(dispatch, [1.0, 1.0]);
+                let camera = victory_gpu::streamline::Camera {
+                    jitter: values.jitter,
+                    motion_scale: values.motion_scale,
+                    render: values.render,
+                    output: output_size,
+                    near: f32::from_bits(dispatch.settings[5]),
+                    far: f32::from_bits(dispatch.settings[6]),
+                    fov_y: f32::from_bits(dispatch.settings[7]),
+                    reset: values.reset || ctx.frames.load(Ordering::Relaxed) == 0,
+                    flags,
+                };
+                let states = bindings.map(|binding| binding.map_or(0, |binding| binding.used));
+                victory_gpu::streamline::upscale(
+                    list.commands(), textures, states, camera, values.pre_exposure,
+                ).map_err(DispatchError::Failed)?;
+                if victory_gpu::framegen::requested()
+                    && let (Some(depth), Some(motion)) = (&textures[1], &textures[2])
+                    && depth.as_raw() != motion.as_raw()
+                {
+                    let read = [states[1], states[2]].map(|state| if state == 0xc0 { 0xc } else { 0x4 });
+                    super::record_framegen(list, dispatch, ctx.upscale.max_render, flags, [depth, motion], read);
+                }
+                ctx.frames.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            }
         },
     );
     if outcome.is_ok() {

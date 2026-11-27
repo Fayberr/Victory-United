@@ -96,6 +96,8 @@ For FSR, point `VICTORY_FIDELITYFX_DIR` or `[paths].fidelityfx_dir` at the
 folder containing `amd_fidelityfx_upscaler_dx12.dll`. The 4K mode prefers
 FSR 4.1.2 and uses 3.1.6 when that is what the adapter supports. Series S
 uses FSR 3.1.6. Both profiles can use FSR when DLSS fails.
+For the optional Streamline backend on Windows, see [Streamline setup](docs/dlss.md).
+
 For DLSS on an RTX card, get `nvngx_dlss.dll` from the NVIDIA DLSS SDK.
 Set `VICTORY_DLSS_DIR` or `[paths].dlss_dir` to its folder, or put the DLL
 beside `victory.exe`. Some drivers ship without this library. Vice-Tay
