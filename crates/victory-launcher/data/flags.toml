@@ -320,6 +320,13 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_BUILD_ID"
+type = "text"
+default = ""
+risk = "advanced"
+doc = "Build string the engine reports to the launcher. Read when the engine is compiled, setting it at run time does nothing."
+
+[[flag]]
 name = "VICTORY_BURY_LAG"
 type = "text"
 default = ""
