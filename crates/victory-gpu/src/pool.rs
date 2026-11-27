@@ -112,15 +112,18 @@ struct Ripe {
     started: u64,
     finished: u64,
     ahead: usize,
+    fullest: bool,
 }
 
 impl Ripe {
-    const ALL: Ripe = Ripe { started: 0, finished: 0, ahead: 0 };
+    const ALL: Ripe = Ripe { started: 0, finished: 0, ahead: 0, fullest: false };
 
     fn now() -> Ripe {
         let (started, finished) = crate::host::submissions();
         // Not more than are kept ([`room`]): they would go and be made again.
-        Ripe { started, finished, ahead: ahead().min(SPARES.load(Ordering::Relaxed)) }
+        static FULLEST: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let fullest = *FULLEST.get_or_init(|| crate::switch::on("VICTORY_POOL_FULLEST"));
+        Ripe { started, finished, ahead: ahead().min(SPARES.load(Ordering::Relaxed)), fullest }
     }
 
     fn is<B>(self, block: &Block<B>) -> bool {
@@ -184,6 +187,7 @@ pub(crate) struct Piece {
 struct Block<B> {
     memory: B,
     free: Ranges,
+    room: u64,
     /// The end of the highest piece ever taken: above it the memory is as
     /// it was made (zeros).
     used_to: u64,
@@ -232,16 +236,20 @@ impl<B: Clone> Pool<B> {
             return None;
         }
         self.rested(now);
-        let mut found = None;
-        for (i, block) in self.blocks.iter_mut().enumerate() {
-            if let Some(block) = block
-                && ripe.is(block)
-                && let Some(start) = block.free.take(len, align)
-            {
-                found = Some((i, start));
-                break;
-            }
-        }
+        let mut found = if ripe.fullest {
+            // Pack fuller blocks first so emptier ones can reclaim long runs or retire.
+            let mut order: Vec<_> = self.blocks.iter().enumerate().filter_map(|(i, block)| {
+                let block = block.as_ref()?;
+                (ripe.is(block) && block.room >= len).then_some((block.room, i))
+            }).collect();
+            order.sort_unstable();
+            order.into_iter().find_map(|(_, i)| Some((i, self.blocks[i].as_mut()?.free.take(len, align)?)))
+        } else {
+            self.blocks.iter_mut().enumerate().find_map(|(i, block)| {
+                let block = block.as_mut().filter(|b| ripe.is(b))?;
+                Some((i, block.free.take(len, align)?))
+            })
+        };
         if found.is_none() && ripe.ahead > 0 {
             // The one that has been there the longest.
             let mut unripe: Vec<(u64, usize)> =
@@ -274,6 +282,7 @@ impl<B: Clone> Pool<B> {
             }
         }
         let block = self.blocks[i].as_mut()?;
+        block.room -= len;
         let again = start < block.used_to;
         block.used_to = block.used_to.max(start + len);
         Some((Piece { block: i, start, len }, block.memory.clone(), again))
@@ -298,7 +307,7 @@ impl<B: Clone> Pool<B> {
                 self.blocks.len() - 1
             }
         };
-        self.blocks[i] = Some(Block { memory, free: Ranges::new(BLOCK), used_to: 0, made, since: crate::host::now_ms() });
+        self.blocks[i] = Some(Block { memory, free: Ranges::new(BLOCK), room: BLOCK, used_to: 0, made, since: crate::host::now_ms() });
         i
     }
 
@@ -320,6 +329,7 @@ impl<B: Clone> Pool<B> {
             self.resting.pop_front();
             if let Some(block) = self.blocks[piece.block].as_mut() {
                 block.free.give(piece.start, piece.len);
+                block.room += piece.len;
                 any |= block.free.whole(BLOCK);
             }
         }
@@ -839,7 +849,7 @@ mod tests {
             made.set(made.get() + 1);
             Some(made.get())
         };
-        let at = |started, finished| Ripe { started, finished, ahead: 2 };
+        let at = |started, finished| Ripe { started, finished, ahead: 2, fullest: false };
         let take = |pool: &mut Pool<u64>, ripe| pool.take_ripe(BLOCK / 2, 65536, 0, ripe, make).unwrap().1;
         // Nothing runs: at once, and two are made ahead, one a time.
         assert_eq!(take(&mut pool, at(0, 0)), 1);
