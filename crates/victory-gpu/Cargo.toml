@@ -17,6 +17,7 @@ victory-core.workspace = true
 victory-formats.workspace = true
 victory-pipeline.workspace = true
 victory-shader = { workspace = true, features = ["host"] }
+victory-stats = { path = "../victory-stats" }
 
 [build-dependencies]
 blake3.workspace = true

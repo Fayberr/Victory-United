@@ -43,6 +43,8 @@ mod cores;
 pub mod descriptor;
 pub mod device;
 #[cfg(windows)]
+mod launcher_stats;
+#[cfg(windows)]
 mod draw;
 pub mod dxgi;
 #[cfg(windows)]
