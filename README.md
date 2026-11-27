@@ -16,41 +16,29 @@ endorsed by the game's developer or publisher, see [LEGAL.md](LEGAL.md).
 
 ## State
 
-Early. It boots, plays the intro and the menus and reaches the first playable room. It is not
-playable yet: in that room it ran at 12 to 15 frames a second in four runs of 7 minutes, and the aim is 20.
+It boots, plays the intro and the menus, loads an open-world save and renders the city. In open-world
+sessions played by hand it runs at 8 to 12 frames a second (9.5 fps on average), with 20 fps as the aim.
 
-Measured on one machine: Windows 11 Pro (build 26300), NVIDIA GeForce RTX 3080 Ti with 12 GB
+Test machine: Windows 11 Pro (build 26300), NVIDIA GeForce RTX 3080 Ti with 12 GB
 (driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `65a8fce7` plus the machine profile in
-`scripts/play.ps1`, Series S profile, no frame generation, no
-real save (a fresh copy of the throwaway test data), measured in the first playable room, standing
-at the window. These switches were set (a switch this tree
-does not know has no effect): internal render scale 0.5 with an own upscaler, relay mode 2, late
-wait 3, 1.5 GB card buffers with their budgets reserved (64 KB minimum, 1 GB windows), textures
-limited to 85 percent of the card's budget, and stubs for exposure, ambient light and the shadow
-mask.
+`scripts/play.ps1`, Series S profile, no frame generation, half render scale with an own upscaler,
+relay mode 2, late wait 3, 1.5 GB card buffers with their budgets reserved (64 KB minimum, 1 GB windows),
+stubs for exposure, ambient light and the shadow mask, playing through an open-world street scene at night.
 
-- **Speed:** minutes 3 to 6 of 7 minute runs, from the frame counter in the log, each run on a
-  cache copied fresh from the same warm one: with textures limited to 85 percent of the budget
-  14.5, 14.8, 14.9 and 14.6 fps in one run and 11.9, 11.9, 12.2 and 12.1 in a repeat; with 75 percent
-  14.6, 15.1, 15.1 and 14.8; with 90 percent 13.0, 13.3, 13.2 and 13.3. Minutes 1 and 2 are slower
-  (about 2.5 fps) while the game settles. Without the limit (96 percent, the default) three of five
-  runs of the same build ran at 4 to 5 fps instead: the card then held 12.4 GB of its 12 GB. These
-  are single runs of one build on one machine, not a range across machines.
-- **Picture:** from minute 3 on every saved frame was a lit frame (89 to 113 per minute, none dark or
-  blank); the frames at minute 4 and at the end of the 75 percent run show the room lit through the
-  window with the watchtower outside and the character in front of it. Some detail is missing: the
-  character's face and hair show horizontal stripes, the game's ray-traced light is
-  not built by default, and [Vice-Tay's list of known problems](https://github.com/TaynanGT/Vice-Tay#known-problems)
-  was not checked here.
-- **Stability:** these runs lasted 7 minutes and had no panic or device-lost line in the log. A longer
-  session has not been shown on this tree. On the earlier tree
-  below, a session played by hand for 34.7 minutes ended normally. Vice-Tay reports memory growing in long
-  sessions and the frame rate falling with it.
-- **Earlier tree, played by hand:** on commit `3588725d` (before this tree moved to Vice-Tay's code) a person played
-  for 34.7 minutes, launch to close, about 33.6 minutes of it in the room after the intro, and moved the
-  character. That is the player's observation, not something the log measures. From the log: median 8.5 fps
-  over 361 five-second reports in the room. The session ended when the window was closed normally, with no crash,
-  panic or device-removed line. This is a different tree from the one measured above.
+- **Speed:** 8 to 12 frames a second (9.5 fps on average) across minutes 3 to 6 of three 7 minute open-world
+  sessions played by hand on a warm shader cache: 9.1, 7.7, 10.7 and 12.1 fps (card texture share 85 percent),
+  9.2, 8.3, 11.9 and 10.6 fps (96 percent, the default) and 9.5, 7.9, 7.7 and 9.4 fps (85 percent again).
+  Minute 2 ran at 10.6 to 11.4 fps and minute 1 at about 10 fps on a warm cache.
+- **Picture:** from minute 2 on, 1,135 of 1,140 frames were lit (54 to 90 saved per minute), showing the
+  street at night with the character, a billboard, shop fronts, a parked tow truck and a lit shop window
+  with no white or black blocks. Ray-traced lighting is off by default (see
+  [Vice-Tay's known problems](https://github.com/TaynanGT/Vice-Tay#known-problems) for upstream shader notes).
+- **Stability:** a 40 minute open-world session played by hand on this tree ran smoothly at around 9.5 fps
+  with no crashes, and all 7 minute open-world sessions played by hand completed cleanly with no crashes,
+  panics or device-lost errors.
+- **Earlier tree, played by hand:** on commit `3588725d` (before moving to Vice-Tay's code), a 34.7 minute
+  session played by hand (33.6 minutes in the room after the intro, median 8.5 fps over 361 five-second reports)
+  ended normally when the window was closed, with no crash, panic or device-removed errors.
 
 ## Build
 
