@@ -1,6 +1,6 @@
 //! Window shell: navigation and dispatch. The two halves keep their own state (`core`, `ops`) and only
 //! see each other through `Shared`, which the core half fills in once per frame.
-use crate::{core, i18n::tr, ops};
+use crate::{capture::Capture, core, i18n::tr, ops, theme};
 use eframe::egui;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -58,32 +58,119 @@ pub struct App {
     pub core: core::CoreState,
     pub ops: ops::OpsState,
     pub shared: Shared,
+    capture: Option<Capture>,
+}
+
+/// Command line switches: `--ui-demo` and `--capture <dir>` (the latter implies the former).
+#[derive(Default, Clone)]
+pub struct Args {
+    pub demo: bool,
+    pub capture: Option<std::path::PathBuf>,
+}
+
+impl Args {
+    pub fn parse() -> Self {
+        let mut args = Self::default();
+        let mut it = std::env::args().skip(1);
+        while let Some(a) = it.next() {
+            match a.as_str() {
+                "--ui-demo" => args.demo = true,
+                "--capture" => {
+                    args.demo = true;
+                    args.capture = it.next().map(Into::into);
+                }
+                _ => {}
+            }
+        }
+        args
+    }
 }
 
 impl App {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        Self { tab: Tab::Play, core: Default::default(), ops: Default::default(), shared: Default::default() }
+    pub fn new(cc: &eframe::CreationContext<'_>, args: Args) -> Self {
+        let ctx = cc.egui_ctx.clone();
+        let (core, ops, shared) = if args.demo {
+            (core::CoreState::demo(), ops::OpsState::demo(), core::demo_shared())
+        } else {
+            (core::CoreState::new(ctx), Default::default(), Default::default())
+        };
+        let capture = args.capture.map(Capture::new);
+        Self { tab: Tab::Play, core, ops, shared, capture }
+    }
+
+    fn header(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("header").frame(theme::bar().inner_margin(egui::Margin::symmetric(18, 12))).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(theme::strong(tr("app.name")).size(18.0));
+                ui.add_space(24.0);
+                for (n, tab) in Tab::ALL.into_iter().enumerate() {
+                    if n == 2 {
+                        // Players use the first two; everything after is one click further for developers.
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                    }
+                    let on = self.tab == tab;
+                    let text = if on { theme::strong(tab.label()) } else { egui::RichText::new(tab.label()) };
+                    let mut b = egui::Button::new(text).min_size(egui::vec2(0.0, 30.0));
+                    b = if on {
+                        b.fill(theme::ACTIVE).stroke(egui::Stroke::new(1.0, theme::LINE_STRONG))
+                    } else {
+                        b.fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE)
+                    };
+                    if ui.add(b).clicked() {
+                        self.tab = tab;
+                    }
+                }
+            });
+        });
+    }
+
+    fn status_bar(&self, ctx: &egui::Context) {
+        egui::TopBottomPanel::bottom("status").frame(theme::bar().inner_margin(egui::Margin::symmetric(18, 7))).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                let state = match self.shared.game_pid {
+                    Some(pid) => format!("{} (pid {pid})", tr("status.running")),
+                    None => tr("status.idle").to_string(),
+                };
+                ui.label(theme::dim(state).size(12.5));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let engine = match &self.shared.engine_exe {
+                        Some(p) => p.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                        None => tr("status.no_engine").to_string(),
+                    };
+                    ui.label(theme::dim(format!("{} {}   |   {} {}", tr("status.engine"), engine, tr("status.launcher"), env!("CARGO_PKG_VERSION"))).size(12.5));
+                });
+            });
+        });
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::SidePanel::left("nav").exact_width(168.0).show(ctx, |ui| {
-            for tab in Tab::ALL {
-                if ui.selectable_label(self.tab == tab, tab.label()).clicked() {
-                    self.tab = tab;
-                }
+        if let Some(cap) = &mut self.capture {
+            if cap.drive(ctx, &mut self.tab, &mut self.core) {
+                self.capture = None;
             }
-        });
-        egui::CentralPanel::default().show(ctx, |ui| match self.tab {
-            Tab::Play => core::play::show(&mut self.core, &self.shared, ui),
-            Tab::Settings => core::settings::show(&mut self.core, &self.shared, ui),
-            Tab::Flags => core::flags::show(&mut self.core, &self.shared, ui),
-            Tab::Report => core::report::show(&mut self.core, &self.shared, ui),
-            Tab::About => core::about::show(&mut self.core, &self.shared, ui),
-            Tab::Monitor => ops::monitor::show(&mut self.ops, &self.shared, ui),
-            Tab::Updates => ops::updates::show(&mut self.ops, &self.shared, ui),
-            Tab::Dev => ops::dev::show(&mut self.ops, &self.shared, ui),
+        }
+        self.core.tick(ctx, &mut self.shared);
+        if self.core.screen() == core::Screen::FirstRun {
+            egui::CentralPanel::default().show(ctx, |ui| core::firstrun::show(&mut self.core, &self.shared, ui));
+            return;
+        }
+        self.header(ctx);
+        self.status_bar(ctx);
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG).inner_margin(egui::Margin::symmetric(28, 22))).show(ctx, |ui| {
+            match self.tab {
+                Tab::Play => core::play::show(&mut self.core, &self.shared, ui),
+                Tab::Settings => core::settings::show(&mut self.core, &self.shared, ui),
+                Tab::Flags => core::flags::show(&mut self.core, &self.shared, ui),
+                Tab::Report => core::report::show(&mut self.core, &self.shared, ui),
+                Tab::About => core::about::show(&mut self.core, &self.shared, ui),
+                Tab::Monitor => ops::monitor::show(&mut self.ops, &self.shared, ui),
+                Tab::Updates => ops::updates::show(&mut self.ops, &self.shared, ui),
+                Tab::Dev => ops::dev::show(&mut self.ops, &self.shared, ui),
+            }
         });
     }
 }

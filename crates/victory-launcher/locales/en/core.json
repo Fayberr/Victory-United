@@ -1,8 +1,18 @@
 {
+  "app.name": "Victory Launcher",
   "tab.play": "Play",
   "tab.settings": "Settings",
   "tab.flags": "Flags",
   "tab.report": "Bug report",
   "tab.about": "About",
+  "status.running": "Game running",
+  "status.idle": "Ready",
+  "status.engine": "Engine",
+  "status.launcher": "Launcher",
+  "status.no_engine": "none",
+  "firstrun.title": "Welcome to Victory United",
+  "firstrun.sub": "Pick your game folder to get started.",
+  "play.title": "Play",
+  "play.play": "Play",
   "stub.core": "Not built yet."
 }
