@@ -1,5 +1,5 @@
 {
-  "app.name": "Victory Launcher",
+  "app.name": "Victory United Launcher",
   "appearance.title": "Appearance",
   "appearance.reset": "Reset",
   "appearance.theme": "Theme",
@@ -160,7 +160,7 @@
   "report.demo": "Demo mode: no file is written.",
   "report.privacy": "The ZIP stays on your PC. Attach it to a GitHub issue yourself if you want to share it.",
   "about.title": "About",
-  "about.sub": "Victory Launcher starts Victory United and keeps its settings.",
+  "about.sub": "This launcher starts Victory United and keeps its settings.",
   "about.version": "Launcher",
   "about.engine": "Engine",
   "about.licence": "Licence",
