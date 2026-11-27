@@ -1311,9 +1311,20 @@ mod tests {
                 stage: "compute",
                 hash: hash.to_owned(),
                 container: Vec::new(),
+                #[cfg(windows)]
                 ambient: None,
+                #[cfg(windows)]
                 probe: None,
+                #[cfg(windows)]
+                bakes: false,
+                #[cfg(windows)]
                 translated: OnceLock::from(None),
+                #[cfg(windows)]
+                resolves_light: false,
+                #[cfg(windows)]
+                ends_reflections: false,
+                #[cfg(windows)]
+                draws_sky: false,
             })
         };
         let skips = super::super::parse_skip_hashes("32ed072b9f845048");
