@@ -270,7 +270,7 @@ fn live(ui: &mut egui::Ui, s: &Summary) {
         ui.label(theme::strong(tr("monitor.graph")));
         let line = |name: &str, data: &[f32], gray: u8| {
             let pts: PlotPoints = data.iter().enumerate().map(|(i, v)| [i as f64, *v as f64]).collect();
-            Line::new(name.to_string(), pts).color(egui::Color32::from_gray(gray)).width(1.4)
+            Line::new(name.to_string(), pts).color(egui::Color32::from_gray(gray)).width(1.4_f32)
         };
         Plot::new("frame_graph")
             .height(190.0)

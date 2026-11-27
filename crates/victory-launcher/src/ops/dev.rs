@@ -23,7 +23,6 @@ pub struct DevState {
     pub cache_bytes: Option<u64>,
     pub confirm_clear: bool,
     pub note: Option<String>,
-    pub own_engine_text: String,
 }
 
 impl DevState {
