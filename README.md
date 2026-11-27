@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="branding/vu-banner.png" alt="Victory United" width="640">
+</p>
+
 # Victory United
 
 A tree for running GTA VI (the Xbox Series build) on Windows, built from the best work of the
