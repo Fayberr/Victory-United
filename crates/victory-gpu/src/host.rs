@@ -7663,7 +7663,7 @@ impl HostList {
     }
 
     /// For tests: whether the list's read-back wants a *fresh* target for
-    /// `resource` — one whose ticket has not gone stale. A stale target is
+    /// `resource` whose ticket is still valid. A stale target is
     /// one the title's memory reuse invalidated, which the list must
     /// re-register on the next write of `resource`.
     #[cfg(test)]
