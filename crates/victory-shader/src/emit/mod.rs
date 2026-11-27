@@ -262,6 +262,21 @@ thread_local! {
     pub(super) static TEST_SHADER_OPT: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
 }
 
+/// Runs `f` with `shader_opt()` overridden to `passes` on the current thread
+/// (tests only; restores the previous override on unwind).
+#[cfg(test)]
+pub(crate) fn with_shader_opt<R>(passes: u32, f: impl FnOnce() -> R) -> R {
+    struct Reset(Option<u32>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            TEST_SHADER_OPT.set(self.0);
+        }
+    }
+    let prev = TEST_SHADER_OPT.replace(Some(passes));
+    let _guard = Reset(prev);
+    f()
+}
+
 /// On a host whose shaders run on the console's own kind of hardware (AMD
 /// RDNA, [`set_host_rdna`]): which of the console's float instructions are
 /// written as the one host operation the driver makes the same instruction
@@ -1621,6 +1636,7 @@ mod tests {
     fn the_clean_up_switch_parses_or_runs_every_pass() {
         let (all, usual) = (super::bitcode::opt::ALL, super::bitcode::opt::DEFAULT);
         assert_eq!(usual, 63, "the passes of the builds before the wide loads");
+        assert_eq!(all, 4095, "every pass including opt-in passes and WIDE");
         assert_eq!(parse_shader_opt(None), usual);
         assert_eq!(parse_shader_opt(Some("0")), 0);
         assert_eq!(parse_shader_opt(Some(" 1 ")), 1);
@@ -1630,6 +1646,10 @@ mod tests {
         assert_eq!(parse_shader_opt(Some("512")), super::bitcode::opt::LICM);
         assert_eq!(parse_shader_opt(Some("1024")), super::bitcode::opt::BARRIERS);
         assert_eq!(parse_shader_opt(Some("2048")), super::bitcode::opt::SPEC_LICM);
+        assert_eq!(
+            parse_shader_opt(Some("4031")),
+            all & !super::bitcode::opt::WIDE
+        );
         assert_eq!(parse_shader_opt(Some("4095")), all);
         assert_eq!(parse_shader_opt(Some("0xffffffff")), all);
         assert_eq!(parse_shader_opt(Some("on")), usual);
