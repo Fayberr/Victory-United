@@ -393,9 +393,9 @@ static FAULT_RIP: [AtomicU64; MAX_SLOTS] = [const { AtomicU64::new(0) }; MAX_SLO
 static NEXT_SLOT: AtomicUsize = AtomicUsize::new(0);
 /// The event the handler signals (a Win32 handle).
 static CRASH_EVENT: AtomicUsize = AtomicUsize::new(0);
-/// What each slot's worker is making, and whether it takes passes over the
-/// screen alone. Never locked by the handler.
-static ACTIVE_JOBS: Mutex<Vec<Option<(Arc<Pending>, bool)>>> = Mutex::new(Vec::new());
+/// What each guard slot's worker is making, and its index in `NOW_MAKING`.
+/// Never locked by the handler.
+static ACTIVE_JOBS: Mutex<Vec<Option<(Arc<Pending>, usize)>>> = Mutex::new(Vec::new());
 
 thread_local! {
     /// This worker's slot (`usize::MAX`: none).
@@ -410,13 +410,13 @@ struct Compile {
 }
 
 impl Compile {
-    fn begin(slot: usize, p: &Arc<Pending>, screens_only: bool) -> Compile {
+    fn begin(slot: usize, p: &Arc<Pending>, worker: usize) -> Compile {
         if slot < MAX_SLOTS && guard_on() {
             let mut jobs = ACTIVE_JOBS.lock().unwrap_or_else(|e| e.into_inner());
             if jobs.len() < MAX_SLOTS {
                 jobs.resize(MAX_SLOTS, None);
             }
-            jobs[slot] = Some((p.clone(), screens_only));
+            jobs[slot] = Some((p.clone(), worker));
             COMPILING.set(true);
         }
         Compile { slot }
@@ -528,7 +528,7 @@ fn lost(slot: usize) {
         let mut jobs = ACTIVE_JOBS.lock().unwrap_or_else(|e| e.into_inner());
         jobs.get_mut(slot).and_then(Option::take)
     };
-    let Some((p, screens_only)) = job else {
+    let Some((p, worker)) = job else {
         return;
     };
     tracing::error!(
@@ -560,8 +560,7 @@ fn lost(slot: usize) {
     if WAITING.fetch_sub(1, Ordering::Relaxed) == 1 {
         drained();
     }
-    let i = if screens_only { WORKERS.load(Ordering::Relaxed) } else { 0 };
-    if !spawn_worker(i) {
+    if !spawn_worker(worker) {
         tracing::warn!("no worker to take the place of the one the compiler crashed under");
     }
 }
@@ -1271,7 +1270,7 @@ fn spawn_worker(i: usize) -> bool {
                 {
                     // (If the compiler crashes in here this thread never
                     // returns: `lost` does what follows for it.)
-                    let _compile = Compile::begin(slot, &p, screens_only);
+                    let _compile = Compile::begin(slot, &p, i);
                     p.make();
                 }
                 *NOW_MAKING[i.min(NOW_MAKING.len() - 1)].lock().unwrap_or_else(|e| e.into_inner()) = None;
