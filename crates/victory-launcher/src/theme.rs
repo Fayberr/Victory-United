@@ -104,6 +104,10 @@ pub fn card(ui: &egui::Ui) -> egui::Frame {
         .inner_margin(Margin::same(16))
 }
 
+pub fn mark(ui: &mut egui::Ui, logo: &egui::TextureHandle, size: f32) {
+    ui.image((logo.id(), egui::Vec2::splat(size)));
+}
+
 pub fn bar(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::new().fill(ctx.style().visuals.window_fill).inner_margin(Margin::symmetric(18, 10))
 }

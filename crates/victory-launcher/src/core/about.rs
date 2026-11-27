@@ -1,5 +1,5 @@
 use super::{
-    widgets::{kv, open_folder, open_url, page_title},
+    widgets::{kv, open_folder, open_url},
     CoreState,
 };
 use crate::{app::Shared, i18n::tr, paths, theme};
@@ -7,8 +7,13 @@ use eframe::egui;
 
 const REPO: &str = "https://github.com/Fayberr/Victory-United";
 
-pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
-    page_title(ui, tr("about.title"), tr("about.sub"));
+pub fn show(core: &mut CoreState, _shared: &Shared, logo: &egui::TextureHandle, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        theme::mark(ui, logo, 32.0);
+        ui.label(theme::strong(tr("about.title")).size(24.0));
+    });
+    ui.label(theme::dim(tr("about.sub")));
+    ui.add_space(12.0);
     ui.set_max_width(820.0);
     theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());

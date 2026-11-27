@@ -59,6 +59,7 @@ pub struct App {
     pub ops: ops::OpsState,
     pub shared: Shared,
     capture: Option<Capture>,
+    logo: egui::TextureHandle,
 }
 
 /// Command line switches: `--ui-demo` and `--capture <dir>` (the latter implies the former).
@@ -89,7 +90,7 @@ impl Args {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, args: Args) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, args: Args, icon: &egui::IconData) -> Self {
         let ctx = cc.egui_ctx.clone();
         let (core, ops, shared) = if args.demo {
             (core::CoreState::demo(), ops::OpsState::demo(), core::demo_shared())
@@ -98,14 +99,24 @@ impl App {
         };
         theme::set_appearance(&cc.egui_ctx, &core.settings.appearance);
         let capture = args.capture.map(Capture::new);
-        Self { tab: Tab::Play, core, ops, shared, capture }
+        let logo = cc.egui_ctx.load_texture(
+            "victory-logo",
+            egui::ColorImage::from_rgba_unmultiplied([icon.width as usize, icon.height as usize], &icon.rgba),
+            egui::TextureOptions::LINEAR,
+        );
+        Self { tab: Tab::Play, core, ops, shared, capture, logo }
     }
 
     fn header(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("header").frame(theme::bar(ctx).inner_margin(egui::Margin::symmetric(18, 12))).show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(theme::strong(tr("app.name")).size(18.0));
-                ui.add_space(24.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.spacing_mut().button_padding.x = 8.0;
+                ui.horizontal(|ui| {
+                    theme::mark(ui, &self.logo, 24.0);
+                    ui.label(theme::strong(tr("app.name")).size(18.0));
+                });
+                ui.add_space(8.0);
                 for (n, tab) in Tab::ALL.into_iter().enumerate() {
                     if n == 2 {
                         // Players use the first two; everything after is one click further for developers.
@@ -159,7 +170,7 @@ impl eframe::App for App {
         self.core.tick(ctx, &mut self.shared);
         self.ops.tick(ctx, &self.shared, self.tab == Tab::Monitor);
         if self.core.screen() == core::Screen::FirstRun {
-            egui::CentralPanel::default().show(ctx, |ui| core::firstrun::show(&mut self.core, &self.shared, ui));
+            egui::CentralPanel::default().show(ctx, |ui| core::firstrun::show(&mut self.core, &self.shared, &self.logo, ui));
             return;
         }
         self.header(ctx);
@@ -170,7 +181,7 @@ impl eframe::App for App {
                 Tab::Settings => core::settings::show(&mut self.core, &self.shared, ui),
                 Tab::Flags => core::flags::show(&mut self.core, &self.shared, ui),
                 Tab::Report => core::report::show(&mut self.core, &self.shared, ui),
-                Tab::About => core::about::show(&mut self.core, &self.shared, ui),
+                Tab::About => core::about::show(&mut self.core, &self.shared, &self.logo, ui),
                 Tab::Monitor => ops::monitor::show(&mut self.ops, &self.shared, ui),
                 Tab::Updates => ops::updates::show(&mut self.ops, &self.shared, ui),
                 Tab::Dev => ops::dev::show(&mut self.ops, &self.shared, ui),
