@@ -27,6 +27,18 @@ pub fn open_folder(path: &Path) {
     }
 }
 
+/// Opens a web address in the default browser.
+pub fn open_url(url: &str) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("explorer.exe").arg(url).spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}
+
 pub fn pick_folder() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -72,12 +84,6 @@ pub fn page_title(ui: &mut egui::Ui, title: &str, sub: &str) {
     ui.add_space(14.0);
 }
 
-pub fn section(ui: &mut egui::Ui, title: &str) {
-    ui.add_space(6.0);
-    ui.label(theme::strong(title).size(15.5));
-    ui.add_space(2.0);
-}
-
 /// Label on the left in dim text, value on the right.
 pub fn kv(ui: &mut egui::Ui, key: &str, value: &str) {
     ui.horizontal(|ui| {
@@ -89,7 +95,7 @@ pub fn kv(ui: &mut egui::Ui, key: &str, value: &str) {
 /// A calm notice box with muted warning or error text.
 pub fn notice(ui: &mut egui::Ui, text: &str, error: bool) {
     egui::Frame::new()
-        .stroke(egui::Stroke::new(1.0, theme::LINE_STRONG))
+        .stroke(egui::Stroke::new(1.0_f32, theme::LINE_STRONG))
         .corner_radius(egui::CornerRadius::same(6))
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {

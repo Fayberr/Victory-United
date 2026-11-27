@@ -57,6 +57,7 @@ pub struct CoreState {
     /// Settings tab, Flags tab and bug report keep their own widgets state here.
     pub ui: widgets::UiState,
     shown_demo: Option<Screen>,
+    demo_game: Option<game::Game>,
     pub last_env: Vec<(String, String)>,
     pub last_engine: Option<PathBuf>,
 }
@@ -96,6 +97,7 @@ impl CoreState {
             notice: None,
             ui: Default::default(),
             shown_demo: None,
+            demo_game: None,
             last_env: Vec::new(),
             last_engine: None,
         }
@@ -117,6 +119,7 @@ impl CoreState {
         let mut s = Self::blank(ctx, settings, Some(game.clone()), profile, profiles, extra);
         s.persist = false;
         s.hw = Some(hw::Hardware::demo());
+        s.demo_game = Some(game.clone());
         s.detected = vec![game];
         s.ui.demo = true;
         s
@@ -195,6 +198,8 @@ impl CoreState {
             return;
         }
         self.shown_demo = Some(want);
+        // The first-run screenshot shows the walk-through before anything is chosen.
+        self.game = if want == Screen::FirstRun { None } else { self.demo_game.clone() };
         let log: PathBuf = "logs/run-20260101-120000.log".into();
         self.runner.state = match want {
             Screen::WarmUp => RunState::Warming { done: 38_000_000, total: 120_000_000, since: Instant::now() - Duration::from_secs(95) },
@@ -205,7 +210,7 @@ impl CoreState {
 
     pub fn engine_exe(&self) -> Option<PathBuf> {
         if self.ui.demo {
-            return Some("engine/a1b2c3d4-release/victory.exe".into());
+            return (self.force_screen != Some(Screen::FirstRun)).then(|| "engine/a1b2c3d4-release/victory.exe".into());
         }
         self.settings.engine_override.clone().filter(|p| p.is_file()).or_else(paths::active_engine_exe)
     }

@@ -116,7 +116,7 @@ impl App {
                     let text = if on { theme::strong(tab.label()) } else { egui::RichText::new(tab.label()) };
                     let mut b = egui::Button::new(text).min_size(egui::vec2(0.0, 30.0));
                     b = if on {
-                        b.fill(theme::ACTIVE).stroke(egui::Stroke::new(1.0, theme::LINE_STRONG))
+                        b.fill(theme::ACTIVE).stroke(egui::Stroke::new(1.0_f32, theme::LINE_STRONG))
                     } else {
                         b.fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE)
                     };
