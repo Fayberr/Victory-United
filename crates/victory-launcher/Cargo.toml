@@ -1,0 +1,25 @@
+[package]
+name = "victory-launcher"
+description = "Launcher for Victory United: settings, presets, flags, monitor, updates, bug report"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "victory-launcher"
+path = "src/main.rs"
+
+[dependencies]
+victory-stats = { path = "../victory-stats" }
+victory-update = { path = "../victory-update" }
+serde.workspace = true
+toml.workspace = true
+anyhow.workspace = true
+serde_json = "1"
+eframe = { version = "0.33.3", default-features = false, features = ["glow", "default_fonts"] }
+egui_plot = "0.34.1"
+
+[lints]
+workspace = true
