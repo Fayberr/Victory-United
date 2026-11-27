@@ -1,10 +1,17 @@
 //! "Core" half of the launcher: play, settings, presets, flags, profiles, bug report. Owned by the core worker.
 pub mod about;
 pub mod firstrun;
+pub mod game;
+pub mod hw;
+pub mod launch;
 pub mod flags;
 pub mod play;
+pub mod presets;
 pub mod report;
 pub mod settings;
+pub mod store;
+#[cfg(test)]
+pub mod testutil;
 
 use crate::app::Shared;
 
