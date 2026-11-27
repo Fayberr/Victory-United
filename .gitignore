@@ -70,6 +70,19 @@
 *.7z
 *.rar
 
+# The optional DLSS Frame Generation add-on for Ampere/Turing (dlssg_for_sm86,
+# https://github.com/sdli1995/dlssg_for_sm86): NVIDIA's runtime, its kernel
+# images and the proxy are third-party binaries, taken from that project's
+# release and never committed (docs/dlss.md). The proxy itself is a *.dll,
+# already ignored. Its logs and captures land here too.
+/dlssg_sm86/
+/dlssg_sm86.ini
+/alternatives/
+/dlssg_sm86.log
+
+# Streamline's own logs (VICTORY_STREAMLINE_LOG)
+/sl-logs/
+
 # Editor / OS noise
 .vs/
 .idea/

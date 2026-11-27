@@ -14,12 +14,15 @@ from a folder you name; if anything is missing (the folder, a signature, a
 feature on this GPU, the device hand-over), the log says what, and the title's
 own upscaling and our plain present run as before.
 
+The optional add-on that brings frame generation to RTX 30 and 20 (step 3
+below) is a third-party binary release too; nothing of it is here.
+
 ## Setup
 
 1. Download NVIDIA's Streamline SDK release (NVIDIA RTX SDK license) from
    <https://github.com/NVIDIA-RTX/Streamline/releases> and unpack it outside the
    repository. Tested: `streamline-sdk-v2.14.16.zip`, unpacked to
-   `C:\dev\sdk\streamline-sdk-v2.14.16`. Its `bin\x64` folder holds what is
+   `C:\sdk\streamline-sdk-v2.14.16`. Its `bin\x64` folder holds what is
    loaded:
    - `sl.interposer.dll` (loaded by us; its Authenticode signature is checked),
    - `sl.common.dll`, `sl.dlss.dll`, `sl.dlss_g.dll`, `sl.reflex.dll`,
@@ -29,8 +32,41 @@ own upscaling and our plain present run as before.
    A newer `nvngx_dlss.dll` (the DLSS SDK, <https://github.com/NVIDIA/DLSS>,
    `lib\Windows_x86_64\rel`) can replace the one in that folder.
 2. `VICTORY_STREAMLINE_DIR=<that bin\x64 folder>`; the default is
-   `C:\dev\sdk\streamline-sdk-v2.14.16\bin\x64`.
-3. Check the PC without the title (a few seconds):
+   `C:\sdk\streamline-sdk-v2.14.16\bin\x64`.
+3. **Frame Generation on RTX 30 and 20** (optional; RTX 40 and later do not
+   need it). NVIDIA's DLSS-G runtime is for Ada and later, and Streamline's
+   `sl.dlss_g` drops itself on anything older inside `slInit`. The
+   `dlssg_for_sm86` add-on (sdli1995, MIT; its kernel images are NVIDIA's and
+   not covered by that license; **not** part of this repository) puts its own
+   copy of the 310.9.16 runtime with SM86/SM75 kernels in place, and answers
+   the architecture question with Ada on Ampere (Blackwell on Turing) so the
+   plugin loads. Get its release from
+   <https://github.com/sdli1995/dlssg_for_sm86/releases> and keep these three
+   together in a folder (**not** its `alternatives\` proxies):
+
+   ```
+   version.dll
+   dlssg_sm86.ini
+   dlssg_sm86\
+   ```
+
+   Foxhound loads `version.dll` by its full path itself, so the proxies in the
+   release's `alternatives\` folder are never needed. Then point
+   `VICTORY_DLSSG_SM86_DIR` at that folder, or put it where it is found
+   without one: the working directory, `victory.exe`'s folder, or the
+   repository root of a `target\release` build. Without the add-on, frame
+   generation is for RTX 40 and later only. Driver R580 or newer.
+
+   On a PC with more than one NVIDIA GPU, the add-on's CUDA context and its
+   architecture bridge follow **CUDA device 0**, which is not always the
+   adapter `D3D12CreateDevice(NULL)` picks: the bridge then lands on an
+   adapter the device is not on, and the NGX core refuses `CreateFeature`
+   (`0xbad00002`, no frame is generated; the add-on's issue #674, where the
+   reporter had to disable the second GPU). With the add-on loaded, foxhound
+   makes the host device on CUDA device 0's adapter: on one GPU nothing
+   changes. The log's `host D3D12 device ready` line names the adapter.
+
+4. Check the PC without the title (a few seconds):
    - `victory upscaler-check`: Streamline loads, and what this GPU supports.
    - `victory upscaler-check --device`: the host device is made and handed over
      to Streamline, DLSS's render sizes for the output are listed, and DLSS runs
@@ -48,7 +84,8 @@ own upscaling and our plain present run as before.
      swap chain (no "presentCommon() was not observed" may follow).
 
 Windows 10 2004 or later, a GeForce RTX GPU (frame generation: RTX 40 or
-later), hardware-accelerated GPU scheduling on (frame generation needs it).
+later; RTX 30 and 20 with the `dlssg_for_sm86` add-on below),
+hardware-accelerated GPU scheduling on (frame generation needs it).
 
 ## Switches
 
@@ -58,7 +95,8 @@ later), hardware-accelerated GPU scheduling on (frame generation needs it).
 | `VICTORY_FRAMEGEN` | `1` | off | DLSS Frame Generation on our present; needs `VICTORY_THIN=1` or `VICTORY_ASYNC_SUBMIT=1` (the line of submissions) |
 | `VICTORY_DLSS_MODE` | `dlaa`, `quality`, `balanced`, `performance`, `ultraperformance` | `quality` (`dlaa` with frame generation alone) | the scene's size: 1, 2/3, 0.58, 1/2, 1/3 of the output; the DLSS mode follows the sizes the title then passes |
 | `VICTORY_DLSS_PRESET` | `default`, `j`, `k`, `l`, `m` (`e`, `f` deprecated) | `default` | the DLSS model, for every mode |
-| `VICTORY_STREAMLINE_DIR` | a folder | see above | where `sl.interposer.dll` and the rest are |
+| `VICTORY_STREAMLINE_DIR` | a folder | `C:\sdk\streamline-sdk-v2.14.16\bin\x64` | where `sl.interposer.dll` and the rest are |
+| `VICTORY_DLSSG_SM86_DIR` | a folder | found (see above) | the `dlssg_for_sm86` add-on: frame generation on RTX 30 and 20; absent, RTX 40 and later |
 | `VICTORY_STREAMLINE_LOG` | a folder | none | Streamline's own log files there, verbose |
 | `VICTORY_DLSS_JITTER` | `x,y` | `1,1` | multipliers for the jitter DLSS is given (`-1,1` flips x) |
 | `VICTORY_DLSS_MV` | `x,y` | `1,1` | multipliers for the motion-vector scale |
@@ -153,6 +191,17 @@ element drawn there before the composite would be in the copy, one drawn after
 it is warped as before. The interface target is not tagged as the interface's
 colour and alpha: its size is not the back buffer's at a 1440p output.
 
+**The GPU.** The add-on's CUDA context is made on CUDA device 0, and its
+architecture bridge and its kernels follow that card. `D3D12CreateDevice(NULL)`
+can pick another one on a multi-GPU PC (measured on two RTX 3090s: the
+default was the second card, CUDA device 0 the first), and then its bridge
+is applied to an adapter the device is not on, the NGX core's platform
+verdict refuses `CreateFeature` with `0xbad00002` and every present reports
+one frame. With the add-on in use, `crate::adapter` records CUDA device 0's
+LUID before the device is made, and `crate::host` makes the device on that
+adapter. On one GPU it is the default adapter and nothing changes; the
+adapter's LUID and name are in the `host D3D12 device ready` log line.
+
 **The camera's planes.** The title names the far plane first (near 10000, far
 0.15, inverted depth), which FidelityFX takes in either order. Frame
 generation's constants get them in order (near 0.15, far 10000), and the
@@ -171,6 +220,12 @@ output its upscaler is not made (an error in the log says so) and the title
 fails at its first upscaling. Use both switches there.
 
 ## Log lines
+
+With the add-on: `DLSS Frame Generation: the add-on for Ampere and Turing
+(dlssg_for_sm86) is loaded, ahead of Streamline` (or why it was not), and
+`DLSS Frame Generation: the add-on's GPU is CUDA device 0; the host device is
+made on it`. Its own log is `dlssg_sm86\logs\dlssg_sm86.log` in the add-on's
+folder (`[Logging] Level=2` there for the install and capability records).
 
 At start: `Streamline: DLSS Super Resolution is supported on this GPU`
 (requirements), `Streamline loaded (manual hooking, no downloads)`, the `display`

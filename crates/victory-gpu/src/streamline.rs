@@ -18,6 +18,9 @@
 //!   of submissions (`VICTORY_THIN=1` or `VICTORY_ASYNC_SUBMIT=1`).
 //! - `VICTORY_STREAMLINE_DIR`: the folder of `sl.interposer.dll`, its plugins
 //!   and NGX's DLLs (default [`DEFAULT_DIR`]).
+//! - `VICTORY_DLSSG_SM86_DIR`: the folder of the `dlssg_for_sm86` add-on, which
+//!   makes frame generation run on Ampere and Turing ([`sm86`]); without it,
+//!   frame generation is for RTX 40 and later.
 //!
 //! Anything missing (the folder, a signature, a feature on this GPU, the
 //! device hand-over) leaves the title's own upscaling and our plain present
@@ -32,6 +35,7 @@
 
 pub(crate) mod abi;
 pub mod plan;
+pub(crate) mod sm86;
 
 pub use plan::Mode;
 
@@ -47,7 +51,7 @@ use windows::core::Interface;
 use crate::object::Object;
 
 /// Where `sl.interposer.dll` is looked for without `VICTORY_STREAMLINE_DIR`.
-pub const DEFAULT_DIR: &str = r"C:\dev\sdk\streamline-sdk-v2.14.16\bin\x64";
+pub const DEFAULT_DIR: &str = r"C:\sdk\streamline-sdk-v2.14.16\bin\x64";
 const INTERPOSER: &str = "sl.interposer.dll";
 /// The project id NGX is given (engine "custom", no NVIDIA application id).
 const PROJECT_ID: &CStr = c"6f0d7b2e-3a41-4c1e-9b57-2d8e4f1a9c30";
@@ -79,6 +83,10 @@ pub struct Asked {
     /// our swap chain is Streamline's proxy of it, so that Streamline sees
     /// the presents (its bookkeeping per frame).
     pub present_hook: bool,
+    /// `VICTORY_DLSSG_SM86_DIR`: the folder of the frame generation add-on
+    /// for Ampere and Turing; found beside the executable, in the working
+    /// directory or a build's repository root otherwise.
+    pub sm86: Option<PathBuf>,
 }
 
 impl Asked {
@@ -112,6 +120,9 @@ impl Asked {
             log_dir: var("VICTORY_STREAMLINE_LOG").filter(|v| !v.trim().is_empty() && v.trim() != "0").map(PathBuf::from),
             hudless: var("VICTORY_FRAMEGEN_HUDLESS").is_none_or(|v| v.trim() != "0"),
             present_hook: on("VICTORY_STREAMLINE_PRESENT"),
+            sm86: var("VICTORY_DLSSG_SM86_DIR")
+                .filter(|v| !v.trim().is_empty())
+                .map(PathBuf::from),
         })
     }
 
@@ -218,6 +229,43 @@ struct Plan {
 
 static PLAN: OnceLock<Plan> = OnceLock::new();
 
+/// The frame generation add-on for Ampere and Turing, once looked for: the
+/// folder its proxy loaded from (`None`: not found, or not loadable).
+static ADDON: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// Loads [`sm86`]'s proxy, before Streamline: `sl.dlss_g` decides inside
+/// `slInit` whether this GPU gets frame generation, and must already hear
+/// Ada (Ampere) or Blackwell (Turing) by then. Only looked for when frame
+/// generation is asked for.
+fn load_addon(asked: &Asked) {
+    ADDON.get_or_init(|| {
+        let Some(dir) = sm86::find(asked.sm86.as_deref()) else {
+            tracing::debug!(
+                "DLSS Frame Generation: no {} and {} beside the executable or in the working directory, and no VICTORY_DLSSG_SM86_DIR: frame generation stays as Streamline allows on this GPU",
+                sm86::PROXY,
+                sm86::INI
+            );
+            return None;
+        };
+        match sm86::load(&dir) {
+            Ok(proxy) => {
+                tracing::info!(
+                    proxy = %proxy.display(),
+                    "DLSS Frame Generation: the add-on for Ampere and Turing (dlssg_for_sm86) is loaded, ahead of Streamline"
+                );
+                Some(dir)
+            }
+            Err(why) => {
+                tracing::warn!(
+                    folder = %dir.display(),
+                    "DLSS Frame Generation: the add-on for Ampere and Turing (dlssg_for_sm86) was not loaded: {why}; frame generation stays as Streamline allows on this GPU"
+                );
+                None
+            }
+        }
+    });
+}
+
 /// The per-feature functions, once the device is set.
 #[derive(Default)]
 struct Functions {
@@ -320,11 +368,6 @@ fn load_and_init(asked: &Asked, require_line: bool) -> Result<Available, String>
         return Err(format!("no {INTERPOSER} in that folder (VICTORY_STREAMLINE_DIR)"));
     }
     verify_signature(&path)?;
-    let sl = load(&path)?;
-    let sl = SL.get_or_init(|| sl);
-    let dir_wide: Vec<u16> = wide(&asked.dir);
-    let paths = [dir_wide.as_ptr()];
-    let log_wide = asked.log_dir.as_deref().map(wide);
     // Frame generation presents from the line's thread, in order with the
     // submissions: without the line it is not loaded at all.
     let framegen_asked = asked.framegen && (!require_line || line_asked());
@@ -333,6 +376,33 @@ fn load_and_init(asked: &Asked, require_line: bool) -> Result<Available, String>
             "DLSS Frame Generation needs the line of submissions (VICTORY_THIN=1 or VICTORY_ASYNC_SUBMIT=1): frame generation stays off"
         );
     }
+    // Before `slInit` and before `sl.interposer.dll`: on Ampere and Turing
+    // the add-on has to answer the architecture question `sl.dlss_g` asks
+    // there, or the plugin is dropped and frame generation with it.
+    if framegen_asked {
+        load_addon(asked);
+        // The add-on makes its CUDA context on CUDA device 0 and follows that
+        // card for its architecture bridge and its kernels; the default
+        // D3D12 adapter can be another one on a PC with two NVIDIA GPUs.
+        // Then the bridge lands on an adapter the device is not on, the NGX
+        // core's platform verdict refuses `CreateFeature` (`0xbad00002`) and
+        // no frame is generated (the add-on's issue #674). Make the host
+        // device on the card the add-on uses.
+        if ADDON.get().is_some_and(Option::is_some)
+            && let Some(luid) = sm86::cuda_first_luid()
+        {
+            crate::adapter::prefer(crate::adapter::luid(luid));
+            tracing::info!(
+                gpu = format!("{luid:#x}"),
+                "DLSS Frame Generation: the add-on's GPU is CUDA device 0; the host device is made on it"
+            );
+        }
+    }
+    let sl = load(&path)?;
+    let sl = SL.get_or_init(|| sl);
+    let dir_wide: Vec<u16> = wide(&asked.dir);
+    let paths = [dir_wide.as_ptr()];
+    let log_wide = asked.log_dir.as_deref().map(wide);
     let mut features = Vec::new();
     if asked.dlss {
         features.push(abi::FEATURE_DLSS);
@@ -387,6 +457,11 @@ fn load_and_init(asked: &Asked, require_line: bool) -> Result<Available, String>
     let framegen = framegen_asked
         && report("DLSS Frame Generation", abi::FEATURE_DLSS_G, supported(abi::FEATURE_DLSS_G), sl)
         && report("Reflex", abi::FEATURE_REFLEX, supported(abi::FEATURE_REFLEX), sl);
+    if framegen_asked && !framegen && ADDON.get().is_some_and(Option::is_none) {
+        tracing::info!(
+            "DLSS Frame Generation: RTX 40 and later have it without help; on RTX 30 or 20 the dlssg_for_sm86 add-on is needed (VICTORY_DLSSG_SM86_DIR, docs/dlss.md)"
+        );
+    }
     tracing::info!(
         library = %path.display(),
         sdk = "2.14.16",
@@ -469,8 +544,11 @@ fn wide(path: &Path) -> Vec<u16> {
 fn default_adapter() -> Option<(String, windows::Win32::Foundation::LUID)> {
     // SAFETY: plain DXGI queries.
     unsafe {
-        let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
-        let adapter = factory.EnumAdapters1(0).ok()?;
+        let factory: IDXGIFactory4 = CreateDXGIFactory1().ok()?;
+        let adapter = match crate::adapter::wanted().and_then(|luid| factory.EnumAdapterByLuid::<IDXGIAdapter1>(luid).ok()) {
+            Some(adapter) => adapter,
+            None => factory.cast::<IDXGIFactory1>().ok()?.EnumAdapters1(0).ok()?,
+        };
         let desc = adapter.GetDesc1().ok()?;
         let len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
         Some((String::from_utf16_lossy(&desc.Description[..len]), desc.AdapterLuid))
@@ -1652,6 +1730,17 @@ fn check_run(output: [u32; 2], device: bool, present: bool) -> Vec<String> {
             "not asked for (VICTORY_STREAMLINE_PRESENT=1)"
         }
     ));
+    match ADDON.get().and_then(|addon| addon.as_ref()) {
+        Some(dir) => lines.push(format!(
+            "DLSS Frame Generation: the add-on for Ampere and Turing (dlssg_for_sm86) loaded from {}",
+            dir.display()
+        )),
+        None if asked.framegen => lines.push(
+            "DLSS Frame Generation: no dlssg_for_sm86 add-on (RTX 40 and later need none; on RTX 30 or 20 set VICTORY_DLSSG_SM86_DIR, docs/dlss.md)"
+                .into(),
+        ),
+        None => {}
+    }
     if !device {
         return lines;
     }

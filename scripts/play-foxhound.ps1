@@ -19,7 +19,8 @@ param(
     [ValidateSet('1440', '1080to1440', '4k')][string]$Res = '1440',
     # DLSS Super Resolution in place of the title's upscaling; needs NVIDIA Streamline (README).
     [ValidateSet('off', 'dlaa', 'quality', 'balanced', 'performance')][string]$Dlss = 'quality',
-    # DLSS Frame Generation (RTX 40 or later, hardware-accelerated GPU scheduling on); needs DLSS.
+    # DLSS Frame Generation (RTX 40 or later; on RTX 30 / 20 the dlssg_for_sm86 add-on, see the README,
+    # with hardware-accelerated GPU scheduling on); needs DLSS.
     [switch]$FrameGen,
     # Frames begin every 1/Fps s whatever the title asks (it asks 1/30); the frame time is the layer's limit.
     [ValidateRange(1, 1000)][int]$Fps = 0,
@@ -58,7 +59,7 @@ if (-not $SeriesS) {
     elseif ($Res -eq '1080to1440') { $settings.VICTORY_RENDER_1080P = '1' }
 }
 if ($Dlss -ne 'off') {
-    $sl = if ($env:VICTORY_STREAMLINE_DIR) { $env:VICTORY_STREAMLINE_DIR } else { 'C:\dev\sdk\streamline-sdk-v2.14.16\bin\x64' }
+    $sl = if ($env:VICTORY_STREAMLINE_DIR) { $env:VICTORY_STREAMLINE_DIR } else { 'C:\sdk\streamline-sdk-v2.14.16\bin\x64' }
     if (Test-Path (Join-Path $sl 'sl.interposer.dll')) {
         $settings.VICTORY_DLSS = '1'; $settings.VICTORY_DLSS_MODE = $Dlss; $settings.VICTORY_STREAMLINE_DIR = $sl
         if ($FrameGen) { $settings.VICTORY_FRAMEGEN = '1' }
@@ -74,7 +75,8 @@ $victory = Join-Path $repo "target\$Build\victory.exe"
 if (-not (Test-Path $victory)) { Write-Host "No $victory. Build it first (README)."; return }
 if (-not (Test-Path -LiteralPath $Exe)) { Write-Host "No $Exe."; return }
 # Switches left over in this window are cleared; path settings stay (victory.toml gives them otherwise).
-$paths = 'VICTORY_CONFIG', 'VICTORY_GAME_DIR', 'VICTORY_CACHE_DIR', 'VICTORY_DATA_DIR', 'VICTORY_STREAMLINE_DIR'
+$paths = 'VICTORY_CONFIG', 'VICTORY_GAME_DIR', 'VICTORY_CACHE_DIR', 'VICTORY_DATA_DIR', 'VICTORY_STREAMLINE_DIR',
+    'VICTORY_DLSSG_SM86_DIR'
 Get-ChildItem Env:VICTORY_* -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin $paths } | ForEach-Object { Remove-Item "Env:$($_.Name)" }
 foreach ($k in $settings.Keys) { Set-Item "Env:$k" $settings[$k] }
 

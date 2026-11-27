@@ -911,7 +911,35 @@ fn create() -> windows::core::Result<Host> {
             D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device)?;
             tracing::info!("host device on the software adapter (WARP)");
         } else {
-            D3D12CreateDevice(None, D3D_FEATURE_LEVEL_12_0, &mut device)?;
+            // The GPU the frame generation add-on picks (`crate::adapter`):
+            // its CUDA context is there, not necessarily on the default
+            // adapter. Any other case (no add-on, or that LUID is not a
+            // DXGI adapter) is the default adapter, as before.
+            let adapter = crate::adapter::wanted().and_then(|luid| {
+                let made = CreateDXGIFactory2::<IDXGIFactory4>(DXGI_CREATE_FACTORY_FLAGS(0))
+                    .and_then(|factory| factory.EnumAdapterByLuid::<IDXGIAdapter4>(luid));
+                match made {
+                    Ok(adapter) => Some(adapter),
+                    Err(e) => {
+                        tracing::warn!(
+                            gpu = format!("{:#x}", crate::adapter::key(luid)),
+                            "the GPU the frame generation add-on uses is not a DXGI adapter ({e}); the default adapter is used"
+                        );
+                        None
+                    }
+                }
+            });
+            if let Some(adapter) = adapter
+                && let Err(e) = D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device)
+            {
+                // (A GPU that cannot make a D3D12 device is no use to the
+                // title: the default one is tried as before.)
+                tracing::warn!("the frame generation add-on's GPU cannot make a D3D12 device ({e}); the default adapter is used");
+                device = None;
+            }
+            if device.is_none() {
+                D3D12CreateDevice(None, D3D_FEATURE_LEVEL_12_0, &mut device)?;
+            }
             // Whether a GPU hang ends the run or freezes the PC (#1054).
             crate::tdr::log();
         }
@@ -983,7 +1011,15 @@ fn create() -> windows::core::Result<Host> {
         let adapter = CreateDXGIFactory2::<IDXGIFactory4>(DXGI_CREATE_FACTORY_FLAGS(0))
             .and_then(|factory| factory.EnumAdapterByLuid::<IDXGIAdapter3>(device.GetAdapterLuid()))
             .ok();
-        tracing::info!("host D3D12 device ready");
+        let luid = device.GetAdapterLuid();
+        tracing::info!(
+            adapter_luid = format!("{:#x}", crate::adapter::key(luid)),
+            adapter = adapter.as_ref().and_then(|a| a.GetDesc1().ok()).map_or_else(
+                || "?".to_owned(),
+                |d| String::from_utf16_lossy(&d.Description[..d.Description.iter().position(|&c| c == 0).unwrap_or(0)])
+            ),
+            "host D3D12 device ready"
+        );
         Ok(Host {
             device,
             queue,

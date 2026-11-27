@@ -12,7 +12,8 @@ stalls at scene cuts.
 ## Where it stands
 
 Tested on one PC: Windows 11, Ryzen 7 7800X3D, 32 GB RAM, **RTX 4070 SUPER 12 GB**, NVMe SSD; the Xbox Series
-build **v1.0.2.1** of the title, Series X profile, 2560x1440 output, DLSS Quality. Frame times are the layer's
+build **v1.0.2.1** of the title, Series X profile, 2560x1440 output, DLSS Quality — and frame generation on an
+**RTX 3090** with the Ampere add-on below (2x presented). Frame times are the layer's
 own count, in the opening scenes unless noted.
 
 | | Frame time |
@@ -40,8 +41,8 @@ What is known to be wrong:
 
 - Windows 10 or 11 (x64), a CPU with AVX2, 32 GB of RAM or more, an SSD.
 - An NVIDIA GeForce RTX GPU with a recent driver for DLSS (RTX 40 or later for Frame Generation, with
-  hardware-accelerated GPU scheduling on). Any Direct3D 12 GPU with shader model 6.6 and mesh shaders runs the
-  layer without DLSS.
+  hardware-accelerated GPU scheduling on; **RTX 30 and 20 too**, with the small add-on in *Set up*). Any
+  Direct3D 12 GPU with shader model 6.6 and mesh shaders runs the layer without DLSS.
 - **Your own dump** of the title's Xbox Series build v1.0.2.1 (the folder with `game_scarlett_master.exe`).
   Other builds may start, but the image patches (1440p output, FidelityFX path, frame rate) check every byte
   they change and leave a differing build alone.
@@ -83,6 +84,20 @@ The diagnostics build (frame timelines, captures, GPU timing) is optional:
    Check it without the title: `target\release\victory.exe upscaler-check --device` (and `--present` for Frame
    Generation). Details: [docs/dlss.md](docs/dlss.md). Without Streamline the launcher runs without DLSS.
 
+   **Frame Generation on RTX 30 and 20** (optional; RTX 40 and later need nothing): NVIDIA's DLSS-G is Ada-only,
+   so take `sdli1995/dlssg_for_sm86` (MIT; binaries only, **not** in this repository), unpack its release so that
+   `version.dll`, `dlssg_sm86.ini` and the `dlssg_sm86` folder sit together, and point foxhound at that folder:
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable('VICTORY_DLSSG_SM86_DIR', 'D:\sdk\dlssg_for_sm86-0.4.2', 'User')
+   ```
+
+   It needs driver R580 or newer. Without the variable the folder is searched for in the working directory and
+   beside `victory.exe` (the repository root works for a `target` release build; the files are git-ignored).
+   Foxhound loads the add-on before Streamline, and makes the D3D12 device on the GPU the add-on uses (CUDA
+   device 0) — on a PC with two NVIDIA GPUs the default adapter can be the other one, and frame generation then
+   never starts.
+
 3. **Translate the shaders ahead** (a few minutes, once per new build of foxhound):
 
    ```powershell
@@ -100,7 +115,7 @@ The diagnostics build (frame timelines, captures, GPU timing) is optional:
 |---|---|
 | *(none)* | Series X profile, 2560x1440, DLSS Quality (if Streamline is set up), all fixes on |
 | `-Dlss off` / `dlaa` / `balanced` / `performance` | the title's own upscaling, or another DLSS mode |
-| `-FrameGen` | DLSS Frame Generation (about +1.4 GB of VRAM) |
+| `-FrameGen` | DLSS Frame Generation (RTX 40 or later, or RTX 30 / 20 with the add-on; about +1.4 GB of VRAM) |
 | `-SeriesS` | the Series S profile: 1280x720 inside, faster, softer |
 | `-Res 1080to1440` / `4k` | scene at 1080p upscaled by the title / the stock 3840x2160 output |
 | `-Build diag` | the diagnostics build |
@@ -178,6 +193,8 @@ commit and its author.
   (with Spexivus, joroyt and tightfall), Joshua Odom, **Geckomacabre** and **cxy0072019-sketch**.
 - **[XCL](https://github.com/ivall/xcl)** (GPL-2.0-only) was read for how the same title behaves under another
   layer; no code of it is here.
+- **[sdli1995/dlssg_for_sm86](https://github.com/sdli1995/dlssg_for_sm86)** (MIT) makes DLSS Frame Generation
+  run on RTX 30 and 20; its release is loaded at run time from a folder you supply, and nothing of it is here.
 - NVIDIA Streamline, DLSS and Reflex are NVIDIA's; they are loaded at run time from a folder you supply.
 - Much of this fork's code was written with [Claude Code](https://claude.com/claude-code).
 
