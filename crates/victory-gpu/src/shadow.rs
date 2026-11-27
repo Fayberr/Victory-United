@@ -498,8 +498,8 @@ struct Card {
     has_sent: AtomicBool,
     /// The buffers' bytes (the title buffer's, rounded up to 64 KiB).
     size: u64,
-    /// This side used the room kept for a large buffer arriving later.
-    reserved: bool,
+    /// Bytes charged to the room kept for large buffers, returned when this side is released.
+    reserved_bytes: u64,
 }
 
 /// Whether the host copies of big title buffers are in the card's own
@@ -645,27 +645,22 @@ fn card_reserve(most: u64) -> u64 {
     if bytes >= 16 << 20 { bytes } else { 0 }
 }
 
-/// Choose ordinary or reserved room; both are inside the same total quota.
-fn card_budget_pick(size: u64, len: u64, used: u64, reserved: u64, most: u64) -> Option<bool> {
+/// How many of this copy's bytes need the room kept for large buffers.
+fn card_reserved_bytes(size: u64, len: u64, used: u64, reserved: u64, most: u64) -> Option<u64> {
     if size > most.saturating_sub(used) {
         return None;
     }
-    let reserve = card_reserve(most);
-    let ordinary = used.saturating_sub(reserved);
-    if size <= most.saturating_sub(reserve).saturating_sub(ordinary)
-        // A single large copy that fits the total must still be admitted.
-        || (ordinary == 0 && size > most.saturating_sub(reserve))
-    {
-        return Some(false);
-    }
-    (len >= 16 << 20 && size <= reserve.saturating_sub(reserved)).then_some(true)
+    let ordinary_used = used.saturating_sub(reserved);
+    let ordinary_free = (most - card_reserve(most)).saturating_sub(ordinary_used);
+    let needed = size.saturating_sub(ordinary_free);
+    (needed == 0 || len >= 16 << 20).then_some(needed)
 }
 
-fn card_release(size: u64, reserved: bool) {
+fn card_release(size: u64, reserved_bytes: u64) {
     let _admission = CARD_ADMISSION.lock().unwrap_or_else(|e| e.into_inner());
     CARD_BYTES[0].fetch_sub(size, Ordering::Relaxed);
-    if reserved {
-        CARD_RESERVED.fetch_sub(size, Ordering::Relaxed);
+    if reserved_bytes != 0 {
+        CARD_RESERVED.fetch_sub(reserved_bytes, Ordering::Relaxed);
     }
 }
 
@@ -807,7 +802,7 @@ pub(crate) fn card_hash_bytes(size: u64) -> u64 {
 /// copy, if the copy is to be there: [`cards`] is on, the size is within
 /// [`card_limits`] and below 1 GiB (the compare counts in 32 bits), and the
 /// host has what it takes (`Host::card_ready`).
-fn card_for(size: u64, len: u64) -> Option<(ID3D12Resource, bool)> {
+fn card_for(size: u64, len: u64) -> Option<(ID3D12Resource, u64)> {
     let there = card_room_for(size, len);
     if there.is_some() || !card_all() || size >= 1 << 30 {
         return there;
@@ -820,7 +815,7 @@ fn card_for(size: u64, len: u64) -> Option<(ID3D12Resource, bool)> {
     let (buffer, _) = host.shared_buffer(size)?;
     let _admission = CARD_ADMISSION.lock().unwrap_or_else(|e| e.into_inner());
     CARD_BYTES[0].fetch_add(size, Ordering::Relaxed);
-    Some((buffer, false))
+    Some((buffer, 0))
 }
 
 /// Whether every title buffer's copy has two sides, however small
@@ -845,7 +840,7 @@ fn card_size_eligible(size: u64, len: u64, least: u64) -> bool {
     len >= least && size < 1 << 30
 }
 
-fn card_room_for(size: u64, len: u64) -> Option<(ID3D12Resource, bool)> {
+fn card_room_for(size: u64, len: u64) -> Option<(ID3D12Resource, u64)> {
     if !cards() {
         return None;
     }
@@ -889,16 +884,16 @@ fn card_room_for(size: u64, len: u64) -> Option<(ID3D12Resource, bool)> {
         }
         return None;
     }
-    let reserved = {
+    let reserved_bytes = {
         let _admission = CARD_ADMISSION.lock().unwrap_or_else(|e| e.into_inner());
         let live = CARD_BYTES[0].load(Ordering::Relaxed);
         let kept = CARD_RESERVED.load(Ordering::Relaxed);
         let admission = if large_card_copies() {
-            card_budget_pick(size, len, live, kept, most)
+            card_reserved_bytes(size, len, live, kept, most)
         } else {
-            (size <= most.saturating_sub(live)).then_some(false)
+            (size <= most.saturating_sub(live)).then_some(0)
         };
-        let Some(reserved) = admission else {
+        let Some(reserved_bytes) = admission else {
             #[cfg(feature = "diagnostics")]
             if std::env::var_os("VICTORY_TRACE_BUFFER_PLACEMENT").is_some() {
                 tracing::info!(size, live, kept, most, "card copy refused by byte quota");
@@ -906,17 +901,17 @@ fn card_room_for(size: u64, len: u64) -> Option<(ID3D12Resource, bool)> {
             return None;
         };
         CARD_BYTES[0].fetch_add(size, Ordering::Relaxed);
-        if reserved {
-            CARD_RESERVED.fetch_add(size, Ordering::Relaxed);
+        if reserved_bytes != 0 {
+            CARD_RESERVED.fetch_add(reserved_bytes, Ordering::Relaxed);
         }
-        reserved
+        reserved_bytes
     };
     // Admission bookkeeping is released before calling the driver.
     let buffer = host.uav_buffer(size);
     if buffer.is_none() {
-        card_release(size, reserved);
+        card_release(size, reserved_bytes);
     }
-    buffer.map(|buffer| (buffer, reserved))
+    buffer.map(|buffer| (buffer, reserved_bytes))
 }
 
 /// The most bytes of windows outside buffers whose copies go to the card's
@@ -3559,7 +3554,7 @@ impl Drop for Shadow {
             if window {
                 WINDOW_CARD_BYTES.fetch_sub(card.size, Ordering::Relaxed);
             } else {
-                card_release(card.size, card.reserved);
+                card_release(card.size, card.reserved_bytes);
             }
             if card.before.get_mut().unwrap_or_else(|e| e.into_inner()).is_some() {
                 CARD_BYTES[1].fetch_sub(card_hash_bytes(card.size), Ordering::Relaxed);
@@ -5665,7 +5660,7 @@ impl Shadow {
                 sent: Mutex::default(),
                 has_sent: AtomicBool::new(false),
                 size: len.next_multiple_of(PIECE as u64),
-                reserved: false,
+                reserved_bytes: 0,
             });
         }
         let shadow = Arc::new(shadow);
@@ -5863,7 +5858,7 @@ mod land_tests {
             sent: Mutex::default(),
             has_sent: AtomicBool::new(false),
             size: len as u64,
-            reserved: false,
+            reserved_bytes: 0,
         });
         Some(shadow)
     }
@@ -6282,7 +6277,7 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
         // A big one, with `cards`: shaders get a buffer in the card's own
         // memory, and the one just made is the CPU's side.
         let (buffer, card) = match card_for(size, len) {
-            Some((on_card, reserved)) => {
+            Some((on_card, reserved_bytes)) => {
                 crate::host::name(&on_card, || format!("title buffer {:#x}+{len:#x} on the card", key.0));
                 tracing::info!(
                     start = format_args!("{:#x}", key.0),
@@ -6297,7 +6292,7 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
                     sent: Mutex::default(),
                     has_sent: AtomicBool::new(false),
                     size,
-                    reserved,
+                    reserved_bytes,
                 };
                 (on_card, Some(card))
             }
@@ -6530,7 +6525,7 @@ pub(crate) fn by_address(start: u64, len: u64) -> Option<Arc<Shadow>> {
         sent: Mutex::default(),
         has_sent: AtomicBool::new(false),
         size: len,
-        reserved: false,
+        reserved_bytes: 0,
     });
     let shadow = Arc::new(shadow);
     CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
@@ -6609,7 +6604,7 @@ fn build_loose_shadow(start: u64, len: u64, backing: LooseBacking) -> Arc<Shadow
                         sent: Mutex::default(),
                         has_sent: AtomicBool::new(false),
                         size: len,
-                        reserved: false,
+                        reserved_bytes: 0,
                     };
                     (on_card, Some(card))
                 }
@@ -6867,7 +6862,7 @@ fn exact_with_limits(
     let size = len.next_multiple_of(alignment);
     let (staging, data) = make(size)?;
     let (buffer, card) = match large_card_copies().then(|| card_for(size, len)).flatten() {
-        Some((buffer, reserved)) => (buffer, Some(Card {
+        Some((buffer, reserved_bytes)) => (buffer, Some(Card {
             staging,
             before: Mutex::default(),
             dirty: Mutex::default(),
@@ -6875,7 +6870,7 @@ fn exact_with_limits(
             has_dirty: AtomicBool::new(false),
             has_sent: AtomicBool::new(false),
             size,
-            reserved,
+            reserved_bytes,
         })),
         None => (staging, None),
     };
@@ -6959,16 +6954,34 @@ mod exact_card_tests {
         assert_eq!(card_reserve(512 * MB), 64 * MB);
         assert_eq!(card_reserve(2048 * MB), 64 * MB);
         assert_eq!(card_reserve(64 * MB), 0);
-        assert_eq!(card_budget_pick(448 * MB, 448 * MB, 0, 0, 512 * MB), Some(false));
-        assert_eq!(card_budget_pick(20 * MB, 20 * MB, 448 * MB, 0, 512 * MB), Some(true));
-        assert_eq!(card_budget_pick(MB, MB, 468 * MB, 20 * MB, 512 * MB), None);
-        assert_eq!(card_budget_pick(44 * MB, 44 * MB, 468 * MB, 20 * MB, 512 * MB), Some(true));
-        assert_eq!(card_budget_pick(16 * MB, 16 * MB, 512 * MB, 64 * MB, 512 * MB), None);
+        assert_eq!(card_reserved_bytes(448 * MB, 448 * MB, 0, 0, 512 * MB), Some(0));
+        assert_eq!(card_reserved_bytes(20 * MB, 20 * MB, 448 * MB, 0, 512 * MB), Some(20 * MB));
+        assert_eq!(card_reserved_bytes(MB, MB, 468 * MB, 20 * MB, 512 * MB), None);
+        assert_eq!(card_reserved_bytes(44 * MB, 44 * MB, 468 * MB, 20 * MB, 512 * MB), Some(44 * MB));
+        assert_eq!(card_reserved_bytes(16 * MB, 16 * MB, 512 * MB, 64 * MB, 512 * MB), None);
         // Dropping a reserved copy restores its room; ordinary room is still full.
-        assert_eq!(card_budget_pick(24 * MB, 24 * MB, 468 * MB, 20 * MB, 512 * MB), Some(true));
-        assert_eq!(card_budget_pick(500 * MB, 500 * MB, 0, 0, 512 * MB), Some(false));
-        assert_eq!(card_budget_pick(513 * MB, 513 * MB, 0, 0, 512 * MB), None);
-        assert_eq!(card_budget_pick(MB, MB, 0, 0, 0), None);
+        assert_eq!(card_reserved_bytes(24 * MB, 24 * MB, 468 * MB, 20 * MB, 512 * MB), Some(24 * MB));
+        assert_eq!(card_reserved_bytes(500 * MB, 500 * MB, 0, 0, 512 * MB), Some(52 * MB));
+        assert_eq!(card_reserved_bytes(513 * MB, 513 * MB, 0, 0, 512 * MB), None);
+        assert_eq!(card_reserved_bytes(MB, MB, 0, 0, 0), None);
+    }
+
+    #[test]
+    fn large_copy_can_charge_part_of_its_size_to_each_pool() {
+        const MB: u64 = 1 << 20;
+        // 12 MiB ordinary and 64 MiB reserved remain. A 72 MiB request fits
+        // without using the final 4 MiB reserved for large requests.
+        let charge = card_reserved_bytes(72 * MB, 72 * MB, 436 * MB, 0, 512 * MB).unwrap();
+        assert_eq!(charge, 60 * MB);
+        // The small size class cannot use the remaining reserve.
+        assert_eq!(card_reserved_bytes(4 * MB, 4 * MB, 508 * MB, charge, 512 * MB), None);
+        // A 20 MiB ordinary copy retires. The next 24 MiB copy takes those
+        // ordinary bytes and the remaining 4 MiB reserved.
+        let second = card_reserved_bytes(24 * MB, 24 * MB, 488 * MB, charge, 512 * MB).unwrap();
+        assert_eq!(second, 4 * MB);
+        // Retiring the first mixed copy leaves the second one's charge in use.
+        assert_eq!(card_reserved_bytes(64 * MB, 64 * MB, 440 * MB, second, 512 * MB), Some(52 * MB));
+        assert_eq!(card_reserved_bytes(77 * MB, 77 * MB, 436 * MB, 0, 512 * MB), None);
     }
 
     #[test]
