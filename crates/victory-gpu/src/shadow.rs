@@ -918,6 +918,11 @@ fn window_mapped_most() -> u64 {
 /// Bytes alive of windows in card memory the CPU maps.
 static WINDOW_MAPPED_BYTES: AtomicU64 = AtomicU64::new(0);
 
+/// Bytes of title buffers kept in card memory the CPU maps.
+pub(crate) fn in_place_bytes() -> u64 {
+    WINDOW_MAPPED_BYTES.load(Ordering::Relaxed)
+}
+
 /// A buffer for a window of `size` bytes in card memory the CPU maps, if it is
 /// to be there ([`window_mapped_most`]).
 fn window_mapped_for(size: u64) -> Option<(ID3D12Resource, *mut u8)> {

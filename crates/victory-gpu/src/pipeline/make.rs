@@ -386,7 +386,10 @@ fn ready_with<'a>(
         made = if dispatch && p.wait_for_head_map {
             // start has released the queue lock. The worker publishes both
             // failure and success through made and wakes all callers.
-            head_wait.wait(p)
+            let from = Instant::now();
+            let result = head_wait.wait(p);
+            crate::launcher_stats::PIPELINE_WAIT_US.fetch_add(from.elapsed().as_micros() as u64, Ordering::Relaxed);
+            result
         } else {
             wait_for_frame(p);
             p.made.get()
@@ -484,7 +487,9 @@ fn wait(p: &Pending, frame: u64) {
     let waiting = crate::timeline::span("pipeline: first use waits for a host pipeline");
     let started = Instant::now();
     let _ = wait_for_made(&p.made, started, left);
-    let waited = started.elapsed().min(left);
+    let elapsed = started.elapsed();
+    crate::launcher_stats::PIPELINE_WAIT_US.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+    let waited = elapsed.min(left);
     waiting.end();
     if screen && waited > Duration::from_millis(500) {
         tracing::info!(
