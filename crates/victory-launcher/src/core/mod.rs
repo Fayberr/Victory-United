@@ -197,7 +197,7 @@ impl CoreState {
 
     pub fn engine_exe(&self) -> Option<PathBuf> {
         if self.ui.demo {
-            return (self.force_screen != Some(Screen::FirstRun)).then(|| "engine/a1b2c3d4-release/victory.exe".into());
+            return Some("engine/a1b2c3d4-release/victory.exe".into());
         }
         self.own_engine().or_else(paths::active_engine_exe)
     }

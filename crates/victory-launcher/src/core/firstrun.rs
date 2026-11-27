@@ -7,7 +7,7 @@ use eframe::egui;
 
 pub fn show(core: &mut CoreState, _shared: &Shared, logo: &theme::Logo, ui: &mut egui::Ui) {
     egui::ScrollArea::vertical().show(ui, |ui| ui.vertical_centered(|ui| {
-        ui.add_space(12.0);
+        ui.add_space(28.0);
         theme::mark(ui, logo, 58.0);
         ui.add_space(10.0);
         ui.label(theme::strong(tr("firstrun.title")).size(28.0));

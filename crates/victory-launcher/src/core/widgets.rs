@@ -87,9 +87,10 @@ pub fn page_title(ui: &mut egui::Ui, title: &str, sub: &str) {
 
 /// Label on the left in dim text, value on the right.
 pub fn kv(ui: &mut egui::Ui, key: &str, value: &str) {
-    ui.horizontal(|ui| {
+    ui.horizontal_top(|ui| {
         ui.add_sized([96.0, 18.0], egui::Label::new(theme::dim(key)));
-        ui.label(value);
+        // Wraps inside the card instead of pushing it past the window edge (long graphics card names).
+        ui.add(egui::Label::new(value).wrap());
     });
 }
 
