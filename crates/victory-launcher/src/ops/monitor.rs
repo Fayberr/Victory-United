@@ -279,6 +279,7 @@ fn live(ui: &mut egui::Ui, s: &Summary) {
             .allow_scroll(false)
             .allow_boxed_zoom(false)
             .include_y(0.0)
+            .show_grid([false, true])
             .legend(egui_plot::Legend::default())
             .x_axis_label(tr("monitor.axis_frames"))
             .y_axis_label(tr("monitor.axis_ms"))
@@ -421,5 +422,34 @@ mod tests {
         assert!(!m.poll(None, Instant::now()));
         assert!(m.poll(Some(u32::MAX - 5), Instant::now()));
         assert!(m.summary.is_none());
+    }
+}
+
+#[cfg(test)]
+mod cost {
+    use super::*;
+
+    /// Cost of one once-a-second read: copy 512 frames out of the block, summarise, keep history.
+    #[test]
+    fn one_read_is_cheap() {
+        let mut w = victory_stats::Writer::in_memory(1, "t");
+        let mut m = MonitorState::default();
+        let mut t = 0u64;
+        let mut total = std::time::Duration::ZERO;
+        let rounds = 200;
+        for _ in 0..rounds {
+            for _ in 0..90 {
+                t += 11_000_000;
+                w.frame(t, 5000, 8000);
+            }
+            let started = std::time::Instant::now();
+            let mut snap = w.snapshot().unwrap();
+            snap.qpc_freq = 1_000_000_000;
+            m.ingest(snap);
+            total += started.elapsed();
+        }
+        let per = total / rounds;
+        eprintln!("one monitor read: {per:?}");
+        assert!(per < std::time::Duration::from_millis(5), "{per:?}");
     }
 }
