@@ -7,6 +7,15 @@
 A tree for running GTA VI (the Xbox Series build) on Windows, built from the best work of the
 VIctory forks.
 
+> [!IMPORTANT]
+> **We need testers on other machines.** Every number on this page comes from one PC (see the test
+> machine under [State](#state)). We do not know yet how this runs on other graphics cards, drivers,
+> CPUs, amounts of RAM or Windows versions, and that is the biggest gap right now. If you have a copy of
+> the game, please try it and open an issue with your graphics card and driver, CPU, RAM, Windows build,
+> what you ran, the frames per second you saw, and what went wrong if anything did. Working and failing
+> reports are both useful. A first report from a card we have not seen helps more than another run on a
+> card we have.
+
 [VIctory](https://github.com/Marvisak/VIctory) is a compatibility layer written in Rust that runs
 an Xbox Series game natively on Windows. A lot of people work on it at the same time, in the
 upstream repository and in forks, and many good fixes sit in branches and pull requests that never
@@ -44,6 +53,13 @@ stubs for exposure, ambient light and the shadow mask, playing through an open-w
 - **Earlier tree, played by hand:** on commit `3588725d` (before moving to Vice-Tay's code), a 34.7 minute
   session played by hand (33.6 minutes in the room after the intro, median 8.5 fps over 361 five-second reports)
   ended normally when the window was closed, with no crash, panic or device-removed errors.
+
+## Launcher
+
+A launcher is work in progress and not released yet. It will be one download: pick your game folder,
+press Play, with presets, a settings editor, a performance monitor and a bug report button, so you do
+not need the Rust toolchain or the scripts below. Until it is released, build and run as described in
+the next section.
 
 ## Build
 
