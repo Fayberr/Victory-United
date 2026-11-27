@@ -1321,21 +1321,31 @@ fn base_level(desc: &ResourceDesc, first: u32) -> u32 {
     base
 }
 
+#[cfg(windows)]
+thread_local! {
+    /// [`placed_bytes_from`]'s answers, by description without its filler
+    /// and first level. Never trimmed: bounded by the distinct descriptions
+    /// without filler a thread asks about (a title has a few thousand), times
+    /// the first levels its callers pass (`first_mip`: at most 16).
+    static PLACED_SIZES: std::cell::RefCell<std::collections::HashMap<([u32; 14], u32), Option<u64>>> =
+        std::cell::RefCell::default();
+}
+
 /// The bytes of title memory a placed texture with the resource description
 /// `desc` is read from for a view that starts at level `first`; `None` as
 /// [`placed_bytes`]. Remembered: asked for every slot that is looked at.
 #[cfg(windows)]
 pub(crate) fn placed_bytes_from(desc: &[u32; 14], first: u32) -> Option<u64> {
-    if first == 0 || !held_only() {
-        return placed_bytes(desc);
-    }
-    type Known = std::collections::HashMap<([u32; 14], u32), Option<u64>>;
-    thread_local! {
-        static KNOWN: std::cell::RefCell<Known> = std::cell::RefCell::default();
-    }
-    KNOWN.with(|known| {
+    // The size is a function of the description's fields alone, never of
+    // its filler words, so they are left out of the key.
+    let desc = &without_filler(desc);
+    let first = if held_only() { first } else { 0 };
+    PLACED_SIZES.with(|known| {
         *known.borrow_mut().entry((*desc, first)).or_insert_with(|| {
             let whole = placed_bytes(desc)?;
+            if first == 0 {
+                return Some(whole);
+            }
             // SAFETY: 56 bytes in the description's layout.
             let d = unsafe { desc.as_ptr().cast::<ResourceDesc>().read_unaligned() };
             let Some(t) = texture_layout(&d).filter(|t| t.planes.len() == 1) else {
@@ -3143,7 +3153,7 @@ const PLACED_RAW_CAP: usize = 1 << 14;
 /// Placed textures asked for a second time with other filler words in
 /// their description: each was a second resource and host copy before the
 /// filler was left out of the key ([`texture_at`]).
-#[cfg(windows)]
+#[cfg(all(windows, feature = "diagnostics"))]
 static PLACED_TWINS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// See [`PLACED_TWINS`].
@@ -3151,6 +3161,17 @@ static PLACED_TWINS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 #[cfg_attr(not(feature = "diagnostics"), allow(dead_code))]
 pub(crate) fn placed_filler_twins() -> u64 {
     PLACED_TWINS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `desc` with words 1 and 13, the filler of its layout, zeroed: what the
+/// title leaves there is not part of what a texture is ([`texture_at`]).
+/// The padding of [`ResourceDesc`] after `dimension` and after `flags`.
+#[cfg(windows)]
+pub(crate) fn without_filler(desc: &[u32; 14]) -> [u32; 14] {
+    let mut d = *desc;
+    d[1] = 0;
+    d[13] = 0;
+    d
 }
 
 /// Width, height and format of texture `this` (`None` for a buffer), for
@@ -3250,11 +3271,8 @@ pub(crate) fn texture_at(address: u64, desc: &[u32; 14]) -> Option<This> {
     let raw = *desc;
     let mut key = *desc;
     if !*KEPT.get_or_init(|| std::env::var_os("VICTORY_PLACED_FILLER").is_some_and(|v| v == "1")) {
-        key[1] = 0;
-        key[13] = 0;
+        key = without_filler(desc);
     }
-    let desc = &key;
-    let mut map = PLACED_TEXTURES.lock().unwrap_or_else(|e| e.into_inner());
     // How many resources the filler alone would have added (a count for
     // the log: `placed_filler_twins`).
     // Only a diagnostics build reads the count, so only it keeps the variants,
@@ -3268,16 +3286,15 @@ pub(crate) fn texture_at(address: u64, desc: &[u32; 14]) -> Option<This> {
         }
         if seen.insert((address, raw)) {
             let others = seen.range((address, [0; 14])..=(address, [u32::MAX; 14])).filter(|(_, r)| {
-                let mut blank = *r;
-                blank[1] = 0;
-                blank[13] = 0;
-                blank == key
+                without_filler(r) == key
             });
             if others.count() > 1 {
                 PLACED_TWINS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
     }
+    let desc = &key;
+    let mut map = PLACED_TEXTURES.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(&r) = map.get(&(address, *desc)) {
         return Some(r as This);
     }
@@ -5161,5 +5178,26 @@ float4 lit() : SV_Target { return 1.0; }
             tiled.is_some(),
             "reserved texture must not come from the non-reserved texture pool"
         );
+    }
+
+    /// The filler words of a placed texture's description change neither
+    /// its size nor what is remembered of it.
+    #[cfg(windows)]
+    #[test]
+    fn placed_sizes_leave_out_the_filler() {
+        let desc = [3u32, 0, 0, 0, 256, 0, 256, 0x9_0001, 98, 1, 0, 0x105, 0, 0];
+        let mut junk = desc;
+        junk[1] = 0xdead_beef;
+        junk[13] = 0x1234_5678;
+        assert_eq!(without_filler(&junk), desc);
+        assert_eq!(placed_bytes_from(&desc, 0), placed_bytes(&desc));
+        for first in [0, 2] {
+            assert_eq!(placed_bytes_from(&junk, first), placed_bytes_from(&desc, first));
+        }
+        let known = PLACED_SIZES.with(|k| k.borrow().len());
+        for first in [0, 2] {
+            assert!(placed_bytes_from(&junk, first).is_some());
+        }
+        assert_eq!(PLACED_SIZES.with(|k| k.borrow().len()), known);
     }
 }
