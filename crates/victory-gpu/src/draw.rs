@@ -1851,7 +1851,7 @@ impl State {
         }
         // Stages reading different lengths of the same native table share
         // its largest snapshot. Resource readiness remains stage-specific.
-        let extents = if p.stages.len() > 1 {
+        let extents = if p.stages.len() > 1 && share_table_snapshots() {
             self.table_extents(p.stages.iter().map(|stage| &stage.translated().tables), compute)
         } else {
             Few::default()
@@ -4145,24 +4145,30 @@ impl State {
                 }
                 let depth_before = TESTED_DEPTH.get();
                 TESTED_DEPTH.set((depth_before.0, false));
-                let title_first = heap.index(table).filter(|first| first + own_count <= host.count());
+                let title_first = extents
+                    .iter()
+                    .any(|(extent_slot, _)| *extent_slot == slot)
+                    .then(|| heap.index(table))
+                    .flatten()
+                    .filter(|first| first + own_count <= host.count());
                 if let Some(title) = title_first {
                     for k in (0..own_count).filter(|&k| own_count <= 64 || group.entry(k).is_some()) {
                         host.slot_tabled(title + k);
                     }
                 }
                 let read_view = |handle, kind, view: &View| {
-                    readable(list, kind, view);
-                    // Another stage may be the first reader of this texture
-                    // in the shared snapshot. Mirror its title slot just as
-                    // when this stage makes a snapshot of its own.
-                    if let Some(title) = title_first
-                        && crate::descriptor::host::is_texture_view(view)
-                    {
-                        let k = ((handle - table) / 32) as u32;
-                        host.texture_slot_tabled(title + k, true);
-                        host.mirror_after(list, title + k, handle);
-                    }
+                    // A later stage can be the first reader of a texture in
+                    // the snapshot. Prepare and mirror it as a fresh table would.
+                    let Some(title) = title_first.filter(|_| crate::descriptor::host::is_texture_view(view)) else {
+                        readable(list, kind, view);
+                        return;
+                    };
+                    let index = title + ((handle - table) / 32) as u32;
+                    let (_, deferred) = crate::residency::upload_deferred_during(|| {
+                        readable(list, kind, view);
+                        host.mirror_after(list, index, handle);
+                    });
+                    host.texture_slot_tabled(index, !deferred);
                 };
                 for u in entries.iter().filter(|u| u.kind != ResourceType::Cbv) {
                     let handle = table + u64::from(u.table_offset_dwords) * 4;
@@ -5106,6 +5112,12 @@ struct FreshTable {
     /// tested depth target.
     epoch: u64,
     ready: Vec<((usize, usize, bool, usize), bool)>,
+}
+
+/// Try sharing one dynamic descriptor snapshot between pipeline stages.
+fn share_table_snapshots() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_SHARED_TABLE_SNAPSHOTS").is_some_and(|value| value == "1"))
 }
 
 /// Whether a table a list reads again, with nothing changed in the list
