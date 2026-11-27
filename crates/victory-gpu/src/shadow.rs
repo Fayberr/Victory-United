@@ -4254,6 +4254,19 @@ fn window_budget() -> Option<u64> {
     })
 }
 
+/// How long a window nothing asked for is kept, in milliseconds, in place
+/// of what free memory decides (`VICTORY_WINDOW_IDLE_MS`; unset, that; no
+/// less than 2 s, `crate::texture::idle_ms`). With 12 GiB or more free that
+/// is five minutes.
+fn window_idle_ms() -> Option<u64> {
+    static MS: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *MS.get_or_init(|| {
+        std::env::var("VICTORY_WINDOW_IDLE_MS")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+    })
+}
+
 /// The bytes of title memory a loose copy holds a copy of: none for one in
 /// place (`crate::inplace`), which is the title's own memory.
 fn copy_bytes(shadow: &Shadow) -> u64 {
@@ -4297,7 +4310,6 @@ fn window_victims(entries: &[(u64, usize, bool)], total: u64, keep: u64) -> Vec<
 /// policy on the next submission.
 static WINDOW_BAND: std::sync::Mutex<crate::host::RamBand> =
     std::sync::Mutex::new(crate::host::RamBand::Calm);
-
 /// Lets go of the copies of windows outside buffers that nothing names any
 /// more. They were never freed, and the world's streaming keeps asking for
 /// new ones: 648 windows (2.8 GB) when the cutscene began, 974 (4.3 GB)
@@ -4319,7 +4331,10 @@ pub(crate) fn let_go_idle() {
     let budget = window_budget();
     // Without a budget (or in Calm) copies idle this long go; under a
     // budget they still do, and others idle for less go to meet it.
-    let due_ms = crate::host::ram_idle_ms(crate::host::available_physical_ram());
+    let due_ms = crate::texture::idle_ms(
+        window_idle_ms(),
+        crate::host::ram_idle_ms(crate::host::available_physical_ram()),
+    );
     let mut idle_ms = due_ms;
     let mut keep = u64::MAX;
     if let Some(bytes) = budget
