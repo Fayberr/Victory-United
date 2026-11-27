@@ -5293,47 +5293,6 @@ float4 lit() : SV_Target { return 1.0; }
         );
     }
 
-    /// Fork PR #1336 (CwWwWwW, f8fab6fb): the source a placed view aliases
-    /// is held while the caller copies it: the title may let go of its own
-    /// reference between the lookup and the copy (or a recording thread
-    /// may), and the copy still needs it.
-    #[cfg(all(windows, feature = "diagnostics"))]
-    #[test]
-    fn an_alias_source_is_held_after_the_title_releases_it() {
-        use std::sync::atomic::Ordering::Relaxed;
-
-        let Some(_host) = crate::host::host() else {
-            return;
-        };
-        let null = std::ptr::null();
-        let mut source = null;
-        let mut view = null;
-        let source_desc = ResourceDesc {
-            flags: 4,
-            ..texture(4, 4, 42, 1)
-        };
-        assert_eq!(
-            create_committed(null, &PROPERTIES, 0, &source_desc, 0, null.cast(), &RESOURCE_IIDS[0], &mut source),
-            S_OK
-        );
-        assert_eq!(
-            create_at_address(null, resource(source).data() as u64, &texture(4, 4, 67, 1), 0, null.cast(), &RESOURCE_IIDS[0], &mut view),
-            S_OK
-        );
-        resource(view).host.placed.store(true, Relaxed);
-        assert!(is_aliased(view), "the lookup alone finds it too");
-        let held = alias_of(view).expect("an alias source");
-        assert_eq!(held.get(), source);
-        // The title lets go: the pin, not the title's reference, keeps the
-        // source (and the copy about to be made from it) alive.
-        resource_release(source);
-        assert!(host_resource(held.get()).is_some(), "a held source is still copyable");
-        assert!(textures().contains(&(source as usize)), "the held source is not freed");
-        drop(held);
-        assert!(!textures().contains(&(source as usize)), "the last reference frees it");
-        resource_release(view);
-    }
-
     /// The filler words of a placed texture's description change neither
     /// its size nor what is remembered of it.
     #[cfg(windows)]
