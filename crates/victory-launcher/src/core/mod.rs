@@ -67,6 +67,7 @@ pub struct CoreState {
 impl CoreState {
     pub fn new(ctx: egui::Context) -> Self {
         let settings = store::Settings::load();
+        paths::configure_storage(&settings);
         let game = settings.game_folder.as_deref().and_then(game::from_pick).or_else(|| settings.game_exe.as_deref().and_then(game::from_pick));
         let profiles = launch::list_profiles(&paths::profiles_dir());
         let profile = profiles.iter().find(|p| p.name == settings.active_profile).cloned().unwrap_or_default();
@@ -164,6 +165,7 @@ impl CoreState {
             self.apply_demo_screen();
         } else {
             self.runner.drain();
+            settings::tick_storage(self);
             if let Some(rx) = &self.hw_rx {
                 if let Ok(hw) = rx.try_recv() {
                     self.hw = Some(hw);
@@ -259,28 +261,40 @@ impl CoreState {
         let engine = self.engine_exe()?;
         let (resolved, _) = self.resolved();
         let dirs = self.settings.dirs.clone();
-        Some(launch::Plan::new(engine, &game.folder, game.exe.clone(), self.profile.options.console, &resolved, &dirs, &paths::cache_root(), &paths::data_dir()))
+        Some(launch::Plan::new(engine, &game.folder, game.exe.clone(), self.profile.options.console, &resolved, &dirs, &paths::cache_root(), &paths::game_data_root()))
     }
 
     /// The Play button.
     pub fn play(&mut self) {
         self.notice = None;
+        if self.runner.busy() || settings::storage_busy(self) {
+            return;
+        }
+        let settings_file = paths::settings_file();
+        let engine = paths::engine_root();
+        let game = self.game.as_ref().map(|g| g.folder.as_path());
+        let ctx = storage::MoveContext { settings: &settings_file, engine: &engine, game };
+        let guarded = storage::lock(&paths::activity_lock()).and_then(|guard| {
+            let current = store::Settings::load_from(&settings_file);
+            storage::validate_data_work(&ctx, &current)?;
+            saves::recover_restore(&storage::Location::Data.path(&paths::data_dir(), &current))?;
+            Ok((guard, current))
+        });
+        let (guard, current) = match guarded {
+            Ok(result) => result,
+            Err(error) => {
+                self.notice = Some(format!("{error:#}"));
+                return;
+            }
+        };
+        self.settings.storage = current.storage;
+        paths::configure_storage(&self.settings);
         let Some(plan) = self.plan() else {
             self.notice = Some(if self.game.is_none() { "Pick the game folder first.".into() } else { "No engine is installed yet.".into() });
             return;
         };
         let cold = runner::shader_entries(&plan.cache_dir, runner::COLD_CACHE_ENTRIES) < runner::COLD_CACHE_ENTRIES;
         self.last_env = plan.env.iter().filter(|(k, _)| !launch::PATH_VARS.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
-        let guard = match storage::lock(&paths::activity_lock()).and_then(|guard| {
-            saves::recover_restore(&plan.data_dir)?;
-            Ok(guard)
-        }) {
-            Ok(guard) => guard,
-            Err(error) => {
-                self.notice = Some(format!("{error:#}"));
-                return;
-            }
-        };
         let saves = runner::RunStorage {
             _guard: guard,
             backups: paths::backups_root(&self.settings),

@@ -19,6 +19,7 @@ pub struct SettingsUi {
     pub new_name: String,
     pub message: String,
     saves: SavesUi,
+    storage: StorageUi,
 }
 
 pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
@@ -30,6 +31,8 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
         appearance_section(core, ui);
         ui.add_space(12.0);
         backup_section(core, ui);
+        ui.add_space(12.0);
+        storage_section(core, ui);
         ui.add_space(12.0);
         preset_section(core, ui, &preset_id);
         ui.add_space(12.0);
@@ -630,6 +633,7 @@ struct SavesUi {
     label: String,
     selected: Option<String>,
     rename: String,
+    revision: u64,
     confirm: Option<SaveAction>,
     note: Option<(bool, String)>,
 }
@@ -691,19 +695,27 @@ fn run_save_action(
 
 fn start_saves_job(core: &mut CoreState, action: Option<SaveAction>) {
     let root = paths::backups_root(&core.settings);
-    let data = paths::game_data_root();
+    let game = core.game.as_ref().map(|g| g.folder.clone());
     let engine = core.engine_exe();
     let policy = core.settings.backups.retention;
     let ctx = core.ctx.clone();
     let (tx, rx) = mpsc::channel();
     let state = &mut core.ui.settings.saves;
     state.root = Some(root.clone());
+    state.revision = core.runner.backup_revision;
     state.pending = Some(rx);
     state.note = None;
     std::thread::spawn(move || {
         let result = (|| {
             let note = if let Some(action) = action {
                 let _guard = storage::lock(&paths::activity_lock())?;
+                let settings_file = paths::settings_file();
+                let engine_root = paths::engine_root();
+                let ctx = storage::MoveContext { settings: &settings_file, engine: &engine_root, game: game.as_deref() };
+                let current = super::store::Settings::load_from(&settings_file);
+                storage::validate_backup_root(&root, &ctx, &current)?;
+                let data = storage::Location::Data.path(&paths::data_dir(), &current);
+                storage::validate_data_work(&ctx, &current)?;
                 let build = engine.as_deref().and_then(Path::parent).and_then(Path::file_name)
                     .and_then(|b| b.to_str()).unwrap_or_default();
                 run_save_action(action, &data, &root, build, policy)?
@@ -742,11 +754,11 @@ fn backup_section(core: &mut CoreState, ui: &mut egui::Ui) {
             ui.label(tr("saves.folder"));
             if ui.button(tr("settings.choose_folder")).clicked() && !core.ui.demo {
                 if let Some(p) = pick_folder() {
-                    let valid = (|| {
-                        anyhow::ensure!(!storage::overlap(&p, &paths::game_data_root())?
-                            && !storage::overlap(&p, &paths::cache_root())?, "Choose a separate folder for backups.");
-                        storage::absolute(&p)
-                    })();
+                    let settings = paths::settings_file();
+                    let engine = paths::engine_root();
+                    let game = core.game.as_ref().map(|g| g.folder.as_path());
+                    let ctx = storage::MoveContext { settings: &settings, engine: &engine, game };
+                    let valid = storage::validate_backup_root(&p, &ctx, &core.settings);
                     match valid {
                         Ok(p) => cfg.root = Some(p),
                         Err(error) => core.ui.settings.message = format!("{error:#}"),
@@ -774,7 +786,10 @@ pub fn show_saves(core: &mut CoreState, ui: &mut egui::Ui) {
     if core.ui.demo {
         if core.ui.settings.saves.snapshots.is_empty() {
             core.ui.settings.saves.snapshots = demo_saves();
-            core.ui.settings.saves.selected = core.ui.settings.saves.snapshots.first().map(|s| s.id.clone());
+            if let Some(snap) = core.ui.settings.saves.snapshots.first() {
+                core.ui.settings.saves.selected = Some(snap.id.clone());
+                core.ui.settings.saves.rename = snap.manifest.label.clone();
+            }
         }
     } else {
         let state = &mut core.ui.settings.saves;
@@ -788,9 +803,11 @@ pub fn show_saves(core: &mut CoreState, ui: &mut egui::Ui) {
                 Err(error) => state.note = Some((true, format!("{error:#}"))),
             }
         }
-        if state.pending.is_none() && state.root.as_ref() != Some(&root) {
-            state.snapshots.clear();
-            state.selected = None;
+        if state.pending.is_none() && (state.root.as_ref() != Some(&root) || state.revision != core.runner.backup_revision) {
+            if state.root.as_ref() != Some(&root) {
+                state.snapshots.clear();
+                state.selected = None;
+            }
             state.confirm = None;
             start_saves_job(core, None);
         }
@@ -798,7 +815,7 @@ pub fn show_saves(core: &mut CoreState, ui: &mut egui::Ui) {
 
     let mut refresh = false;
     let mut action = None;
-    let busy = core.runner.busy() && !core.ui.demo;
+    let busy = (core.runner.busy() || core.ui.settings.storage.pending()) && !core.ui.demo;
     let state = &mut core.ui.settings.saves;
     page_scroll(ui, scroll, |ui| {
         ui.set_max_width(820.0);
@@ -887,16 +904,15 @@ pub fn show_saves(core: &mut CoreState, ui: &mut egui::Ui) {
                 }
                 if let Some(confirm) = &state.confirm {
                     match confirm {
-                        SaveAction::Restore(_) => ui.label(theme::warn_text(ui, tr("saves.confirm_restore"))),
-                        SaveAction::Delete(_) => ui.label(theme::warn_text(ui, tr("saves.confirm_delete"))),
+                        SaveAction::Restore(_) => { ui.label(theme::warn_text(ui, tr("saves.confirm_restore"))); }
+                        SaveAction::Delete(_) => { ui.label(theme::warn_text(ui, tr("saves.confirm_delete"))); }
                         SaveAction::Cleanup(ids) => {
                             ui.label(theme::warn_text(ui, tr("saves.confirm_cleanup")));
                             for id in ids {
                                 ui.label(id);
                             }
-                            ui.label("")
                         }
-                        _ => ui.label(""),
+                        _ => {}
                     };
                     ui.horizontal(|ui| {
                         if ui.button(tr("saves.confirm")).clicked() {
@@ -959,4 +975,318 @@ fn demo_saves() -> Vec<saves::Snapshot> {
         sample("20261127-182400-example-after-exit", 1_795_803_840, saves::Kind::AfterExit, "", 3_670_016, "9fc250ac4673c8b4"),
         sample("20261126-203000-example-before-launch", 1_795_725_000, saves::Kind::BeforeLaunch, "", 3_145_728, "ee71033d81ad7192"),
     ]
+}
+
+use std::{
+    sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}},
+    time::{Duration, Instant},
+};
+use storage::{Location, MoveJournal, MovePhase};
+
+const LOCATIONS: [Location; 2] = [Location::Cache, Location::Data];
+type Measurements = [Result<storage::Usage, String>; 2];
+
+#[derive(Default)]
+struct StorageUi {
+    usage: Option<Measurements>,
+    measuring: Option<Receiver<Measurements>>,
+    job: Option<Receiver<StorageOutcome>>,
+    progress: Arc<MoveProgress>,
+    plan: Option<StorageConfirm>,
+    journal: Option<MoveJournal>,
+    journal_read: bool,
+    note: Option<(bool, String)>,
+}
+
+impl StorageUi {
+    fn pending(&self) -> bool { self.job.is_some() }
+}
+
+#[derive(Default)]
+struct MoveProgress {
+    cancel: AtomicBool,
+    done: AtomicU64,
+    total: AtomicU64,
+}
+
+struct StorageOutcome {
+    status: anyhow::Result<()>,
+    journal: anyhow::Result<Option<MoveJournal>>,
+    locations: super::store::StorageSettings,
+    message: &'static str,
+}
+
+enum StorageAction {
+    Move(Location, PathBuf),
+    Resume,
+    Finish(bool),
+    Clear(Location),
+}
+
+enum StorageConfirm {
+    Move { location: Location, target: PathBuf, network: bool },
+    Clear { location: Location, phrase: String },
+    DeleteOld,
+}
+
+pub fn storage_busy(core: &CoreState) -> bool {
+    core.ui.settings.storage.pending()
+}
+
+pub fn tick_storage(core: &mut CoreState) {
+    let state = &mut core.ui.settings.storage;
+    if !state.journal_read {
+        state.journal_read = true;
+        match storage::read_journal(&paths::move_journal()) {
+            Ok(journal) => state.journal = journal,
+            Err(error) => state.note = Some((true, format!("{error:#}"))),
+        }
+    }
+    if let Some(result) = state.measuring.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        state.usage = Some(result);
+        state.measuring = None;
+    }
+    if let Some(result) = state.job.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        state.job = None;
+        state.measuring = None;
+        state.usage = None;
+        state.note = Some(match result.status {
+            Ok(()) => (false, tr(result.message).to_string()),
+            Err(error) => (true, format!("{error:#}")),
+        });
+        match result.journal {
+            Ok(journal) => state.journal = journal,
+            Err(error) => state.note = Some((true, format!("{error:#}"))),
+        }
+        core.settings.storage = result.locations;
+        paths::configure_storage(&core.settings);
+        core.ui.settings.saves.root = None;
+    }
+}
+
+fn start_measurement(core: &mut CoreState) {
+    let roots = [paths::cache_root(), paths::game_data_root()];
+    let ctx = core.ctx.clone();
+    let (tx, rx) = mpsc::channel();
+    core.ui.settings.storage.measuring = Some(rx);
+    std::thread::spawn(move || {
+        let result = roots.map(|path| storage::measure(&path).map_err(|error| format!("{error:#}")));
+        let _ = tx.send(result);
+        ctx.request_repaint();
+    });
+}
+
+fn start_storage_job(core: &mut CoreState, action: StorageAction) {
+    let ctx = core.ctx.clone();
+    let game = core.game.as_ref().map(|g| g.folder.clone());
+    let build = core.engine_exe().and_then(|p| p.parent()?.file_name().map(|s| s.to_string_lossy().into_owned())).unwrap_or_default();
+    let (tx, rx) = mpsc::channel();
+    let state = &mut core.ui.settings.storage;
+    state.job = Some(rx);
+    state.note = None;
+    state.progress = Arc::new(MoveProgress::default());
+    let progress = state.progress.clone();
+    std::thread::spawn(move || {
+        let settings = paths::settings_file();
+        let engine = paths::engine_root();
+        let runtime = storage::MoveContext { settings: &settings, engine: &engine, game: game.as_deref() };
+        let mut last = Instant::now();
+        let update = |done, total| {
+            progress.done.store(done, Ordering::Relaxed);
+            progress.total.store(total, Ordering::Relaxed);
+            if last.elapsed() >= Duration::from_millis(120) {
+                last = Instant::now();
+                ctx.request_repaint();
+            }
+        };
+        let (status, message) = match action {
+            StorageAction::Move(location, target) => (
+                storage::start_move(&runtime, location, &target, &build, &progress.cancel, update).map(|_| ()),
+                "storage.moved",
+            ),
+            StorageAction::Resume => (
+                storage::resume_move(&runtime, &progress.cancel, update).map(|_| ()),
+                "storage.moved",
+            ),
+            StorageAction::Finish(delete_old) => (
+                storage::finish_move(&runtime, delete_old),
+                "storage.finished",
+            ),
+            StorageAction::Clear(location) => (storage::clear(&runtime, location, &build), "storage.cleared"),
+        };
+        let result = StorageOutcome {
+            status, message,
+            journal: storage::read_journal(&paths::move_journal()),
+            locations: super::store::Settings::load_from(&settings).storage,
+        };
+        let _ = tx.send(result);
+        ctx.request_repaint();
+    });
+}
+
+fn location_label(location: Location) -> &'static str {
+    tr(match location {
+        Location::Cache => "storage.cache",
+        Location::Data => "storage.data",
+    })
+}
+
+fn storage_section(core: &mut CoreState, ui: &mut egui::Ui) {
+    let demo = core.ui.demo;
+    let busy = (core.runner.busy() || core.ui.settings.saves.pending.is_some()) && !demo;
+    let before = core.settings.storage.verify_cache_by_hash;
+    if !demo && !core.ui.settings.storage.pending() && core.ui.settings.storage.measuring.is_none()
+        && core.ui.settings.storage.usage.is_none()
+    {
+        start_measurement(core);
+    }
+    let mut action = None;
+    let mut refresh = false;
+    let state = &mut core.ui.settings.storage;
+    let can_change = !busy && !state.pending() && state.journal.is_none();
+    let active = [paths::cache_root(), paths::game_data_root()];
+    let base = paths::data_dir();
+    theme::card(ui).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(theme::strong(tr("storage.title")).size(16.0));
+            if ui.add_enabled(before && !state.pending(), egui::Button::new(tr("appearance.reset"))).clicked() {
+                core.settings.storage.verify_cache_by_hash = false;
+            }
+            if ui.add_enabled(state.measuring.is_none(), egui::Button::new(tr("saves.refresh"))).clicked() {
+                refresh = true;
+            }
+        });
+        if busy {
+            ui.label(theme::dim(tr("saves.busy")));
+        }
+        for (i, location) in LOCATIONS.into_iter().enumerate() {
+            ui.separator();
+            ui.label(theme::strong(location_label(location)));
+            let location_help = if location == Location::Cache { "storage.cache_help" } else { "storage.data_help" };
+            ui.label(theme::dim(tr(location_help)).size(12.5));
+            let current = &active[i];
+            let path = if demo {
+                if location == Location::Cache { "D:/Victory United/cache".into() }
+                else { "C:/Users/Player/AppData/Roaming/Victory-United/data".into() }
+            } else {
+                current.to_string_lossy()
+            };
+            ui.label(path);
+            let demo_usage = Ok(storage::Usage { bytes: if i == 0 { 3_035_000_000 } else { 6_344_000 }, free: 107_592_000_000, network: false });
+            let measure = if demo { Some(&demo_usage) } else { state.usage.as_ref().map(|results| &results[i]) };
+            match measure {
+                Some(Ok(usage)) => {
+                    ui.label(theme::dim(trf("storage.usage", &[("size", &display_size(usage.bytes)), ("free", &display_size(usage.free))])));
+                    if usage.network {
+                        ui.label(theme::warn_text(ui, tr("storage.network")));
+                    }
+                }
+                Some(Err(error)) => { ui.label(theme::warn_text(ui, error)); }
+                None => { ui.label(theme::dim(tr("storage.counting"))); }
+            }
+            ui.horizontal_wrapped(|ui| {
+                if ui.button(tr("storage.open")).clicked() && !demo {
+                    open_folder(current);
+                }
+                if ui.add_enabled(can_change, egui::Button::new(tr("storage.move"))).clicked() && !demo {
+                    if let Some(target) = pick_folder() {
+                        plan_move(state, location, target);
+                    }
+                }
+                if ui.add_enabled(can_change, egui::Button::new(tr("storage.clear"))).clicked() {
+                    state.plan = Some(StorageConfirm::Clear { location, phrase: String::new() });
+                }
+                let default = location.default_path(&base);
+                if current != &default && ui.add_enabled(can_change, egui::Button::new(tr("storage.default"))).clicked() {
+                    plan_move(state, location, default);
+                }
+            });
+        }
+        ui.separator();
+        ui.add_enabled_ui(!state.pending(), |ui| {
+            ui.checkbox(&mut core.settings.storage.verify_cache_by_hash, tr("storage.hash"));
+        });
+        ui.label(theme::dim(tr("storage.hash_help")).size(12.5));
+        if state.pending() {
+            let total = state.progress.total.load(Ordering::Relaxed);
+            if total > 0 {
+                let done = state.progress.done.load(Ordering::Relaxed);
+                ui.add(egui::ProgressBar::new((done as f64 / total as f64) as f32).show_percentage());
+            } else {
+                ui.label(theme::dim(tr("storage.working")));
+            }
+            if ui.button(tr("storage.pause")).clicked() {
+                state.progress.cancel.store(true, Ordering::Relaxed);
+            }
+        } else {
+            if let Some(journal) = &state.journal {
+                let switched = journal.phase == MovePhase::Switched;
+                ui.label(theme::strong(tr(if switched { "storage.moved" } else { "storage.interrupted" })));
+                ui.label(theme::dim(trf("storage.move_paths", &[
+                    ("from", &journal.source.to_string_lossy()), ("to", &journal.destination.to_string_lossy()),
+                ])));
+                ui.add_enabled_ui(!busy, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        if switched {
+                            if ui.button(tr("storage.keep_old")).clicked() { action = Some(StorageAction::Finish(false)); }
+                            if ui.button(tr("storage.delete_old")).clicked() { state.plan = Some(StorageConfirm::DeleteOld); }
+                        } else {
+                            if ui.button(tr("storage.resume")).clicked() { action = Some(StorageAction::Resume); }
+                            if ui.button(tr("storage.cancel")).clicked() { action = Some(StorageAction::Finish(false)); }
+                        }
+                    });
+                });
+            }
+            ui.add_enabled_ui(!busy, |ui| {
+                if let Some(confirm) = &mut state.plan {
+                    let approved = match confirm {
+                        StorageConfirm::Move { location, target, network } => {
+                            ui.label(trf("storage.confirm_move", &[("location", location_label(*location)), ("path", &target.to_string_lossy())]));
+                            if *network { ui.label(theme::warn_text(ui, tr("storage.network"))); }
+                            true
+                        }
+                        StorageConfirm::Clear { location: Location::Cache, .. } => {
+                            ui.label(theme::warn_text(ui, tr("storage.clear_cache")));
+                            true
+                        }
+                        StorageConfirm::Clear { location: Location::Data, phrase } => {
+                            ui.label(theme::warn_text(ui, tr("storage.clear_data")));
+                            ui.text_edit_singleline(phrase);
+                            phrase == tr("storage.clear_phrase")
+                        }
+                        StorageConfirm::DeleteOld => {
+                            ui.label(theme::warn_text(ui, tr("storage.confirm_old")));
+                            true
+                        }
+                    };
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.add_enabled(approved, egui::Button::new(tr("saves.confirm"))).clicked() {
+                            action = state.plan.take().map(|confirm| match confirm {
+                                StorageConfirm::Move { location, target, .. } => StorageAction::Move(location, target),
+                                StorageConfirm::Clear { location, .. } => StorageAction::Clear(location),
+                                StorageConfirm::DeleteOld => StorageAction::Finish(true),
+                            });
+                        }
+                        if ui.button(tr("play.cancel")).clicked() { state.plan = None; }
+                    });
+                }
+            });
+        }
+        if let Some((error, note)) = &state.note {
+            ui.label(if *error { theme::error_text(ui, note) } else { theme::dim(note) });
+        }
+    });
+    if !demo {
+        if before != core.settings.storage.verify_cache_by_hash { core.save_settings(); }
+        if let Some(action) = action { start_storage_job(core, action); }
+        else if refresh { start_measurement(core); }
+    }
+}
+
+fn plan_move(state: &mut StorageUi, location: Location, target: PathBuf) {
+    match storage::network_drive(&target) {
+        Ok(network) => state.plan = Some(StorageConfirm::Move { location, target, network }),
+        Err(error) => state.note = Some((true, format!("{error:#}"))),
+    }
 }

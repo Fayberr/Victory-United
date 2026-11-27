@@ -214,10 +214,10 @@ impl Plan {
         resolved: &Resolved,
         dirs: &BTreeMap<String, String>,
         cache_root: &Path,
-        data_root: &Path,
+        data_dir: &Path,
     ) -> Self {
         let cache_dir = cache_root.join(cache_folder_name(game_folder));
-        let data_dir = data_root.join("data");
+        let data_dir = data_dir.to_path_buf();
         let mut env = resolved.env.clone();
         for (k, v) in dirs {
             if !v.is_empty() {

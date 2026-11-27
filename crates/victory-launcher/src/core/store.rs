@@ -40,6 +40,14 @@ impl Default for Backups {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct StorageSettings {
+    pub cache: Option<PathBuf>,
+    pub data: Option<PathBuf>,
+    pub verify_cache_by_hash: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -59,6 +67,7 @@ pub struct Settings {
     pub setup_done: bool,
     pub appearance: Appearance,
     pub backups: Backups,
+    pub storage: StorageSettings,
 }
 
 impl Default for Settings {
@@ -73,6 +82,7 @@ impl Default for Settings {
             setup_done: false,
             appearance: Appearance::default(),
             backups: Backups::default(),
+            storage: StorageSettings::default(),
         }
     }
 }
@@ -92,9 +102,29 @@ impl Settings {
         Self::load_from(&crate::paths::settings_file())
     }
 
-    pub fn save(&self) -> std::io::Result<()> {
-        self.save_to(&crate::paths::settings_file())
+    pub fn save(&self) -> anyhow::Result<()> {
+        // Folder locations are committed by the storage transaction. A different launcher may
+        // have completed a move since this window last loaded Settings.
+        edit_settings(&crate::paths::settings_file(), |current| {
+            let (cache, data) = (current.storage.cache.take(), current.storage.data.take());
+            *current = self.clone();
+            current.storage.cache = cache;
+            current.storage.data = data;
+            Ok(())
+        })?;
+        Ok(())
     }
+}
+
+pub fn edit_settings(
+    path: &Path,
+    edit: impl FnOnce(&mut Settings) -> anyhow::Result<()>,
+) -> anyhow::Result<Settings> {
+    let _guard = super::storage::lock(&path.with_extension("lock"))?;
+    let mut settings = Settings::load_from(path);
+    edit(&mut settings)?;
+    settings.save_to(path)?;
+    Ok(settings)
 }
 
 /// Writes through a temp file and a rename so a crash never leaves half a file.

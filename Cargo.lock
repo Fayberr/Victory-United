@@ -2800,6 +2800,7 @@ dependencies = [
  "eframe",
  "egui_plot",
  "image",
+ "libc",
  "rfd",
  "serde",
  "serde_json",

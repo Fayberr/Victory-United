@@ -252,6 +252,9 @@ pub fn create(data: &Path, root: &Path, options: Create<'_>) -> Result<Option<Sn
         Ok(())
     };
     check()?;
+    let backup_path = storage::absolute(root)?;
+    ensure!(!backup_path.ancestors().any(|p| p.join(".victory-root").exists() || p.join(".git").exists()),
+        "Backups must be outside source repositories.");
     ensure!(!storage::overlap(data, root)?, "Save data and backups must use separate folders");
     let files = scan(data, check)?;
     if files.is_empty() {

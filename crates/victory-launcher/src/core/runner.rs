@@ -78,12 +78,13 @@ pub struct Runner {
     cancel: Arc<AtomicBool>,
     skip: Arc<AtomicBool>,
     pub backup_warning: Option<String>,
+    pub backup_revision: u64,
 }
 
 impl Runner {
     pub fn new(ctx: egui::Context) -> Self {
         let (tx, rx) = channel();
-        Self { state: RunState::Idle, rx, tx, ctx, child_pid: Arc::new(AtomicU32::new(0)), cancel: Arc::new(AtomicBool::new(false)), skip: Arc::new(AtomicBool::new(false)), backup_warning: None }
+        Self { state: RunState::Idle, rx, tx, ctx, child_pid: Arc::new(AtomicU32::new(0)), cancel: Arc::new(AtomicBool::new(false)), skip: Arc::new(AtomicBool::new(false)), backup_warning: None, backup_revision: 0 }
     }
 
     pub fn busy(&self) -> bool {
@@ -188,7 +189,10 @@ impl Runner {
                 Event::BackupWarning(message) => self.backup_warning = Some(message),
                 Event::WarmFinished => self.state = RunState::Starting,
                 Event::Started { pid, log } => self.state = RunState::Running { pid, since: Instant::now(), log },
-                Event::Ended(s) => self.state = RunState::Ended(s),
+                Event::Ended(s) => {
+                    self.state = RunState::Ended(s);
+                    self.backup_revision = self.backup_revision.wrapping_add(1);
+                }
             }
         }
     }

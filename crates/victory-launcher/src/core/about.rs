@@ -46,7 +46,7 @@ pub fn show(core: &mut CoreState, _shared: &Shared, logo: &egui::TextureHandle, 
         ui.add_space(4.0);
         let cache = core.plan().map(|p| p.cache_dir).unwrap_or_else(paths::cache_root);
         for (label, path) in [
-            (tr("about.data"), paths::data_dir()),
+            (tr("about.data"), paths::game_data_root()),
             (tr("about.logs"), paths::logs_dir()),
             (tr("about.cache"), cache),
             (tr("about.engine_folder"), paths::engine_root()),

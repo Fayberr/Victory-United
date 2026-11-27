@@ -1,6 +1,15 @@
 //! Where things live. Part of the contract, see docs/launcher-contract.md ("Folders").
 //! The launcher is portable: the engine sits next to the launcher exe, user data under %APPDATA%.
-use std::path::PathBuf;
+use crate::core::store::{Settings, StorageSettings};
+use std::{path::PathBuf, sync::RwLock};
+
+static STORAGE: RwLock<StorageSettings> = RwLock::new(StorageSettings {
+    cache: None, data: None, verify_cache_by_hash: false,
+});
+
+pub fn configure_storage(settings: &Settings) {
+    *STORAGE.write().unwrap_or_else(std::sync::PoisonError::into_inner) = settings.storage.clone();
+}
 
 /// Folder of the launcher executable (falls back to the current directory).
 pub fn app_dir() -> PathBuf {
@@ -22,12 +31,17 @@ pub fn data_dir() -> PathBuf {
 pub fn settings_file() -> PathBuf { data_dir().join("settings.toml") }
 pub fn profiles_dir() -> PathBuf { data_dir().join("profiles") }
 pub fn logs_dir() -> PathBuf { data_dir().join("logs") }
-pub fn cache_root() -> PathBuf { data_dir().join("cache") }
-pub fn game_data_root() -> PathBuf { data_dir().join("data") }
+pub fn cache_root() -> PathBuf {
+    STORAGE.read().unwrap_or_else(std::sync::PoisonError::into_inner).cache.clone().unwrap_or_else(|| data_dir().join("cache"))
+}
+pub fn game_data_root() -> PathBuf {
+    STORAGE.read().unwrap_or_else(std::sync::PoisonError::into_inner).data.clone().unwrap_or_else(|| data_dir().join("data"))
+}
 pub fn backups_root(settings: &crate::core::store::Settings) -> PathBuf {
     settings.backups.root.clone().unwrap_or_else(|| data_dir().join("backups"))
 }
 pub fn activity_lock() -> PathBuf { data_dir().join("activity.lock") }
+pub fn move_journal() -> PathBuf { data_dir().join("move-journal.toml") }
 pub fn reports_dir() -> PathBuf { data_dir().join("reports") }
 
 /// `<launcher folder>\engine`: one sub folder per installed engine build plus `current.txt`.
