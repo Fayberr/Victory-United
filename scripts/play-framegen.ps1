@@ -56,6 +56,15 @@ $sl = if ($env:VICTORY_STREAMLINE_DIR) { $env:VICTORY_STREAMLINE_DIR }
       else { 'C:\sdk\streamline-sdk-v2.14.16\bin\x64' }
 $victory = Join-Path $repo 'target\release\victory.exe'
 $hags = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' -Name HwSchMode -ErrorAction SilentlyContinue).HwSchMode
+$isWin11 = [Environment]::OSVersion.Version.Build -ge 22000
+$hagsOff = ($hags -eq 1) -or ($null -eq $hags -and -not $isWin11)
+$hagsText = if ($hags -eq 2) {
+    'on'
+} elseif ($null -eq $hags -and $isWin11) {
+    'default (on in Windows 11)'
+} else {
+    'off: frame generation needs it (Settings > Display > Graphics)'
+}
 
 if ($Check) {
     Write-Host "repo:    $repo"
@@ -63,7 +72,7 @@ if ($Check) {
     Write-Host "mode:    $Mode ($what)"
     Write-Host "DLSS:    $(if (Test-Path (Join-Path $sl 'sl.interposer.dll')) { 'present' } else { 'missing: install Streamline yourself (README)' })"
     Write-Host "built:   $(if (Test-Path $victory) { 'yes' } else { 'no (built at first start)' })"
-    Write-Host "HAGS:    $(if ($hags -eq 2) { 'on' } else { 'off: frame generation needs it (Settings > Display > Graphics)' })"
+    Write-Host "HAGS:    $hagsText"
     exit 0
 }
 if (Get-Process victory -ErrorAction SilentlyContinue) { Write-Host 'The game is already running. Close it first.'; exit 1 }
@@ -95,7 +104,7 @@ if (-not (Test-Path (Join-Path $sl 'sl.interposer.dll'))) {
     Write-Host 'set VICTORY_STREAMLINE_DIR to an unpacked Streamline bin\x64 folder (README); the game then'
     Write-Host 'runs without DLSS and frame generation.'
 }
-if ($hags -ne 2) { Write-Host 'Hardware-accelerated GPU scheduling is off: frame generation will not work until it is on.' }
+if ($hagsOff) { Write-Host 'Hardware-accelerated GPU scheduling is off: frame generation will not work until it is on.' }
 
 # 4. Start (play-VIctory_sm86.ps1 builds target\release\victory.exe the first time).
 if (-not (Test-Path $victory)) { Write-Host 'First start: building the layer, a few minutes ...' }
