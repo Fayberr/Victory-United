@@ -445,7 +445,11 @@ pub fn precompile(paths: Vec<PathBuf>, jobs: Option<usize>, list: Option<PathBuf
                             if !lock(&seen).insert(hash) {
                                 continue;
                             }
-                            match victory_hle::modules::d3d12x::precompile(&bytes) {
+                            let translated = std::panic::catch_unwind(|| {
+                                victory_hle::modules::d3d12x::precompile(&bytes)
+                            })
+                            .unwrap_or_else(|_| Err("translation panicked".to_owned()));
+                            match translated {
                                 Ok(_) => {
                                     let n = done.fetch_add(1, Ordering::Relaxed) + 1;
                                     if n.is_multiple_of(1000) {
@@ -455,7 +459,7 @@ pub fn precompile(paths: Vec<PathBuf>, jobs: Option<usize>, list: Option<PathBuf
                                 Err(why) => {
                                     let hex = hash.to_hex()[..16].to_owned();
                                     if list.is_some() {
-                                        let line = format!("{hex}	{}{}	{why}", path.display(), job.label());
+                                        let line = format!("{hex}\t{}{}\t{why}", path.display(), job.label());
                                         lock(&lines).push(line);
                                     }
                                     let mut failed = lock(&failed);
