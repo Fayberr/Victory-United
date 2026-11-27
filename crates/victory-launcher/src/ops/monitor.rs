@@ -239,7 +239,7 @@ pub fn show(ops: &mut OpsState, shared: &Shared, ui: &mut egui::Ui) {
 }
 
 fn waiting(ui: &mut egui::Ui, text: &str) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(text));
         ui.label(theme::dim(tr("monitor.waiting_help")));
@@ -247,7 +247,7 @@ fn waiting(ui: &mut egui::Ui, text: &str) {
 }
 
 fn live(ui: &mut egui::Ui, s: &Summary) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             big_number(ui, format!("{:.0}", s.fps_avg), tr("monitor.fps"));
@@ -265,12 +265,13 @@ fn live(ui: &mut egui::Ui, s: &Summary) {
         ui.label(theme::dim(frames).size(12.5));
     });
     ui.add_space(12.0);
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("monitor.graph")));
-        let line = |name: &str, data: &[f32], gray: u8| {
+        let colors = theme::palette(ui.visuals()).chart;
+        let line = |name: &str, data: &[f32], color| {
             let pts: PlotPoints = data.iter().enumerate().map(|(i, v)| [i as f64, *v as f64]).collect();
-            Line::new(name.to_string(), pts).color(egui::Color32::from_gray(gray)).width(1.4_f32)
+            Line::new(name.to_string(), pts).color(color).width(1.4_f32)
         };
         Plot::new("frame_graph")
             .height(190.0)
@@ -284,14 +285,15 @@ fn live(ui: &mut egui::Ui, s: &Summary) {
             .x_axis_label(tr("monitor.axis_frames"))
             .y_axis_label(tr("monitor.axis_ms"))
             .show(ui, |p| {
-                p.line(line(tr("monitor.frame_time"), &s.frame_ms, 235));
-                p.line(line(tr("monitor.cpu"), &s.cpu_ms_series, 150));
-                p.line(line(tr("monitor.gpu"), &s.gpu_ms_series, 95));
+                p.line(line(tr("monitor.frame_time"), &s.frame_ms, colors[0]));
+                p.line(line(tr("monitor.cpu"), &s.cpu_ms_series, colors[1]));
+                p.line(line(tr("monitor.gpu"), &s.gpu_ms_series, colors[2]));
             });
     });
     ui.add_space(12.0);
+    let card = theme::card(ui);
     ui.columns(2, |cols| {
-        theme::card().show(&mut cols[0], |ui| {
+        card.show(&mut cols[0], |ui| {
             ui.set_width(ui.available_width());
             ui.label(theme::strong(tr("monitor.memory")));
             ui.add_space(6.0);
@@ -301,7 +303,7 @@ fn live(ui: &mut egui::Ui, s: &Summary) {
             ui.add_space(6.0);
             ui.label(trf("monitor.ram", &[("used", &mb(s.ram))]));
         });
-        theme::card().show(&mut cols[1], |ui| {
+        card.show(&mut cols[1], |ui| {
             ui.set_width(ui.available_width());
             ui.label(theme::strong(tr("monitor.work")));
             ui.add_space(6.0);
@@ -313,7 +315,7 @@ fn live(ui: &mut egui::Ui, s: &Summary) {
 }
 
 fn overlay_card(ui: &mut egui::Ui, ops: &mut OpsState) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("overlay.title")));
         ui.add_space(4.0);

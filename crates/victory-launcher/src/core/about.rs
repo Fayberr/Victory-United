@@ -10,7 +10,7 @@ const REPO: &str = "https://github.com/Fayberr/Victory-United";
 pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
     page_title(ui, tr("about.title"), tr("about.sub"));
     ui.set_max_width(820.0);
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         kv(ui, tr("about.version"), &format!("{} ({})", env!("CARGO_PKG_VERSION"), if cfg!(debug_assertions) { "debug" } else { "release" }));
         let engine = core.engine_exe().and_then(|p| p.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| tr("status.no_engine").to_string());
@@ -20,7 +20,7 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
         ui.label(theme::dim(tr("about.text")).size(13.0));
     });
     ui.add_space(12.0);
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("about.links")).size(16.0));
         ui.add_space(4.0);
@@ -35,7 +35,7 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
         ui.label(theme::dim(REPO).size(12.5));
     });
     ui.add_space(12.0);
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("about.folders")).size(16.0));
         ui.add_space(4.0);

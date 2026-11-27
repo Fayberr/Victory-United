@@ -95,12 +95,12 @@ pub fn kv(ui: &mut egui::Ui, key: &str, value: &str) {
 /// A calm notice box with muted warning or error text.
 pub fn notice(ui: &mut egui::Ui, text: &str, error: bool) {
     egui::Frame::new()
-        .stroke(egui::Stroke::new(1.0_f32, theme::LINE_STRONG))
+        .stroke(egui::Stroke::new(1.0_f32, ui.visuals().widgets.hovered.bg_stroke.color))
         .corner_radius(egui::CornerRadius::same(6))
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(if error { theme::error_text(text) } else { theme::warn_text(text) });
+            ui.label(if error { theme::error_text(ui, text) } else { theme::warn_text(ui, text) });
         });
 }
 

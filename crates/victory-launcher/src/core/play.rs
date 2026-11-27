@@ -34,7 +34,7 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
 
 fn play_card(core: &mut CoreState, ui: &mut egui::Ui) {
     let state = core.runner.state.clone();
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         match state {
             RunState::Warming { done, total, since } => warmup(core, ui, done, total, since.elapsed()),
@@ -80,7 +80,7 @@ fn idle(core: &mut CoreState, ui: &mut egui::Ui) {
             }
         }
     } else if engine.is_none() {
-        ui.label(theme::warn_text(tr("play.need_engine")));
+        ui.label(theme::warn_text(ui, tr("play.need_engine")));
     } else {
         ui.label(theme::dim(shader_status(core)));
     }
@@ -104,7 +104,7 @@ fn warmup(core: &mut CoreState, ui: &mut egui::Ui, done: u64, total: u64, elapse
     ui.label(tr("play.warm_text"));
     ui.add_space(14.0);
     let frac = if total > 0 { (done as f32 / total as f32).clamp(0.0, 1.0) } else { 0.0 };
-    ui.add(egui::ProgressBar::new(frac).desired_height(14.0).fill(egui::Color32::from_gray(150)).corner_radius(egui::CornerRadius::same(7)));
+    ui.add(egui::ProgressBar::new(frac).desired_height(14.0).fill(theme::palette(ui.visuals()).chart[2]).corner_radius(egui::CornerRadius::same(7)));
     ui.add_space(4.0);
     let eta = remaining(done, total, elapsed).map(|d| trf("play.warm_left", &[("time", &format_duration(d))])).unwrap_or_else(|| tr("play.warm_estimating").to_string());
     let count = if total > 0 { trf("play.warm_count", &[("done", &mib(done)), ("total", &mib(total))]) } else { tr("play.warm_counting").to_string() };
@@ -138,7 +138,7 @@ fn ended(core: &mut CoreState, ui: &mut egui::Ui, s: &super::runner::Summary) {
     if s.cancelled && s.log.is_none() {
         ui.label(tr("play.cancelled"));
     } else if let Some(e) = &s.error {
-        ui.label(theme::error_text(e));
+        ui.label(theme::error_text(ui, e));
     } else {
         let how = match s.code {
             Some(0) => tr("play.exit_ok").to_string(),
@@ -176,7 +176,7 @@ fn preset_card(core: &mut CoreState, ui: &mut egui::Ui) {
     let file = super::presets::builtin();
     let (_, preset_id) = core.resolved();
     let auto = core.profile.options.preset == "auto";
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::dim(tr("play.preset")));
         let name = file.preset(&preset_id).map(|p| p.name.clone()).unwrap_or_default();
@@ -205,7 +205,7 @@ fn preset_card(core: &mut CoreState, ui: &mut egui::Ui) {
 }
 
 fn machine_card(core: &CoreState, ui: &mut egui::Ui) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("play.your_pc")).size(15.5));
         ui.add_space(6.0);

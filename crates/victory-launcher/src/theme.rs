@@ -1,137 +1,192 @@
-//! Neutral dark gray theme. There is no accent hue: layers are told apart by lightness, selection and
-//! focus by a lighter fill and a thin outline. Muted amber and red exist for warnings and errors only.
+//! Neutral gray themes. Layers, selection and focus use lightness and outlines.
+use crate::core::store::Appearance;
 use eframe::egui::{self, Color32, CornerRadius, FontFamily, FontId, Margin, Stroke, TextStyle, Visuals};
 
-/// The gray ramp, darkest to lightest.
-pub const BG: Color32 = Color32::from_gray(20);
-pub const PANEL: Color32 = Color32::from_gray(27);
-pub const CARD: Color32 = Color32::from_gray(34);
-pub const FIELD: Color32 = Color32::from_gray(16);
-pub const HOVER: Color32 = Color32::from_gray(48);
-pub const ACTIVE: Color32 = Color32::from_gray(60);
-pub const LINE: Color32 = Color32::from_gray(52);
-pub const LINE_STRONG: Color32 = Color32::from_gray(96);
-pub const TEXT_DIM: Color32 = Color32::from_gray(132);
-pub const TEXT: Color32 = Color32::from_gray(208);
-pub const TEXT_STRONG: Color32 = Color32::from_gray(240);
-
-/// Warnings and errors only, muted.
-pub const WARN: Color32 = Color32::from_rgb(196, 160, 92);
-pub const ERROR: Color32 = Color32::from_rgb(194, 108, 100);
-
-pub const RADIUS: u8 = 6;
-
 pub fn apply(ctx: &egui::Context) {
-    let mut v = Visuals::dark();
-    let r = CornerRadius::same(RADIUS);
-    v.panel_fill = BG;
-    v.window_fill = PANEL;
-    v.extreme_bg_color = FIELD;
-    v.faint_bg_color = Color32::from_gray(24);
-    v.code_bg_color = FIELD;
-    v.window_stroke = Stroke::new(1.0_f32, LINE);
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        ctx.style_mut_of(theme, |s| {
+            s.visuals = visuals(theme);
+            s.spacing.item_spacing = egui::vec2(10.0, 8.0);
+            s.spacing.button_padding = egui::vec2(14.0, 6.0);
+            s.spacing.interact_size.y = 28.0;
+            s.spacing.window_margin = Margin::same(14);
+            s.spacing.scroll.bar_width = 8.0;
+            s.spacing.scroll.floating = true;
+            s.animation_time = 0.0; // no animation: draw on input only
+            s.text_styles.insert(TextStyle::Heading, FontId::new(22.0, FontFamily::Proportional));
+            s.text_styles.insert(TextStyle::Body, FontId::new(14.5, FontFamily::Proportional));
+            s.text_styles.insert(TextStyle::Button, FontId::new(14.5, FontFamily::Proportional));
+            s.text_styles.insert(TextStyle::Small, FontId::new(12.0, FontFamily::Proportional));
+            s.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
+        });
+    }
+}
+
+pub fn set_appearance(ctx: &egui::Context, appearance: &Appearance) {
+    use crate::core::store::ThemeChoice;
+    ctx.set_theme(match appearance.theme {
+        ThemeChoice::Dark => egui::ThemePreference::Dark,
+        ThemeChoice::Light => egui::ThemePreference::Light,
+        ThemeChoice::System => egui::ThemePreference::System,
+    });
+    ctx.set_zoom_factor(f32::from(appearance.scale_percent.clamp(80, 150)) / 100.0);
+}
+
+fn visuals(theme: egui::Theme) -> Visuals {
+    let dark = theme == egui::Theme::Dark;
+    let gray = |d, l| Color32::from_gray(if dark { d } else { l });
+    let mut v = if dark { Visuals::dark() } else { Visuals::light() };
+    let panel = gray(27, 245);
+    let line = gray(52, 198);
+    let outline = gray(113, 105);
+    let text = gray(208, 39);
+    let strong = gray(240, 20);
+    let active = gray(60, 201);
+    let field = gray(16, 252);
+    v.panel_fill = gray(20, 234);
+    v.window_fill = panel;
+    v.extreme_bg_color = field;
+    v.faint_bg_color = gray(24, 239);
+    v.code_bg_color = field;
+    v.window_stroke = Stroke::new(1.0_f32, line);
     v.window_corner_radius = CornerRadius::same(8);
-    v.override_text_color = None;
-    v.hyperlink_color = TEXT_STRONG;
-    v.warn_fg_color = WARN;
-    v.error_fg_color = ERROR;
-    v.selection.bg_fill = Color32::from_gray(70);
-    v.selection.stroke = Stroke::new(1.0_f32, TEXT_STRONG);
+    v.weak_text_color = Some(gray(186, 70));
+    v.hyperlink_color = strong;
+    v.warn_fg_color = if dark { Color32::from_rgb(215, 178, 107) } else { Color32::from_rgb(112, 71, 19) };
+    v.error_fg_color = if dark { Color32::from_rgb(231, 145, 138) } else { Color32::from_rgb(143, 47, 44) };
+    v.selection.bg_fill = gray(70, 188);
+    v.selection.stroke = Stroke::new(1.0_f32, strong);
     v.popup_shadow = egui::Shadow::NONE;
     v.window_shadow = egui::Shadow::NONE;
 
     let w = &mut v.widgets;
-    w.noninteractive.bg_fill = PANEL;
-    w.noninteractive.weak_bg_fill = PANEL;
-    w.noninteractive.bg_stroke = Stroke::new(1.0_f32, LINE);
-    w.noninteractive.fg_stroke = Stroke::new(1.0_f32, TEXT);
-    w.noninteractive.corner_radius = r;
-    w.inactive.bg_fill = Color32::from_gray(40);
-    w.inactive.weak_bg_fill = Color32::from_gray(38);
-    w.inactive.bg_stroke = Stroke::new(1.0_f32, LINE);
-    w.inactive.fg_stroke = Stroke::new(1.0_f32, TEXT);
-    w.inactive.corner_radius = r;
-    w.hovered.bg_fill = HOVER;
-    w.hovered.weak_bg_fill = HOVER;
-    w.hovered.bg_stroke = Stroke::new(1.0_f32, LINE_STRONG);
-    w.hovered.fg_stroke = Stroke::new(1.0_f32, TEXT_STRONG);
-    w.hovered.corner_radius = r;
-    w.active.bg_fill = ACTIVE;
-    w.active.weak_bg_fill = ACTIVE;
-    w.active.bg_stroke = Stroke::new(1.0_f32, TEXT);
-    w.active.fg_stroke = Stroke::new(1.0_f32, TEXT_STRONG);
-    w.active.corner_radius = r;
-    w.open.bg_fill = ACTIVE;
-    w.open.weak_bg_fill = ACTIVE;
-    w.open.bg_stroke = Stroke::new(1.0_f32, LINE_STRONG);
-    w.open.fg_stroke = Stroke::new(1.0_f32, TEXT_STRONG);
-    w.open.corner_radius = r;
-    ctx.set_visuals(v);
-
-    ctx.style_mut(|s| {
-        s.spacing.item_spacing = egui::vec2(10.0, 8.0);
-        s.spacing.button_padding = egui::vec2(14.0, 6.0);
-        s.spacing.interact_size.y = 28.0;
-        s.spacing.window_margin = Margin::same(14);
-        s.spacing.scroll.bar_width = 8.0;
-        s.spacing.scroll.floating = true;
-        s.animation_time = 0.0; // no animation: draw on input only
-        s.text_styles.insert(TextStyle::Heading, FontId::new(22.0, FontFamily::Proportional));
-        s.text_styles.insert(TextStyle::Body, FontId::new(14.5, FontFamily::Proportional));
-        s.text_styles.insert(TextStyle::Button, FontId::new(14.5, FontFamily::Proportional));
-        s.text_styles.insert(TextStyle::Small, FontId::new(12.0, FontFamily::Proportional));
-        s.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
-    });
+    for (style, fill, border, foreground) in [
+        (&mut w.noninteractive, panel, line, text),
+        (&mut w.inactive, gray(40, 223), line, text),
+        (&mut w.hovered, gray(48, 212), outline, strong),
+        (&mut w.active, active, outline, strong),
+        (&mut w.open, active, outline, strong),
+    ] {
+        style.bg_fill = fill;
+        style.weak_bg_fill = fill;
+        style.bg_stroke = Stroke::new(1.0_f32, border);
+        style.fg_stroke = Stroke::new(1.0_f32, foreground);
+        style.corner_radius = CornerRadius::same(6);
+    }
+    v
 }
 
-/// A raised group: one lightness step above the page, thin outline.
-pub fn card() -> egui::Frame {
+pub struct Palette {
+    pub chart: [Color32; 4],
+    pub badge: Stroke,
+    pub badge_selected: Stroke,
+}
+
+pub fn palette(v: &Visuals) -> Palette {
+    let chart = if v.dark_mode { [235, 182, 133, 99] } else { [26, 67, 100, 124] };
+    Palette {
+        chart: chart.map(Color32::from_gray),
+        badge: Stroke::new(1.0_f32, v.weak_text_color()),
+        badge_selected: Stroke::new(1.0_f32, v.strong_text_color()),
+    }
+}
+
+fn card_fill(v: &Visuals) -> Color32 {
+    Color32::from_gray(if v.dark_mode { 34 } else { 248 })
+}
+
+pub fn card(ui: &egui::Ui) -> egui::Frame {
+    let v = ui.visuals();
     egui::Frame::new()
-        .fill(CARD)
-        .stroke(Stroke::new(1.0_f32, LINE))
+        .fill(card_fill(v))
+        .stroke(v.window_stroke)
         .corner_radius(CornerRadius::same(8))
         .inner_margin(Margin::same(16))
 }
 
-/// A quiet strip (header, status bar).
-pub fn bar() -> egui::Frame {
-    egui::Frame::new().fill(PANEL).inner_margin(Margin::symmetric(18, 10))
+pub fn bar(ctx: &egui::Context) -> egui::Frame {
+    egui::Frame::new().fill(ctx.style().visuals.window_fill).inner_margin(Margin::symmetric(18, 10))
 }
 
 pub fn dim(text: impl Into<String>) -> egui::RichText {
-    egui::RichText::new(text).color(TEXT_DIM)
+    egui::RichText::new(text).weak()
 }
 
 pub fn strong(text: impl Into<String>) -> egui::RichText {
-    egui::RichText::new(text).color(TEXT_STRONG).strong()
+    egui::RichText::new(text).strong()
 }
 
-/// The one prominent button on a screen: light fill, dark text.
 pub fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    let b = egui::Button::new(egui::RichText::new(text).color(Color32::from_gray(18)).strong().size(17.0))
-        .fill(Color32::from_gray(222))
+    let v = ui.visuals();
+    let b = egui::Button::new(egui::RichText::new(text).color(v.panel_fill).strong().size(17.0))
+        .fill(v.strong_text_color())
         .stroke(Stroke::NONE)
         .min_size(egui::vec2(180.0, 46.0))
         .corner_radius(CornerRadius::same(8));
     ui.add(b)
 }
 
-/// Small outlined text label used for risk and status badges (text carries the meaning, not color).
 pub fn badge(ui: &mut egui::Ui, text: &str, strong_look: bool) {
-    let (fg, line) = if strong_look { (TEXT_STRONG, LINE_STRONG) } else { (TEXT_DIM, LINE) };
+    let colors = palette(ui.visuals());
+    let stroke = if strong_look { colors.badge_selected } else { colors.badge };
     egui::Frame::new()
-        .stroke(Stroke::new(1.0_f32, line))
+        .stroke(stroke)
         .corner_radius(CornerRadius::same(4))
         .inner_margin(Margin::symmetric(6, 1))
         .show(ui, |ui| {
-            ui.label(egui::RichText::new(text).size(11.5).color(fg));
+            ui.label(egui::RichText::new(text).size(11.5).color(stroke.color));
         });
 }
 
-pub fn warn_text(text: impl Into<String>) -> egui::RichText {
-    egui::RichText::new(text).color(WARN)
+pub fn warn_text(ui: &egui::Ui, text: impl Into<String>) -> egui::RichText {
+    egui::RichText::new(text).color(ui.visuals().warn_fg_color)
 }
 
-pub fn error_text(text: impl Into<String>) -> egui::RichText {
-    egui::RichText::new(text).color(ERROR)
+pub fn error_text(ui: &egui::Ui, text: impl Into<String>) -> egui::RichText {
+    egui::RichText::new(text).color(ui.visuals().error_fg_color)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn luminance(color: Color32) -> f64 {
+        let linear = |s: u8| {
+            let s = f64::from(s) / 255.0;
+            if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
+    }
+
+    fn contrast(a: Color32, b: Color32) -> f64 {
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn both_themes_meet_text_contrast() {
+        for theme in [egui::Theme::Dark, egui::Theme::Light] {
+            let v = visuals(theme);
+            for bg in [v.panel_fill, v.window_fill, card_fill(&v), v.extreme_bg_color, v.selection.bg_fill] {
+                for fg in [v.text_color(), v.weak_text_color()] {
+                    assert!(contrast(fg, bg) >= 4.5, "{theme:?}: {fg:?} on {bg:?}");
+                }
+                assert!(contrast(v.strong_text_color(), bg) >= 3.0);
+            }
+            assert!(contrast(v.panel_fill, v.strong_text_color()) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn system_preference_follows_platform_input() {
+        let ctx = egui::Context::default();
+        apply(&ctx);
+        set_appearance(&ctx, &Appearance::default());
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            let _ = ctx.run(egui::RawInput { system_theme: Some(theme), ..Default::default() }, |ctx| {
+                assert_eq!(ctx.theme(), theme);
+                assert_eq!(ctx.style().visuals.panel_fill, visuals(theme).panel_fill);
+            });
+        }
+    }
 }

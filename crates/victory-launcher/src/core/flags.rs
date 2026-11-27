@@ -39,7 +39,7 @@ fn risk_badge(ui: &mut egui::Ui, risk: Risk) {
 
 fn mine(core: &mut CoreState, ui: &mut egui::Ui) {
     let reg = registry();
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("flags.mine")).size(16.0));
         ui.label(theme::dim(tr("flags.mine_help")).size(12.5));
@@ -52,7 +52,7 @@ fn mine(core: &mut CoreState, ui: &mut egui::Ui) {
         for (i, f) in core.extra.iter_mut().enumerate() {
             ui.horizontal(|ui| {
                 changed |= ui.checkbox(&mut f.enabled, "").changed();
-                ui.label(egui::RichText::new(&f.name).monospace().color(if f.enabled { theme::TEXT_STRONG } else { theme::TEXT_DIM }));
+                ui.label(egui::RichText::new(&f.name).monospace().color(if f.enabled { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() }));
                 match reg.get(&f.name) {
                     Some(flag) => risk_badge(ui, flag.risk),
                     None => theme::badge(ui, tr("flags.custom"), false),
@@ -108,7 +108,7 @@ fn add_row(core: &mut CoreState, ui: &mut egui::Ui, changed: &mut bool) {
     let state = &mut core.ui.flags;
     let typed = state.add_name.trim().to_ascii_uppercase();
     if !typed.is_empty() && !valid_name(&typed) {
-        ui.label(theme::warn_text(tr("flags.bad_name")).size(12.5));
+        ui.label(theme::warn_text(ui, tr("flags.bad_name")).size(12.5));
     } else if !typed.is_empty() && reg.get(&typed).is_none() {
         ui.label(theme::dim(tr("flags.unknown_ok")).size(12.5));
     }
@@ -190,7 +190,7 @@ fn registry_list(core: &mut CoreState, ui: &mut egui::Ui) {
                 ui.vertical(|ui| {
                     ui.set_width((ui.available_width() - 90.0).max(200.0));
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(&f.name).monospace().color(theme::TEXT_STRONG));
+                        ui.label(egui::RichText::new(&f.name).monospace().color(ui.visuals().strong_text_color()));
                         risk_badge(ui, f.risk);
                         let kind = match f.kind {
                             Kind::Switch => "switch",

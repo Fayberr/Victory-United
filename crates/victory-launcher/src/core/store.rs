@@ -3,6 +3,28 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThemeChoice {
+    Dark,
+    Light,
+    #[default]
+    System,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct Appearance {
+    pub theme: ThemeChoice,
+    pub scale_percent: u16,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self { theme: ThemeChoice::System, scale_percent: 100 }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -20,6 +42,7 @@ pub struct Settings {
     pub dirs: std::collections::BTreeMap<String, String>,
     /// The first-run walk-through was finished or skipped.
     pub setup_done: bool,
+    pub appearance: Appearance,
 }
 
 impl Default for Settings {
@@ -32,6 +55,7 @@ impl Default for Settings {
             language: "en".into(),
             dirs: Default::default(),
             setup_done: false,
+            appearance: Appearance::default(),
         }
     }
 }

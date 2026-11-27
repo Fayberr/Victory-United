@@ -96,12 +96,13 @@ impl App {
         } else {
             (core::CoreState::new(ctx.clone()), ops::OpsState::new(ctx), Default::default())
         };
+        theme::set_appearance(&cc.egui_ctx, &core.settings.appearance);
         let capture = args.capture.map(Capture::new);
         Self { tab: Tab::Play, core, ops, shared, capture }
     }
 
     fn header(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("header").frame(theme::bar().inner_margin(egui::Margin::symmetric(18, 12))).show(ctx, |ui| {
+        egui::TopBottomPanel::top("header").frame(theme::bar(ctx).inner_margin(egui::Margin::symmetric(18, 12))).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label(theme::strong(tr("app.name")).size(18.0));
                 ui.add_space(24.0);
@@ -116,7 +117,7 @@ impl App {
                     let text = if on { theme::strong(tab.label()) } else { egui::RichText::new(tab.label()) };
                     let mut b = egui::Button::new(text).min_size(egui::vec2(0.0, 30.0));
                     b = if on {
-                        b.fill(theme::ACTIVE).stroke(egui::Stroke::new(1.0_f32, theme::LINE_STRONG))
+                        b.fill(ui.visuals().widgets.active.bg_fill).stroke(egui::Stroke::new(1.0_f32, ui.visuals().widgets.hovered.bg_stroke.color))
                     } else {
                         b.fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE)
                     };
@@ -129,7 +130,7 @@ impl App {
     }
 
     fn status_bar(&self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("status").frame(theme::bar().inner_margin(egui::Margin::symmetric(18, 7))).show(ctx, |ui| {
+        egui::TopBottomPanel::bottom("status").frame(theme::bar(ctx).inner_margin(egui::Margin::symmetric(18, 7))).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let state = match self.shared.game_pid {
                     Some(pid) => format!("{} (pid {pid})", tr("status.running")),
@@ -163,7 +164,7 @@ impl eframe::App for App {
         }
         self.header(ctx);
         self.status_bar(ctx);
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG).inner_margin(egui::Margin::symmetric(28, 22))).show(ctx, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(ctx.style().visuals.panel_fill).inner_margin(egui::Margin::symmetric(28, 22))).show(ctx, |ui| {
             match self.tab {
                 Tab::Play => core::play::show(&mut self.core, &self.shared, ui),
                 Tab::Settings => core::settings::show(&mut self.core, &self.shared, ui),

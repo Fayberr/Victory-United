@@ -179,7 +179,7 @@ pub fn show(ops: &mut OpsState, shared: &Shared, ui: &mut egui::Ui) {
 }
 
 fn builds_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("dev.engine")));
         let running = shared.game_pid.is_some();
@@ -218,13 +218,13 @@ fn builds_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
             }
         });
         if !ops.cfg.own_engine.is_empty() && !Path::new(&ops.cfg.own_engine).is_file() {
-            ui.label(theme::warn_text(tr("dev.own_missing")));
+            ui.label(theme::warn_text(ui, tr("dev.own_missing")));
         }
     });
 }
 
 fn profiler_card(ui: &mut egui::Ui, ops: &mut OpsState) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("dev.profiler")));
         ui.add(egui::Label::new(theme::dim(tr("dev.profiler_help")).size(12.5)).wrap());
@@ -253,7 +253,7 @@ fn profiler_card(ui: &mut egui::Ui, ops: &mut OpsState) {
                 }
             }
             Err(_) => {
-                ui.label(theme::warn_text(tr("dev.profile_invalid")));
+                ui.label(theme::warn_text(ui, tr("dev.profile_invalid")));
             }
         });
         if let Some(n) = &d.profile_note {
@@ -280,7 +280,7 @@ pub fn add_flag_to(path: &Path, name: &str, value: &str) -> Result<(), String> {
 }
 
 fn log_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("dev.log")));
         ui.horizontal(|ui| {
@@ -308,7 +308,7 @@ fn log_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
         }
         let needle = ops.dev.search.to_lowercase();
         let lines: Vec<&str> = ops.dev.log_text.lines().filter(|l| needle.is_empty() || l.to_lowercase().contains(&needle)).collect();
-        egui::Frame::new().fill(theme::FIELD).inner_margin(egui::Margin::same(8)).corner_radius(6).show(ui, |ui| {
+        egui::Frame::new().fill(ui.visuals().extreme_bg_color).inner_margin(egui::Margin::same(8)).corner_radius(6).show(ui, |ui| {
             egui::ScrollArea::vertical().max_height(240.0).auto_shrink([false, true]).stick_to_bottom(true).show_rows(ui, 15.0, lines.len(), |ui, range| {
                 for l in &lines[range] {
                     ui.label(egui::RichText::new(*l).monospace().size(12.0));
@@ -322,7 +322,7 @@ fn log_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
 }
 
 fn folders_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("dev.folders")));
         ui.horizontal_wrapped(|ui| {
@@ -349,7 +349,7 @@ fn folders_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
                 ui.label(trf("dev.cache_size", &[("size", &mb(b))]));
             }
             if ops.dev.confirm_clear {
-                ui.label(theme::warn_text(tr("dev.cache_ask")));
+                ui.label(theme::warn_text(ui, tr("dev.cache_ask")));
                 if ui.button(tr("dev.cache_yes")).clicked() {
                     ops.dev.note = Some(match clear_cache(&paths::cache_root()) {
                         Ok(b) => trf("dev.cache_cleared", &[("size", &mb(b))]),
@@ -372,7 +372,7 @@ fn folders_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
 }
 
 fn env_card(ui: &mut egui::Ui, shared: &Shared) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("dev.env")));
         ui.label(theme::dim(tr("dev.env_help")).size(12.5));

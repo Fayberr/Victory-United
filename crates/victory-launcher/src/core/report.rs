@@ -224,7 +224,7 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
     let scroll = core.page_scroll.take();
     page_scroll(ui, scroll, |ui| {
         ui.set_max_width(820.0);
-        theme::card().show(ui, |ui| {
+        theme::card(ui).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(theme::dim(tr("report.items_help")).size(12.5));
             ui.add_space(6.0);
@@ -236,7 +236,7 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
                 });
                 egui::CollapsingHeader::new(theme::dim(tr("report.preview")).size(12.5)).id_salt(item.file).default_open(core.ui.demo && item.file == "flags.txt").show(ui, |ui| {
                     let preview: String = item.text.lines().take(40).collect::<Vec<_>>().join("\n");
-                    egui::Frame::new().fill(theme::FIELD).corner_radius(egui::CornerRadius::same(6)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+                    egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(egui::CornerRadius::same(6)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.label(egui::RichText::new(preview).monospace().size(12.0));
                         if item.text.lines().count() > 40 {
