@@ -1,6 +1,6 @@
 use super::*;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 
 #[test]
 fn layout_is_stable() {
@@ -61,6 +61,8 @@ fn a_torn_read_is_never_valid() {
     let stop = Arc::new(AtomicBool::new(false));
     let block = w.block as usize;
     let s2 = stop.clone();
+    let seen = Arc::new(AtomicU64::new(0));
+    let seen2 = seen.clone();
     let reader = std::thread::spawn(move || {
         let b = unsafe { &*(block as *const Block) };
         let (mut ok, mut none) = (0u32, 0u32);
@@ -68,6 +70,7 @@ fn a_torn_read_is_never_valid() {
             match b.snapshot() {
                 Some(s) => {
                     ok += 1;
+                    seen2.store(ok as u64, Ordering::Relaxed);
                     for (i, f) in s.frames_recent.iter().enumerate() {
                         let n = s.frames - s.frames_recent.len() as u64 + i as u64;
                         assert_eq!(f.qpc, n + 1, "torn sample");
@@ -81,7 +84,11 @@ fn a_torn_read_is_never_valid() {
         }
         (ok, none)
     });
-    for n in 1..=300_000u64 {
+    // Keep writing until the reader has validated plenty of snapshots (or 5 s passed).
+    let t = std::time::Instant::now();
+    let mut n = 0u64;
+    while (seen.load(Ordering::Relaxed) < 2000 || n < 300_000) && t.elapsed().as_secs() < 5 {
+        n += 1;
         w.frame(n, n as u32, n as u32);
     }
     stop.store(true, Ordering::Relaxed);
