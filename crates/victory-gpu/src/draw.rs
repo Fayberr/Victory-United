@@ -1458,6 +1458,37 @@ pub(crate) static HEAP_TEXTURES_QUEUE: [AtomicU64; 5] = [const { AtomicU64::new(
 pub(crate) static HEAP_TEXTURES_PARTLY: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 static DROPPED: AtomicU64 = AtomicU64::new(0);
 
+/// `n` consecutive dynamic slots of `host` ([`crate::descriptor::host::HostHeap::dynamic`]).
+/// With none free, the flights in the air are landed first, which gives
+/// back the slots of their lists, and the slots are asked for again.
+/// `None`: refused again; the caller drops its draw or dispatch.
+///
+/// With submissions sent ahead (`crate::host::late`) the landing waits
+/// until nothing is in the air, and it is counted as a blocking fence wait;
+/// diagnostics builds count these waits and the tables refused after them
+/// apart (the frame line's "dynamic slots"), so that a wait for slots is
+/// not taken for the title's.
+fn dynamic_or_settle(host: &crate::descriptor::host::HostHeap, n: u32) -> Option<u32> {
+    if let Some(first) = host.dynamic(n) {
+        return Some(first);
+    }
+    #[cfg(feature = "diagnostics")]
+    let started = std::time::Instant::now();
+    crate::host::settle_for_fence();
+    #[cfg(feature = "diagnostics")]
+    {
+        use crate::copystat::{C, add};
+        add(C::DynamicSettles, 1);
+        add(C::DynamicSettleUs, started.elapsed().as_micros() as u64);
+    }
+    let first = host.dynamic(n);
+    #[cfg(feature = "diagnostics")]
+    if first.is_none() {
+        crate::copystat::add(crate::copystat::C::DynamicLost, 1);
+    }
+    first
+}
+
 /// Marks the last traced draw as not run on the host.
 #[cfg(feature = "diagnostics")]
 fn dropped(pipeline: usize) {
@@ -2724,10 +2755,7 @@ impl State {
             Some((index, shadow)) => (*index, address.zip(shadow.clone())),
             None => {
                 let shadow = address.and_then(|a| find(a).map(|s| (a, s)));
-                let Some(index) = host.dynamic(1).or_else(|| {
-                    crate::host::settle_for_fence();
-                    host.dynamic(1)
-                }) else {
+                let Some(index) = dynamic_or_settle(host, 1) else {
                     #[cfg(feature = "diagnostics")]
                     crate::pipeline::note_why("no free dynamic slot for the one-view table of a root view".to_owned());
                     return prepare_failed!(self, RootUavSlot);
@@ -2800,10 +2828,7 @@ impl State {
             Some((index, shadow)) => (*index, address.zip(shadow.clone())),
             None => {
                 let shadow = address.and_then(|a| crate::shadow::find(a, 1).map(|s| (a, s)));
-                let Some(index) = host.dynamic(1).or_else(|| {
-                    crate::host::settle_for_fence();
-                    host.dynamic(1)
-                }) else {
+                let Some(index) = dynamic_or_settle(host, 1) else {
                     #[cfg(feature = "diagnostics")]
                     crate::pipeline::note_why("no free dynamic slot for the one-view table of a root view".to_owned());
                     return prepare_failed!(self, RootSrvSlot);
@@ -5532,10 +5557,7 @@ impl State {
             }
             #[cfg(feature = "diagnostics")]
             let mut clock = table_asked(&mut self.recording, table, n);
-            let Some(first) = host.dynamic(n).or_else(|| {
-                crate::host::settle_for_fence();
-                host.dynamic(n)
-            }) else {
+            let Some(first) = dynamic_or_settle(host, n) else {
                 // No room: the draw must not run with the title's own
                 // offsets (slots never made for it); `bind` drops it.
                 made.push((slot, u32::MAX));

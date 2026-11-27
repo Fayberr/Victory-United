@@ -2340,6 +2340,9 @@ impl HostHeap {
             {
                 use crate::copystat::{C, add};
                 add(C::DynamicRefused, 1);
+                if self.in_pieces(n as u32) {
+                    add(C::DynamicPieces, 1);
+                }
                 add(C::DynamicNs, started.elapsed().as_nanos() as u64);
             }
             return None;
@@ -2354,6 +2357,14 @@ impl HostHeap {
         self.free.fetch_sub(n as u32, std::sync::atomic::Ordering::Relaxed);
         *next = ((first + n) % end) as u32;
         Some(self.count + first as u32)
+    }
+
+    /// Whether `n` dynamic slots are free in all: when [`HostHeap::dynamic`]
+    /// refuses `n` all the same, the free ones are in pieces, none `n`
+    /// together; otherwise they are taken (by lists not yet run).
+    #[cfg_attr(not(feature = "diagnostics"), allow(dead_code))]
+    fn in_pieces(&self, n: u32) -> bool {
+        self.free.load(std::sync::atomic::Ordering::Relaxed) >= n
     }
 
     /// The title slots this heap has host slots for; fewer than the title's
@@ -8109,6 +8120,32 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         let last = first + heap.dynamic - 1;
         heap.release(heap.id(), last, 1);
         assert_eq!(heap.dynamic(2), None);
+    }
+
+    /// A refusal tells free slots in pieces from slots taken (the frame
+    /// line counts the first apart), and a run given back twice is free
+    /// once: a full pool is never taken for one in pieces.
+    #[test]
+    fn refused_slots_in_pieces_are_told_from_taken_ones() {
+        let Some(heap) = HostHeap::new(false, 4) else {
+            return; // no host GPU
+        };
+        // Every slot in runs of two (the pool is a power of two), then every
+        // other run given back: half of them free, no four together.
+        let runs: Vec<u32> = std::iter::from_fn(|| heap.dynamic(2)).collect();
+        assert_eq!(runs.len() as u32, heap.dynamic / 2);
+        assert!(!heap.in_pieces(1));
+        for &first in runs.iter().step_by(2) {
+            heap.release(heap.id(), first, 2);
+        }
+        assert_eq!(heap.dynamic(4), None);
+        assert!(heap.in_pieces(4));
+        // Given back again: nothing more is free.
+        heap.release(heap.id(), runs[0], 2);
+        let again: Vec<u32> = std::iter::from_fn(|| heap.dynamic(2)).collect();
+        assert_eq!(again.len(), runs.len().div_ceil(2));
+        assert_eq!(heap.dynamic(1), None);
+        assert!(!heap.in_pieces(1));
     }
 
     #[test]

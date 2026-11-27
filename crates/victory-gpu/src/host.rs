@@ -14671,7 +14671,8 @@ impl Host {
         height: u32,
         format: DXGI_FORMAT,
     ) -> windows::core::Result<Presenter> {
-        let hwnd = match title_window() {
+        let title = title_window();
+        let hwnd = match title {
             Some(hwnd) => hwnd,
             None => window(width, height)?,
         };
@@ -14698,7 +14699,9 @@ impl Host {
             // Alt+Enter is the title window's own switch to and from full
             // screen (frameless, the swap chain stretched); DXGI's would make
             // it exclusive full screen, whose buffers nothing resizes.
-            let _ = factory.MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
+            if title.is_some() {
+                let _ = factory.MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
+            }
             let copy = self.new_list()?;
             copy.close();
             tracing::info!(width, height, format = format.0, "presenting to a window");
