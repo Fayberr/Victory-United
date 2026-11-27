@@ -52,7 +52,9 @@ Branch `launcher/ops`. Core's theme and capture mode were merged once (`d2433b3d
 - The profiler is only a string builder plus a flag; launching belongs to core's Play flow.
 - The launcher's own update is a "newer launcher exists" line with a link only.
 - Overlay is `show_viewport_immediate`, so it only redraws when the main window updates.
-- `package.ps1` result on the WinPC dry run: see the end of this file.
+- `package.ps1` was only run as a dry run on a fake engine folder (`test-package.ps1`, passes on the WinPC: manifest,
+  SHA-256, no .pdb, current.txt, DLSS file refused). Not run on a real engine build, so what a real build needs next to
+  `victory.exe` (D3D12 folder, DLLs) was NOT inspected; the script copies the whole folder.
 
 ## Gates
 

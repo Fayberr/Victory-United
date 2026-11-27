@@ -9,10 +9,11 @@ $e = $m.channels.stable.engines[0]
 if ($m.schema -ne 1 -or $e.kind -ne 'release' -or $e.build -notlike 'abcdef01*') { throw 'manifest content is wrong' }
 if ((Get-FileHash "$tmp\dist\engine-abcdef01-release.zip" -Algorithm SHA256).Hash.ToLower() -ne $e.sha256) { throw 'sha256 mismatch' }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$names = [IO.Compression.ZipFile]::OpenRead("$tmp\dist\engine-abcdef01-release.zip").Entries.FullName
+function Get-ZipNames($path) { $z = [IO.Compression.ZipFile]::OpenRead($path); try { $z.Entries.FullName } finally { $z.Dispose() } }
+$names = Get-ZipNames "$tmp\dist\engine-abcdef01-release.zip"
 if ($names -notcontains 'victory.exe') { throw 'victory.exe missing in engine zip' }
 if ($names -contains 'victory.pdb') { throw 'pdb must not be packaged' }
-$full = [IO.Compression.ZipFile]::OpenRead((Get-ChildItem "$tmp\dist\victory-united-*.zip").FullName).Entries.FullName
+$full = Get-ZipNames (Get-ChildItem "$tmp\dist\victory-united-*.zip").FullName
 if (-not ($full -match 'current\.txt')) { throw 'current.txt missing' }
 # A DLSS file must make the script refuse.
 Set-Content "$eng\nvngx_dlss.dll" 'x'
