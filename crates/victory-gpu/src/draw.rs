@@ -5116,7 +5116,7 @@ struct FreshTable {
 
 /// Try sharing one dynamic descriptor snapshot between pipeline stages.
 fn share_table_snapshots() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_SHARED_TABLE_SNAPSHOTS").is_some_and(|value| value == "1"))
 }
 
