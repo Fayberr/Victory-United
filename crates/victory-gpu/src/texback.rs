@@ -142,7 +142,7 @@ impl Target {
 
 /// The readback resources and the allocation the pixels belong to.
 pub(crate) struct Back {
-    buffer: ID3D12Resource,
+    buffer: crate::host::TextureReadback,
     footprints: Vec<D3D12_PLACED_SUBRESOURCE_FOOTPRINT>,
     rows: Vec<u32>,
     mips: u32,
@@ -193,14 +193,14 @@ pub(crate) fn record(list: &ID3D12GraphicsCommandList, target: Target) -> Option
             .checked_mul(u64::from(format.Depth))?;
         total = total.max(footprint.Offset.checked_add(pitched)?);
     }
-    let buffer = host.read_back_buffer(total)?;
+    let buffer = host.texture_readback_buffer(total)?;
     // With device-removed data on: a page fault in it, alive or freed, is
     // reported under this name (it was "unnamed").
-    crate::host::name_frame(&buffer, || format!("texback read-back buffer of {total} bytes"));
+    crate::host::name_frame(buffer.resource(), || format!("texback read-back buffer of {total} bytes"));
     for (i, footprint) in footprints.iter().enumerate() {
         let to = D3D12_TEXTURE_COPY_LOCATION {
             // SAFETY: a borrowed pointer the location never releases.
-            pResource: unsafe { std::mem::transmute_copy(&buffer) },
+            pResource: unsafe { std::mem::transmute_copy(buffer.resource()) },
             Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
             Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 { PlacedFootprint: *footprint },
         };
@@ -244,6 +244,7 @@ struct Landing {
     ticket: Arc<Ticket>,
     /// The read-back buffer's bytes, from 0 to the end of its last subresource.
     data: Vec<u8>,
+    stats: crate::host::ReadbackStats,
 }
 
 /// Once the list has run, tile its texels back into the same title allocation
@@ -260,15 +261,20 @@ pub(crate) fn land(back: &Back) {
         .map(|(f, &rows)| f.Offset as usize + f.Footprint.RowPitch as usize * rows as usize * f.Footprint.Depth as usize)
         .max()
         .unwrap_or(0);
+    let buffer = back.buffer.resource();
     let mut mapped = std::ptr::null_mut();
     // SAFETY: our read-back buffer, written by the list that has run; `len`
     // ends with its last subresource, which it holds.
     let data = unsafe {
-        if back.buffer.Map(0, None, Some(&mut mapped)).is_err() || mapped.is_null() {
+        if buffer.Map(0, None, Some(&mut mapped)).is_err() {
+            return;
+        }
+        if mapped.is_null() {
+            buffer.Unmap(0, None);
             return;
         }
         let data = std::slice::from_raw_parts(mapped.cast::<u8>().cast_const(), len).to_vec();
-        back.buffer.Unmap(0, None);
+        buffer.Unmap(0, None);
         data
     };
     let landing = Landing {
@@ -278,6 +284,7 @@ pub(crate) fn land(back: &Back) {
         layout: back.layout.clone(),
         ticket: back.ticket.clone(),
         data,
+        stats: back.buffer.stats(),
     };
     match asynchronous().then(writer).flatten() {
         Some(writer) => writer.send(landing),
@@ -329,7 +336,22 @@ fn write(landing: &Landing) {
     count(stat::TB_WRITTEN, 1);
     let copied = COPIED.fetch_add(1, Ordering::Relaxed) + 1;
     if copied == 1 || copied.is_multiple_of(128) {
-        tracing::info!(copied, bytes = size, "texture readback landed");
+        let stats = landing.stats;
+        tracing::info!(
+            copied,
+            bytes = size,
+            created = stats.created,
+            reused = stats.reused,
+            allocation_failures = stats.allocation_failures,
+            allocation_us = stats.allocation_us,
+            peak_allocation_us = stats.peak_allocation_us,
+            active_buffers = stats.active_buffers,
+            active_bytes = stats.active_bytes,
+            peak_active_bytes = stats.peak_active_bytes,
+            idle_bytes = stats.idle_bytes,
+            peak_idle_bytes = stats.peak_idle_bytes,
+            "texture readback landed"
+        );
     }
 }
 
@@ -380,6 +402,42 @@ fn writer() -> Option<&'static Writer> {
     })
 }
 
+/// Register the initialized upload row copied by the host's test list as a
+/// linear 1×1 readback, so it goes through the real landing/reset path.
+#[cfg(test)]
+pub(crate) fn buffer_back_for_test(buffer: crate::host::TextureReadback, dst: &mut [u8; 256]) -> Back {
+    use victory_formats::texture::{Desc, Dimension, Layout, Swizzle};
+    let layout = Layout::new(&Desc {
+        dimension: Dimension::Tex2d,
+        width: 1,
+        height: 1,
+        depth: 1,
+        mips: 1,
+        element_bytes: 4,
+        block: 1,
+        samples: 1,
+        swizzle: Swizzle::LINEAR,
+    }).unwrap();
+    assert_eq!(layout.size, dst.len() as u64);
+    let at = dst.as_mut_ptr() as usize;
+    Back {
+        buffer,
+        footprints: vec![D3D12_PLACED_SUBRESOURCE_FOOTPRINT {
+            Offset: 0,
+            Footprint: D3D12_SUBRESOURCE_FOOTPRINT {
+                Format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R32_UINT,
+                Width: 1,
+                Height: 1,
+                Depth: 1,
+                RowPitch: 256,
+            },
+        }],
+        rows: vec![1],
+        mips: 1,
+        layout,
+        ticket: track(at, at, at + dst.len()),
+    }
+}
 
 #[cfg(test)]
 mod tests {
