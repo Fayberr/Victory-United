@@ -35,6 +35,14 @@ by the project owner's decision (2026-11-23), entered as an exception in
 repository's licence does not cover them. Nothing else of this kind is
 accepted.
 
+## The logo
+
+`branding/` holds the project's own logo, drawn by the project owner, by the owner's decision
+(2026-11-27): `vu-banner.png`, `vu-icon.png`, `vu-icon.ico` and `vu-social-preview.png`. They are our own
+artwork, used in the README, as the launcher's icon and as the repository's social image.
+`xtask/src/policy.rs` allows exactly these four names, each only if it really is a PNG or ICO file and
+under 256 KiB. Any other picture anywhere is still refused.
+
 ## Run logs
 
 `diagnostics/` holds the layer's own logs of test and play runs, by the

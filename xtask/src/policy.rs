@@ -36,6 +36,18 @@ const EXCEPTIONS: &[(&str, &str)] = &[(
     "the BCPack format's constant tables: nothing decodes without them and they cannot be derived (owner's decision, 2026-11-23; docs/asset-policy.md)",
 )];
 
+/// The project's own logo, by the owner's decision (2026-11-27; docs/asset-policy.md): exactly these
+/// files, each of the type its name says and no larger than [`BRANDING_MAX`].
+const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+const ICO_MAGIC: &[u8] = &[0, 0, 1, 0];
+const BRANDING: &[(&str, &[u8])] = &[
+    ("branding/vu-banner.png", PNG_MAGIC),
+    ("branding/vu-icon.png", PNG_MAGIC),
+    ("branding/vu-icon.ico", ICO_MAGIC),
+    ("branding/vu-social-preview.png", PNG_MAGIC),
+];
+const BRANDING_MAX: usize = 256 * 1024;
+
 /// Run logs: the layer's own log of a run, scrubbed of names, kept under
 /// `diagnostics/` by the owner's decision (2026-11-26; docs/asset-policy.md).
 /// A log is text we wrote, but long: these may be this large as text, and
@@ -196,6 +208,15 @@ pub fn check(path: &str, content: &[u8]) -> Vec<String> {
         }
         return problems;
     }
+    if let Some((_, magic)) = BRANDING.iter().find(|(p, _)| *p == path) {
+        if !content.starts_with(magic) {
+            problems.push("not the image type its name says".to_owned());
+        }
+        if content.len() > BRANDING_MAX {
+            problems.push(format!("{} bytes exceeds the {BRANDING_MAX}-byte limit for a logo file", content.len()));
+        }
+        return problems;
+    }
     let name = path.rsplit('/').next().unwrap_or(path);
     let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
     let allowed = ALLOWED_NAMES.contains(&name)
@@ -298,6 +319,19 @@ mod tests {
         assert!(!check("docs/run-1.txt", &long).is_empty());
         assert!(!check("diagnostics/deeper/run-1.txt", &long).is_empty());
         assert!(!check("diagnostics/shot.png", b"\x89PNG").is_empty());
+    }
+
+    /// The logo files are allowed by exact name and type; nothing else near them.
+    #[test]
+    fn the_logo_is_allowed_and_nothing_else_like_it() {
+        assert!(check("branding/vu-icon.png", b"\x89PNG\r\n\x1a\nabc").is_empty());
+        assert!(check("branding/vu-icon.ico", &[0, 0, 1, 0, 3, 0]).is_empty());
+        assert!(!check("branding/vu-icon.png", b"MZ\x90\0").is_empty());
+        assert!(!check("branding/vu-icon.ico", b"\x89PNG\r\n\x1a\n").is_empty());
+        assert!(!check("branding/other.png", b"\x89PNG\r\n\x1a\n").is_empty());
+        assert!(!check("diagnostics/vu-icon.png", b"\x89PNG\r\n\x1a\n").is_empty());
+        let big = [&b"\x89PNG\r\n\x1a\n"[..], &vec![0u8; super::BRANDING_MAX][..]].concat();
+        assert!(!check("branding/vu-icon.png", &big).is_empty());
     }
 
     #[test]
