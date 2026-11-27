@@ -5,3 +5,10 @@ pub mod updates;
 
 #[derive(Default)]
 pub struct OpsState {}
+
+impl OpsState {
+    /// Synthetic state for `--ui-demo` and screenshots.
+    pub fn demo() -> Self {
+        Self::default()
+    }
+}

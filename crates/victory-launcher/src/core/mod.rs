@@ -7,3 +7,10 @@ pub mod settings;
 
 #[derive(Default)]
 pub struct CoreState {}
+
+impl CoreState {
+    /// Synthetic state for `--ui-demo` and screenshots.
+    pub fn demo() -> Self {
+        Self::default()
+    }
+}

@@ -56,6 +56,6 @@ mod tests {
     #[test]
     fn missing_key_returns_itself_and_placeholders_work() {
         assert_eq!(tr("no.such.key"), "no.such.key");
-        assert_eq!(trf("no.{x}.key", &[("x", "y")]), "no.{x}.key");
+        assert_eq!(trf("no.{x}.key", &[("x", "y")]), "no.y.key");
     }
 }
