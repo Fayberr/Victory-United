@@ -6381,6 +6381,8 @@ fn late_line(frames: f64) {
                 "of them through the merge on the card per frame (VICTORY_MERGE_ON_CARD=0 turns it off): {submissions:.1} submissions with \
                  {dispatches:.1} dispatches and {:.0} KiB of masks; {copies:.1} submissions sent theirs up as copies",
                 mask / 1024.0
+            );
+        }
         let card = [0, 1, 2, 3, 4, 5, 6].map(|i| CARD_BEFORE_PARTS[i].swap(0, Ordering::Relaxed) as f64 / 1e3 / frames);
         tracing::info!(
             "card_before by part, ms per frame: the ranges given to shaders gathered {:.1}; the changed ranges and masked patches \
@@ -7131,7 +7133,6 @@ impl Host {
                 fetched: None,
                 taken: 0,
                 out: 0,
-                out: 0,
                 merge: if crate::shadow::merge_on_card_wanted() { self.make_card_merge() } else { None },
                 patch_pool: Vec::new(),
             })
@@ -7329,8 +7330,6 @@ impl Host {
             numbered();
             return None;
         }
-            return None;
-        }
         let mut work = CARD_WORK.lock().unwrap_or_else(|e| e.into_inner());
         let work = work.as_mut()?;
         // The merges on the card of this submission, per copy the
@@ -7489,6 +7488,9 @@ impl Host {
                     let timed_list = timed;
                     allocator.Reset()?;
                     list.Reset(allocator, None)?;
+                    let timed = crate::cardmeter::begin(list, crate::cardmeter::Kind::Sync);
+                    #[cfg(feature = "diagnostics")]
+                    let shot_span = crate::shot::span_begin(list);
                     // The masked patches first: each copy from the common
                     // state to unordered access, its words, then back (the
                     // copies below promote it again).
@@ -9027,8 +9029,6 @@ impl Host {
                 marks.push((lists.len(), crate::copystat::Timed::Prelude));
                 lists.push(Some(prelude));
             }
-                lists.push(Some(prelude));
-            }
             #[cfg(feature = "diagnostics")]
             marks.push((
                 lists.len(),
@@ -10465,12 +10465,22 @@ impl HostList {
                 copying.insert(key, COPY_DEST);
             }
         }
+        #[cfg(feature = "diagnostics")]
+        let shot_begins = crate::shot::of_the_frame(self);
+        #[cfg(feature = "diagnostics")]
+        let mut leaving: Vec<(std::sync::Arc<crate::resource::HostTexture>, u32, u32)> = Vec::new();
         barriers.extend(states.iter().filter_map(|(key, (first, last, copy))| {
             let real = copy.state.swap(*last, Ordering::Relaxed);
             let real = copying.get(key).copied().unwrap_or(real);
+            #[cfg(feature = "diagnostics")]
+            if shot_begins.is_some() && !copying.contains_key(key) && crate::shot::might_leave(real, *first) {
+                leaving.push((copy.clone(), real, *first));
+            }
             (real != *first)
                 .then(|| transition(&copy.texture, host_state(real), host_state(*first)))
         }));
+        #[cfg(feature = "diagnostics")]
+        leaving.sort_by_key(|l| std::sync::Arc::as_ptr(&l.0) as usize);
         // The records the list's draws read from slots (`crate::indirect::gather`).
         let gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
         let gathered = gather.sets.iter().any(|s| s.records() > 0);
@@ -10489,6 +10499,8 @@ impl HostList {
         let recorded = unsafe {
             allocator.Reset().and_then(|()| {
                 list.Reset(allocator, None)?;
+                #[cfg(feature = "diagnostics")]
+                let shot_span = if shot_begins.is_some() { crate::shot::span_begin(list) } else { u32::MAX };
                 if !aliasing.is_empty() {
                     list.ResourceBarrier(&aliasing);
                 }
@@ -10500,6 +10512,10 @@ impl HostList {
                 }
                 for (upload, _) in uploads {
                     upload.record(self, list);
+                }
+                #[cfg(feature = "diagnostics")]
+                for (copy, real, first) in &leaving {
+                    crate::shot::leaves(list, std::ptr::from_ref(self) as usize, None, shot_begins, copy, *real, *first);
                 }
                 if !barriers.is_empty() {
                     list.ResourceBarrier(&barriers);
@@ -11622,7 +11638,6 @@ impl HostList {
                     Step::Copy(..) => 0,
                     Step::Fill(..) => 1,
                     Step::Refresh(..) => 2,
-                    Step::Run(..) => 3,
                     Step::Host(..) => 4,
                     Step::GpuWrite(..) => 5,
                     Step::Texture(..) => 6,
@@ -14233,7 +14248,6 @@ impl Meter {
                     card_us / 1e3,
                     modes.join(", ")
                 );
-            }
             }
             {
                 let [own, asking, still, all] =

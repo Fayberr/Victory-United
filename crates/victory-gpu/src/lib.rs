@@ -102,6 +102,8 @@ mod ranges;
 mod primitive;
 pub mod query;
 pub mod queue;
+#[cfg(windows)]
+mod queue2;
 #[cfg(all(windows, feature = "diagnostics"))]
 pub mod replay;
 #[cfg(windows)]

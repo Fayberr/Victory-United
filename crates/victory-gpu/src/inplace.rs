@@ -37,6 +37,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::c_void;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use windows::Win32::Foundation::HANDLE;
@@ -1831,7 +1832,7 @@ pub(crate) mod tests {
     /// private memory opens nothing; a remap forgets the region.
     #[test]
     fn warp_the_constants_heap_is_read_and_written_in_place_through_a_view_of_ours() {
-        let Some(device) = warp() else { return };
+        let Some((_serial, device)) = warp() else { return };
         if device.cast::<ID3D12Device13>().is_err() {
             return;
         }

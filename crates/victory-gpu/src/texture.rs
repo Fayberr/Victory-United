@@ -1479,28 +1479,6 @@ impl Staging {
         crate::gpudetile::STATS[1].fetch_add(gpu.jobs.len() as u64, Relaxed);
         true
     }
-    /// The buffer the list copies the texture's subresources from.
-    fn copy_source(&self) -> &ID3D12Resource {
-        self.gpu.as_ref().map_or(&self.buffer, |g| &g.linear)
-    }
-
-    /// On the card's way: records in `list` (the prelude of a list of
-    /// submission `submission`) the detiling of the staging buffer, unless
-    /// a prelude of the same submission already did. False if nothing was
-    /// recorded.
-    pub(crate) fn record_detile(&self, list: &ID3D12GraphicsCommandList, submission: u64) -> bool {
-        use std::sync::atomic::Ordering::Relaxed;
-        let (Some(gpu), Some(detiler)) = (&self.gpu, crate::gpudetile::detiler()) else {
-            return false;
-        };
-        if gpu.recorded.swap(submission, Relaxed) == submission {
-            return false;
-        }
-        crate::gpudetile::record(list, detiler, &self.buffer, &gpu.linear, &gpu.jobs);
-        crate::gpudetile::STATS[0].fetch_add(1, Relaxed);
-        crate::gpudetile::STATS[1].fetch_add(gpu.jobs.len() as u64, Relaxed);
-        true
-    }
 
     /// Levels on demand: what says, beside the mapping, which levels of
     /// the texture are the title's now. First the lowest level a live view
