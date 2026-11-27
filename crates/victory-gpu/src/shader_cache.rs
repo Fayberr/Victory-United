@@ -133,6 +133,7 @@ fn build() -> [u8; 32] {
             "VICTORY_WAVE_PAIRS",
             "VICTORY_WAVE_PAIRS_ONLY",
             "VICTORY_WAVE_PAIRS_FP32",
+            "VICTORY_WAVE_PAIRS_SPILLED",
         ] {
             bytes.extend_from_slice(name.as_bytes());
             bytes.push(b'=');
