@@ -13,6 +13,7 @@ zlib-rs.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
 victory-core.workspace = true
+victory-stats = { path = "../victory-stats" }
 victory-formats.workspace = true
 victory-pipeline.workspace = true
 victory-shader = { workspace = true, features = ["host"] }

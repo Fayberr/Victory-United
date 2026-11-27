@@ -44,6 +44,7 @@ pub mod device;
 mod drvwatch;
 #[cfg(windows)]
 mod fpsbox;
+mod launcher_stats;
 #[cfg(windows)]
 mod stats;
 #[cfg(windows)]

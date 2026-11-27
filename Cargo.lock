@@ -2647,6 +2647,7 @@ dependencies = [
  "victory-formats",
  "victory-pipeline",
  "victory-shader",
+ "victory-stats",
  "windows",
  "windows-sys 0.61.2",
  "zlib-rs",
