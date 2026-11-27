@@ -309,6 +309,13 @@ fn hold(this: This, what: impl FnOnce() -> Held) -> bool {
     true
 }
 
+/// One caller of [`release_held`] at a time, so a queue's submissions keep
+/// their order; also serializes queue teardown in [`release`] so a queue
+/// present in `WAITING` cannot be freed while [`release_held`] iterates it.
+/// Lock order: `RELEASING` -> `WAITING`.
+#[cfg(windows)]
+static RELEASING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Runs what waiting queues hold as far as their fences have been reached
 /// (`all`: all of it), each queue's in the order it was given. Called
 /// where a fence may have moved: after a signal and after a submission (a
@@ -321,8 +328,6 @@ pub(crate) fn release_held(all: bool) {
         behind::wake();
         return;
     }
-    // One caller at a time, so a queue's submissions keep their order.
-    static RELEASING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     if lock(&WAITING).is_empty() {
         return;
     }
@@ -568,12 +573,13 @@ extern "system" fn query(this: This, iid: *const Iid, out: *mut This) -> HRESULT
     )
 }
 extern "system" fn release(this: This) -> u32 {
-    let left = object::release_boxed::<Queue>(this);
-    #[cfg(windows)]
-    if left == 0 {
-        lock(&WAITING).retain(|&q| q != this as usize);
-    }
-    left
+    object::release_boxed_with::<Queue>(this, || {
+        #[cfg(windows)]
+        {
+            let _one = lock(&RELEASING);
+            lock(&WAITING).retain(|&q| q != this as usize);
+        }
+    })
 }
 
 /// Runs the lists' host lists and waits for them (decision 0007). A queue
@@ -1405,5 +1411,45 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(2));
         Written::GpuTimestamp.write(at[1..].as_mut_ptr().cast(), 8);
         assert!(at[1] > first);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn release_waits_for_release_held_before_freeing_waiting_queue() {
+        let null = std::ptr::null();
+        let desc = QueueDesc {
+            kind: 0,
+            priority: 0,
+            flags: 0,
+            nodes: 0,
+        };
+        let mut q = null;
+        assert_eq!(create(null, &desc, &QUEUE_IIDS[0], &mut q), S_OK);
+        let q_addr = q as usize;
+        // Register directly to exercise teardown independently of queue
+        // configuration. Hold the lock used while visiting waiting queues.
+        let guard = lock(&RELEASING);
+        lock(&WAITING).push(q_addr);
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let releaser = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let left = slot::<extern "system" fn(This) -> u32>(q_addr as This, 0x10)(q_addr as This);
+            let _ = done_tx.send(left);
+        });
+        started_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_millis(40))
+                .is_err(),
+            "queue::release freed queue while release_held lock was held"
+        );
+        drop(guard);
+        let left = done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("queue::release finished");
+        assert_eq!(left, 0);
+        assert!(!lock(&WAITING).contains(&q_addr));
+        releaser.join().unwrap();
     }
 }
