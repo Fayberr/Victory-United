@@ -7,9 +7,10 @@ use eframe::egui;
 
 const REPO: &str = "https://github.com/Fayberr/Victory-United";
 
-pub fn show(core: &mut CoreState, _shared: &Shared, logo: &egui::TextureHandle, ui: &mut egui::Ui) {
+pub fn show(core: &mut CoreState, _shared: &Shared, logo: &theme::Logo, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
-        theme::mark(ui, logo, 32.0);
+        theme::mark(ui, logo, 30.0);
+        ui.add_space(6.0);
         ui.label(theme::strong(tr("about.title")).size(24.0));
     });
     ui.label(theme::dim(tr("about.sub")));

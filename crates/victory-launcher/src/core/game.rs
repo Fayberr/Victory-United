@@ -1,6 +1,6 @@
 //! Finding the game. A game folder is recognised by its `MicrosoftGame.Config` file, like the engine does
-//! (`apps/victory/src/run.rs` reads it from the executable's folder). Auto-detection looks only at the
-//! usual Xbox app install roots, one or two levels deep, never over whole drives.
+//! (`apps/victory/src/run.rs` reads it from the executable's folder). The launcher never searches for the
+//! game: you point it at your own copy (the files can be anywhere), by choosing the folder or dropping it.
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -72,64 +72,6 @@ pub fn from_pick(pick: &Path) -> Option<Game> {
     from_folder(pick).or_else(|| from_folder(&pick.join("Content")))
 }
 
-/// Looks inside each root: the root itself, its children and their `Content` folders.
-pub fn scan_roots(roots: &[PathBuf]) -> Vec<Game> {
-    let mut found: Vec<Game> = Vec::new();
-    for root in roots {
-        let Ok(entries) = std::fs::read_dir(root) else { continue };
-        for entry in entries.flatten().take(400) {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let game = from_folder(&path).or_else(|| from_folder(&path.join("Content")));
-            if let Some(g) = game {
-                if !found.iter().any(|f| f.folder == g.folder) {
-                    found.push(g);
-                }
-            }
-        }
-    }
-    found
-}
-
-/// Root folders worth looking at on a drive.
-pub fn candidate_roots(drives: &[PathBuf]) -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    for d in drives {
-        for sub in ["XboxGames", "Program Files/ModifiableWindowsApps", "Games", "Program Files/Xbox Games"] {
-            roots.push(d.join(sub));
-        }
-    }
-    roots
-}
-
-/// Fixed and removable drives, by the Windows drive list (a plain bit mask, no disk access).
-#[cfg(windows)]
-pub fn drives() -> Vec<PathBuf> {
-    use windows::{core::PCWSTR, Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives}};
-    let mask = unsafe { GetLogicalDrives() };
-    (0..26u32)
-        .filter(|i| mask & (1 << i) != 0)
-        .filter_map(|i| {
-            let root = format!("{}:\\", (b'A' + i as u8) as char);
-            let wide: Vec<u16> = root.encode_utf16().chain(Some(0)).collect();
-            // 2 removable, 3 fixed. Network and optical drives are skipped on purpose (they can stall).
-            let kind = unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) };
-            (kind == 2 || kind == 3).then(|| PathBuf::from(root))
-        })
-        .collect()
-}
-
-#[cfg(not(windows))]
-pub fn drives() -> Vec<PathBuf> {
-    Vec::new()
-}
-
-pub fn auto_detect() -> Vec<Game> {
-    scan_roots(&candidate_roots(&drives()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,19 +104,6 @@ mod tests {
         assert_eq!(from_pick(&t.join("Two")).unwrap().exe, t.join("Two").join("Content").join("two.exe"));
         std::fs::create_dir_all(t.join("Empty")).unwrap();
         assert!(from_pick(&t.join("Empty")).is_none());
-    }
-
-    #[test]
-    fn scan_finds_titles_in_roots_without_going_deeper() {
-        let t = tempdir("scan");
-        let root = t.join("XboxGames");
-        make_game(&root.join("A").join("Content"), "a.exe", "MicrosoftGame.Config");
-        make_game(&root.join("B"), "b.exe", "MicrosoftGame.Config");
-        make_game(&root.join("C").join("deep").join("deeper"), "c.exe", "MicrosoftGame.Config");
-        let found = scan_roots(&[root, t.join("missing")]);
-        let mut names: Vec<_> = found.iter().map(|g| g.title.clone()).collect();
-        names.sort();
-        assert_eq!(names, ["a", "b"]);
     }
 
     #[test]

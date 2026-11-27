@@ -1,5 +1,6 @@
 //! "Core" half of the launcher: play, settings, presets, flags, profiles, bug report. Owned by the core worker.
 pub mod about;
+pub mod engine;
 pub mod firstrun;
 pub mod flagreg;
 pub mod flags;
@@ -18,7 +19,7 @@ pub mod storage;
 pub mod testutil;
 pub mod widgets;
 
-use crate::{app::Shared, paths};
+use crate::{app::Shared, i18n::trf, paths};
 use eframe::egui;
 use std::{
     path::PathBuf,
@@ -53,9 +54,6 @@ pub struct CoreState {
     pub hw: Option<hw::Hardware>,
     pub rendering_adapter: Option<u64>,
     hw_rx: Option<Receiver<hw::Hardware>>,
-    pub detected: Vec<game::Game>,
-    pub detecting: bool,
-    detect_rx: Option<Receiver<Vec<game::Game>>>,
     pub runner: runner::Runner,
     /// A message for the user after something failed (shown on the Play tab).
     pub notice: Option<String>,
@@ -75,10 +73,8 @@ impl CoreState {
         let profile = profiles.iter().find(|p| p.name == settings.active_profile).cloned().unwrap_or_default();
         let extra = std::fs::read_to_string(paths::launch_flags_file()).map(|t| launch::parse_extra(&t)).unwrap_or_default();
         let mut s = Self::blank(ctx, settings, game, profile, profiles, extra);
+        s.drop_unusable_engine();
         s.start_hardware_probe();
-        if s.game.is_none() {
-            s.start_detection();
-        }
         s
     }
 
@@ -97,9 +93,6 @@ impl CoreState {
             hw: None,
             rendering_adapter: None,
             hw_rx: None,
-            detected: Vec::new(),
-            detecting: false,
-            detect_rx: None,
             notice: None,
             ui: Default::default(),
             shown_demo: None,
@@ -112,7 +105,7 @@ impl CoreState {
     /// Synthetic state for `--ui-demo` and screenshots.
     pub fn demo() -> Self {
         let ctx = egui::Context::default();
-        let game = game::Game { folder: "D:/XboxGames/Demo Game/Content".into(), exe: "D:/XboxGames/Demo Game/Content/game.exe".into(), title: "Demo Game".into() };
+        let game = game::Game { folder: "D:/Games/Demo Game/Content".into(), exe: "D:/Games/Demo Game/Content/game.exe".into(), title: "Demo Game".into() };
         let settings = store::Settings { game_folder: Some(game.folder.clone()), game_exe: Some(game.exe.clone()), setup_done: true, ..Default::default() };
         let mut profile = launch::Profile::default();
         profile.edits.insert("VICTORY_THIN_THREADS".into(), "8".into());
@@ -126,7 +119,6 @@ impl CoreState {
         s.persist = false;
         s.hw = Some(hw::Hardware::demo());
         s.demo_game = Some(game.clone());
-        s.detected = vec![game];
         s.ui.demo = true;
         s
     }
@@ -148,20 +140,6 @@ impl CoreState {
         });
     }
 
-    pub fn start_detection(&mut self) {
-        if self.detecting {
-            return;
-        }
-        let (tx, rx) = channel();
-        let ctx = self.ctx.clone();
-        self.detect_rx = Some(rx);
-        self.detecting = true;
-        std::thread::spawn(move || {
-            let _ = tx.send(game::auto_detect());
-            ctx.request_repaint();
-        });
-    }
-
     /// Once per frame: results of background work, dropped files, runner events, and `Shared`.
     pub fn tick(&mut self, ctx: &egui::Context, shared: &mut Shared) {
         if self.ui.demo {
@@ -174,13 +152,6 @@ impl CoreState {
                 if let Ok(hw) = rx.try_recv() {
                     self.hw = Some(hw);
                     self.hw_rx = None;
-                }
-            }
-            if let Some(rx) = &self.detect_rx {
-                if let Ok(found) = rx.try_recv() {
-                    self.detected = found;
-                    self.detecting = false;
-                    self.detect_rx = None;
                 }
             }
             let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
@@ -228,7 +199,30 @@ impl CoreState {
         if self.ui.demo {
             return (self.force_screen != Some(Screen::FirstRun)).then(|| "engine/a1b2c3d4-release/victory.exe".into());
         }
-        self.settings.engine_override.clone().filter(|p| p.is_file()).or_else(paths::active_engine_exe)
+        self.own_engine().or_else(paths::active_engine_exe)
+    }
+
+    /// The developer's own engine from Settings, when it is set and still a usable `victory.exe`.
+    pub fn own_engine(&self) -> Option<PathBuf> {
+        self.settings.engine_override.clone().filter(|p| engine::check(p).is_ok())
+    }
+
+    /// An earlier version let any file be chosen as the engine (even the launcher itself, which made Play open
+    /// another launcher window). Forget a stored choice that is not a real engine, so the built-in one is used.
+    fn drop_unusable_engine(&mut self) {
+        if let Some(bad) = self.settings.engine_override.clone().filter(|p| engine::check(p).is_err()) {
+            self.settings.engine_override = None;
+            self.save_settings();
+            self.notice = Some(trf("engine.dropped", &[("path", &bad.to_string_lossy())]));
+        }
+    }
+
+    /// Takes a different engine from the user, or says why it cannot be used.
+    pub fn use_engine(&mut self, path: PathBuf) -> Result<(), engine::Problem> {
+        engine::check(&path)?;
+        self.settings.engine_override = Some(path);
+        self.save_settings();
+        Ok(())
     }
 
     pub fn set_game(&mut self, g: game::Game) {
@@ -370,5 +364,44 @@ pub fn demo_shared() -> Shared {
         launch_env: Vec::new(),
         engine_exe: Some("engine/a1b2c3d4-release/victory.exe".into()),
         log_file: Some("logs/run-20260101-120000.log".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(engine_override: Option<PathBuf>) -> CoreState {
+        let settings = store::Settings { engine_override, ..Default::default() };
+        let mut s = CoreState::blank(egui::Context::default(), settings, None, launch::Profile::default(), Vec::new(), Vec::new());
+        s.persist = false;
+        s
+    }
+
+    #[test]
+    fn a_stored_launcher_as_engine_is_forgotten_and_never_started() {
+        let t = testutil::tempdir("engine-heal");
+        let launcher = t.join("victory-launcher.exe");
+        std::fs::write(&launcher, b"MZ").unwrap();
+        let mut s = state(Some(launcher.clone()));
+        assert!(s.own_engine().is_none(), "even before it is dropped it is not used");
+        s.drop_unusable_engine();
+        assert_eq!(s.settings.engine_override, None);
+        assert!(s.notice.as_deref().is_some_and(|n| n.contains("victory-launcher.exe")));
+    }
+
+    #[test]
+    fn a_real_engine_choice_is_kept_and_other_files_are_refused() {
+        let t = testutil::tempdir("engine-keep");
+        let engine = t.join("victory.exe");
+        std::fs::write(&engine, b"MZ").unwrap();
+        let mut s = state(Some(engine.clone()));
+        s.drop_unusable_engine();
+        assert_eq!(s.engine_exe(), Some(engine.clone()));
+        assert!(s.notice.is_none());
+        let other = t.join("tool.exe");
+        std::fs::write(&other, b"MZ").unwrap();
+        assert_eq!(s.use_engine(other), Err(engine::Problem::WrongName));
+        assert_eq!(s.settings.engine_override, Some(engine));
     }
 }

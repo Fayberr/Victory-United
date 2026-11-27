@@ -18,6 +18,8 @@ use std::{collections::HashSet, path::{Path, PathBuf}, sync::mpsc::{self, Receiv
 pub struct SettingsUi {
     pub new_name: String,
     pub message: String,
+    /// Why the engine the user picked was refused (Engine card).
+    pub engine_error: String,
     saves: SavesUi,
     storage: StorageUi,
 }
@@ -564,27 +566,39 @@ fn engine_section(core: &mut CoreState, ui: &mut egui::Ui) {
         ui.label(theme::strong(tr("settings.engine")).size(16.0));
         ui.add_space(4.0);
         let exe = core.engine_exe();
-        let own = core.settings.engine_override.is_some();
+        let own = core.own_engine().is_some();
         match &exe {
             Some(p) => {
-                ui.label(if own { tr("settings.engine_own") } else { tr("settings.engine_installed") });
-                ui.label(theme::dim(p.to_string_lossy()).size(12.5));
+                let build = p.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                if own {
+                    ui.label(tr("settings.engine_own"));
+                    ui.label(theme::dim(p.to_string_lossy()).size(12.5));
+                } else {
+                    ui.label(trf("settings.engine_builtin", &[("build", &build)]));
+                    ui.label(theme::dim(tr("settings.engine_builtin_help")).size(12.5));
+                }
             }
             None => {
                 ui.label(theme::warn_text(ui, tr("settings.engine_none")));
             }
         }
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
+        if own && ui.button(tr("settings.engine_use_installed")).clicked() {
+            core.settings.engine_override = None;
+            core.ui.settings.engine_error.clear();
+            core.save_settings();
+        }
+        egui::CollapsingHeader::new(theme::dim(tr("settings.engine_other")).size(12.5)).id_salt("other-engine").default_open(own).show(ui, |ui| {
+            ui.label(theme::dim(tr("settings.engine_other_help")).size(12.5));
             if ui.button(tr("settings.engine_choose")).clicked() {
                 if let Some(p) = pick_file(("victory.exe", &["exe"])) {
-                    core.settings.engine_override = Some(p);
-                    core.save_settings();
+                    core.ui.settings.engine_error = match core.use_engine(p) {
+                        Ok(()) => String::new(),
+                        Err(problem) => problem.text().to_string(),
+                    };
                 }
             }
-            if own && ui.button(tr("settings.engine_use_installed")).clicked() {
-                core.settings.engine_override = None;
-                core.save_settings();
+            if !core.ui.settings.engine_error.is_empty() {
+                ui.label(theme::error_text(ui, core.ui.settings.engine_error.clone()).size(12.5));
             }
         });
         ui.add_space(8.0);

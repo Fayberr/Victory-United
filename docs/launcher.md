@@ -6,10 +6,11 @@ bundles or downloads game files.
 
 ## For players
 
-1. Unpack the ZIP anywhere and run `victory-launcher.exe`.
+1. Unpack the ZIP anywhere and run `victory-launcher.exe`. The engine is part of the package: it sits in the
+   `engine` folder next to the launcher and there is nothing to set up for it.
 2. On first start, choose the folder of your game. It is the folder with `MicrosoftGame.Config` in it, for
-   example `D:\XboxGames\<title>\Content`. The launcher also looks in the usual Xbox app folders on your
-   drives, and you can drop a folder onto the window.
+   example `D:\Games\<title>\Content`. The files can be anywhere: the launcher does not search for them, you
+   point it at them (or drop the folder onto the window).
 3. Press Play.
 
 The first start translates the game's shaders. That takes a while once; later starts are faster. You can

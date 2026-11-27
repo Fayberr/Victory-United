@@ -169,8 +169,61 @@ pub fn card(ui: &egui::Ui) -> egui::Frame {
         .inner_margin(Margin::same(16))
 }
 
-pub fn mark(ui: &mut egui::Ui, logo: &egui::TextureHandle, size: f32) {
-    ui.image((logo.id(), egui::Vec2::splat(size)));
+/// The VU mark without its app-icon tile: the glyph alone on a transparent background, so it sits on the
+/// window like text does instead of showing up as a dark box. Two sizes (small for the top bar, large for
+/// the welcome screen) so it is not shrunk too far, and a variant for each theme, because the letters are
+/// white on the dark theme and near-black on the light one. See `branding/make-mark.py`.
+pub struct Logo {
+    /// `[dark theme, light theme]`.
+    small: [egui::TextureHandle; 2],
+    large: [egui::TextureHandle; 2],
+}
+
+const MARK_SMALL: &[u8] = include_bytes!("../../../branding/vu-mark-small.png");
+const MARK_LARGE: &[u8] = include_bytes!("../../../branding/vu-mark-large.png");
+/// Letters on the light theme.
+const LIGHT_LETTERS: [u8; 3] = [22, 24, 29];
+
+impl Logo {
+    pub fn load(ctx: &egui::Context) -> Self {
+        let make = |png: &[u8], name: &str| {
+            let img = image::load_from_memory(png).expect("bundled mark is a valid PNG").into_rgba8();
+            let size = [img.width() as usize, img.height() as usize];
+            let dark = img.into_raw();
+            let light = for_light_theme(&dark);
+            let tex = |rgba: &[u8], suffix: &str| {
+                ctx.load_texture(format!("vu-mark-{name}-{suffix}"), egui::ColorImage::from_rgba_unmultiplied(size, rgba), egui::TextureOptions::LINEAR)
+            };
+            [tex(&dark, "dark"), tex(&light, "light")]
+        };
+        Self { small: make(MARK_SMALL, "small"), large: make(MARK_LARGE, "large") }
+    }
+}
+
+/// Turns the white letters dark and leaves the colored wings alone (straight, not premultiplied, RGBA).
+fn for_light_theme(rgba: &[u8]) -> Vec<u8> {
+    let mut out = rgba.to_vec();
+    for px in out.chunks_exact_mut(4) {
+        let (hi, lo) = (px[0].max(px[1]).max(px[2]), px[0].min(px[1]).min(px[2]));
+        if px[3] == 0 || hi == 0 {
+            continue;
+        }
+        let saturation = f32::from(hi - lo) / f32::from(hi);
+        let letter = (1.0 - (saturation / 0.3).powi(2)).clamp(0.0, 1.0);
+        for (c, dark) in px[..3].iter_mut().zip(LIGHT_LETTERS) {
+            *c = (f32::from(*c) + (f32::from(dark) - f32::from(*c)) * letter).round() as u8;
+        }
+    }
+    out
+}
+
+/// Draws the mark `height` points tall (about 2.6 times as wide).
+pub fn mark(ui: &mut egui::Ui, logo: &Logo, height: f32) {
+    let theme = usize::from(!ui.visuals().dark_mode);
+    let wanted_pixels = height * ui.ctx().pixels_per_point();
+    let tex = if wanted_pixels > 90.0 { &logo.large[theme] } else { &logo.small[theme] };
+    let aspect = tex.size()[0] as f32 / tex.size()[1] as f32;
+    ui.add(egui::Image::new((tex.id(), egui::vec2(height * aspect, height))));
 }
 
 pub fn bar(ctx: &egui::Context) -> egui::Frame {
@@ -229,6 +282,28 @@ pub fn error_text(ui: &egui::Ui, text: impl Into<String>) -> egui::RichText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_light_variant_darkens_the_letters_and_keeps_the_wings() {
+        let img = image::load_from_memory(MARK_LARGE).unwrap().into_rgba8();
+        let dark = img.into_raw();
+        let light = for_light_theme(&dark);
+        let (mut white, mut orange) = (0, 0);
+        for (d, l) in dark.chunks_exact(4).zip(light.chunks_exact(4)) {
+            if d[3] < 250 {
+                continue;
+            }
+            if d[0] > 245 && d[1] > 245 && d[2] > 245 {
+                white += 1;
+                assert!(l[0] < 40 && l[1] < 40 && l[2] < 40, "a white pixel stayed light: {l:?}");
+            }
+            if d[0] > 200 && d[2] < 120 {
+                orange += 1;
+                assert_eq!(d[..3], l[..3], "a wing pixel changed");
+            }
+        }
+        assert!(white > 1000 && orange > 500, "found {white} letter and {orange} wing pixels");
+    }
 
     fn luminance(color: Color32) -> f64 {
         let linear = |s: u8| {

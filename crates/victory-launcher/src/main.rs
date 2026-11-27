@@ -48,7 +48,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             theme::apply(&cc.egui_ctx);
-            Ok(Box::new(app::App::new(cc, args, &icon, settings)))
+            Ok(Box::new(app::App::new(cc, args, settings)))
         }),
     )
 }

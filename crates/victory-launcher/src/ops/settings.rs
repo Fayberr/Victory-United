@@ -44,8 +44,6 @@ pub struct OpsSettings {
     pub channel: String,
     /// Which engine build to download: `release` or `diagnostics`.
     pub engine_kind: String,
-    /// A developer's own victory.exe (Developer tab). Empty: the installed build is used.
-    pub own_engine: String,
 }
 
 impl Default for OpsSettings {
@@ -59,7 +57,6 @@ impl Default for OpsSettings {
             profile_view: super::profile::View::default(),
             channel: "stable".into(),
             engine_kind: "release".into(),
-            own_engine: String::new(),
         }
     }
 }
