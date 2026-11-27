@@ -1806,7 +1806,15 @@ fn pooled(n: usize) -> Vec<u8> {
         POOL_USED.store(crate::host::moment(), Ordering::Relaxed);
         pool.take(n)
     };
-    let mut v = reused.unwrap_or_else(|| Vec::with_capacity(n));
+    let mut v = reused.unwrap_or_else(|| {
+        let mut snapshot = Vec::new();
+        if snapshot.try_reserve_exact(n).is_err() {
+            // The idle buffers go before a final attempt.
+            *POOL.lock().unwrap_or_else(|e| e.into_inner()) = Default::default();
+            snapshot.reserve_exact(n);
+        }
+        snapshot
+    });
     v.clear();
     v
 }
