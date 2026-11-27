@@ -737,11 +737,10 @@ fn carded(shadow: &Arc<Shadow>) {
 }
 
 impl Card {
-    /// `dirty` or `chunks` took something: [`card_dirty`] is to look.
+    /// `dirty` or `chunks` took something and `touched` went from off to on (the caller saw
+    /// it): [`card_dirty`] is to look at this copy, so it goes in the line.
     fn flag(&self) {
-        if !self.touched.swap(true, Ordering::AcqRel)
-            && let Some(me) = self.me.get()
-        {
+        if let Some(me) = self.me.get() {
             FLAGGED.lock().unwrap_or_else(|e| e.into_inner()).push(me.clone());
         }
     }
@@ -5388,10 +5387,14 @@ impl Shadow {
                 _ => dirty.push((from, to)),
             }
         }
-        // (Under the lock: what takes the list sees it or finds it set.)
-        card.touched.store(true, Ordering::Release);
+        // (Under the lock: what takes the list sees it or finds it set.) Off to on is what puts
+        // the copy in the line; a store here would hide that from `flag`, and a copy used once
+        // would never be looked at again (black frames, run i7-base).
+        let newly = !card.touched.swap(true, Ordering::AcqRel);
         drop(dirty);
-        card.flag();
+        if newly {
+            card.flag();
+        }
         // From none to some: [`card_dirty`] finds the copy in the list. (A
         // copy changed again before its ranges are taken is in it already;
         // one whose ranges the walk took may be in it with nothing to take.)
