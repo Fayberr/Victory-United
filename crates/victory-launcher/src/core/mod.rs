@@ -47,6 +47,7 @@ pub struct CoreState {
     pub profiles: Vec<launch::Profile>,
     pub extra: Vec<launch::ExtraFlag>,
     pub hw: Option<hw::Hardware>,
+    pub rendering_adapter: Option<u64>,
     hw_rx: Option<Receiver<hw::Hardware>>,
     pub detected: Vec<game::Game>,
     pub detecting: bool,
@@ -90,6 +91,7 @@ impl CoreState {
             profiles,
             extra,
             hw: None,
+            rendering_adapter: None,
             hw_rx: None,
             detected: Vec::new(),
             detecting: false,
@@ -263,10 +265,27 @@ impl CoreState {
     /// The Play button.
     pub fn play(&mut self) {
         self.notice = None;
-        let Some(plan) = self.plan() else {
+        let Some(mut plan) = self.plan() else {
             self.notice = Some(if self.game.is_none() { "Pick the game folder first.".into() } else { "No engine is installed yet.".into() });
             return;
         };
+        let ops = crate::ops::OpsSettings::load();
+        match crate::ops::settings::engine_options(&ops, &paths::data_dir()) {
+            Ok(flags) => {
+                let resolved = self.resolved().0;
+                for (key, value) in flags {
+                    let override_allowed = !matches!(resolved.source.get(&key), Some(launch::Source::Edit | launch::Source::Extra))
+                        && !self.profile.removed.contains(&key);
+                    if override_allowed {
+                        plan.env.insert(key, value);
+                    }
+                }
+            }
+            Err(error) => {
+                self.notice = Some(error.to_string());
+                return;
+            }
+        }
         let cold = runner::shader_entries(&plan.cache_dir, runner::COLD_CACHE_ENTRIES) < runner::COLD_CACHE_ENTRIES;
         self.last_env = plan.env.iter().filter(|(k, _)| !launch::PATH_VARS.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
         self.runner.start(plan, paths::logs_dir(), cold, !self.active_extra().is_empty());

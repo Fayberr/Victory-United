@@ -44,12 +44,22 @@ impl Capture {
             s("03-settings-lower", Tab::Settings, Some(core::Screen::Main), 700.0),
             s("04-flags", Tab::Flags, Some(core::Screen::Main), 0.0),
             s("05-monitor", Tab::Monitor, Some(core::Screen::Main), 0.0),
+            s("05-monitor-detail", Tab::Monitor, Some(core::Screen::Main), 500.0),
+            s("05-monitor-hardware", Tab::Monitor, Some(core::Screen::Main), 1_240.0),
+            s("05-monitor-customize", Tab::Monitor, Some(core::Screen::Main), 0.0),
+            s("05-overlay", Tab::Monitor, Some(core::Screen::Main), 0.0),
             s("06-updates", Tab::Updates, Some(core::Screen::Main), 0.0),
             s("07-developer", Tab::Dev, Some(core::Screen::Main), 0.0),
+            s("07-profiler", Tab::Dev, Some(core::Screen::Main), 0.0),
+            s("07-profiler-schedule", Tab::Dev, Some(core::Screen::Main), 420.0),
             s("08-bug-report", Tab::Report, Some(core::Screen::Main), 0.0),
             s("09-about", Tab::About, Some(core::Screen::Main), 0.0),
         ];
         Self { dir, steps, idx: 0, waited: 0, requested: false, failed }
+    }
+
+    pub fn page(&self) -> &'static str {
+        self.steps[self.idx % self.steps.len()].name
     }
 
     /// Called at the start of every frame. Returns true when finished (the window is told to close).

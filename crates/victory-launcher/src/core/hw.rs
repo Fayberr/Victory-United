@@ -4,6 +4,25 @@
 use serde::Serialize;
 
 #[derive(Clone, Debug, Default, Serialize)]
+pub struct Capabilities {
+    pub shader_model: Option<String>,
+    pub resource_binding_tier: Option<u32>,
+    pub mesh_shader_tier: Option<u32>,
+    pub ray_tracing_tier: Option<u32>,
+    pub enhanced_barriers: Option<bool>,
+    pub gpu_upload_heap: Option<bool>,
+    pub wave_lanes: Option<[u32; 2]>,
+    pub unified_memory: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Adapter {
+    pub name: String,
+    pub luid: u64,
+    pub capabilities: Capabilities,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct Hardware {
     pub gpu_name: String,
     /// PCI vendor id: 0x10DE NVIDIA, 0x1002 AMD, 0x8086 Intel.
@@ -15,6 +34,8 @@ pub struct Hardware {
     pub driver_parts: [u16; 4],
     /// `Some(true)` when the card supports mesh shaders, `None` when the query failed.
     pub mesh_shaders: Option<bool>,
+    pub adapters: Vec<Adapter>,
+    pub checked_adapter: Option<u64>,
     pub ram_mb: u64,
     pub cpu_name: String,
     pub cpu_cores: u32,
@@ -82,17 +103,61 @@ pub fn nvidia_user_version(parts: [u16; 4]) -> String {
 }
 
 impl Hardware {
+    pub fn capabilities(&self, active: Option<u64>) -> Vec<(&'static str, String)> {
+        use crate::i18n::tr;
+        let checked = self.checked_adapter.and_then(|id| self.adapters.iter().find(|a| a.luid == id));
+        let active = active.and_then(|id| self.adapters.iter().find(|a| a.luid == id));
+        let caps = active.or(checked).map(|a| &a.capabilities);
+        let unavailable = || tr("monitor.unavailable").to_owned();
+        let toggle = |value: Option<bool>| match value {
+            Some(true) => tr("monitor.supported").into(),
+            Some(false) => tr("monitor.unsupported").into(),
+            None => unavailable(),
+        };
+        let tier = |value: Option<u32>, version: bool| match value {
+            Some(0) => tr("monitor.unsupported").into(),
+            Some(n) if version => format!("{}.{}", n / 10, n % 10),
+            Some(n) => n.to_string(),
+            None => unavailable(),
+        };
+        vec![
+            ("monitor.adapter_checked", checked.map_or_else(unavailable, |a| a.name.clone())),
+            ("monitor.adapter_rendering", active.map_or_else(unavailable, |a| a.name.clone())),
+            ("monitor.shader_model", caps.and_then(|c| c.shader_model.clone()).unwrap_or_else(unavailable)),
+            ("monitor.binding_tier", tier(caps.and_then(|c| c.resource_binding_tier), false)),
+            ("monitor.mesh_tier", tier(caps.and_then(|c| c.mesh_shader_tier), true)),
+            ("monitor.ray_tier", tier(caps.and_then(|c| c.ray_tracing_tier), true)),
+            ("monitor.enhanced_barriers", toggle(caps.and_then(|c| c.enhanced_barriers))),
+            ("monitor.gpu_upload_heap", toggle(caps.and_then(|c| c.gpu_upload_heap))),
+            ("monitor.wave_width", caps.and_then(|c| c.wave_lanes).map_or_else(unavailable, |[min, max]| format!("{min} to {max}"))),
+        ]
+    }
+
+    pub fn hybrid_adapters(&self) -> bool {
+        self.adapters.iter().any(|a| a.capabilities.unified_memory == Some(true))
+            && self.adapters.iter().any(|a| a.capabilities.unified_memory == Some(false))
+    }
+
     /// Short multi-line text for the bug report and the GitHub issue.
     pub fn summary(&self) -> String {
+        self.summary_with_adapter(None)
+    }
+
+    pub fn summary_with_adapter(&self, active: Option<u64>) -> String {
         let mesh = match self.mesh_shaders {
             Some(true) => "yes",
             Some(false) => "no",
             None => "unknown",
         };
-        format!(
+        let mut summary = format!(
             "GPU: {} ({} MB VRAM)\nDriver: {}\nMesh shaders: {}\nRAM: {} MB\nCPU: {} ({} cores, {} threads)\nWindows build: {}\n",
             self.gpu_name, self.vram_mb, self.driver, mesh, self.ram_mb, self.cpu_name, self.cpu_cores, self.cpu_threads, self.windows_build
-        )
+        );
+        use std::fmt::Write;
+        for (key, value) in self.capabilities(active) {
+            let _ = writeln!(summary, "{}: {value}", crate::i18n::tr(key));
+        }
+        summary
     }
 
     /// Demo machine for screenshots.
@@ -104,6 +169,21 @@ impl Hardware {
             driver: "546.01".into(),
             driver_parts: [31, 0, 15, 4601],
             mesh_shaders: Some(true),
+            checked_adapter: Some(1),
+            adapters: vec![Adapter {
+                name: "NVIDIA GeForce RTX 3080 Ti".into(),
+                luid: 1,
+                capabilities: Capabilities {
+                    shader_model: Some("6.7".into()),
+                    resource_binding_tier: Some(3),
+                    mesh_shader_tier: Some(10),
+                    ray_tracing_tier: Some(11),
+                    enhanced_barriers: Some(true),
+                    gpu_upload_heap: Some(true),
+                    wave_lanes: Some([32, 32]),
+                    unified_memory: Some(false),
+                },
+            }],
             ram_mb: 65_536,
             cpu_name: "AMD Ryzen 7 5700X3D 8-Core Processor".into(),
             cpu_cores: 8,
@@ -152,12 +232,17 @@ pub fn probe() -> Hardware {
             continue;
         }
         let vram = desc.DedicatedVideoMemory as u64;
+        let luid = (u64::from(desc.AdapterLuid.HighPart as u32) << 32) | u64::from(desc.AdapterLuid.LowPart);
+        let capabilities = probe_capabilities(&adapter).unwrap_or_default();
         if best.as_ref().is_none_or(|(v, _)| vram > *v) {
             hw.gpu_name = wide_to_string(&desc.Description);
             hw.vendor_id = desc.VendorId;
             hw.vram_mb = vram >> 20;
+            hw.checked_adapter = Some(luid);
+            hw.mesh_shaders = capabilities.mesh_shader_tier.map(|tier| tier > 0);
             best = Some((vram, adapter));
         }
+        hw.adapters.push(Adapter { name: wide_to_string(&desc.Description), luid, capabilities });
     }
     let Some((_, adapter)) = best else {
         hw.note = "No graphics adapter found.".into();
@@ -169,7 +254,6 @@ pub fn probe() -> Hardware {
     } else {
         hw.driver_parts.map(|p| p.to_string()).join(".")
     };
-    hw.mesh_shaders = mesh_shader_support(&adapter);
     hw
 }
 
@@ -189,28 +273,44 @@ fn driver_parts(adapter: &windows::Win32::Graphics::Dxgi::IDXGIAdapter1) -> [u16
     }
 }
 
-/// Creates a D3D12 device on the adapter, asks about mesh shaders, and drops the device again.
+/// Probes a device and drops it before returning; unsupported queries stay absent.
 #[cfg(windows)]
-fn mesh_shader_support(adapter: &windows::Win32::Graphics::Dxgi::IDXGIAdapter1) -> Option<bool> {
+fn probe_capabilities(adapter: &windows::Win32::Graphics::Dxgi::IDXGIAdapter1) -> Option<Capabilities> {
     use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_12_0;
-    use windows::Win32::Graphics::Direct3D12::{
-        D3D12CreateDevice, ID3D12Device, D3D12_FEATURE_D3D12_OPTIONS7, D3D12_FEATURE_DATA_D3D12_OPTIONS7,
-        D3D12_MESH_SHADER_TIER_NOT_SUPPORTED,
-    };
+    use windows::Win32::Graphics::Direct3D12::*;
+    fn check<T>(device: &ID3D12Device, feature: D3D12_FEATURE, mut data: T) -> Option<T> {
+        // SAFETY: each call pairs a feature with its documented structure.
+        unsafe { device.CheckFeatureSupport(feature, (&raw mut data).cast(), size_of::<T>() as u32) }.ok()?;
+        Some(data)
+    }
     let mut device: Option<ID3D12Device> = None;
     unsafe { D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_0, &mut device) }.ok()?;
     let device = device?;
-    let mut opts = D3D12_FEATURE_DATA_D3D12_OPTIONS7::default();
-    unsafe {
-        device
-            .CheckFeatureSupport(
-                D3D12_FEATURE_D3D12_OPTIONS7,
-                &mut opts as *mut _ as *mut core::ffi::c_void,
-                std::mem::size_of::<D3D12_FEATURE_DATA_D3D12_OPTIONS7>() as u32,
-            )
-            .ok()?;
-    }
-    Some(opts.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED)
+    let base = check(&device, D3D12_FEATURE_D3D12_OPTIONS, D3D12_FEATURE_DATA_D3D12_OPTIONS::default());
+    let wave = check(&device, D3D12_FEATURE_D3D12_OPTIONS1, D3D12_FEATURE_DATA_D3D12_OPTIONS1::default());
+    let ray = check(&device, D3D12_FEATURE_D3D12_OPTIONS5, D3D12_FEATURE_DATA_D3D12_OPTIONS5::default());
+    let mesh = check(&device, D3D12_FEATURE_D3D12_OPTIONS7, D3D12_FEATURE_DATA_D3D12_OPTIONS7::default());
+    let barrier = check(&device, D3D12_FEATURE_D3D12_OPTIONS12, D3D12_FEATURE_DATA_D3D12_OPTIONS12::default());
+    let upload = check(&device, D3D12_FEATURE_D3D12_OPTIONS16, D3D12_FEATURE_DATA_D3D12_OPTIONS16::default());
+    let arch = check(&device, D3D12_FEATURE_ARCHITECTURE1, D3D12_FEATURE_DATA_ARCHITECTURE1::default());
+    let shader_model = [
+        D3D_SHADER_MODEL_6_9, D3D_SHADER_MODEL_6_8, D3D_SHADER_MODEL_6_7, D3D_SHADER_MODEL_6_6,
+        D3D_SHADER_MODEL_6_5, D3D_SHADER_MODEL_6_4, D3D_SHADER_MODEL_6_3, D3D_SHADER_MODEL_6_2,
+        D3D_SHADER_MODEL_6_1, D3D_SHADER_MODEL_6_0, D3D_SHADER_MODEL_5_1,
+    ].into_iter().find_map(|model| {
+        check(&device, D3D12_FEATURE_SHADER_MODEL, D3D12_FEATURE_DATA_SHADER_MODEL { HighestShaderModel: model })
+            .map(|value| format!("{}.{}", value.HighestShaderModel.0 >> 4, value.HighestShaderModel.0 & 15))
+    });
+    Some(Capabilities {
+        shader_model,
+        resource_binding_tier: base.map(|o| o.ResourceBindingTier.0 as u32),
+        mesh_shader_tier: mesh.map(|o| o.MeshShaderTier.0 as u32),
+        ray_tracing_tier: ray.map(|o| o.RaytracingTier.0 as u32),
+        enhanced_barriers: barrier.map(|o| o.EnhancedBarriersSupported.as_bool()),
+        gpu_upload_heap: upload.map(|o| o.GPUUploadHeapSupported.as_bool()),
+        wave_lanes: wave.and_then(|o| o.WaveOps.as_bool().then_some([o.WaveLaneCountMin, o.WaveLaneCountMax])),
+        unified_memory: arch.map(|o| o.UMA.as_bool()),
+    })
 }
 
 #[cfg(windows)]

@@ -29,6 +29,13 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
         ui.add_space(12.0);
         preset_section(core, ui, &preset_id);
         ui.add_space(12.0);
+        theme::card(ui).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            egui::CollapsingHeader::new(tr("monitor.hardware")).show(ui, |ui| {
+                crate::ops::monitor::capabilities(ui, core.hw.as_ref(), core.rendering_adapter);
+            });
+        });
+        ui.add_space(12.0);
         options_section(core, ui);
         ui.add_space(12.0);
         for (group, title) in [("graphics", "settings.g_graphics"), ("memory", "settings.g_memory"), ("threads", "settings.g_threads"), ("debug", "settings.g_debug")] {

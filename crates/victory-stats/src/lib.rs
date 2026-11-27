@@ -284,7 +284,7 @@ impl LegacyBlock {
                 qpc_freq: self.qpc_freq.load(Ordering::Relaxed),
                 frames,
                 last_qpc,
-                slow_qpc: self.slow_qpc.load(Ordering::Relaxed),
+                slow_qpc: self.slow_qpc.load(Ordering::Acquire),
                 vram_used: slow(Slow::VramUsed),
                 vram_budget: slow(Slow::VramBudget),
                 ram_resident: slow(Slow::RamResident),
