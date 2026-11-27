@@ -53,7 +53,7 @@ automatic NVIDIA SDK downloader is deliberately left out; install Streamline you
 - **No frame-rate cap by default.** `-Fps` defaults to 1000 (`VICTORY_FRAME_INTERVAL_US=1000`); `-Fps 30` restores
   the title's own rate. The caption and the top-left line show rendered and presented rates when frame generation
   is on.
-- **FPS line and F3 stats panel.** The FPS line is on by default (`VICTORY_FPS_LINE=0` hides it). F3 toggles the
+- **FPS line and F3 stats panel.** The FPS line is off by default (`VICTORY_FPS_LINE=1` shows it). F3 toggles the
   stats panel in every build now (`VICTORY_PANEL=1`), not only in the diagnostics build; it also shows the
   frame-generation multiplier.
 - **`victory play`, or double-click.** `target\release\victory.exe play <path to game_scarlett_master.exe>` uses
@@ -200,7 +200,7 @@ Every `VICTORY_...` switch is described in a comment where the code reads it. Th
 | `VICTORY_DLSS`, `VICTORY_DLSS_MODE` | `quality` | DLSS Super Resolution through the title's FidelityFX dispatch |
 | `VICTORY_FRAMEGEN` | ready (`-FrameGen` turns on) | DLSS Frame Generation, with the picture before the HUD tagged |
 | `VICTORY_FRAMEGEN_X` | `0` (ready, off) | frames shown per rendered frame: 2-6, or 0 for ready but off |
-| `VICTORY_FPS_LINE` | on | FPS line at the top left; `0` hides it |
+| `VICTORY_FPS_LINE` | off | FPS line at the top left; `1` shows it |
 | `VICTORY_PANEL` | off | F3 stats panel in every build |
 | `VICTORY_FULLSCREEN`, `VICTORY_FULLSCREEN_RES` | off | borderless fullscreen at the monitor's size, or `WxH` |
 | `VICTORY_IME_ENGLISH` | off | switch to the en-US keyboard layout while the game has focus |
