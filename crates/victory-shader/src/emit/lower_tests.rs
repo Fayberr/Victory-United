@@ -633,6 +633,123 @@ fn paired_lowering_scope_restores_on_unwind() {
     assert!(!super::PAIRED.get());
 }
 
+    /// A 128-thread group whose divergent region both reads and writes LDS. With that branch
+    /// taken by both halves of a wave, the program lowers to wave 32 and the LDS sites meet
+    /// per wave. Without the branch marked, no meet is emitted in the divergent block.
+    #[test]
+    fn half_meet_orders_a_128_thread_lds_region() {
+        let words = [
+            0x7E02_0281, // v_mov_b32 v1, 1
+            0x7D88_0000, // v_cmp_gt_u32 vcc, s0, v0
+            0xBE8C_246A, // s_and_saveexec_b64 s[12:13], vcc
+            0xBF88_0004, // s_cbranch_execz past the LDS pair
+            0x36 << 26 | 0x0D << 18, // ds_write_b32
+            1 << 8 | 1,
+            0x36 << 26 | 0x36 << 18, // ds_read_b32
+            2 << 24 | 1,
+            0xBEFE_040C, // s_mov_b64 exec, s[12:13]
+            S_ENDPGM,
+        ];
+        let code: Vec<u8> = words.into_iter().flat_map(u32::to_le_bytes).collect();
+        let native = NativeProgram {
+            stage: HwStage::Cs,
+            wave64: true,
+            vgprs: 16,
+            layout: vec![RootParam {
+                root: RootType::Constants,
+                table_offset_dwords: 0,
+                sgprs: 2,
+                base_register: 0,
+                user_data: 0,
+                slot: 0,
+            }],
+            used: vec![],
+            io: StageIo::Cs(ComputeIo {
+                rsrc2: 1 << 15 | 2 << 1,
+                threads: [128, 1, 1],
+            }),
+            code,
+        };
+        let p = ir::build(&native.code, true, 16).unwrap();
+        let lds_blocks: Vec<usize> = p
+            .blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| {
+                b.insts.iter().any(|i| i.name() == "ds_write_b32" || i.name() == "ds_read_b32")
+            })
+            .map(|(i, _)| i)
+            .collect();
+        assert!(!lds_blocks.is_empty(), "the LDS pair did not decode");
+        let branch = p
+            .blocks
+            .iter()
+            .position(|b| b.insts.iter().any(|i| i.name() == "s_cbranch_execz"))
+            .unwrap();
+        let mut wide = std::collections::HashSet::new();
+        wide.insert(branch);
+        let st = structure::structure_wide(&p, &wide).unwrap();
+        let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
+        let io = io::raise(&p, &native).unwrap();
+        let was = super::TEST_HOST_WAVE.replace(Some(32));
+        let lowered = super::with_half_meets(|| {
+            lower(&Parts {
+                native: &native,
+                p: &p,
+                st: &st,
+                io: &io,
+                res: &res,
+                inputs: vec![],
+                outputs: vec![],
+                prims: vec![],
+                mesh_stride: 0,
+            })
+        });
+        super::TEST_HOST_WAVE.set(was);
+        let lowered = lowered.expect("wave 32 with a per-wave meet");
+        assert_eq!(lowered.wave_size, Some(32));
+        assert!(lowered.half_meets >= 1, "the LDS region did not meet per wave");
+        assert!(lowered.group_barriers >= 1, "the entry lost its group barrier");
+        for b in &lds_blocks {
+            assert!(
+                !lowered.group_sync_blocks.contains(b),
+                "a group barrier landed inside the divergent LDS block {b}"
+            );
+        }
+        let st = structure::structure(&p).unwrap();
+        let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
+        let io = io::raise(&p, &native).unwrap();
+        let was = super::TEST_HOST_WAVE.replace(Some(32));
+        let plain = super::with_half_meets(|| {
+            lower(&Parts {
+                native: &native,
+                p: &p,
+                st: &st,
+                io: &io,
+                res: &res,
+                inputs: vec![],
+                outputs: vec![],
+                prims: vec![],
+                mesh_stride: 0,
+            })
+        });
+        super::TEST_HOST_WAVE.set(was);
+        match plain {
+            Ok(l) => assert_eq!(l.half_meets, 0, "a meet was emitted where a half may not arrive"),
+            Err(e) => {
+                let crate::ShaderError::Unsupported { what, .. } = e else {
+                    panic!("unexpected {e}");
+                };
+                assert!(
+                    what == "a half-meet where not every lane runs"
+                        || what == "no wave32 lowering for this wave64 program"
+                        || what.ends_with("where not every lane runs"),
+                    "unexpected refusal: {what}"
+                );
+            }
+        }
+    }
+
     /// A minimum and then an add on one LDS word are not interchangeable
     /// between the two host halves. Two adds of the same word are.
     #[test]

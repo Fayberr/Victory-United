@@ -140,6 +140,10 @@ mod texback;
 
 #[cfg(windows)]
 pub use host::on_failure;
+#[cfg(windows)]
+pub use host::log_defrag_counters;
+#[cfg(not(windows))]
+pub fn log_defrag_counters() {}
 
 /// Whether `switch` is on now, if it is one of those `VICTORY_AB` turns on and
 /// off while the title runs (`ab`).
