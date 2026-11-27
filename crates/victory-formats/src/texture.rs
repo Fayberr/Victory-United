@@ -386,7 +386,7 @@ impl TilingCache {
         linear: &[u8],
         pitches: (usize, usize),
     ) -> Result<(), Error> {
-        if !layout.thick {
+        if !layout.thick && layout.micro_tiled() {
             return crate::detile::tile(
                 layout,
                 tiled,
@@ -787,6 +787,13 @@ impl Layout {
         }
     }
 
+    /// True when the layout has a plain swizzle table (or is linear): the
+    /// micro-tile copy in detile.rs reads that table. Layouts that are
+    /// addressed through XOR flips have none and take the walking path.
+    pub(crate) fn micro_tiled(&self) -> bool {
+        self.desc.swizzle == Swizzle::LINEAR || !self.pattern[0].is_empty()
+    }
+
     /// Whether [`Layout::offset`] and the copies work for this layout:
     /// every single-sampled GFX10 mode but `4KB_R_X`, which addrlib has no
     /// pattern for.
@@ -923,6 +930,9 @@ impl Layout {
         row_pitch: usize,
         depth_pitch: usize,
     ) -> Result<(), Error> {
+        if !self.micro_tiled() {
+            return self.walk::<true>(tiled, linear, mip, slice, row_pitch, depth_pitch, None);
+        }
         crate::detile::detile(self, tiled, mip, slice, linear, row_pitch, depth_pitch)
     }
 
@@ -936,6 +946,9 @@ impl Layout {
         row_pitch: usize,
         depth_pitch: usize,
     ) -> Result<(), Error> {
+        if !self.micro_tiled() {
+            return self.walk::<false>(linear, tiled, mip, slice, row_pitch, depth_pitch, None);
+        }
         crate::detile::tile(self, tiled, mip, slice, linear, row_pitch, depth_pitch)
     }
 
