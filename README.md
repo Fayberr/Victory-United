@@ -209,6 +209,7 @@ Every `VICTORY_...` switch is described in a comment where the code reads it. Th
 | `VICTORY_WATER_LIGHT` | off | run the tiled water light (green water, dark blocks) |
 | `VICTORY_NATIVE_1440P` | on | Series X renders and outputs 2560x1440 (image patched) |
 | `VICTORY_SOFT_VIEWS` | `copies` | the title's tiled-heap page mappings kept without Windows views: no freezes at scene cuts |
+| `VICTORY_SECTION_MB` | off | physical pages in sections of at most N MiB: fewer map/unmap stalls when the camera moves (not with `VICTORY_PORT_CONSTANTS=1`) |
 | `VICTORY_WC_NO_BACK`, `_MIN_KB` | `1`, `1024` | shader writes into big write-combined copies are not copied back |
 | `VICTORY_AMBIENT`, `VICTORY_AMBIENT_SPECULAR` | `0.8`, `1` | estimates of indirect light and of reflections (no ray tracing) |
 | `VICTORY_EARLY_DEPTH` | on | pixel programs keep the console's early depth test |
