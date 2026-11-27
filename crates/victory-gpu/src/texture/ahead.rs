@@ -287,6 +287,7 @@ impl Job {
     /// `list` is an open copy list, and the job lives until it has run.
     unsafe fn record(&self, list: &ID3D12GraphicsCommandList) {
         let (s, texture) = (&self.staging, &self.copy.texture);
+        crate::launcher_stats::TEXTURE_UPLOAD_BYTES.fetch_add(s.bytes, Relaxed);
         for (i, footprint) in s.footprints.iter().enumerate() {
             let to = D3D12_TEXTURE_COPY_LOCATION {
                 // SAFETY: a borrowed pointer the location never releases.

@@ -1002,6 +1002,7 @@ fn record_upload(
     if let Some(prefill) = prefill {
         record_prefill(list, texture, resource as usize, staging.memory as u64, prefill);
     }
+    crate::launcher_stats::TEXTURE_UPLOAD_BYTES.fetch_add(staging.bytes, Relaxed);
     // The staging/plane upload buffer lives until the list is reset.
     for (i, footprint) in staging.footprints.iter().enumerate() {
         #[cfg(feature = "diagnostics")]
@@ -1161,6 +1162,7 @@ fn record_prefill(list: &HostList, texture: &ID3D12Resource, resource: usize, st
     // SAFETY: the mapping holds `total` bytes.
     unsafe { std::ptr::copy_nonoverlapping(claim.bytes.as_ptr(), data, total as usize) };
     list.keep(&buffer);
+    crate::launcher_stats::TEXTURE_UPLOAD_BYTES.fetch_add(total, Ordering::Relaxed);
     for (i, footprint) in footprints.iter().enumerate() {
         let to = D3D12_TEXTURE_COPY_LOCATION {
             // SAFETY: a borrowed pointer the location never releases.

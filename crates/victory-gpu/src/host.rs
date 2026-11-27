@@ -1191,6 +1191,13 @@ pub(crate) fn log_removal_context() {
 static SUBMISSION_US: [std::sync::atomic::AtomicU64; 2] =
     [std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0)];
 
+/// Adds to [`SUBMISSION_US`] and to the launcher's totals, which are never reset.
+#[inline]
+fn submission_us(kind: usize, us: u64) {
+    SUBMISSION_US[kind].fetch_add(us, Ordering::Relaxed);
+    crate::launcher_stats::SUBMISSION[kind].fetch_add(us, Ordering::Relaxed);
+}
+
 /// After submissions: shader-written ranges compared and copied back into
 /// title memory (microseconds, bytes that differed), since the last
 /// frame-rate line.
@@ -1259,6 +1266,7 @@ fn card_clock_watch(clock: &'static CardClock) {
     let Ok(event) = (unsafe { CreateEventW(None, false, false, None) }) else {
         return;
     };
+    crate::launcher_stats::CARD_CLOCK_ACTIVE.store(true, Ordering::Relaxed);
     let mut seen = 0;
     loop {
         let target = {
@@ -5008,7 +5016,7 @@ fn relay_wait(why: usize, done: impl Fn(&Line) -> bool) {
     let us = waiting.elapsed().as_micros() as u64;
     LATE_STATS[12].fetch_add(us, Ordering::Relaxed);
     LATE_WAITED[why.min(10)].fetch_add(us, Ordering::Relaxed);
-    SUBMISSION_US[1].fetch_add(us, Ordering::Relaxed);
+    submission_us(1, us);
     #[cfg(feature = "diagnostics")]
     blamed(why, us);
 }
@@ -5919,8 +5927,12 @@ impl Host {
         // SAFETY: our queue and the clock's fence.
         let _ = unsafe { self.queue.Signal(&clock.fence, state.0) };
         if let Some((since, worked_then)) = state.1.take() {
-            CARD_CLOCK_US[0].fetch_add(since.elapsed().as_micros() as u64, Ordering::Relaxed);
-            CARD_CLOCK_US[1].fetch_add(worked().saturating_sub(worked_then), Ordering::Relaxed);
+            let idle = since.elapsed().as_micros() as u64;
+            let cpu = worked().saturating_sub(worked_then);
+            CARD_CLOCK_US[0].fetch_add(idle, Ordering::Relaxed);
+            CARD_CLOCK_US[1].fetch_add(cpu, Ordering::Relaxed);
+            crate::launcher_stats::CARD_IDLE[0].fetch_add(idle, Ordering::Relaxed);
+            crate::launcher_stats::CARD_IDLE[1].fetch_add(cpu, Ordering::Relaxed);
         }
         drop(state);
         clock.sent.notify_one();
@@ -7213,7 +7225,7 @@ impl Host {
                 let gpu = waiting.elapsed();
                 LATE_STATS[12].fetch_add(gpu.as_micros() as u64, Ordering::Relaxed);
                 LATE_WAITED[why.min(10)].fetch_add(gpu.as_micros() as u64, Ordering::Relaxed);
-                SUBMISSION_US[1].fetch_add(gpu.as_micros() as u64, Ordering::Relaxed);
+                submission_us(1, gpu.as_micros() as u64);
                 #[cfg(feature = "diagnostics")]
                 crate::copystat::card_waited(gpu.as_micros() as u64, || {
                     format!("{flights} submissions sent ahead, settled together")
@@ -7698,7 +7710,7 @@ impl Host {
                 texture_back_ranges.extend(list.deferred().readback_ranges());
             }
             let writes = runs.iter().flat_map(|l| l.deferred().writes.clone()).collect();
-            SUBMISSION_US[0].fetch_add((prepared - started).saturating_sub(settled).as_micros() as u64, Ordering::Relaxed);
+            submission_us(0, (prepared - started).saturating_sub(settled).as_micros() as u64);
             submitting(0, 0);
             #[cfg(feature = "diagnostics")]
             crate::copystat::submission_ends(lock);
@@ -7804,8 +7816,8 @@ impl Host {
         FINISHED.store(this_submission, Ordering::Release);
         bury(this_submission);
         let gpu = prepared.elapsed();
-        SUBMISSION_US[0].fetch_add((prepared - started).as_micros() as u64, Ordering::Relaxed);
-        SUBMISSION_US[1].fetch_add(gpu.as_micros() as u64, Ordering::Relaxed);
+        submission_us(0, (prepared - started).as_micros() as u64);
+        submission_us(1, gpu.as_micros() as u64);
         #[cfg(feature = "diagnostics")]
         crate::copystat::card_waited(gpu.as_micros() as u64, || {
             let pipelines: std::collections::BTreeSet<String> = runs
@@ -11318,8 +11330,19 @@ struct Meter {
     copy_stats_frames: u64,
     drawn: u64,
     logged: std::time::Instant,
+    /// The block the launcher reads (`crate::launcher_stats`); `None` when off or refused.
+    stats: Option<crate::launcher_stats::Publisher>,
     /// The caption the window had, once read.
     caption: Option<Vec<u16>>,
+}
+
+/// The launcher block outlives a presenter that is made again.
+impl Drop for Meter {
+    fn drop(&mut self) {
+        if let Some(stats) = self.stats.take() {
+            stats.park();
+        }
+    }
 }
 
 impl Meter {
@@ -11333,6 +11356,7 @@ impl Meter {
             copy_stats_frames: 0,
             drawn: crate::draw::drawn(),
             logged: now,
+            stats: crate::launcher_stats::Publisher::new(),
             caption: None,
         }
     }
@@ -11344,21 +11368,24 @@ impl Meter {
     }
 
     /// Record a frame once the swap chain has accepted it.
-    fn record_present(&mut self, hwnd: HWND, status: windows::core::HRESULT) -> bool {
+    fn record_present(&mut self, hwnd: HWND, status: windows::core::HRESULT, timing: Option<(u64, u64)>) -> bool {
         use windows::Win32::Foundation::S_OK;
         if status != S_OK && status != self.last_present {
             tracing::warn!(?status, "swap chain did not present the frame");
         }
         self.last_present = status;
         if status != S_OK {
+            if let Some(stats) = &mut self.stats {
+                stats.rejected(status);
+            }
             return false;
         }
-        self.frame(hwnd);
+        self.frame(hwnd, timing);
         true
     }
 
     /// Counts a presented frame.
-    fn frame(&mut self, hwnd: HWND) {
+    fn frame(&mut self, hwnd: HWND, timing: Option<(u64, u64)>) {
         #[cfg(feature = "diagnostics")]
         tracing::debug!(target: "victory_gpu::frame", token = crate::frame::current(), "present");
         #[cfg(feature = "diagnostics")]
@@ -11368,11 +11395,24 @@ impl Meter {
         {
             self.copy_stats_frames += 1;
         }
+        // For the launcher's monitor: a few atomic stores, nothing else.
+        if let (Some(stats), Some(timing)) = (&mut self.stats, timing) {
+            stats.frame(timing);
+        }
         let elapsed = self.since.elapsed();
         if elapsed < std::time::Duration::from_secs(1) {
             return;
         }
         let drawn = crate::draw::drawn();
+        // Taken here, once, for the lines below and for the launcher.
+        let preparing = PREPARING.each_ref().map(|v| v.swap(0, Ordering::Relaxed));
+        let readback = COPY_BACK.each_ref().map(|v| v.swap(0, Ordering::Relaxed));
+        let dropped = crate::draw::take_dropped();
+        let indirect = crate::list::take_indirect();
+        let refused = BUDGET_NOTES[0].swap(0, Ordering::Relaxed);
+        if let Some(stats) = &self.stats {
+            stats.slow(self.frames, preparing, readback, [dropped, indirect, refused]);
+        }
         let frames = f64::from(self.frames);
         let fps = frames / elapsed.as_secs_f64();
         let ms = elapsed.as_secs_f64() * 1000.0 / frames;
@@ -11396,16 +11436,16 @@ impl Meter {
             });
             let [copy_ms, copy_mb, texture_ms, texture_mb] = [0, 1, 2, 3].map(|i| {
                 let scale = if i % 2 == 0 { 1e3 } else { 1e6 };
-                PREPARING[i].swap(0, Ordering::Relaxed) as f64 / scale / frames
+                preparing[i] as f64 / scale / frames
             });
             let [back_ms, back_mb] = [0, 1].map(|i| {
-                COPY_BACK[i].swap(0, Ordering::Relaxed) as f64 / [1e3, 1e6][i] / frames
+                readback[i] as f64 / [1e3, 1e6][i] / frames
             });
-            let dropped = crate::draw::take_dropped() as f64 / frames;
-            let indirect = crate::list::take_indirect() as f64 / frames;
+            let dropped = dropped as f64 / frames;
+            let indirect = indirect as f64 / frames;
             let mesh_largest = MESH_GROUPS[0].swap(0, Ordering::Relaxed);
             let mesh_groups = MESH_GROUPS[1].swap(0, Ordering::Relaxed) as f64 / frames;
-            let refused = BUDGET_NOTES[0].swap(0, Ordering::Relaxed) as f64 / frames;
+            let refused = refused as f64 / frames;
             let biggest = BUDGET_NOTES[1].swap(0, Ordering::Relaxed);
             tracing::info!(
                 "indirect mesh dispatches: the largest group count asked for {mesh_largest} (run: at most 65535), {mesh_groups:.0} groups asked per frame; {refused:.2} indirect records a frame ran empty for want of their list's budget (2^27), the largest cost of one {biggest} (0: under 2^22)"
@@ -11685,11 +11725,11 @@ mod present_status_tests {
     fn the_meter_counts_successful_presents_across_a_failure() {
         let mut meter = Meter::new();
         let hwnd = HWND::default();
-        assert!(meter.record_present(hwnd, S_OK));
-        assert!(!meter.record_present(hwnd, DXGI_STATUS_OCCLUDED));
-        assert!(!meter.record_present(hwnd, E_FAIL));
-        assert!(!meter.record_present(hwnd, E_FAIL));
-        assert!(meter.record_present(hwnd, S_OK));
+        assert!(meter.record_present(hwnd, S_OK, Some((1, 2))));
+        assert!(!meter.record_present(hwnd, DXGI_STATUS_OCCLUDED, Some((1, 2))));
+        assert!(!meter.record_present(hwnd, E_FAIL, Some((1, 2))));
+        assert!(!meter.record_present(hwnd, E_FAIL, Some((1, 2))));
+        assert!(meter.record_present(hwnd, S_OK, Some((1, 2))));
         assert_eq!(meter.frames, 2);
         assert_eq!(meter.last_present, S_OK);
     }
@@ -12051,6 +12091,8 @@ impl Host {
             #[cfg(feature = "diagnostics")]
             crate::replay::record::present(texture, state);
             let mut showing = crate::timeline::span("the host's Present");
+            // The time of the present call itself, for the launcher.
+            let started = p.meter.stats.as_ref().map(|_| victory_stats::qpc_now());
             let status = if p.framegen {
                 #[cfg(feature = "diagnostics")]
                 let ui = panel_copy.as_ref().and_then(|panel| panel.ui.as_ref());
@@ -12082,12 +12124,13 @@ impl Host {
             } else {
                 p.swap_chain.Present(0, DXGI_PRESENT(0))
             };
+            let timing = started.map(|start| (start, victory_stats::qpc_now()));
             showing.next("the frame meter");
             #[cfg(feature = "diagnostics")]
             if status == windows::Win32::Foundation::S_OK {
                 p.panel.frame(p.meter.line_due());
             }
-            let presented = p.meter.record_present(p.hwnd, status);
+            let presented = p.meter.record_present(p.hwnd, status, timing);
             showing.end();
             if !presented { return None; }
             self.start_title_stock();
@@ -12157,6 +12200,10 @@ impl Host {
             }
             tracing::info!(width, height, format = format.0, "presenting to a window");
             self.log_video_memory("right after the swap chain is made");
+            let meter = Meter::new();
+            if let Some(stats) = &meter.stats {
+                stats.adapter(self.device.GetAdapterLuid());
+            }
             Ok(Presenter {
                 swap_chain,
                 framegen,
@@ -12167,7 +12214,7 @@ impl Host {
                 copy,
                 ahead: Vec::new(),
                 hwnd,
-                meter: Meter::new(),
+                meter,
                 composer: None,
                 game_ui: None,
                 ui_slot: 0,
@@ -12255,6 +12302,9 @@ impl Host {
                 .QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &mut shared)
                 .ok()?;
         }
+        // For the launcher's monitor (`crate::launcher_stats`).
+        crate::launcher_stats::VRAM[0].store(own.CurrentUsage, Ordering::Relaxed);
+        crate::launcher_stats::VRAM[1].store(own.Budget, Ordering::Relaxed);
         // The card's budget moved by 256 MB or more since the last look:
         // said at once, with what was in use at the last look, so the log
         // has the moment. (It fell from 11,242 MB to some 10,300 MB with
