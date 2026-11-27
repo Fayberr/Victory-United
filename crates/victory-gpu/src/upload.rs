@@ -93,32 +93,59 @@ impl Upload {
             return Some(Upload(Kind::Heap(vec![0; len])));
         }
         let n = len.max(1).div_ceil(BLOCK);
-        let mut arenas = ARENAS.lock().unwrap_or_else(|e| e.into_inner());
-        let found = arenas.iter().enumerate().find_map(|(a, arena)| Some((a, gap(&arena.taken, n)?)));
-        let (a, first) = match found {
-            Some(place) => place,
+        // The arena table's lock is not held while `VirtualAlloc2` and
+        // `shadow::register` run: both take other locks, and a title thread
+        // asking for upload memory must not wait behind the shadow table (or
+        // the other way round).
+        let found = {
+            let mut arenas = ARENAS.lock().unwrap_or_else(|e| e.into_inner());
+            arenas
+                .iter()
+                .enumerate()
+                .find_map(|(a, arena)| Some((a, gap(&arena.taken, n)?)))
+                .map(|(a, first)| {
+                    let arena = &mut arenas[a];
+                    arena.taken[first..first + n].fill(true);
+                    arena.at + first * BLOCK
+                })
+        };
+        let at = match found {
+            Some(at) => at,
             None => {
                 let preferred = n.max(ARENA / BLOCK);
                 // A title memory pool can leave only holes smaller than a
                 // whole arena once it has grown (the late cutscenes do): the
-                // blocks this request needs may still fit. The structure
-                // builder writes through the pointer without looking for
-                // null, so a 4 MiB request that fails when 64 KiB would do is
-                // a crash, not a fallback.
-                let (at, blocks) = match reserve(preferred * BLOCK) {
-                    Some(at) => (at, preferred),
-                    None if preferred > n => (reserve(n * BLOCK)?, n),
-                    None => return None,
+                // blocks this request needs may still fit. Try the preferred
+                // arena, then halves down to exactly what is needed. The
+                // structure builder writes through the pointer without
+                // looking for null, so a 4 MiB request that fails when 1 MiB
+                // would do is a crash, not a fallback.
+                let mut blocks = preferred;
+                let (at, blocks) = loop {
+                    if let Some(at) = reserve(blocks * BLOCK) {
+                        break (at, blocks);
+                    }
+                    if blocks <= n {
+                        return None;
+                    }
+                    blocks = (blocks / 2).max(n);
                 };
+                if blocks < preferred {
+                    tracing::warn!(
+                        preferred_bytes = preferred * BLOCK,
+                        bytes = blocks * BLOCK,
+                        "only a smaller list upload arena fits the free low memory"
+                    );
+                }
                 crate::shadow::register(at, at as u64, (blocks * BLOCK) as u64);
                 tracing::info!(at = format_args!("{at:#x}"), bytes = blocks * BLOCK, "memory for lists' uploads, where shaders reach it by address");
-                arenas.push(Arena { at, taken: vec![false; blocks] });
-                (arenas.len() - 1, 0)
+                let mut arenas = ARENAS.lock().unwrap_or_else(|e| e.into_inner());
+                let mut taken = vec![false; blocks];
+                taken[..n].fill(true);
+                arenas.push(Arena { at, taken });
+                at
             }
         };
-        let arena = &mut arenas[a];
-        arena.taken[first..first + n].fill(true);
-        let at = arena.at + first * BLOCK;
         // SAFETY: the blocks are the arena's and nobody else's now.
         unsafe { std::ptr::write_bytes(at as *mut u8, 0, len) };
         Some(Upload(Kind::Low(at, len)))
