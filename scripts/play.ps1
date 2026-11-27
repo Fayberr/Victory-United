@@ -85,6 +85,10 @@ if ($Machine -eq '3080ti') {
         $settings.VICTORY_CARD_RESERVE_BUDGETS = '1'
         $settings.VICTORY_CARD_BUFFERS_MIN_KB = '64'; $settings.VICTORY_CARD_BUFFERS_MB = '1536'
         $settings.VICTORY_CARD_WINDOWS_MB = '1024'
+        # Textures may fill 85 percent of the budget the system gives (default 96): at 96 the
+        # card ended some room runs at 12.4 GB in use of 12 GB and ran at 4 to 5 fps, with 75 to 90
+        # it ran at 12 to 15 fps in six of six runs.
+        $settings.VICTORY_TEXTURE_ROOM_PERCENT = '85'
     }
 }
 # -Safe leaves out every way still on trial, and the newest faster ones.

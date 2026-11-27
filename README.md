@@ -17,30 +17,33 @@ endorsed by the game's developer or publisher, see [LEGAL.md](LEGAL.md).
 ## State
 
 Early. It boots, plays the intro and the menus and reaches the first playable room. It is not
-playable yet: in that room it ran at about 11 frames a second in two runs of 7 and 10 minutes, and the aim is 20.
+playable yet: in that room it ran at 12 to 15 frames a second in four runs of 7 minutes, and the aim is 20.
 
 Measured on one machine: Windows 11 Pro (build 26300), NVIDIA GeForce RTX 3080 Ti with 12 GB
-(driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `fab5286c` (the tree of this repository
-is that commit plus the legal and contributing files), Series S profile, no frame generation, no
+(driver 32.0.16.2124), Ryzen 7 5700X3D, 64 GB RAM. Commit `65a8fce7` plus the machine profile in
+`scripts/play.ps1`, Series S profile, no frame generation, no
 real save (a fresh copy of the throwaway test data), measured in the first playable room, standing
 at the window. These switches were set (a switch this tree
 does not know has no effect): internal render scale 0.5 with an own upscaler, relay mode 2, late
-wait 3, 2 GB card buffers, and stubs for exposure, ambient light and the shadow
+wait 3, 1.5 GB card buffers with their budgets reserved (64 KB minimum, 1 GB windows), textures
+limited to 85 percent of the card's budget, and stubs for exposure, ambient light and the shadow
 mask.
 
-- **Speed:** 10.6, 10.8, 11.0 and 11.1 frames per second in minutes 3 to 6 of a 7 minute run,
-  measured from the frame counter in the log. Minute 1 ran at 5.2 and minute 2 at 8.4 fps while the
-  game settled. The run was the second one with the same cache; a first run on a new build is
-  much slower for the first minutes. A 10 minute run of the same build, also with the same cache, ran at
-  11.1, 11.0, 10.7, 10.7, 10.7, 10.3 and 10.0 fps in minutes 3 to 9, so it slowly lost speed. These are
-  two runs of one build on one machine, not a range across machines.
-- **Picture:** from minute 3 on every saved frame was a lit frame (79 to 83 per minute); the
-  frames that were looked at show the room lit through the window, the fence outside and the
-  character, with no white or black blocks. Some detail is missing: the game's ray-traced light is
+- **Speed:** minutes 3 to 6 of 7 minute runs, from the frame counter in the log, each run on a
+  cache copied fresh from the same warm one: with textures limited to 85 percent of the budget
+  14.5, 14.8, 14.9 and 14.6 fps in one run and 11.9, 11.9, 12.2 and 12.1 in a repeat; with 75 percent
+  14.6, 15.1, 15.1 and 14.8; with 90 percent 13.0, 13.3, 13.2 and 13.3. Minutes 1 and 2 are slower
+  (about 2.5 fps) while the game settles. Without the limit (96 percent, the default) three of five
+  runs of the same build ran at 4 to 5 fps instead: the card then held 12.4 GB of its 12 GB. These
+  are single runs of one build on one machine, not a range across machines.
+- **Picture:** from minute 3 on every saved frame was a lit frame (89 to 113 per minute, none dark or
+  blank); the frames at minute 4 and at the end of the 75 percent run show the room lit through the
+  window with the watchtower outside and the character in front of it. Some detail is missing: the
+  character's face and hair show horizontal stripes, the game's ray-traced light is
   not built by default, and [Vice-Tay's list of known problems](https://github.com/TaynanGT/Vice-Tay#known-problems)
   was not checked here.
-- **Stability:** on this tree a longer session has not been shown to hold yet; the 7 minute run ended normally and
-  the 10 minute run (stopped by us at about 10 minutes) had no crash or GPU hang up to then. On the earlier tree
+- **Stability:** these runs lasted 7 minutes and had no panic or device-lost line in the log. A longer
+  session has not been shown on this tree. On the earlier tree
   below, a session played by hand for 34.7 minutes ended normally. Vice-Tay reports memory growing in long
   sessions and the frame rate falling with it.
 - **Earlier tree, played by hand:** on commit `3588725d` (before this tree moved to Vice-Tay's code) a person played
