@@ -358,7 +358,8 @@ impl TilePlan {
         let chunk_size = body.first().map(|run| run.2).filter(|&size| {
             body.iter().all(|&(offset, _, len)| len == size && offset.is_multiple_of(size))
         });
-        let rows = if remember_rows {
+        // Layouts addressed by XOR flips have no swizzle table for `row`.
+        let rows = if remember_rows && !layout.pattern[0].is_empty() {
             let slices = if layout.thick { layout.block[2] } else { 1 };
             (0..slices)
                 .flat_map(|z| (0..m.height).map(move |y| layout.row(m, y, z)))
