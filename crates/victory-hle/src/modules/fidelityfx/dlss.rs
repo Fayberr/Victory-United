@@ -1655,22 +1655,19 @@ fn record_dispatch(
             if let Some(ngx) = ngx {
                 evaluate(list, ngx, ctx, &mut feature, dispatch, output_size, textures)
             } else {
-                let values = Evaluation::of(dispatch, [1.0, 1.0]);
-                let camera = victory_gpu::streamline::Camera {
-                    jitter: values.jitter,
-                    motion_scale: values.motion_scale,
-                    render: values.render,
-                    output: output_size,
-                    near: f32::from_bits(dispatch.settings[5]),
-                    far: f32::from_bits(dispatch.settings[6]),
-                    fov_y: f32::from_bits(dispatch.settings[7]),
-                    reset: values.reset || ctx.frames.load(Ordering::Relaxed) == 0,
-                    flags,
-                };
+                let pre_exposure = f32::from_bits(dispatch.settings[3]);
+                let mut camera = super::streamline_camera(dispatch, output_size, flags);
+                camera.reset |= ctx.frames.load(Ordering::Relaxed) == 0;
                 let states = bindings.map(|binding| binding.map_or(0, |binding| binding.used));
-                victory_gpu::streamline::upscale(
-                    list.commands(), textures, states, camera, values.pre_exposure,
+                let frame = victory_gpu::streamline::upscale(
+                    list.commands(), textures, states, camera, pre_exposure,
                 ).map_err(DispatchError::Failed)?;
+                list.prepare_streamline_framegen(
+                    dispatch.resources[1].resource.cast::<Object>(),
+                    dispatch.resources[2].resource.cast::<Object>(),
+                    camera,
+                    Some(frame),
+                );
                 if victory_gpu::framegen::requested()
                     && let (Some(depth), Some(motion)) = (&textures[1], &textures[2])
                     && depth.as_raw() != motion.as_raw()

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The part of NVIDIA Streamline's C ABI this crate calls (SDK 2.14, the
 //! `sl_*.h` headers of the SDK's `include` folder), written down by hand from
 //! those headers: structures that begin with a chained header (next, type id,

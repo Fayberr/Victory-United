@@ -101,7 +101,18 @@ pub(super) fn prepare_fsr_4k(image: &mut PreparedImage, preset: FsrPreset) -> Re
     Ok(())
 }
 
-pub(super) fn prepare_fsr(image: &mut PreparedImage, preset: FsrPreset) -> Result<()> {
+pub(super) fn prepare_streamline(image: &mut PreparedImage, preset: FsrPreset) -> Result<()> {
+    const TEMPORAL_SCALE: u32 = 0x028f_1e7e;
+    ensure!(
+        *field::<4>(image, TEMPORAL_SCALE)? == (2.0f32 / 3.0).to_le_bytes(),
+        "Unexpected Series X temporal scale"
+    );
+    prepare_fsr(image, preset)?;
+    *field::<4>(image, TEMPORAL_SCALE)? = preset.render_scale().to_le_bytes();
+    Ok(())
+}
+
+fn prepare_fsr(image: &mut PreparedImage, preset: FsrPreset) -> Result<()> {
     ensure!(
         image.original_hash.to_hex().as_str() == RETAIL_BUILD,
         "The FidelityFX profile is unavailable for this retail game build"

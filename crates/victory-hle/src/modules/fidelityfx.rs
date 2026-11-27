@@ -263,7 +263,7 @@ mod resource_states;
 use resource_states::{Binding, SetupError, with_resource_states};
 
 pub use victory_gpu::framegen::{requested as framegen_requested, set_dir as set_framegen_dir};
-pub use victory_gpu::streamline::start as start_streamline;
+pub use victory_gpu::streamline::{framegen_requested as streamline_framegen_requested, start as start_streamline};
 
 /// Select the best supported PC provider before the title's imports are bound.
 pub fn use_host_dir(dir: &Path) -> Result<&'static str, String> {
@@ -875,6 +875,7 @@ fn record_dispatch(
                 once!(warn, code, "FidelityFX provider rejected the title dispatch");
                 return Err(DispatchError(code));
             }
+            record_streamline_framegen(list, dispatch, output_size, flags);
             if victory_gpu::framegen::requested()
                 && let (Some((depth, _)), Some((motion, _))) = (&textures[1], &textures[2])
             {
@@ -933,6 +934,38 @@ fn record_framegen(
         reset: dispatch.settings[4] & 0xff != 0,
         camera: std::array::from_fn(|i| f32::from_bits(dispatch.settings[5 + i])),
     });
+}
+
+fn record_streamline_framegen(
+    list: &victory_gpu::external::Recording<'_>,
+    dispatch: &DispatchUpscale,
+    output: [u32; 2],
+    flags: u32,
+) {
+    list.prepare_streamline_framegen(
+        dispatch.resources[1].resource.cast::<Object>(),
+        dispatch.resources[2].resource.cast::<Object>(),
+        streamline_camera(dispatch, output, flags),
+        None,
+    );
+}
+
+fn streamline_camera(
+    dispatch: &DispatchUpscale,
+    output: [u32; 2],
+    flags: u32,
+) -> victory_gpu::streamline::Camera {
+    victory_gpu::streamline::Camera {
+        jitter: dispatch.jitter,
+        motion_scale: dispatch.motion_scale.map(|scale| if scale == 0.0 { 1.0 } else { scale }),
+        render: dispatch.render_size,
+        output,
+        near: f32::from_bits(dispatch.settings[5]),
+        far: f32::from_bits(dispatch.settings[6]),
+        fov_y: f32::from_bits(dispatch.settings[7]),
+        reset: dispatch.settings[4] & 0xff != 0,
+        flags,
+    }
 }
 
 pub(crate) fn module() -> HleModule {

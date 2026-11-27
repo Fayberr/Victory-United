@@ -4489,6 +4489,13 @@ impl State {
         let rects = self.topology == RECTANGLES && !self.completes_rects();
         let ran = ready && (!rects || self.rectangles(list, vertices, first));
         if ran {
+            if crate::streamline::generation::hudless_wanted()
+                && vertices == 3 && instances == 1 && self.depth == 0
+                && let &[target] = self.targets.as_slice()
+                && let Some(pipeline) = crate::pipeline::host_pipeline(self.pipeline as This)
+            {
+                crate::streamline::generation::before_target_draw(list, target as This, pipeline);
+            }
             // Rectangles were expanded into their own vertex buffers.
             let (count, from) = if rects {
                 (vertices / 3 * 6, 0)

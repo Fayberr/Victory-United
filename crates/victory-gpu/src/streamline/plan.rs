@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Streamline camera constants derived from a FidelityFX dispatch.
 
 use super::abi;

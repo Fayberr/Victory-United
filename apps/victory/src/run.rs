@@ -166,6 +166,17 @@ pub fn run(
     };
     let series_s_fsr = fsr_4k::FsrPreset::requested("VICTORY_FSR")?;
     let framegen = fidelityfx::framegen_requested();
+    let dlss_framegen = fidelityfx::streamline_framegen_requested();
+    if dlss_framegen {
+        anyhow::ensure!(
+            dlss.or(series_s_dlss).is_none(),
+            "DLSS Frame Generation can use Streamline Super Resolution (VICTORY_DLSS=1) or FidelityFX"
+        );
+        anyhow::ensure!(
+            !matches!(console, Console::SeriesX) || streamline_asked,
+            "DLSS Frame Generation on Series X requires VICTORY_DLSS=1"
+        );
+    }
     anyhow::ensure!(
         !framegen || matches!(console, Console::SeriesS),
         "VICTORY_FRAMEGEN requires Series S"
@@ -214,29 +225,28 @@ pub fn run(
             profile = Some(preset);
         }
     }
-    let streamline_preset = if execute {
-        streamline_preset.filter(|preset| match fidelityfx::start_streamline(preset.mode()) {
-            Ok(()) => {
-                if let Some(dir) = cfg.fidelityfx_dir.as_deref() {
-                    let fallback = match console {
-                        Console::SeriesS => fidelityfx::use_host_fsr3(dir, u32::from(preset.mode())),
-                        Console::SeriesX => fidelityfx::use_host_dir(dir).map(|_| ()),
-                    };
-                    if let Err(error) = fallback {
-                        tracing::warn!(%error, "Streamline DLSS: could not load the AMD FSR fallback");
-                    }
-                }
-                tracing::info!(preset = preset.name(), "Streamline DLSS: selected the FidelityFX renderer");
-                true
-            }
-            Err(error) => {
-                tracing::warn!(%error, "Streamline DLSS unavailable; using the title's upscaler");
-                false
-            }
-        })
+    let streamline = if execute && (streamline_asked || dlss_framegen) {
+        fidelityfx::start_streamline(streamline_preset.map(|preset| preset.mode()), dlss_framegen)
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "Streamline unavailable; using the title's renderer and plain presentation");
+                Default::default()
+            })
     } else {
-        None
+        Default::default()
     };
+    let streamline_preset = streamline_preset.filter(|_| streamline.super_resolution);
+    if let Some(preset) = streamline_preset {
+        if let Some(dir) = cfg.fidelityfx_dir.as_deref() {
+            let fallback = match console {
+                Console::SeriesS => fidelityfx::use_host_fsr3(dir, u32::from(preset.mode())),
+                Console::SeriesX => fidelityfx::use_host_dir(dir).map(|_| ()),
+            };
+            if let Err(error) = fallback {
+                tracing::warn!(%error, "Streamline DLSS: could not load the AMD FSR fallback");
+            }
+        }
+        tracing::info!(preset = preset.name(), "Streamline DLSS: selected the FidelityFX renderer");
+    }
     let image = if let Some(preset) = profile {
         fsr_4k::prepare_fsr_4k(&mut prepared, preset)?;
         // SAFETY: Windows supports setting the environment across threads.
@@ -247,7 +257,7 @@ pub fn run(
     } else if let Some(preset) = streamline_preset
         && matches!(console, Console::SeriesX)
     {
-        fsr_4k::prepare_fsr(&mut prepared, preset)?;
+        fsr_4k::prepare_streamline(&mut prepared, preset)?;
         let cache = cfg.cache_subdir(&format!("images/streamline-{}", preset.name()))?;
         victory_loader::load(&prepared, &cache)?
     } else {
@@ -287,7 +297,9 @@ pub fn run(
         image.base(),
         image.info().image_base
     );
-    let native_framegen = framegen && execute && !fidelityfx::serving();
+    let native_framegen = (framegen || streamline.frame_generation)
+        && execute && !fidelityfx::serving()
+        && matches!(console, Console::SeriesS);
     let resolver = HleResolver::new(if strict {
         HostPolicy::none()
     } else {

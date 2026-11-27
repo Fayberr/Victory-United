@@ -8,7 +8,7 @@ use victory_gpu::{external, object::Object};
 
 use super::{
     CREATE_UPSCALE, Call, Create, CreateUpscale, DISPATCH_UPSCALE, Destroy, DispatchUpscale,
-    Header, NO_PROVIDER, OK, dispatch_output, minimum_extent, record_framegen,
+    Header, NO_PROVIDER, OK, dispatch_output, minimum_extent, record_framegen, record_streamline_framegen,
 };
 
 struct Api {
@@ -205,6 +205,7 @@ fn prepare(list: &external::Recording<'_>, ctx: &Context, upscale: &DispatchUpsc
             ?output,
             "frame generation: captured native FidelityFX depth and motion"
         );
+        record_streamline_framegen(list, upscale, output, ctx.flags);
         record_framegen(
             list,
             upscale,

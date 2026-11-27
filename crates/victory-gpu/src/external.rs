@@ -66,9 +66,36 @@ impl Recording<'_> {
         &self.host.list
     }
 
+    /// Hold Streamline inputs with the list and publish them only on submission.
+    pub fn prepare_streamline_framegen(
+        &self,
+        depth: This,
+        motion: This,
+        camera: crate::streamline::Camera,
+        frame: Option<u32>,
+    ) {
+        use crate::streamline::generation;
+        if generation::wants_inputs()
+            && let (Some(depth), Some(motion)) = (
+                crate::resource::made_copy(depth),
+                crate::resource::made_copy(motion),
+            )
+            && !std::sync::Arc::ptr_eq(&depth, &motion)
+        {
+            self.host
+                .keep_streamline_preparation(generation::Preparation {
+                    depth,
+                    motion,
+                    camera,
+                    frame,
+                });
+        }
+    }
+
     /// Record AMD's preparation after the upscaler, on the same host list.
     pub fn prepare_framegen(&self, input: crate::framegen::Inputs<'_>) {
-        if let Some(preparation) = crate::framegen::prepare(self.commands(), self.title_list, input) {
+        if let Some(preparation) = crate::framegen::prepare(self.commands(), self.title_list, input)
+        {
             self.host.keep_frame_preparation(preparation);
         }
     }

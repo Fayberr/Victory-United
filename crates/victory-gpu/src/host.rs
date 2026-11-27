@@ -1015,7 +1015,10 @@ fn create() -> windows::core::Result<Host> {
             D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device)?;
             tracing::info!("host device on the software adapter (WARP)");
         } else {
-            device = Some(victory_shader::emit::host::create_preferred_device()?);
+            device = Some(match crate::streamline::addon_device() {
+                Some(device) => device,
+                None => victory_shader::emit::host::create_preferred_device()?,
+            });
             // Whether a GPU hang ends the run or freezes the PC (#1054).
             crate::tdr::log();
         }
@@ -1058,10 +1061,13 @@ fn create() -> windows::core::Result<Host> {
         let messages = debug
             .then(|| device.cast::<ID3D12InfoQueue>().ok())
             .flatten();
-        let queue: ID3D12CommandQueue = device.CreateCommandQueue(&D3D12_COMMAND_QUEUE_DESC {
-            Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
-            ..Default::default()
-        })?;
+        let queue: ID3D12CommandQueue = match crate::streamline::device_made(&device) {
+            Some(queue) => queue,
+            None => device.CreateCommandQueue(&D3D12_COMMAND_QUEUE_DESC {
+                Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
+                ..Default::default()
+            })?,
+        };
         let fence: ID3D12Fence = device.CreateFence(0, D3D12_FENCE_FLAG_NONE)?;
         let event = CreateEventW(None, false, false, None)?;
         let rtvs: ID3D12DescriptorHeap =
@@ -2819,6 +2825,8 @@ struct Deferred {
     /// [`HostList::keep_shared`].
     shared: Vec<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
     frame_preparation: Vec<crate::framegen::Preparation>,
+    streamline_preparation: Option<crate::streamline::generation::Preparation>,
+    hudless_copy: Option<crate::streamline::generation::HudlessCopy>,
     /// The pipelines [`HostList::bind_pipeline`] kept, by address.
     bound: std::collections::HashSet<usize, std::hash::BuildHasherDefault<AddressHash>>,
     /// Buffer ranges refreshed since the last title copy (host copy,
@@ -2866,6 +2874,18 @@ struct Deferred {
 
 /// Mark preparations only once their lists reached the graphics queue.
 fn mark_frame_preparations(runs: &[&HostList]) {
+    use crate::streamline::generation;
+    if generation::wants_inputs() {
+        for run in runs {
+            let deferred = run.deferred();
+            if let Some(preparation) = &deferred.streamline_preparation {
+                generation::submitted(preparation);
+            }
+            if let Some(copy) = &deferred.hudless_copy {
+                generation::hudless_submitted(copy);
+            }
+        }
+    }
     if crate::framegen::requested() {
         for run in runs {
             for preparation in &run.deferred().frame_preparation {
@@ -7891,6 +7911,8 @@ impl HostList {
                 && deferred.kept.is_empty()
                 && deferred.shared.is_empty()
                 && deferred.frame_preparation.is_empty()
+                && deferred.streamline_preparation.is_none()
+                && deferred.hudless_copy.is_none()
                 && deferred.textures.is_empty()
                 && deferred.writes.is_empty()
                 && deferred.backs.is_empty()
@@ -8358,6 +8380,18 @@ impl HostList {
 
     pub(crate) fn keep_frame_preparation(&self, preparation: crate::framegen::Preparation) {
         self.deferred().frame_preparation.push(preparation);
+    }
+
+    pub(crate) fn keep_streamline_preparation(&self, preparation: crate::streamline::generation::Preparation) {
+        self.deferred().streamline_preparation = Some(preparation);
+    }
+
+    pub(crate) fn has_hudless_copy(&self) -> bool {
+        self.deferred().hudless_copy.is_some()
+    }
+
+    pub(crate) fn keep_hudless_copy(&self, copy: crate::streamline::generation::HudlessCopy) {
+        self.deferred().hudless_copy = Some(copy);
     }
 
     #[cfg(test)]
@@ -10208,7 +10242,7 @@ impl Host {
 
 /// The swap chain formats a presented texture can be copied into: its own
 /// family's.
-fn swap_format(format: DXGI_FORMAT) -> Option<DXGI_FORMAT> {
+pub(crate) fn swap_format(format: DXGI_FORMAT) -> Option<DXGI_FORMAT> {
     Some(match format.0 {
         27..=32 => DXGI_FORMAT_R8G8B8A8_UNORM,
         87 | 90 | 91 => DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -10223,6 +10257,7 @@ const BUFFERS: u32 = 2;
 struct Presenter {
     swap_chain: IDXGISwapChain3,
     framegen: bool,
+    dlss_framegen: bool,
     width: u32,
     height: u32,
     format: DXGI_FORMAT,
@@ -10737,6 +10772,9 @@ impl Host {
                         .ResizeBuffers(BUFFERS, width, height, format, DXGI_SWAP_CHAIN_FLAG(0))
                 }
             };
+            if p.dlss_framegen {
+                crate::streamline::generation::disable();
+            }
             let resized = if p.framegen {
                 crate::framegen::resize(frame, width, height, format.0, resize_buffers)
             } else {
@@ -10766,6 +10804,12 @@ impl Host {
                         if !crate::framegen::release_swap_chain(|| drop(presenter.take())) {
                             return None;
                         }
+                        drop(presenter);
+                        return self.present_planes(texture, state_u32, overlay, frame, token);
+                    }
+                    if p.dlss_framegen {
+                        crate::streamline::generation::abandon_swap_chain();
+                        drop(presenter.take());
                         drop(presenter);
                         return self.present_planes(texture, state_u32, overlay, frame, token);
                     }
@@ -11020,6 +11064,11 @@ impl Host {
                     p.ui_slot ^= 1;
                 }
                 status
+            } else if p.dlss_framegen {
+                crate::streamline::generation::present(
+                    &p.swap_chain, (texture, state_u32),
+                    planes.map(|(ui, state, _, _)| (ui, state.0 as u32)), [width, height],
+                )
             } else {
                 p.swap_chain.Present(0, DXGI_PRESENT(0))
             };
@@ -11077,7 +11126,11 @@ impl Host {
                 .then(|| crate::framegen::swap_chain(hwnd, &fg_desc, &factory, &self.queue, &self.device, frame))
                 .flatten();
             let framegen = generated.is_some();
-            let swap_chain = match generated {
+            let dlss_chain = if framegen { None } else {
+                crate::streamline::generation::swap_chain(&factory, hwnd, &desc)
+            };
+            let dlss_framegen = dlss_chain.is_some();
+            let swap_chain = match generated.or(dlss_chain) {
                 Some(swap_chain) => swap_chain,
                 None => {
                     let swap_chain = factory
@@ -11097,6 +11150,7 @@ impl Host {
             Ok(Presenter {
                 swap_chain,
                 framegen,
+                dlss_framegen,
                 width,
                 height,
                 format: if framegen { fg_format } else { format },

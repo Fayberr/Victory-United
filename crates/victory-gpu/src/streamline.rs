@@ -1,8 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! NVIDIA Streamline for the title's FidelityFX dispatch. The SDK is loaded
 //! from a user-supplied folder and uses D3D12 manual hooking.
 
 mod abi;
+pub(crate) mod generation;
 mod plan;
+mod sm86;
 
 pub use plan::Camera;
 
@@ -30,11 +34,14 @@ struct Settings {
     jitter: [f32; 2],
     motion: [f32; 2],
     reactive: bool,
-    quality: u8,
+    quality: Option<u8>,
+    framegen: bool,
+    require_sr_for_fg: bool,
+    addon_luid: Option<u64>,
 }
 
 impl Settings {
-    fn read(quality: u8) -> Result<Self, String> {
+    fn read(quality: Option<u8>, framegen: bool) -> Result<Self, String> {
         let folder = std::env::var_os("VICTORY_STREAMLINE_DIR")
             .filter(|value| !value.is_empty())
             .ok_or("set VICTORY_STREAMLINE_DIR to the SDK's bin\\x64 folder")?;
@@ -53,6 +60,56 @@ impl Settings {
                 ));
             }
         };
+        for file in [INTERPOSER, "sl.common.dll"] {
+            require_file(&dir, file)?;
+        }
+        verify_signature(&dir.join(INTERPOSER))?;
+        let require_sr_for_fg = quality.is_some();
+        let quality = quality.filter(|_| match require_files(&dir, &["sl.dlss.dll", "nvngx_dlss.dll"]) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(%error, "Streamline DLSS unavailable; using the title's upscaler");
+                false
+            }
+        });
+        let framegen = framegen
+            && match require_files(
+                &dir,
+                &[
+                    "sl.dlss_g.dll",
+                    "sl.reflex.dll",
+                    "sl.pcl.dll",
+                    "nvngx_dlssg.dll",
+                ],
+            ) {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(%error, "DLSS Frame Generation unavailable");
+                    false
+                }
+            };
+        let addon_luid = if framegen
+            && let Some(folder) = std::env::var_os("VICTORY_DLSSG_SM86_DIR")
+        {
+            match std::fs::canonicalize(folder)
+                .map_err(|e| e.to_string())
+                .and_then(|dir| sm86::load(&dir))
+            {
+                Ok(proxy) => {
+                    tracing::info!(proxy = %proxy.display(), "DLSS Frame Generation: loaded dlssg_for_sm86 before Streamline");
+                    sm86::cuda_first_luid()
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "DLSS Frame Generation: could not load dlssg_for_sm86");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if quality.is_none() && !framegen {
+            return Err("no requested Streamline feature can be loaded".into());
+        }
         Ok(Self {
             dir,
             log_dir: std::env::var_os("VICTORY_STREAMLINE_LOG")
@@ -63,6 +120,9 @@ impl Settings {
             motion: plan::pair(std::env::var("VICTORY_DLSS_MV").ok().as_deref()),
             reactive: std::env::var_os("VICTORY_DLSS_REACTIVE").is_none_or(|v| v != "0"),
             quality,
+            framegen,
+            require_sr_for_fg,
+            addon_luid,
         })
     }
 }
@@ -89,6 +149,8 @@ struct Sl {
     set_device: abi::SlSetD3DDevice,
     function: abi::SlGetFeatureFunction,
     upgrade: abi::SlUpgradeInterface,
+    native: abi::SlGetNativeInterface,
+    set_tag: abi::SlSetTagForFrame,
     token: abi::SlGetNewFrameToken,
     constants: abi::SlSetConstants,
     evaluate: abi::SlEvaluateFeature,
@@ -103,19 +165,19 @@ fn checked(operation: &str, code: i32) -> Result<(), String> {
 }
 
 impl Sl {
-    fn initialize(settings: &Settings, device: &ID3D12Device) -> Result<Self, String> {
-        for file in [INTERPOSER, "sl.common.dll", "sl.dlss.dll", "nvngx_dlss.dll"] {
-            if !settings.dir.join(file).is_file() {
-                return Err(format!("missing {file} in {}", settings.dir.display()));
-            }
-        }
+    fn initialize(settings: &Settings) -> Result<Self, String> {
         let path = settings.dir.join(INTERPOSER);
-        verify_signature(&path)?;
         let sl = load(&path)?;
         let dir = wide(&settings.dir);
         let paths = [dir.as_ptr()];
         let log_dir = settings.log_dir.as_deref().map(wide);
-        let features = [abi::FEATURE_DLSS];
+        let mut features = Vec::with_capacity(4);
+        if settings.quality.is_some() {
+            features.push(abi::FEATURE_DLSS);
+        }
+        if settings.framegen {
+            features.extend([abi::FEATURE_DLSS_G, abi::FEATURE_REFLEX, abi::FEATURE_PCL]);
+        }
         let preferences = abi::Preferences {
             base: abi::BaseStructure::new(abi::PREFERENCES, 1),
             show_console: false,
@@ -133,7 +195,12 @@ impl Sl {
             flags: abi::DISABLE_CL_STATE_TRACKING
                 | abi::DISABLE_DEBUG_TEXT
                 | abi::USE_MANUAL_HOOKING
-                | abi::USE_FRAME_BASED_RESOURCE_TAGGING,
+                | abi::USE_FRAME_BASED_RESOURCE_TAGGING
+                | if settings.framegen {
+                    abi::USE_DXGI_FACTORY_PROXY
+                } else {
+                    0
+                },
             features_to_load: features.as_ptr(),
             num_features_to_load: features.len() as u32,
             application_id: 0,
@@ -146,16 +213,11 @@ impl Sl {
         checked("slInit", unsafe {
             (sl.init)(&preferences, abi::SDK_VERSION)
         })?;
-        if let Err(error) = sl.attach(device) {
-            // SAFETY: initialization succeeded and no Streamline device work ran.
-            unsafe { (sl.shutdown)() };
-            return Err(error);
-        }
         tracing::info!(library = %path.display(), "Streamline loaded (manual hooking, no OTA updates)");
         Ok(sl)
     }
 
-    fn attach(&self, device: &ID3D12Device) -> Result<(), String> {
+    fn check_support(&self, device: &ID3D12Device, feature: u32) -> Result<(), String> {
         // SAFETY: the device is live and this query has no arguments.
         let luid = unsafe { device.GetAdapterLuid() };
         let adapter = abi::AdapterInfo {
@@ -165,12 +227,8 @@ impl Sl {
             vk_physical_device: null_mut(),
         };
         // SAFETY: an adapter description that lives through the call.
-        checked("Streamline DLSS support", unsafe {
-            (self.supported)(abi::FEATURE_DLSS, &adapter)
-        })?;
-        // SAFETY: Streamline receives the native device, held for the process.
-        checked("slSetD3DDevice", unsafe {
-            (self.set_device)(device.as_raw())
+        checked("Streamline feature support", unsafe {
+            (self.supported)(feature, &adapter)
         })
     }
 
@@ -204,8 +262,9 @@ impl Sl {
 
 struct Runtime {
     sl: Sl,
-    settings: Settings,
-    set_options: abi::SlDlssSetOptions,
+    settings: &'static Settings,
+    set_options: Option<abi::SlDlssSetOptions>,
+    framegen: Option<generation::FrameGeneration>,
     calls: Mutex<Calls>,
 }
 
@@ -215,38 +274,157 @@ struct Calls {
     last: Option<([u32; 2], [u32; 2])>,
 }
 
+impl Calls {
+    fn next_frame(&mut self) -> u32 {
+        self.frame = self.frame.wrapping_add(1);
+        self.frame
+    }
+}
+
+static SETTINGS: OnceLock<Settings> = OnceLock::new();
 static RUNTIME: OnceLock<Result<Runtime, String>> = OnceLock::new();
 static STOPPED: AtomicBool = AtomicBool::new(false);
 
-/// Check the actual host adapter before changing the title's renderer or imports.
-pub fn start(quality: u8) -> Result<(), String> {
-    RUNTIME
-        .get_or_init(|| {
-            let settings = Settings::read(quality)?;
-            let device = crate::external::host_device().ok_or("no host D3D12 device")?;
-            let sl = Sl::initialize(&settings, &device)?;
-            let function = match sl.function(abi::FEATURE_DLSS, c"slDLSSSetOptions") {
-                Ok(function) => function,
-                Err(error) => {
-                    // SAFETY: initialized successfully, before any feature evaluation.
-                    unsafe { (sl.shutdown)() };
-                    return Err(error);
-                }
-            };
-            // SAFETY: the Streamline function of this name has the SDK signature.
-            let set_options =
-                unsafe { std::mem::transmute::<*mut c_void, abi::SlDlssSetOptions>(function) };
-            sl.log_version(abi::FEATURE_DLSS, "DLSS Super Resolution");
-            Ok(Runtime {
-                sl,
-                settings,
-                set_options,
-                calls: Mutex::default(),
-            })
-        })
+#[derive(Default)]
+pub struct Available {
+    pub super_resolution: bool,
+    pub frame_generation: bool,
+}
+
+pub fn framegen_requested() -> bool {
+    std::env::var_os("VICTORY_FRAMEGEN").is_some_and(|v| v == "dlss")
+}
+
+/// Select features before the host creates its direct queue.
+pub fn start(quality: Option<u8>, framegen: bool) -> Result<Available, String> {
+    let framegen = framegen
+        && if crate::queue::line_on() {
+            true
+        } else {
+            tracing::warn!(
+                "DLSS Frame Generation requires the ordered submission line (VICTORY_THIN=1 or VICTORY_ASYNC_SUBMIT=1 with late present)"
+            );
+            false
+        };
+    if quality.is_none() && !framegen {
+        return Ok(Available::default());
+    }
+    SETTINGS
+        .set(Settings::read(quality, framegen)?)
+        .map_err(|_| "Streamline already configured")?;
+    let device = crate::external::host_device().ok_or("no host D3D12 device")?;
+    // Normally device_made initializes inside host creation. An existing
+    // device can still supply SR, but its direct queue predates the proxy.
+    let runtime = RUNTIME
+        .get_or_init(|| initialize(&device, false))
         .as_ref()
-        .map(|_| ())
-        .map_err(Clone::clone)
+        .map_err(Clone::clone)?;
+    Ok(Available {
+        super_resolution: runtime.set_options.is_some(),
+        frame_generation: runtime.framegen.is_some(),
+    })
+}
+
+pub(crate) fn addon_device() -> Option<ID3D12Device> {
+    use windows::Win32::Foundation::LUID;
+    use windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory2, DXGI_CREATE_FACTORY_FLAGS, IDXGIAdapter1, IDXGIFactory4,
+    };
+    use windows::Win32::Graphics::{
+        Direct3D::D3D_FEATURE_LEVEL_12_0, Direct3D12::D3D12CreateDevice,
+    };
+
+    let luid = SETTINGS.get()?.addon_luid?;
+    if std::env::var("VICTORY_D3D12_ADAPTER").is_ok_and(|value| !value.trim().is_empty()) {
+        return None;
+    }
+    let luid = LUID {
+        LowPart: luid as u32,
+        HighPart: (luid >> 32) as i32,
+    };
+    // SAFETY: DXGI enumeration and device creation with valid arguments.
+    unsafe {
+        let factory: IDXGIFactory4 = CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)).ok()?;
+        let adapter: IDXGIAdapter1 = factory.EnumAdapterByLuid(luid).ok()?;
+        let mut device = None;
+        D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device).ok()?;
+        device
+    }
+}
+
+pub(crate) fn device_made(
+    device: &ID3D12Device,
+) -> Option<windows::Win32::Graphics::Direct3D12::ID3D12CommandQueue> {
+    SETTINGS.get()?;
+    let runtime = RUNTIME
+        .get_or_init(|| initialize(device, true))
+        .as_ref()
+        .ok()?;
+    runtime.framegen.as_ref()?.native_queue()
+}
+
+fn initialize(device: &ID3D12Device, can_proxy_queue: bool) -> Result<Runtime, String> {
+    let settings = SETTINGS.get().ok_or("Streamline was not configured")?;
+    let sl = Sl::initialize(settings)?;
+    // SAFETY: the native device lives with the host and through shutdown.
+    if let Err(error) = checked("slSetD3DDevice", unsafe {
+        (sl.set_device)(device.as_raw())
+    }) {
+        // SAFETY: initialization succeeded and no feature work has run.
+        unsafe { (sl.shutdown)() };
+        return Err(error);
+    }
+    let set_options = settings.quality.and_then(|_| {
+        match sl
+            .check_support(device, abi::FEATURE_DLSS)
+            .and_then(|()| sl.function(abi::FEATURE_DLSS, c"slDLSSSetOptions"))
+        {
+            Ok(function) => {
+                sl.log_version(abi::FEATURE_DLSS, "DLSS Super Resolution");
+                // SAFETY: the Streamline export has the SDK signature.
+                Some(unsafe { std::mem::transmute::<*mut c_void, abi::SlDlssSetOptions>(function) })
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Streamline DLSS unavailable; using the title's upscaler");
+                None
+            }
+        }
+    });
+    let framegen = if settings.framegen && (!settings.require_sr_for_fg || set_options.is_some()) {
+        match generation::FrameGeneration::new(&sl, settings, device, can_proxy_queue) {
+            Ok(framegen) => Some(framegen),
+            Err(error) => {
+                tracing::warn!(%error, "DLSS Frame Generation unavailable");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    if set_options.is_none() && framegen.is_none() {
+        // SAFETY: the initialized SDK recorded no feature work.
+        unsafe { (sl.shutdown)() };
+        return Err("no requested Streamline feature initialized".into());
+    }
+    Ok(Runtime {
+        sl,
+        settings,
+        set_options,
+        framegen,
+        calls: Mutex::default(),
+    })
+}
+
+fn require_file(dir: &Path, name: &str) -> Result<(), String> {
+    if dir.join(name).is_file() {
+        Ok(())
+    } else {
+        Err(format!("missing {name} in {}", dir.display()))
+    }
+}
+
+fn require_files(dir: &Path, names: &[&str]) -> Result<(), String> {
+    names.iter().try_for_each(|name| require_file(dir, name))
 }
 
 fn runtime() -> Option<&'static Runtime> {
@@ -255,7 +433,9 @@ fn runtime() -> Option<&'static Runtime> {
 
 /// The preset selected before the title's FidelityFX registry was populated.
 pub fn quality() -> Option<u8> {
-    Some(runtime()?.settings.quality)
+    let runtime = runtime()?;
+    runtime.set_options?;
+    runtime.settings.quality
 }
 
 pub fn reactive() -> bool {
@@ -263,7 +443,7 @@ pub fn reactive() -> bool {
 }
 
 pub(crate) fn upgrade_swap_chain(swap_chain: IDXGISwapChain3) -> IDXGISwapChain3 {
-    let Some(runtime) = runtime() else {
+    let Some(runtime) = runtime().filter(|runtime| runtime.set_options.is_some()) else {
         return swap_chain;
     };
     let mut raw = swap_chain.as_raw();
@@ -286,15 +466,18 @@ pub fn upscale(
     states: [u32; 7],
     mut camera: Camera,
     pre_exposure: f32,
-) -> Result<(), String> {
+) -> Result<u32, String> {
     let runtime = runtime().ok_or("Streamline is unavailable")?;
     let mut calls = runtime.calls.lock().unwrap_or_else(|e| e.into_inner());
     if STOPPED.load(Ordering::Acquire) {
         return Err("Streamline has shut down".into());
     }
+    let set_options = runtime
+        .set_options
+        .ok_or("Streamline Super Resolution is unavailable")?;
     let mode = match runtime.settings.quality {
-        1 => abi::DLSS_MAX_QUALITY,
-        2 => abi::DLSS_BALANCED,
+        Some(1) => abi::DLSS_MAX_QUALITY,
+        Some(2) => abi::DLSS_BALANCED,
         _ => abi::DLSS_MAX_PERFORMANCE,
     };
     let mut options = abi::DlssOptions::new(mode, camera.output, runtime.settings.preset);
@@ -308,10 +491,10 @@ pub fn upscale(
     let viewport = abi::ViewportHandle::new(VIEWPORT);
     // SAFETY: initialized options and an engine-owned viewport.
     checked("slDLSSSetOptions", unsafe {
-        (runtime.set_options)(&viewport, &options)
+        set_options(&viewport, &options)
     })?;
-    let token = frame_token(&runtime.sl, calls.frame)?;
-    calls.frame = calls.frame.wrapping_add(1);
+    let frame = calls.next_frame();
+    let token = frame_token(&runtime.sl, frame)?;
     let sizes = (camera.render, camera.output);
     camera.reset |= calls.last != Some(sizes);
     let constants = camera
@@ -367,7 +550,7 @@ pub fn upscale(
         tracing::info!(render = ?camera.render, output = ?camera.output, "Streamline DLSS: recorded the title's upscaling");
         calls.last = Some(sizes);
     }
-    Ok(())
+    Ok(frame)
 }
 
 fn frame_token(sl: &Sl, frame: u32) -> Result<*mut abi::FrameToken, String> {
@@ -389,6 +572,7 @@ pub fn shut_down() {
     }
     drop(runtime.calls.lock().unwrap_or_else(|e| e.into_inner()));
     crate::external::finish_submitted();
+    generation::disable();
     crate::host::release_streamline_presenter();
     let _calls = runtime.calls.lock().unwrap_or_else(|e| e.into_inner());
     // SAFETY: the GPU is settled and the Streamline swap chain has been released.
@@ -499,6 +683,8 @@ fn load(path: &Path) -> Result<Sl, String> {
         set_device: get!(c"slSetD3DDevice", abi::SlSetD3DDevice),
         function: get!(c"slGetFeatureFunction", abi::SlGetFeatureFunction),
         upgrade: get!(c"slUpgradeInterface", abi::SlUpgradeInterface),
+        native: get!(c"slGetNativeInterface", abi::SlGetNativeInterface),
+        set_tag: get!(c"slSetTagForFrame", abi::SlSetTagForFrame),
         token: get!(c"slGetNewFrameToken", abi::SlGetNewFrameToken),
         constants: get!(c"slSetConstants", abi::SlSetConstants),
         evaluate: get!(c"slEvaluateFeature", abi::SlEvaluateFeature),

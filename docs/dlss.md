@@ -45,3 +45,39 @@ context` and restart with `VICTORY_DLSS` unset to return to the title renderer.
 
 The manual integration follows NVIDIA's [DLSS guide](https://github.com/NVIDIA-RTX/Streamline/blob/v2.14.16/docs/ProgrammingGuideDLSS.md)
 and [manual hooking guide](https://github.com/NVIDIA-RTX/Streamline/blob/v2.14.16/docs/ProgrammingGuideManualHooking.md).
+
+## NVIDIA frame generation
+
+Set `VICTORY_FRAMEGEN=dlss` to generate one frame between rendered frames.
+Use `VICTORY_DLSS=1` on Series X. On Series S, frame generation can also use
+the title's native FidelityFX or the PC FSR path. The existing
+`VICTORY_FRAMEGEN=1` setting continues to select AMD frame generation.
+
+1. Keep `sl.dlss_g.dll`, `sl.reflex.dll`, `sl.pcl.dll` and `nvngx_dlssg.dll`
+   from the same Streamline SDK release in `VICTORY_STREAMLINE_DIR`. Enable
+   Hardware-accelerated GPU scheduling in Windows.
+2. For an RTX 30 or RTX 20, extract the [dlssg_for_sm86 release](https://github.com/sdli1995/dlssg_for_sm86/releases/tag/0.4.2)
+   outside the checkout. Set `VICTORY_DLSSG_SM86_DIR` to the folder holding
+   `version.dll`, `dlssg_sm86.ini` and the complete `dlssg_sm86\` directory.
+   Victory United loads that proxy by its full path before Streamline starts.
+   Leave the add-on variable unset for native support on RTX 40 and later.
+   With the add-on, the host selects CUDA device 0 when no adapter is specified.
+3. Use `VICTORY_THIN=1` or `VICTORY_ASYNC_SUBMIT=1`, with
+   `VICTORY_LATE_WAIT=3` and the wait cuts enabled. This orders application
+   submissions and presentation on the same thread.
+
+Frame generation tags depth and motion from the submitted upscaler work.
+Presenting without a fresh dispatch or on a history reset disables
+interpolation. At matching plane sizes, Series S can supply the scene and HUD
+separately. On Series X, the presenter uses a scene copy recorded just before
+the known HUD composite. Set `VICTORY_FRAMEGEN_HUDLESS=0` to skip those copies.
+An absent copy can leave the HUD inside the interpolated image.
+
+Check the log for `DLSS Frame Generation: Streamline swap-chain proxy is active`,
+`DLSS Frame Generation: tagged the first submitted depth and motion`,
+`DLSS Frame Generation switched` with `on=true`, and status `0`. The periodic
+`rendered` and `shown` counts distinguish real presents from displayed frames
+including interpolation. At a low base frame rate, additional displayed frames
+can come with more latency, visible interpolation errors, and extra VRAM use.
+
+See the [NVIDIA DLSS-G integration guide](https://github.com/NVIDIA-RTX/Streamline/blob/v2.14.16/docs/ProgrammingGuideDLSS_G.md).
