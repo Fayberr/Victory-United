@@ -2107,3 +2107,106 @@ fn a_backward_permute_reads_within_the_lanes_half() {
     }
     eprintln!("ran on the hardware device (threads, host wave): {ran:?}");
 }
+
+/// Each active lane stores to its own dword in the chosen arm. The address
+/// is set before EXEC narrows, so every inactive lane also has a distinct
+/// in-bounds dword whose initial zero makes an unwanted store observable.
+fn stores_in_scc_arms(on_set: bool) -> NativeProgram {
+    let (branch, fallthrough, taken) = if on_set {
+        (0xbf85_0004, 1, 2) // s_cbranch_scc1
+    } else {
+        (0xbf84_0004, 2, 1) // s_cbranch_scc0
+    };
+    native(&[
+        0xbf8c_0000, // s_waitcnt 0 for the descriptor
+        0x3402_0082, // v_lshlrev_b32 v1, 2, v0
+        0x7d88_0000, // v_cmp_gt_u32 vcc, s0, v0
+        0xbe8c_246a, // s_and_saveexec_b64 s[12:13], vcc
+        0xbf88_000a, // s_cbranch_execz to the restore
+        0x7d84_0001, // v_cmp_eq_u32 vcc, s1, v0
+        0x8792_7e6a, // s_and_b64 s[18:19], vcc, exec
+        branch,
+        0x7e04_0280 | fallthrough, // v_mov_b32 v2, fallthrough
+        0xe070_1000, 0x8002_0201, // buffer_store_dword v2 at v1
+        0xbf82_0003, // s_branch to the restore
+        0x7e04_0280 | taken, // v_mov_b32 v2, taken
+        0xe070_1000, 0x8002_0201, // buffer_store_dword v2 at v1
+        0xbefe_040c, // s_mov_b64 exec, s[12:13]
+    ])
+}
+
+#[test]
+fn both_arms_of_a_wave_wide_scc_branch_keep_their_store_guards() {
+    for on_set in [false, true] {
+        let native = stores_in_scc_arms(on_set);
+        let p = ir::build(&native.code, native.wave64, native.vgprs).expect("IR");
+        let form = ir::without_skips(&p, false).expect("removable EXEC skip");
+        let st = structure::structure(&form).expect("structure");
+        let mut stores = 0;
+        for (block, guards) in form.blocks.iter().zip(&st.guards) {
+            for (inst, guard) in block.insts.iter().zip(guards) {
+                if inst.name() == "buffer_store_dword" {
+                    stores += 1;
+                    assert!(guard.is_some(), "store at {:#x} lost EXEC", inst.machine.offset);
+                }
+            }
+        }
+        assert_eq!(stores, 2);
+    }
+}
+
+/// The issue's branch-only program (#66) with an EXEC skip that cannot be left out: the
+/// skipped code sets s20, which the code after the join stores. The branch on the mask's
+/// SCC then stands where not every lane runs, in every form.
+fn mask_scc_behind_a_kept_skip() -> NativeProgram {
+    native(&[
+        0xBF8C_0000, // s_waitcnt 0: the descriptor
+        0xBE94_0380, // s_mov_b32 s20, 0
+        0x7D88_0000, // v_cmp_gt_u32 vcc, s0, v0
+        0xBE8C_246A, // s_and_saveexec_b64 s[12:13], vcc
+        0xBF88_000A, // s_cbranch_execz to the restore
+        0x7D84_0001, // v_cmp_eq_u32 vcc, s1, v0
+        0x8792_7E6A, // s_and_b64 s[18:19], vcc, exec
+        0xBE94_0387, // s_mov_b32 s20, 7
+        0xBF84_0002, // s_cbranch_scc0 to the value 1
+        0x7E04_0282, // v_mov_b32 v2, 2
+        0xBF82_0001, // s_branch to the store
+        0x7E04_0281, // v_mov_b32 v2, 1
+        0x3402_0082, // v_lshlrev_b32 v1, 2, v0
+        0xE070_1000,
+        0x8002_0201, // buffer_store_dword v2, v1, s[8:11], 0 offen
+        0xBEFE_040C, // s_mov_b64 exec, s[12:13]
+        0x7E06_0214, // v_mov_b32 v3, s20
+        0xE070_1000,
+        0x8002_0301, // buffer_store_dword v3, v1, s[8:11], 0 offen
+    ])
+}
+
+/// A program none of whose forms can take a branch on a mask's SCC wave-wide is translated
+/// with it split per lane (as before #66) instead of being dropped (#80: a dropped dispatch
+/// the title read back as a pointer).
+#[test]
+fn a_wave_wide_scc_branch_no_form_can_take_falls_back_to_the_per_lane_split() {
+    let native = mask_scc_behind_a_kept_skip();
+    let p = ir::build(&native.code, native.wave64, native.vgprs).expect("IR");
+    assert!(ir::without_skips(&p, false).is_none(), "the skip is kept: the code after it reads s20");
+    let st = structure::structure(&p).expect("structure");
+    assert_eq!(st.wave_scc.len(), 1, "the branch on the mask's SCC is the wave's");
+    assert!(structure::with_per_lane(|| structure::structure(&p)).expect("structure").wave_scc.is_empty());
+    let res = resource::track(&p, &native.layout, native.stage, Some(&st)).expect("resources");
+    let io = io::raise(&p, &native).expect("io");
+    let c = crate::Container { digest: [0; 16], version: (1, 0), parts: Vec::new(), input: &[] };
+    let was = lower::TEST_HOST_WAVE.replace(Some(32));
+    let exact = super::emit_forms(&c, &native, &p, &st, &io, &res);
+    let shader = super::emit(&c, &native, &p, &st, &io, &res);
+    lower::TEST_HOST_WAVE.set(was);
+    assert!(
+        matches!(&exact, Err(ShaderError::Unsupported { what, .. }) if *what == lower::WAVE_WIDE_ELSEWHERE),
+        "{:?}",
+        exact.err()
+    );
+    let shader = shader.expect("split per lane, the program translates");
+    if let Ok(mut v) = validator::Validator::load(validator::Validator::default_path().as_deref()) {
+        v.validate(&mut shader.dxil.clone()).expect("DXIL validation");
+    }
+}

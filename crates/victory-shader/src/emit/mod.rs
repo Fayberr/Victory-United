@@ -124,7 +124,7 @@ pub use sampler::StaticSampler;
 pub use lower::{host_max_wave, host_settings, set_host_max_wave, set_host_rdna, set_thread_max_wave};
 pub use rect::rect_list_gs;
 pub use shader::{
-    LAUNCH_SPACE, mesh_payload_bytes, MEMORY_FAULTS, MEMORY_PAGES, MEMORY_READ_ONLY, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
+    LAUNCH_SPACE, mesh_payload_bytes, MEMORY_FAULTS, MEMORY_PAGES, MEMORY_READ_ONLY, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEET, SLOT_MEMORY, SLOT_STRIDES,
     SLOT_STRIDE_CONSTANT, SLOT_STRIDES_BYTES, SLOT_STRIDES_COUNT, SLOT_TABLE_STRIDES, SLOT_VIEW_BYTES, SLOT_VIEWS, SLOT_VIEWS_COUNT, VIEW_ADDRESSES, USER_DATA_SPACE, USER_DISPATCH_SPREAD, USER_DISPATCH_THREADS, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS, USER_DISPATCH_THREADS_X, USER_MEMORY_BASE, USER_ROOT_ADDRESS, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
     constant_marks, constants_raw, raw_views, set_raw_views, set_view_heap_limit, view_heap_limit,
 };
@@ -650,8 +650,54 @@ fn listed_wave_pairs_scope_is_restored() {
     assert!(!WAVE_PAIRS_HERE.get());
 }
 
+/// Meet sites emitted for the face-relocation compute, one number for the process.
+pub fn defrag_meet_sites() -> u32 {
+    lower::meet_sites()
+}
+
+/// Shader LDS reads and writes that received their own half-meet.
+pub fn defrag_lds_sites() -> (u32, u32) {
+    lower::meet_lds_sites()
+}
+
 /// Emits a program whose earlier stages already ran.
 pub fn emit(
+    c: &Container,
+    native: &NativeProgram,
+    p: &ir::Program,
+    st: &structure::Structured,
+    io: &io::Io,
+    res: &resource::Resources,
+) -> Result<HostShader, ShaderError> {
+    let exact = emit_forms(c, native, p, st, io, res);
+    // A branch on a mask operation's SCC is the wave's ([`structure::Structured::wave_scc`],
+    // #66) and needs every lane where it stands. A program none of whose forms gives it that
+    // is taken with those branches split per lane, as before #66: inexact where an arm runs
+    // lanes whose own bit went the other way, but drawn. Dropped, its dispatch leaves what
+    // it writes unwritten, and the title read that back as a pointer: a write to 0 at
+    // +0x23cf683 loading the boat cutscene (#80) right after `ff6fdf23ce0b9048` failed so.
+    // `VICTORY_LANE_SPLIT=exact` refuses such a program instead.
+    let refused_wide = matches!(&exact,
+        Err(ShaderError::Unsupported { what, .. }) if *what == lower::WAVE_WIDE_ELSEWHERE);
+    if !refused_wide || st.wave_scc.is_empty() || std::env::var_os("VICTORY_LANE_SPLIT").is_some_and(|v| v == "exact") {
+        return exact;
+    }
+    let again = structure::with_per_lane(|| {
+        let st = structure::structure(p)?;
+        let res = resource::track(p, &native.layout, native.stage, Some(&st))?;
+        emit_forms(c, native, p, &st, io, &res)
+    });
+    if std::env::var_os("VICTORY_WAVE_WHY").is_some() {
+        match &again {
+            Ok(_) => eprintln!("WAVE64-RETRY branches on a mask's SCC split per lane (inexact): translated"),
+            Err(e) => eprintln!("WAVE64-RETRY branches on a mask's SCC split per lane: {e}"),
+        }
+    }
+    // the exact form's refusal says more than the inexact one's
+    if again.is_err() { exact } else { again }
+}
+
+fn emit_forms(
     c: &Container,
     native: &NativeProgram,
     p: &ir::Program,
@@ -801,7 +847,18 @@ pub fn emit(
             && matches!(
                 c.digest,
                 [0x58, 0x1d, 0xab, 0x2c, 0xd8, 0xbc, 0xf2, 0x2e, 0x5c, 0x96, 0x4b, 0x98, 0xe9, 0x03, 0x48, 0xd1]
+                    // CS_Visibility
                     | [0x24, 0x31, 0xbb, 0xe7, 0xdc, 0x15, 0x4a, 0xd7, 0x59, 0xd2, 0x0b, 0xc9, 0x54, 0x82, 0x9c, 0x1c]
+                    // CS_Tree_BatchCull
+                    | [0xc0, 0xf4, 0xa2, 0x3c, 0xaa, 0xa3, 0xe2, 0x34, 0xdc, 0xac, 0x7c, 0x40, 0x4c, 0x57, 0x48, 0x57]
+                    // CS_Tree_BatchCull_ImposterOnly
+                    | [0x6a, 0xc0, 0x3a, 0x0d, 0xa9, 0xb6, 0x80, 0x0d, 0xac, 0x87, 0x42, 0x32, 0x9d, 0x4f, 0x84, 0x82]
+                    // CS_TransmissionVolumetrics_Tiled
+                    | [0x24, 0x12, 0x6c, 0x14, 0xdc, 0x76, 0x19, 0xb0, 0x82, 0xef, 0x57, 0x12, 0x96, 0x03, 0x88, 0x90]
+                    // CS_TransmissionVolumetrics_Tiled_LocalLights
+                    | [0x70, 0x99, 0xa5, 0x7f, 0xde, 0xd1, 0x42, 0x61, 0x3b, 0x44, 0xf4, 0x10, 0x46, 0x3d, 0x6b, 0xe6]
+                    // CS_CollisionRaytraced
+                    | [0xd3, 0x2c, 0xbc, 0xbf, 0xff, 0x6a, 0x0c, 0x04, 0x80, 0xb5, 0x06, 0xd8, 0xf7, 0xd6, 0x58, 0xf9]
             );
         let (wide_on, driver_loop_allowed) = wave_wide_routes(
             wide_option.as_deref(),
@@ -810,6 +867,19 @@ pub fn emit(
             scene_kernel,
         );
         let wide_on = wide_on || WAVE_WIDE_HERE.get();
+        // CS_DefragHeap_ComputeRelocations: a group of two console waves. Its
+        // divergent LDS is read and written in one region, so it only lowers
+        // once that region is taken by both halves of a wave. The other wave
+        // of the group does not wait (`with_half_meets`). Not the global switch.
+        // `VICTORY_DEFRAG=0` leaves this compute untranslated, so its dispatches
+        // are dropped and a run can be compared with one where it executes.
+        let defrag_off = std::env::var_os("VICTORY_DEFRAG").is_some_and(|v| v == "0");
+        let defrag = !defrag_off
+            && c.digest
+                == [
+                    0x50, 0xcf, 0x28, 0x32, 0x8b, 0x58, 0x05, 0x3d, 0xa8, 0x9a, 0x8d, 0xa0, 0x1a,
+                    0xa1, 0x23, 0xc6,
+                ];
         // A single guest wave can iterate an active-lane loop until both host
         // halves have finished. The precise latch and convergence conditions
         // for the driver compute route are checked by widen().
@@ -847,7 +917,7 @@ pub fn emit(
                 // Still stopped where not every lane runs: the per-lane branches around
                 // those places taken as the console takes them, by the whole wave at once
                 // ([`widen`]), at two group barriers per such branch.
-                if wide_on || driver_loop {
+                if wide_on || driver_loop || defrag {
                     let bases = [
                         deep.as_ref().map(|f| &f.0),
                         forms[1].1.as_ref().map(|f| &f.0),
@@ -855,7 +925,11 @@ pub fn emit(
                         Some(p),
                     ];
                     if let Some(base) = bases.into_iter().flatten().next() {
-                        let again = widen(c, native, base, why, driver_loop);
+                        let again = if defrag {
+                            lower::with_half_meets(|| widen(c, native, base, why, driver_loop))
+                        } else {
+                            widen(c, native, base, why, driver_loop)
+                        };
                         report("wave-wide branches", &again);
                         if done(&again) {
                             return again.map(|(shader, _)| shader);
@@ -1028,6 +1102,9 @@ fn widen(
         // (a program whose waves are the host's meets no one: no barrier, any group)
         crate::native::StageIo::Cs(_) if !(native.wave64 && lower::host_max_wave() == 32) => {}
         crate::native::StageIo::Cs(cs) if cs.threads.iter().product::<u32>() == 64 => {}
+        // One program only: two console waves, and a meet per wave instead of a group barrier.
+        crate::native::StageIo::Cs(cs)
+            if lower::half_meets() && cs.threads.iter().product::<u32>() == 128 => {}
         crate::native::StageIo::Cs(cs) => {
             if why {
                 eprintln!("WAVE64-WIDE not tried: thread groups of {:?}", cs.threads);
