@@ -637,8 +637,20 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
         // world and lighting set-up passes) or with `compute_waits`: made
         // here, or waited for while a worker makes it, instead of dropping
         // its dispatch after the frame's budget. `make` keeps its panic guard.
-        if p.graphics.is_none() && (compute_waits() || crate::frame::current() < 600) {
+        if p.graphics.is_none() && crate::frame::current() < 600 {
             p.make();
+        } else if p.graphics.is_none() && compute_waits() {
+            // One frame a pipeline waits (as the draws' wait below): a
+            // pipeline still not made after the limit does not stall the
+            // title's thread again at every dispatch of it.
+            let frame = crate::frame::current();
+            let first = match p.waited_frame.compare_exchange(u64::MAX, frame, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => frame,
+                Err(f) => f,
+            };
+            if first == frame {
+                wait_compute(p);
+            }
         } else {
             let frame = crate::frame::current();
             let first = match p.waited_frame.compare_exchange(
@@ -680,12 +692,67 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
 /// before stayed blended over the whole picture for minutes (run 195).
 /// A wait of seconds once (the pipeline library has it on the next run)
 /// against a picture wrong until the scene ends.
-/// On by default; `VICTORY_PIPELINE_COMPUTE_WAIT=0`: within the budget, as
+/// On by default, for at most [`compute_wait_limit`] (10 s) one frame of a
+/// pipeline; `VICTORY_PIPELINE_COMPUTE_WAIT=0`: within the budget, as
 /// before.
 fn compute_waits() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VICTORY_PIPELINE_COMPUTE_WAIT").is_none_or(|v| v != "0"))
 }
+/// How long a dispatch waits for its compute pipeline at most
+/// (`VICTORY_PIPELINE_COMPUTE_WAIT_MS`, default 10,000; 0 or unreadable:
+/// the default). The title's watchdog thread faults the title (write to
+/// address 0, `+0x23cf683`) when its main thread has not moved for about
+/// 30 s. With the wait unbounded, a cold shader cache (a changed
+/// translator) put the title's thread behind a queue of compute programs
+/// that took 29 s and the title ended a minute into the world (fork issue
+/// 1420; every run of our combined10 tree on a cache keyed for the one
+/// before). Past the limit the dispatch is dropped as with
+/// `VICTORY_PIPELINE_COMPUTE_WAIT=0`, and the pipeline is made meanwhile
+/// (the library has it on the next run).
+fn compute_wait_limit() -> Duration {
+    static LIMIT: OnceLock<Duration> = OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        let ms = std::env::var("VICTORY_PIPELINE_COMPUTE_WAIT_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|&ms| ms > 0)
+            .unwrap_or(10_000);
+        Duration::from_millis(ms)
+    })
+}
+
+/// Waits for the worker making a compute pipeline (queued by the caller),
+/// at most [`compute_wait_limit`]. The workers take requested compute
+/// pipelines before the mesh and the early ones.
+fn wait_compute(p: &Pending) {
+    let limit = compute_wait_limit();
+    let waiting = crate::timeline::span("pipeline: a dispatch waits for its compute pipeline");
+    let started = Instant::now();
+    let (lock, done) = &DONE;
+    let mut held = lock.lock().unwrap_or_else(|e| e.into_inner());
+    while p.made.get().is_none() {
+        let rest = limit.saturating_sub(started.elapsed());
+        if rest.is_zero() {
+            break;
+        }
+        // Short turns: a pipeline made by a thread that did not notify is seen too.
+        held = done
+            .wait_timeout(held, rest.min(Duration::from_millis(250)))
+            .unwrap_or_else(|e| e.into_inner())
+            .0;
+    }
+    drop(held);
+    waiting.end();
+    if p.made.get().is_none() {
+        tracing::warn!(
+            shaders = ?p.shaders,
+            ms = limit.as_millis() as u64,
+            "a compute pipeline not made within the dispatch's wait: the dispatch is dropped, the pipeline is made meanwhile (VICTORY_PIPELINE_COMPUTE_WAIT_MS)"
+        );
+    }
+}
+
 /// Makes `p` on this thread if it is not made yet (waiting for a worker
 /// that is making it); whether it has a host pipeline.
 pub(crate) fn now(p: &Arc<Pending>) -> bool {
