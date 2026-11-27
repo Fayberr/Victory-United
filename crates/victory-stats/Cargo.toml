@@ -9,5 +9,8 @@ publish.workspace = true
 
 [dependencies]
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Memory", "Win32_System_Performance"] }
+
 [lints]
 workspace = true
