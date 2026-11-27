@@ -298,6 +298,10 @@ type CopyRun = (usize, usize, usize);
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct TileShape {
     pattern: usize,
+    /// The XOR layouts share one empty pattern, so the mode and the pipe
+    /// configuration tell their plans apart.
+    swizzle: Swizzle,
+    pipes: Pipes,
     extent: [u32; 2],
     element_bytes: u32,
     block: [u32; 3],
@@ -312,6 +316,8 @@ impl TileShape {
         Self {
             // The swizzle tables are static for the process.
             pattern: std::ptr::from_ref(layout.pattern) as usize,
+            swizzle: layout.desc.swizzle,
+            pipes: layout.pipes,
             extent: [mip.width, mip.height],
             element_bytes: layout.desc.element_bytes,
             block: layout.block,
@@ -1457,13 +1463,20 @@ mod tests {
                         .map(|i| (i * 7 + mip as usize * 13 + slice as usize) as u8)
                         .collect();
                     cache.tile(&l, &mut tiled, (mip, slice), &linear, (row, plane)).unwrap();
+                    for y in 0..m.height {
+                        for x in 0..m.width {
+                            let at = l.offset(mip, x, y, slice).unwrap() as usize;
+                            let source = y as usize * row + x as usize * n;
+                            assert_eq!(tiled[at..at + n], linear[source..source + n], "TILE side {d:?} mip {mip} x {x} y {y}");
+                        }
+                    }
                     let mut back = vec![0xcc; linear.len()];
                     l.detile(&tiled, mip, slice, &mut back, row, plane).unwrap();
                     for z in 0..m.depth {
                         let base = z as usize * plane;
                         for y in 0..m.height {
                             let start = base + y as usize * row;
-                            assert_eq!(back[start..start + active], linear[start..start + active]);
+                            assert_eq!(back[start..start + active], linear[start..start + active], "{d:?} mip {mip} slice {slice} y {y} z {z} flips {:?} xor {}", l.flips.is_some(), l.xor);
                             assert!(back[start + active..start + row].iter().all(|&b| b == 0xcc));
                             for x in 0..m.width {
                                 let at = l.offset(mip, x, y, slice + z).unwrap() as usize;
