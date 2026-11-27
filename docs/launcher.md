@@ -1,4 +1,4 @@
-# Victory Launcher
+# Victory United Launcher
 
 The launcher starts Victory United, picks settings that suit your graphics card, translates the game's
 shaders the first time, and keeps logs. You bring your own copy of the game: the launcher never copies,

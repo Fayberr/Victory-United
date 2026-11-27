@@ -1,4 +1,4 @@
-//! Victory Launcher: settings, presets, flags, monitor, updates and bug report for Victory United.
+//! Victory United Launcher: settings, presets, flags, monitor, updates and bug report for Victory United.
 //!
 //! Hard rule: this program sits next to an emulator that is CPU bound, so it must use almost no CPU.
 //! No repaint loops, no polling threads, no animation. See docs/launcher-contract.md ("Idle CPU rules").
@@ -29,7 +29,7 @@ fn main() -> eframe::Result {
     let icon = std::sync::Arc::new(egui::IconData { rgba: logo.into_raw(), width, height });
     let settings = if args.demo { Default::default() } else { core::store::Settings::load() };
     let mut viewport = egui::ViewportBuilder::default()
-            .with_title("Victory Launcher")
+            .with_title("Victory United Launcher")
             .with_inner_size([980.0, 660.0])
             .with_min_inner_size([780.0, 520.0])
             .with_icon(icon.clone());
@@ -44,7 +44,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "Victory Launcher",
+        "Victory United Launcher",
         options,
         Box::new(move |cc| {
             theme::apply(&cc.egui_ctx);
