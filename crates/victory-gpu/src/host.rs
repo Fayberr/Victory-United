@@ -13919,7 +13919,7 @@ fn planes_are_composed_bottom_first() {
         l.ClearRenderTargetView(host.rtv(Some(&back), None), &[1.0, 1.0, 1.0, 1.0], None);
         l.ResourceBarrier(&[transition(&bottom, target, read), transition(&top, target, read)]);
         let planes = [(&bottom, read.0 as u32, None), (&top, read.0 as u32, Some([0, 0, 4, 4]))];
-        record_compose(l, &back, (8, 8, format), &planes);
+        record_compose(&list, &back, (8, 8, format), &planes);
         l.ResourceBarrier(&[transition(&back, target, D3D12_RESOURCE_STATE_COPY_SOURCE)]);
         crate::capture::read_back(&host.device, l, &back).expect("a readback buffer")
     };
@@ -13952,22 +13952,51 @@ fn planes_are_composed_bottom_first() {
 /// family and one already typed as it is, into a back buffer of the plain
 /// format: planes in an sRGB format would need the back buffer's sRGB view.
 fn record_compose(
-    list: &ID3D12GraphicsCommandList,
+    owner: &HostList,
     back: &ID3D12Resource,
     (width, height, format): (u32, u32, DXGI_FORMAT),
     planes: &[Shown],
 ) {
-    // The views ring of the depth planes' pass: a heap of ours like any.
-    let (Some(host), Some(pass), Some((root, pipeline))) =
+    let list = &owner.list;
+    let (Some(host), Some(_pass), Some((root, pipeline))) =
         (host(), plane_pass(), compose_pipeline(format))
     else {
         return;
     };
+    if planes.is_empty() {
+        return;
+    }
+    let count = planes.len() as u32;
+    let kind = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    let views: ID3D12DescriptorHeap = match unsafe {
+        host.device.CreateDescriptorHeap(&D3D12_DESCRIPTOR_HEAP_DESC {
+            Type: kind,
+            NumDescriptors: count,
+            Flags: D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
+            NodeMask: 0,
+        })
+    } {
+        Ok(heap) => heap,
+        Err(e) => {
+            tracing::error!(error = %e, count, "no descriptor heap for compose pass");
+            return;
+        }
+    };
+    owner.keep(&views);
+    owner.keep(back);
+    for &(texture, _, _) in planes {
+        owner.keep(texture);
+    }
     let target = host.rtv(Some(back), None);
     // SAFETY: an open list; slots of our heap; live resources and objects
     // (the pass's own live as long as the process).
     unsafe {
-        list.SetDescriptorHeaps(&[Some(pass.views.clone())]);
+        list.SetDescriptorHeaps(&[Some(views.clone())]);
+        let (base_cpu, base_gpu, step) = (
+            views.GetCPUDescriptorHandleForHeapStart().ptr,
+            views.GetGPUDescriptorHandleForHeapStart().ptr,
+            host.device.GetDescriptorHandleIncrementSize(kind),
+        );
         list.SetGraphicsRootSignature(&root);
         list.SetPipelineState(&pipeline);
         list.OMSetRenderTargets(1, Some(&target), false, None);
@@ -13988,7 +14017,7 @@ fn record_compose(
         list.IASetPrimitiveTopology(windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY(4));
         for (i, &(texture, _, part)) in planes.iter().enumerate() {
             let of = texture.GetDesc();
-            let slot = pass.next.fetch_add(1, Ordering::Relaxed) % PLANE_VIEWS;
+            let slot = i as u32;
             let view = D3D12_SHADER_RESOURCE_VIEW_DESC {
                 Format: swap_format(of.Format).filter(|_| typeless(of.Format)).unwrap_or(of.Format),
                 ViewDimension: D3D12_SRV_DIMENSION_TEXTURE2D,
@@ -14001,10 +14030,10 @@ fn record_compose(
                 },
             };
             let cpu = D3D12_CPU_DESCRIPTOR_HANDLE {
-                ptr: pass.cpu + (slot * pass.step) as usize,
+                ptr: base_cpu + slot as usize * step as usize,
             };
             let gpu = D3D12_GPU_DESCRIPTOR_HANDLE {
-                ptr: pass.gpu + u64::from(slot * pass.step),
+                ptr: base_gpu + u64::from(slot) * u64::from(step),
             };
             host.device.CreateShaderResourceView(texture, Some(&view), cpu);
             let [x, y, w, h] = shown_part(part, of.Width as u32, of.Height);
@@ -14961,7 +14990,7 @@ impl Host {
             let mut before = moves(true);
             before.push(transition(&back, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
             list.ResourceBarrier(&before);
-            record_compose(list, &back, (width, height, format), planes);
+            record_compose(copy, &back, (width, height, format), planes);
             #[cfg(feature = "diagnostics")]
             let capture = crate::capture::wanted(frame).then(|| {
                 list.ResourceBarrier(&[transition(
