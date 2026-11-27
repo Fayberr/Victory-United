@@ -9,9 +9,8 @@
 //! saves already are.
 //!
 //! NVIDIA's DLSS and frame generation files are NVIDIA's and are not part of
-//! this program. Where they are missing, the first start asks once whether to
-//! fetch them from NVIDIA's own GitHub (`victory get-dlss` does it later);
-//! without them the title runs with its own upscaling.
+//! this program. Install Streamline yourself (the README says how); without
+//! it the title runs with its own upscaling.
 
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
@@ -21,9 +20,6 @@ use anyhow::{Context, Result};
 
 /// The title's executable, looked for beside this program.
 const GAME: &str = "game_scarlett_master.exe";
-
-/// `scripts\get-nvidia-sdks.ps1`, run by Windows PowerShell.
-const FETCH: &str = include_str!("../../../scripts/get-nvidia-sdks.ps1");
 
 /// The settings the title is started with (`scripts\play-foxhound.ps1` has
 /// the same, with what each is for).
@@ -88,6 +84,7 @@ const KEPT: &[&str] = &[
     "VICTORY_CACHE_DIR",
     "VICTORY_DATA_DIR",
     "VICTORY_STREAMLINE_DIR",
+    "VICTORY_DLSSG_SM86_DIR",
     "VICTORY_LOG",
 ];
 
@@ -130,7 +127,7 @@ fn home() -> Result<PathBuf> {
     Ok(PathBuf::from(base).join("victory"))
 }
 
-/// Where `victory get-dlss` puts NVIDIA's files.
+/// Where a per-user copy of NVIDIA's files may be kept.
 fn nvidia_home() -> Result<PathBuf> {
     Ok(home()?.join("nvidia-sdk"))
 }
@@ -140,7 +137,7 @@ fn has_streamline(dir: &Path) -> bool {
 }
 
 /// The folder with NVIDIA's files: the one `VICTORY_STREAMLINE_DIR` names,
-/// where `get-dlss` puts them, or beside this program (a repository's
+/// a per-user `nvidia-sdk`, or beside this program (a repository's
 /// `nvidia-sdk`, or the files themselves).
 fn streamline_dir(here: &Path) -> Option<PathBuf> {
     let named = std::env::var_os("VICTORY_STREAMLINE_DIR").filter(|v| !v.is_empty()).map(PathBuf::from);
@@ -270,55 +267,6 @@ fn log_file(logs: &Path) -> Result<PathBuf> {
     Ok(logs.join(format!("play-{}-{}.log", stamp(now), std::process::id())))
 }
 
-/// Runs the fetcher: NVIDIA's files from NVIDIA's GitHub into `to`.
-fn fetch(to: &Path) -> Result<()> {
-    std::fs::create_dir_all(to).with_context(|| format!("creating {}", to.display()))?;
-    let script = to.join("get-nvidia-sdks.ps1");
-    std::fs::write(&script, FETCH).with_context(|| format!("writing {}", script.display()))?;
-    let status = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-        .arg(&script)
-        .arg("-To")
-        .arg(to)
-        .status()
-        .context("starting Windows PowerShell")?;
-    let _ = std::fs::remove_file(&script);
-    anyhow::ensure!(
-        status.success() && has_streamline(&to.join("Streamline").join("bin").join("x64")),
-        "NVIDIA's files did not arrive (see above); the title runs without DLSS and frame generation"
-    );
-    Ok(())
-}
-
-/// `victory get-dlss`.
-pub(crate) fn get_dlss() -> Result<()> {
-    let to = nvidia_home()?;
-    let _ = std::fs::remove_file(to.join("declined"));
-    fetch(&to)
-}
-
-/// Asks once, at a start without NVIDIA's files, whether to fetch them.
-fn offer_dlss() {
-    let Ok(to) = nvidia_home() else { return };
-    let declined = to.join("declined");
-    if declined.exists() || !std::io::stdin().is_terminal() {
-        println!("No NVIDIA files: running without DLSS and frame generation (`victory get-dlss` fetches them).");
-        return;
-    }
-    println!("NVIDIA's DLSS and frame generation files are not on this PC yet. They are NVIDIA's own,");
-    println!("under NVIDIA's licences, and come from github.com/NVIDIA-RTX/Streamline (about 70 MB, once).");
-    print!("Download them now? [Y/n] ");
-    let _ = std::io::stdout().flush();
-    let mut answer = String::new();
-    let _ = std::io::stdin().read_line(&mut answer);
-    if answer.trim().to_ascii_lowercase().starts_with('n') {
-        let _ = std::fs::create_dir_all(&to);
-        let _ = std::fs::write(&declined, "asked once; `victory get-dlss` fetches them\r\n");
-        println!("Not downloaded. `victory get-dlss` does it later; the title runs with its own upscaling.");
-    } else if let Err(e) = fetch(&to) {
-        println!("{e:#}");
-    }
-}
 
 /// What a start needs once its settings are in the environment.
 pub(crate) struct Ready {
@@ -357,10 +305,10 @@ pub(crate) fn prepare(o: &Play) -> Result<Ready> {
         .find(|(k, _)| k == "VICTORY_MENU_DLSS")
         .map_or(o.dlss.as_str(), |(_, v)| v.as_str())
         != "off";
-    if wants_dlss && streamline_dir(&here).is_none() {
-        offer_dlss();
-    }
     let streamline = streamline_dir(&here);
+    if wants_dlss && streamline.is_none() {
+        println!("No NVIDIA files: running without DLSS and frame generation. Install Streamline yourself (README).");
+    }
     let (mut s, series_s) = settings(o, &menu, streamline.as_deref());
     // Where the menu saves, and how it starts the title again (`--set` is not carried over).
     let quoted = |p: &Path| format!("'{}'", p.to_string_lossy().replace('\'', "''"));

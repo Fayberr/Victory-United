@@ -135,10 +135,6 @@ enum Command {
     /// menu, F3 the stats panel.
     #[cfg(windows)]
     Play(play::Play),
-    /// Fetch NVIDIA's DLSS and frame generation files from NVIDIA's GitHub
-    /// (about 70 MB) to where `play` looks for them.
-    #[cfg(windows)]
-    GetDlss,
     /// Prepare, map and bind a title executable; with --execute, run it.
     Run {
         exe: PathBuf,
@@ -270,8 +266,6 @@ fn main() -> Result<()> {
         Command::Warm { jobs, limit, again, used, these } => warm::run(jobs, limit, again, used, these),
         #[cfg(windows)]
         Command::Play(_) => unreachable!("handled above"),
-        #[cfg(windows)]
-        Command::GetDlss => play::get_dlss(),
         Command::Run {
             exe,
             unimplemented,

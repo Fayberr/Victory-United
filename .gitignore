@@ -90,7 +90,7 @@
 Thumbs.db
 .DS_Store
 
-# NVIDIA's own files (Get-NVIDIA-DLSS.cmd fetches them from NVIDIA; never part of this repository)
+# NVIDIA's own files: installed by the player, never part of this repository
 /nvidia-sdk/
 # What the F1 menu saved
 /victory-settings.txt
