@@ -488,6 +488,7 @@ struct Card {
     /// `land_card` readers observing `has_dirty == false` are guaranteed to
     /// observe `has_sent == true`.
     has_dirty: AtomicBool,
+    me: std::sync::OnceLock<std::sync::Weak<Shadow>>,
     /// With [`relay`]: the offsets that went from `dirty` to the card's
     /// side, each with the number of the send that took it
     /// ([`card_dirty`]), kept until a fetch sent after it has been merged.
@@ -764,6 +765,29 @@ fn remaining_card_room(buffers: u64, used: u64, refused: u64, windows: u64, wind
 
 /// The copies in the card's memory.
 static CARDED: Mutex<Vec<std::sync::Weak<Shadow>>> = Mutex::new(Vec::new());
+
+// Drained before taking any per-copy dirty lock. Publishers hold the
+// dirty lock while they enqueue the first change to an otherwise clean copy.
+static TOUCHED: Mutex<Vec<std::sync::Weak<Shadow>>> = Mutex::new(Vec::new());
+static TOUCHED_ALL: AtomicBool = AtomicBool::new(false);
+
+fn touched_listed() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::switch::on("VICTORY_CARD_TOUCHED"))
+}
+
+fn card_joins(shadow: &Arc<Shadow>) {
+    let weak = Arc::downgrade(shadow);
+    CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(weak.clone());
+    if touched_listed() && let Some(card) = &shadow.card {
+        let _dirty = card.dirty.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = card.me.set(weak.clone());
+        if card.has_dirty.load(Ordering::Acquire) {
+            TOUCHED.lock().unwrap_or_else(|e| e.into_inner()).push(weak);
+        }
+    }
+}
+
 
 /// Since the last frame line: bytes copied to card sides and the ranges
 /// they were; pieces compared on the card, pieces fetched and their
@@ -1114,15 +1138,12 @@ pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)
     let mut carded = CARDED.lock().unwrap_or_else(|e| e.into_inner());
     let fetched = RELAY_FETCHED.load(Ordering::Acquire);
     let relay_on = relay();
-    carded.retain(|weak| {
-        let Some(shadow) = weak.upgrade() else {
-            return false;
-        };
+    let mut take = |shadow: Arc<Shadow>| {
         let Some(c) = shadow.card.as_ref() else {
-            return true;
+            return;
         };
         if !c.has_dirty.load(Ordering::Acquire) {
-            return true;
+            return;
         }
         let ranges = {
             let mut dirty = c.dirty.lock().unwrap_or_else(|e| e.into_inner());
@@ -1140,7 +1161,29 @@ pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)
         if !ranges.is_empty() {
             out.push((shadow, ranges));
         }
-        true
+    };
+    if touched_listed() && !TOUCHED_ALL.swap(false, Ordering::AcqRel) {
+        let list = std::mem::take(&mut *TOUCHED.lock().unwrap_or_else(|e| e.into_inner()));
+        for shadow in list.iter().filter_map(std::sync::Weak::upgrade) {
+            take(shadow);
+        }
+        static CALLS: AtomicU64 = AtomicU64::new(0);
+        if CALLS.fetch_add(1, Ordering::Relaxed).is_multiple_of(1024) {
+            carded.retain(|weak| weak.strong_count() != 0);
+        }
+        out.sort_unstable_by_key(|(shadow, _)| (shadow.start, shadow.id));
+        return out;
+    }
+    if touched_listed() {
+        TOUCHED.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+    carded.retain(|weak| {
+        if let Some(shadow) = weak.upgrade() {
+            take(shadow);
+            true
+        } else {
+            false
+        }
     });
     out
 }
@@ -5347,7 +5390,14 @@ impl Shadow {
             }
         }
         // (Under the lock: what takes the list sees it or finds it set.)
-        card.has_dirty.store(true, Ordering::Release);
+        if !touched_listed() {
+            card.has_dirty.store(true, Ordering::Release);
+        } else if !card.has_dirty.swap(true, Ordering::AcqRel) {
+            match card.me.get() {
+                Some(me) => TOUCHED.lock().unwrap_or_else(|e| e.into_inner()).push(me.clone()),
+                None => TOUCHED_ALL.store(true, Ordering::Release),
+            }
+        }
     }
 
     /// Whether shaders were ever declared to write it.
@@ -5657,6 +5707,7 @@ impl Shadow {
                 before: Mutex::default(),
                 dirty: Mutex::default(),
                 has_dirty: AtomicBool::new(false),
+                me: std::sync::OnceLock::new(),
                 sent: Mutex::default(),
                 has_sent: AtomicBool::new(false),
                 size: len.next_multiple_of(PIECE as u64),
@@ -5855,6 +5906,7 @@ mod land_tests {
             before: Mutex::default(),
             dirty: Mutex::default(),
             has_dirty: AtomicBool::new(false),
+            me: std::sync::OnceLock::new(),
             sent: Mutex::default(),
             has_sent: AtomicBool::new(false),
             size: len as u64,
@@ -6289,6 +6341,7 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
                     before: Mutex::default(),
                     dirty: Mutex::default(),
                     has_dirty: AtomicBool::new(false),
+                    me: std::sync::OnceLock::new(),
                     sent: Mutex::default(),
                     has_sent: AtomicBool::new(false),
                     size,
@@ -6317,7 +6370,7 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
         shadow.card = card;
         let shadow = Arc::new(shadow);
         if shadow.card.is_some() {
-            CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
+            card_joins(&shadow);
         }
         entry.shadow = Some(shadow);
     }
@@ -6522,13 +6575,14 @@ pub(crate) fn by_address(start: u64, len: u64) -> Option<Arc<Shadow>> {
         before: Mutex::default(),
         dirty: Mutex::default(),
         has_dirty: AtomicBool::new(false),
+        me: std::sync::OnceLock::new(),
         sent: Mutex::default(),
         has_sent: AtomicBool::new(false),
         size: len,
         reserved_bytes: 0,
     });
     let shadow = Arc::new(shadow);
-    CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
+    card_joins(&shadow);
     Some(shadow)
 }
 
@@ -6601,6 +6655,7 @@ fn build_loose_shadow(start: u64, len: u64, backing: LooseBacking) -> Arc<Shadow
                         before: Mutex::default(),
                         dirty: Mutex::default(),
                         has_dirty: AtomicBool::new(false),
+                        me: std::sync::OnceLock::new(),
                         sent: Mutex::default(),
                         has_sent: AtomicBool::new(false),
                         size: len,
@@ -6718,7 +6773,7 @@ fn loose_with(
             }
             let shadow = build_loose_shadow(start, len, make(len)?);
             if shadow.card.is_some() {
-                CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
+                card_joins(&shadow);
             }
             note(&shadow);
             map.insert((start, len), shadow.clone());
@@ -6760,7 +6815,7 @@ fn loose_with(
             continue;
         }
         if candidate.card.is_some() {
-            CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&candidate));
+            card_joins(&candidate);
         }
         note(&candidate);
         map.insert(key, candidate.clone());
@@ -6868,6 +6923,7 @@ fn exact_with_limits(
             dirty: Mutex::default(),
             sent: Mutex::default(),
             has_dirty: AtomicBool::new(false),
+            me: std::sync::OnceLock::new(),
             has_sent: AtomicBool::new(false),
             size,
             reserved_bytes,
@@ -6913,7 +6969,7 @@ fn exact_with_limits(
         candidate.used.store(crate::host::moment(), Ordering::Relaxed);
         map.insert(key, (candidate.clone(), AtomicU64::new(published_now)));
         if candidate.card.is_some() {
-            CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&candidate));
+            card_joins(&candidate);
         }
         EXACT_STATS[1].fetch_add(1, Ordering::Relaxed);
         OWN_MADE.fetch_add(1, Ordering::Relaxed);
