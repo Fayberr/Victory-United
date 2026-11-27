@@ -1,75 +1,178 @@
-//! Publishes the live statistics block for the launcher (`victory-stats`, docs/launcher-contract.md).
-//!
-//! The frame path ([`Publisher::frame`]) is a few atomic stores: no lock, no allocation, no system
-//! call. The slower values are written from the once-a-second branch of the frame meter
-//! ([`Publisher::slow`]); that is the only place that asks the system anything. Off with
-//! `VICTORY_STATS=0`; if the block cannot be made nothing happens and the engine goes on.
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use victory_stats::{Slow, Writer, qpc_now};
+//! Live launcher statistics. The present path uses only QPC and atomic stores.
+//! The existing meter publishes slower counters once per interval.
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use victory_stats::{Metric, PresentTiming, Slow, UNKNOWN_US, Writer, qpc_now};
 
-/// Card memory in use and its budget, set where the engine already looks at them
-/// ([`crate::host::Host::video_memory`]), so this module asks nothing new.
-pub(crate) static VRAM: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+/// Updated by the existing DXGI video-memory query.
+pub(crate) static VRAM: [AtomicU64; 2] = [const { AtomicU64::new(u64::MAX) }; 2];
+/// Cumulative copies of the logged timers, which are reset by a different thread.
+pub(crate) static SUBMISSION: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+pub(crate) static CARD_IDLE: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+pub(crate) static CARD_CLOCK_ACTIVE: AtomicBool = AtomicBool::new(false);
+pub(crate) static PIPELINE_WAIT_US: AtomicU64 = AtomicU64::new(0);
+pub(crate) static TEXTURE_UPLOAD_BYTES: AtomicU64 = AtomicU64::new(0);
+
+const STAGES: &[&str] = &["Buffer refresh", "Texture refresh", "Readback"];
 
 pub(crate) struct Publisher {
     writer: Writer,
-    /// `SUBMISSION_US` as seen at the last frame: its change is this frame's CPU and GPU time.
-    seen: [u64; 2],
+    seen: [u64; 4],
+    qpc_freq: u64,
+    interrupted: bool,
 }
 
 impl Publisher {
-    /// The block of this process, once: `None` when switched off, already made, or refused.
-    pub(crate) fn new() -> Option<Publisher> {
+    pub(crate) fn new() -> Option<Self> {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         static TAKEN: AtomicBool = AtomicBool::new(false);
-        if !*ON.get_or_init(|| std::env::var("VICTORY_STATS").as_deref() != Ok("0")) {
-            return None;
-        }
-        if TAKEN.swap(true, Ordering::Relaxed) {
+        if !*ON.get_or_init(|| std::env::var("VICTORY_STATS").as_deref() != Ok("0"))
+            || TAKEN.swap(true, Relaxed)
+        {
             return None;
         }
         let build = format!(
             "{} {}",
             option_env!("VICTORY_BUILD_ID").unwrap_or(env!("CARGO_PKG_VERSION")),
-            if cfg!(feature = "diagnostics") { "diagnostics" } else { "release" }
+            if cfg!(feature = "diagnostics") {
+                "diagnostics"
+            } else {
+                "release"
+            }
         );
-        let writer = Writer::create(std::process::id(), &build)?;
+        let writer = Writer::create_named(std::process::id(), &build, STAGES)?;
+        let qpc_freq = writer.qpc_freq();
         tracing::info!("live statistics block published for the launcher");
-        Some(Publisher { writer, seen: [0; 2] })
+        Some(Self {
+            writer,
+            seen: totals(),
+            qpc_freq,
+            interrupted: true,
+        })
     }
 
-    /// One presented frame. `submission_us` is the engine's running totals of CPU preparation and
-    /// GPU wait (they are reset once in a while by the meter's lines, a smaller value is a restart).
+    pub(crate) fn adapter(&self, luid: windows::Win32::Foundation::LUID) {
+        let bits = (u64::from(luid.HighPart as u32) << 32) | u64::from(luid.LowPart);
+        self.writer.set_metric(Metric::AdapterLuid, Some(bits));
+    }
+
     #[inline]
-    pub(crate) fn frame(&mut self, submission_us: [u64; 2]) {
-        let mut delta = |i: usize| {
-            let (now, was) = (submission_us[i], self.seen[i]);
-            self.seen[i] = now;
-            (if now >= was { now - was } else { now }).min(u64::from(u32::MAX)) as u32
-        };
-        let (cpu, gpu) = (delta(0), delta(1));
-        self.writer.frame(qpc_now(), cpu, gpu);
+    pub(crate) fn frame(&mut self, (start, end): (u64, u64)) {
+        let now = totals();
+        let [cpu, wait, mut idle, mut idle_cpu] = std::array::from_fn(|i| {
+            now[i]
+                .saturating_sub(self.seen[i])
+                .min(u64::from(UNKNOWN_US - 1)) as u32
+        });
+        self.seen = now;
+        let interrupted = std::mem::take(&mut self.interrupted);
+        if interrupted || !CARD_CLOCK_ACTIVE.load(Relaxed) {
+            idle = UNKNOWN_US;
+            idle_cpu = UNKNOWN_US;
+        }
+        let call_us = end.saturating_sub(start).saturating_mul(1_000_000) / self.qpc_freq;
+        self.writer.frame_with_timing(
+            end,
+            if interrupted { UNKNOWN_US } else { cpu },
+            if interrupted { UNKNOWN_US } else { wait },
+            PresentTiming {
+                call_us: call_us.min(u64::from(UNKNOWN_US - 1)) as u32,
+                gpu_idle_us: idle,
+                gpu_idle_cpu_us: idle_cpu,
+            },
+        );
     }
 
-    /// The values that change slowly, about once a second.
-    pub(crate) fn slow(&mut self, draws: u64, dispatches: u64) {
+    #[inline]
+    pub(crate) fn rejected(&mut self, status: windows::core::HRESULT) {
+        use windows::Win32::Foundation::DXGI_STATUS_OCCLUDED;
+        self.interrupted = true;
+        self.writer
+            .present_rejected(status.0, status == DXGI_STATUS_OCCLUDED);
+    }
+
+    pub(crate) fn slow(
+        &self,
+        frames: u32,
+        preparing: [u64; 4],
+        readback: [u64; 2],
+        [drops, indirect, budget]: [u64; 3],
+    ) {
         let w = &self.writer;
-        w.set(Slow::VramUsed, VRAM[0].load(Ordering::Relaxed));
-        w.set(Slow::VramBudget, VRAM[1].load(Ordering::Relaxed));
-        w.set(Slow::RamResident, process_working_set());
+        let [used, budget_bytes] = VRAM.each_ref().map(|v| {
+            let bytes = v.load(Relaxed);
+            (bytes != u64::MAX).then_some(bytes)
+        });
+        w.set(Slow::VramUsed, used.unwrap_or_default());
+        w.set(Slow::VramBudget, budget_bytes.unwrap_or_default());
+        let ram = process_working_set();
+        let draws = crate::draw::drawn();
+        let dispatches = crate::draw::dispatched();
+        w.set(Slow::RamResident, ram.unwrap_or_default());
         w.set(Slow::Draws, draws);
         w.set(Slow::Dispatches, dispatches);
-        // Pipelines being built and the shader warm-up are not counted by the engine yet: 0.
+        let issued = crate::list::totals();
+        let in_place = crate::shadow::in_place_bytes();
+        for (metric, value) in [
+            (Metric::VramUsed, used),
+            (Metric::VramBudget, budget_bytes),
+            (Metric::RamResident, ram),
+            (Metric::DrawsIssued, Some(issued[0])),
+            (Metric::DispatchesIssued, Some(issued[1])),
+            (Metric::DrawsExecuted, Some(draws)),
+            (Metric::DispatchesExecuted, Some(dispatches)),
+            (Metric::PipelineDrops, Some(drops)),
+            (Metric::IndirectDrops, Some(indirect)),
+            (Metric::IndirectBudgetDrops, Some(budget)),
+            (Metric::PipelinesBuilding, Some(crate::pipeline::making())),
+            (Metric::PipelineWaitUs, Some(PIPELINE_WAIT_US.load(Relaxed))),
+            (
+                Metric::TexturesWithoutRoom,
+                Some(crate::resource::NOT_MADE_FOR_NOW.load(Relaxed)),
+            ),
+            (
+                Metric::TextureLevelsWithoutTiles,
+                Some(crate::tiles::STATS[9].load(Relaxed)),
+            ),
+            (
+                Metric::TextureUploadBytes,
+                Some(TEXTURE_UPLOAD_BYTES.load(Relaxed)),
+            ),
+            (Metric::WriteWatchQueries, Some(crate::watch::queries())),
+            (Metric::InPlaceBytes, Some(in_place)),
+            (Metric::InPlacePages, Some(in_place / 65_536)),
+            (Metric::CopiedToGpu, Some(preparing[1])),
+            (Metric::CopiedFromGpu, Some(readback[1])),
+        ] {
+            w.set_metric(metric, value);
+        }
+        w.set_stages(
+            u64::from(frames),
+            &[preparing[0], preparing[2], readback[0]],
+        );
         w.slow_done(qpc_now());
     }
 }
 
-/// Our working set in bytes (once a second).
-fn process_working_set() -> u64 {
-    use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+#[inline]
+fn totals() -> [u64; 4] {
+    [
+        SUBMISSION[0].load(Relaxed),
+        SUBMISSION[1].load(Relaxed),
+        CARD_IDLE[0].load(Relaxed),
+        CARD_IDLE[1].load(Relaxed),
+    ]
+}
+
+fn process_working_set() -> Option<u64> {
+    use windows_sys::Win32::System::ProcessStatus::{
+        K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
-    let mut c = PROCESS_MEMORY_COUNTERS { cb: size_of::<PROCESS_MEMORY_COUNTERS>() as u32, ..Default::default() };
+    let mut c = PROCESS_MEMORY_COUNTERS {
+        cb: size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        ..Default::default()
+    };
     // SAFETY: our own process and a sized structure.
-    unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) };
-    c.WorkingSetSize as u64
+    (unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) } != 0)
+        .then_some(c.WorkingSetSize as u64)
 }

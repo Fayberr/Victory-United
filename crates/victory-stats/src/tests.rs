@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 #[test]
 fn layout_is_stable() {
     assert_eq!(V1_SIZE, 8704);
-    assert_eq!(SIZE, 17408);
+    assert_eq!(SIZE, 17472);
     assert_eq!(std::mem::align_of::<Block>(), 64);
     assert_eq!(MAGIC.to_le_bytes(), *b"VUSTATS1");
     assert_eq!(name(42), "Local\\VictoryUnited.Stats.42");

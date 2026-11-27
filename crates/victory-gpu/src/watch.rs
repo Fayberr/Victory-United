@@ -332,6 +332,10 @@ fn dirty4k_mode() -> u8 {
 /// (shared will do: what notes an answer holds it alone).
 static ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+pub(crate) fn queries() -> u64 {
+    ASKED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn next_asking() -> u64 {
     ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }

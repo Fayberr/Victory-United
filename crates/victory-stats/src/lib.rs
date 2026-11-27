@@ -133,9 +133,11 @@ pub enum Metric {
     DrawsExecuted,
     DispatchesExecuted,
     AdapterLuid,
+    IndirectBudgetDrops,
+    TextureLevelsWithoutTiles,
 }
 
-const METRICS: usize = Metric::AdapterLuid as usize + 1;
+const METRICS: usize = Metric::TextureLevelsWithoutTiles as usize + 1;
 
 #[repr(C, align(64))]
 pub struct Block {
@@ -470,6 +472,10 @@ impl Writer {
     fn end(&mut self, b: &LegacyBlock) {
         self.seq += 1;
         b.seq.store(self.seq, Ordering::Release);
+    }
+
+    pub fn qpc_freq(&self) -> u64 {
+        self.block().legacy.qpc_freq.load(Ordering::Relaxed)
     }
 
     pub fn set_metric(&self, metric: Metric, value: Option<u64>) {
