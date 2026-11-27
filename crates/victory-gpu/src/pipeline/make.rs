@@ -649,7 +649,7 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
                 Err(f) => f,
             };
             if first == frame {
-                wait_compute(p);
+                wait_compute(p, frame);
             }
         } else {
             let frame = crate::frame::current();
@@ -722,11 +722,60 @@ fn compute_wait_limit() -> Duration {
     })
 }
 
+/// How long the dispatches of one frame wait for compute pipelines in all
+/// (`VICTORY_PIPELINE_COMPUTE_WAIT_FRAME_MS`, default 8,000; 0 or unreadable:
+/// the default). A frame that first dispatches dozens of compute programs
+/// (the world's, on a cold shader cache) waits for each in turn: each is
+/// within [`compute_wait_limit`], all of them together ran past the title's
+/// 30 s watchdog (fork issue 1420, pure fork b1d777a8 at frame 1951 with
+/// 12 of 16 processors busy making them). Past the frame's budget the
+/// dispatches are dropped as with `VICTORY_PIPELINE_COMPUTE_WAIT=0`; the
+/// pipelines are made meanwhile and wait again in the next frame, whose
+/// budget starts again.
+fn compute_frame_budget() -> Duration {
+    static LIMIT: OnceLock<Duration> = OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        let ms = std::env::var("VICTORY_PIPELINE_COMPUTE_WAIT_FRAME_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|&ms| ms > 0)
+            .unwrap_or(8_000);
+        Duration::from_millis(ms)
+    })
+}
+
+/// The title's frame the budget is counted for, the time the dispatches of
+/// it waited so far, and whether the frame's drop was logged.
+static FRAME_WAITED: Mutex<(u64, Duration, bool)> = Mutex::new((u64::MAX, Duration::ZERO, false));
+
 /// Waits for the worker making a compute pipeline (queued by the caller),
-/// at most [`compute_wait_limit`]. The workers take requested compute
-/// pipelines before the mesh and the early ones.
-fn wait_compute(p: &Pending) {
-    let limit = compute_wait_limit();
+/// at most [`compute_wait_limit`] and within the frame's budget
+/// ([`compute_frame_budget`]). The workers take requested compute pipelines
+/// before the mesh and the early ones.
+fn wait_compute(p: &Pending, frame: u64) {
+    let left = {
+        let mut w = FRAME_WAITED.lock().unwrap_or_else(|e| e.into_inner());
+        if w.0 != frame {
+            *w = (frame, Duration::ZERO, false);
+        }
+        compute_frame_budget().saturating_sub(w.1)
+    };
+    let limit = compute_wait_limit().min(left);
+    if limit.is_zero() {
+        // The frame's budget is spent: this dispatch is dropped, and the
+        // pipeline may wait in a later frame.
+        p.waited_frame.store(u64::MAX, Ordering::Relaxed);
+        let mut w = FRAME_WAITED.lock().unwrap_or_else(|e| e.into_inner());
+        if w.0 == frame && !w.2 {
+            w.2 = true;
+            tracing::warn!(
+                frame,
+                ms = compute_frame_budget().as_millis() as u64,
+                "the compute pipelines a frame's dispatches wait for are over the frame's budget: its other dispatches are dropped, the pipelines are made meanwhile (VICTORY_PIPELINE_COMPUTE_WAIT_FRAME_MS)"
+            );
+        }
+        return;
+    }
     let waiting = crate::timeline::span("pipeline: a dispatch waits for its compute pipeline");
     let started = Instant::now();
     let (lock, done) = &DONE;
@@ -744,6 +793,12 @@ fn wait_compute(p: &Pending) {
     }
     drop(held);
     waiting.end();
+    {
+        let mut w = FRAME_WAITED.lock().unwrap_or_else(|e| e.into_inner());
+        if w.0 == frame {
+            w.1 += started.elapsed();
+        }
+    }
     if p.made.get().is_none() {
         tracing::warn!(
             shaders = ?p.shaders,
