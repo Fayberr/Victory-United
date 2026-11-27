@@ -1406,59 +1406,84 @@ fn lds_meetings(p: &crate::ir::Program, st: &Structured, all: &[bool]) -> Option
     // per region: LDS reads, LDS writes
     let mut reads = vec![false; n];
     let mut writes = vec![false; n];
+    let lds_op = |i: &crate::ir::Inst| {
+        let name = i.name();
+        (matches!(i.fields, Fields::Ds { .. }) && !name.starts_with("ds_swizzle") && !name.contains("permute")).then_some(name)
+    };
     for (b, block) in p.blocks.iter().enumerate().take(n) {
         if all[b] {
             continue;
         }
         let r = find(&mut region, b);
-        for i in &block.insts {
-            let name = i.name();
-            if !matches!(i.fields, Fields::Ds { .. }) || name.starts_with("ds_swizzle") || name.contains("permute") {
-                continue;
-            }
+        for name in block.insts.iter().filter_map(lds_op) {
             if name.starts_with("ds_read") {
                 reads[r] = true;
             } else {
                 writes[r] = true;
+                // Only ordinary stores are write-only. An atomic depends on the
+                // previous LDS value even when it has no return register.
+                reads[r] |= !(name.starts_with("ds_write_b") || name.starts_with("ds_write2"));
             }
         }
     }
     // A region that reads and writes LDS is still taken when it only raises flags
     // (`lds_flag_region`): a read that misses the other host wave's write changes nothing
-    // the region leaves behind. With the loose-LDS fallback on (`loose_lds`) any is.
+    // the region leaves behind. It is also taken when every access is the same commuting
+    // integer reduction with no value returned: the final value at each address does not
+    // depend on which half runs first. A minimum followed by an add does, and is refused.
+    // With the loose-LDS fallback on (`loose_lds`) any is.
     if !super::loose_lds::on() {
         let flags_on = std::env::var_os("VICTORY_LDS_FLAGS").is_none_or(|v| v != "0");
         for r in (0..n).filter(|&r| reads[r] && writes[r]).collect::<Vec<_>>() {
             let blocks: Vec<usize> = (0..n).filter(|&b| !all[b] && find(&mut region, b) == r).collect();
-            if !(flags_on && lds_flag_region(p, st, &blocks)) {
-                if std::env::var_os("VICTORY_WAVE_WHY").is_some() {
-                    let mut list = Vec::new();
-                    for &b in &blocks {
-                        for i in &p.blocks[b].insts {
-                            let name = i.name();
-                            if !matches!(i.fields, Fields::Ds { .. }) || name.starts_with("ds_swizzle") || name.contains("permute") {
-                                continue;
-                            }
-                            let addr = match &i.fields {
-                                Fields::Ds { addr: Some(Operand::Vector { reg, .. }), offset0, offset1, .. } => {
-                                    let made = i.read(Reg::V(*reg)).and_then(|v| {
-                                        p.blocks
-                                            .iter()
-                                            .flat_map(|bl| &bl.insts)
-                                            .find(|x| x.writes.iter().any(|w| w.1 == v))
-                                            .map(|x| format!("{:#x} {}", x.machine.offset, x.name()))
-                                    });
-                                    format!("v{reg} off {offset0}/{offset1} made by {}", made.as_deref().unwrap_or("an input or a phi"))
-                                }
-                                _ => "no address".to_string(),
-                            };
-                            list.push(format!("{:#x} {name} [{addr}]", i.machine.offset));
-                        }
-                    }
-                    eprintln!("WAVE64-LDS region with reads and writes: {}", list.join("; "));
-                }
-                return None;
+            if flags_on && lds_flag_region(p, st, &blocks) {
+                continue;
             }
+            let mut ops = blocks.iter().flat_map(|&b| p.blocks[b].insts.iter().filter_map(lds_op));
+            if let Some(op) = ops.next()
+                && matches!(
+                    op,
+                    "ds_add_u32"
+                        | "ds_sub_u32"
+                        | "ds_and_b32"
+                        | "ds_or_b32"
+                        | "ds_xor_b32"
+                        | "ds_min_i32"
+                        | "ds_max_i32"
+                        | "ds_min_u32"
+                        | "ds_max_u32"
+                )
+                && ops.all(|next| next == op)
+            {
+                continue;
+            }
+            if std::env::var_os("VICTORY_WAVE_WHY").is_some() {
+                let mut list = Vec::new();
+                for &b in &blocks {
+                    for i in &p.blocks[b].insts {
+                        let name = i.name();
+                        if !matches!(i.fields, Fields::Ds { .. }) || name.starts_with("ds_swizzle") || name.contains("permute") {
+                            continue;
+                        }
+                        let addr = match &i.fields {
+                            Fields::Ds { addr: Some(Operand::Vector { reg, .. }), offset0, offset1, .. } => {
+                                let made = i.read(Reg::V(*reg)).and_then(|v| {
+                                    p.blocks
+                                        .iter()
+                                        .flat_map(|bl| &bl.insts)
+                                        .find(|x| x.writes.iter().any(|w| w.1 == v))
+                                        .map(|x| format!("{:#x} {}", x.machine.offset, x.name()))
+                                });
+                                format!("v{reg} off {offset0}/{offset1} made by {}", made.as_deref().unwrap_or("an input or a phi"))
+                            }
+                            _ => "no address".to_string(),
+                        };
+                        list.push(format!("{:#x} {name} [{addr}]", i.machine.offset));
+                    }
+                }
+                eprintln!("WAVE64-LDS region with reads and writes: {}", list.join("; "));
+            }
+            return None;
         }
     }
     let mut meet = vec![(false, false); n];
@@ -13695,6 +13720,57 @@ mod tests {
     use crate::{io, ir, resource, structure};
 
     const S_ENDPGM: u32 = 0xBF81_0000;
+
+    /// A minimum and then an add on one LDS word are not interchangeable
+    /// between the two host halves. Two adds of the same word are.
+    #[test]
+    fn divergent_lds_atomics_need_instruction_order_between_halves() {
+        let mut words: [u32; 15] = [
+            0x7E12_0280, // v_mov_b32 v9, 0
+            0x7E04_0281, // v_mov_b32 v2, 1
+            0x7D88_0000, // v_cmp_gt_u32 vcc, s0, v0
+            0xBE8C_246A, // s_and_saveexec_b64 s[12:13], vcc
+            0xBF88_0006, // s_cbranch_execz past both atomics
+            0x36 << 26 | 0x07 << 18, // ds_min_u32
+            9 << 8 | 9,
+            0xBF07_8001, // s_cmp_lg_u32 s1, 0
+            0xBF85_0002, // s_cbranch_scc1 past the increment
+            0x36 << 26, // ds_add_u32
+            2 << 8 | 9,
+            0xBEFE_040C, // s_mov_b64 exec, s[12:13]
+            0x36 << 26 | 0x36 << 18, // ds_read_b32
+            5 << 24 | 9,
+            S_ENDPGM,
+        ];
+        for (first, second, ordered) in [(0x07u32, 0, true), (0, 0, false)] {
+            words[5] = 0x36 << 26 | first << 18;
+            words[9] = 0x36 << 26 | second << 18;
+            let code: Vec<u8> = words.into_iter().flat_map(u32::to_le_bytes).collect();
+            let native = NativeProgram {
+                stage: HwStage::Cs,
+                wave64: true,
+                vgprs: 16,
+                layout: vec![RootParam {
+                    root: RootType::Constants,
+                    table_offset_dwords: 0,
+                    sgprs: 2,
+                    base_register: 0,
+                    user_data: 0,
+                    slot: 0,
+                }],
+                used: vec![],
+                io: StageIo::Cs(ComputeIo {
+                    rsrc2: 1 << 15 | 2 << 1,
+                    threads: [64, 1, 1],
+                }),
+                code,
+            };
+            let p = ir::build(&native.code, native.wave64, native.vgprs).unwrap();
+            let st = structure::structure(&p).unwrap();
+            let all = super::all_lane_blocks(&st).unwrap();
+            assert_eq!(super::lds_meetings(&p, &st, &all).is_none(), ordered);
+        }
+    }
 
     #[test]
     fn shifted_thread_ids_are_uniform_only_when_every_lane_agrees() {
