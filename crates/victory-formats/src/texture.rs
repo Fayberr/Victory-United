@@ -310,8 +310,7 @@ impl TilingCache {
         pitches: (usize, usize),
     ) -> Result<(), Error> {
         if !layout.thick {
-            return crate::detile::tile(
-                layout,
+            return layout.tile(
                 tiled,
                 subresource.0,
                 subresource.1,
@@ -807,6 +806,9 @@ impl Layout {
         row_pitch: usize,
         depth_pitch: usize,
     ) -> Result<(), Error> {
+        if self.render_xor.is_some() {
+            return self.walk::<true>(tiled, linear, mip, slice, row_pitch, depth_pitch, None);
+        }
         crate::detile::detile(self, tiled, mip, slice, linear, row_pitch, depth_pitch)
     }
 
@@ -820,6 +822,9 @@ impl Layout {
         row_pitch: usize,
         depth_pitch: usize,
     ) -> Result<(), Error> {
+        if self.render_xor.is_some() {
+            return self.walk::<false>(linear, tiled, mip, slice, row_pitch, depth_pitch, None);
+        }
         crate::detile::tile(self, tiled, mip, slice, linear, row_pitch, depth_pitch)
     }
 
@@ -1132,6 +1137,11 @@ mod tests {
             layout.configure_render_xor(cfg);
             let mut tiled = vec![0xbc; layout.size as usize];
             layout.tile(&mut tiled, 0, 0, &linear, pitch, 256 * pitch).unwrap();
+            let mut cached = vec![0; tiled.len()];
+            TilingCache::default()
+                .tile(&layout, &mut cached, (0, 0), &linear, (pitch, 256 * pitch))
+                .unwrap();
+            assert_eq!(cached, tiled);
             let digest = tiled.iter().fold(0xcbf29ce484222325u64, |h, &b| {
                 (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
             });
