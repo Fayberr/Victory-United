@@ -42,6 +42,7 @@ impl Capture {
             s("02-play", Tab::Play, Some(core::Screen::Main), 0.0),
             s("03-settings", Tab::Settings, Some(core::Screen::Main), 0.0),
             s("03-settings-lower", Tab::Settings, Some(core::Screen::Main), 700.0),
+            s("03-saves", Tab::Saves, Some(core::Screen::Main), 0.0),
             s("04-flags", Tab::Flags, Some(core::Screen::Main), 0.0),
             s("05-monitor", Tab::Monitor, Some(core::Screen::Main), 0.0),
             s("06-updates", Tab::Updates, Some(core::Screen::Main), 0.0),

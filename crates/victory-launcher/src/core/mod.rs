@@ -10,8 +10,10 @@ pub mod play;
 pub mod presets;
 pub mod report;
 pub mod runner;
+pub mod saves;
 pub mod settings;
 pub mod store;
+pub mod storage;
 #[cfg(test)]
 pub mod testutil;
 pub mod widgets;
@@ -269,7 +271,24 @@ impl CoreState {
         };
         let cold = runner::shader_entries(&plan.cache_dir, runner::COLD_CACHE_ENTRIES) < runner::COLD_CACHE_ENTRIES;
         self.last_env = plan.env.iter().filter(|(k, _)| !launch::PATH_VARS.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
-        self.runner.start(plan, paths::logs_dir(), cold, !self.active_extra().is_empty());
+        let guard = match storage::lock(&paths::activity_lock()).and_then(|guard| {
+            saves::recover_restore(&plan.data_dir)?;
+            Ok(guard)
+        }) {
+            Ok(guard) => guard,
+            Err(error) => {
+                self.notice = Some(format!("{error:#}"));
+                return;
+            }
+        };
+        let saves = runner::RunStorage {
+            _guard: guard,
+            backups: paths::backups_root(&self.settings),
+            before: self.settings.backups.before_launch,
+            after: self.settings.backups.after_exit,
+            retention: self.settings.backups.retention,
+        };
+        self.runner.start(plan, paths::logs_dir(), cold, !self.active_extra().is_empty(), Some(saves));
     }
 
     /// Starts again after a quick exit, without the extra flags.

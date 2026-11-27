@@ -6,17 +6,19 @@ use super::{
     launch::{self, Resolved, Source},
     presets::builtin,
     widgets::{open_folder, page_scroll, page_title, pick_file, pick_folder, save_file},
-    store::{Appearance, ThemeChoice},
+    saves, storage,
+    store::{Appearance, Backups, ThemeChoice},
     CoreState,
 };
-use crate::{app::Shared, i18n::tr, theme};
+use crate::{app::Shared, i18n::{tr, trf}, paths, theme};
 use eframe::egui;
-use std::collections::HashSet;
+use std::{collections::HashSet, path::{Path, PathBuf}, sync::mpsc::{self, Receiver}};
 
 #[derive(Default)]
 pub struct SettingsUi {
     pub new_name: String,
     pub message: String,
+    saves: SavesUi,
 }
 
 pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
@@ -26,6 +28,8 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
         ui.set_max_width(820.0);
         let (resolved, preset_id) = core.resolved();
         appearance_section(core, ui);
+        ui.add_space(12.0);
+        backup_section(core, ui);
         ui.add_space(12.0);
         preset_section(core, ui, &preset_id);
         ui.add_space(12.0);
@@ -614,4 +618,345 @@ mod tests {
             assert!(registry().group(g).any(|f| !owned.contains(&f.name)), "{g}");
         }
     }
+}
+
+type SavesResult = anyhow::Result<(Vec<saves::Snapshot>, String)>;
+
+#[derive(Default)]
+struct SavesUi {
+    root: Option<PathBuf>,
+    snapshots: Vec<saves::Snapshot>,
+    pending: Option<Receiver<SavesResult>>,
+    label: String,
+    selected: Option<String>,
+    rename: String,
+    confirm: Option<SaveAction>,
+    note: Option<(bool, String)>,
+}
+
+enum SaveAction {
+    Create(String),
+    Restore(String),
+    Verify(String),
+    Export(String, PathBuf),
+    Import(PathBuf),
+    Delete(String),
+    Rename(String, String),
+    Cleanup(Vec<String>),
+}
+
+fn run_save_action(
+    action: SaveAction,
+    data: &Path,
+    root: &Path,
+    build: &str,
+    policy: saves::Retention,
+) -> anyhow::Result<String> {
+    let note = match action {
+        SaveAction::Create(label) => {
+            let options = saves::Create { kind: saves::Kind::Manual, label: &label, engine_build: build, deadline: None, force: false };
+            if saves::create(data, root, options)?.is_some() { "saves.created" } else { "saves.unchanged" }
+        }
+        SaveAction::Restore(id) => {
+            saves::restore(data, root, &id, build)?;
+            "saves.restored"
+        }
+        SaveAction::Verify(id) => {
+            saves::verify(root, &id)?;
+            "saves.verified"
+        }
+        SaveAction::Export(id, out) => {
+            saves::export(root, &id, &out)?;
+            "saves.exported"
+        }
+        SaveAction::Import(source) => {
+            saves::import(root, &source)?;
+            "saves.imported"
+        }
+        SaveAction::Delete(id) => {
+            saves::delete(root, &id)?;
+            "saves.deleted"
+        }
+        SaveAction::Rename(id, label) => {
+            saves::rename(root, &id, &label)?;
+            "saves.renamed"
+        }
+        SaveAction::Cleanup(ids) => {
+            saves::cleanup(root, policy, &ids)?;
+            "saves.cleaned"
+        }
+    };
+    Ok(tr(note).into())
+}
+
+fn start_saves_job(core: &mut CoreState, action: Option<SaveAction>) {
+    let root = paths::backups_root(&core.settings);
+    let data = paths::game_data_root();
+    let engine = core.engine_exe();
+    let policy = core.settings.backups.retention;
+    let ctx = core.ctx.clone();
+    let (tx, rx) = mpsc::channel();
+    let state = &mut core.ui.settings.saves;
+    state.root = Some(root.clone());
+    state.pending = Some(rx);
+    state.note = None;
+    std::thread::spawn(move || {
+        let result = (|| {
+            let note = if let Some(action) = action {
+                let _guard = storage::lock(&paths::activity_lock())?;
+                let build = engine.as_deref().and_then(Path::parent).and_then(Path::file_name)
+                    .and_then(|b| b.to_str()).unwrap_or_default();
+                run_save_action(action, &data, &root, build, policy)?
+            } else {
+                String::new()
+            };
+            Ok((saves::list(&root)?, note))
+        })();
+        let _ = tx.send(result);
+        ctx.request_repaint();
+    });
+}
+
+fn backup_section(core: &mut CoreState, ui: &mut egui::Ui) {
+    let before = core.settings.backups.clone();
+    let mut cfg = before.clone();
+    theme::card(ui).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(theme::strong(tr("saves.settings")).size(16.0));
+            if ui.add_enabled(cfg != Backups::default(), egui::Button::new(tr("appearance.reset"))).clicked() {
+                cfg = Backups::default();
+            }
+        });
+        ui.checkbox(&mut cfg.before_launch, tr("saves.before"));
+        ui.label(theme::dim(tr("saves.before_help")).size(12.5));
+        ui.checkbox(&mut cfg.after_exit, tr("saves.after"));
+        ui.label(theme::dim(tr("saves.after_help")).size(12.5));
+        ui.horizontal_wrapped(|ui| {
+            ui.add(egui::DragValue::new(&mut cfg.retention.keep_recent).range(0..=1000).prefix(tr("saves.recent")));
+            ui.add(egui::DragValue::new(&mut cfg.retention.keep_days).range(0..=3650).prefix(tr("saves.days")));
+            ui.add(egui::DragValue::new(&mut cfg.retention.max_gib).range(0..=10_000).prefix(tr("saves.cap")).suffix(" GiB"));
+        });
+        ui.label(theme::dim(tr("saves.retention_help")).size(12.5));
+        ui.horizontal_wrapped(|ui| {
+            ui.label(tr("saves.folder"));
+            if ui.button(tr("settings.choose_folder")).clicked() && !core.ui.demo {
+                if let Some(p) = pick_folder() {
+                    let valid = (|| {
+                        anyhow::ensure!(!storage::overlap(&p, &paths::game_data_root())?
+                            && !storage::overlap(&p, &paths::cache_root())?, "Choose a separate folder for backups.");
+                        storage::absolute(&p)
+                    })();
+                    match valid {
+                        Ok(p) => cfg.root = Some(p),
+                        Err(error) => core.ui.settings.message = format!("{error:#}"),
+                    }
+                }
+            }
+        });
+        let root = if core.ui.demo { PathBuf::from("C:/Users/Player/AppData/Roaming/Victory-United/backups") } else { paths::backups_root(&core.settings) };
+        ui.label(theme::dim(root.to_string_lossy()).size(12.5));
+        ui.label(theme::dim(tr("saves.folder_help")).size(12.5));
+        if !core.ui.settings.message.is_empty() {
+            ui.label(theme::warn_text(ui, &core.ui.settings.message).size(12.5));
+        }
+    });
+    if cfg != before {
+        core.settings.backups = cfg;
+        core.save_settings();
+    }
+}
+
+pub fn show_saves(core: &mut CoreState, ui: &mut egui::Ui) {
+    page_title(ui, tr("saves.title"), tr("saves.subtitle"));
+    let scroll = core.page_scroll.take();
+    let root = paths::backups_root(&core.settings);
+    if core.ui.demo {
+        if core.ui.settings.saves.snapshots.is_empty() {
+            core.ui.settings.saves.snapshots = demo_saves();
+            core.ui.settings.saves.selected = core.ui.settings.saves.snapshots.first().map(|s| s.id.clone());
+        }
+    } else {
+        let state = &mut core.ui.settings.saves;
+        if let Some(result) = state.pending.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            state.pending = None;
+            match result {
+                Ok((snapshots, note)) => {
+                    state.snapshots = snapshots;
+                    state.note = (!note.is_empty()).then_some((false, note));
+                }
+                Err(error) => state.note = Some((true, format!("{error:#}"))),
+            }
+        }
+        if state.pending.is_none() && state.root.as_ref() != Some(&root) {
+            state.snapshots.clear();
+            state.selected = None;
+            state.confirm = None;
+            start_saves_job(core, None);
+        }
+    }
+
+    let mut refresh = false;
+    let mut action = None;
+    let busy = core.runner.busy() && !core.ui.demo;
+    let state = &mut core.ui.settings.saves;
+    page_scroll(ui, scroll, |ui| {
+        ui.set_max_width(820.0);
+        theme::card(ui).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut state.label).hint_text(tr("saves.optional_label")).desired_width(180.0).char_limit(120));
+                if ui.add_enabled(!busy && state.pending.is_none(), egui::Button::new(tr("saves.create"))).clicked() {
+                    action = Some(SaveAction::Create(state.label.clone()));
+                }
+                if ui.add_enabled(!busy && state.pending.is_none(), egui::Button::new(tr("saves.import"))).clicked() && !core.ui.demo {
+                    action = pick_file(("ZIP", &["zip"])).map(SaveAction::Import);
+                }
+                if ui.add_enabled(state.pending.is_none(), egui::Button::new(tr("saves.refresh"))).clicked() {
+                    refresh = true;
+                }
+                if ui.button(tr("saves.open")).clicked() && !core.ui.demo {
+                    open_folder(&root);
+                }
+            });
+            if busy {
+                ui.label(theme::dim(tr("saves.busy")));
+            }
+            if state.pending.is_some() {
+                ui.label(theme::dim(tr("saves.working")));
+            }
+            if let Some((error, note)) = &state.note {
+                ui.label(if *error { theme::error_text(ui, note) } else { theme::dim(note) });
+            }
+        });
+        ui.add_space(12.0);
+        theme::card(ui).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(theme::strong(tr("saves.list")).size(16.0));
+            if state.snapshots.is_empty() {
+                ui.label(theme::dim(tr("saves.empty")));
+                return;
+            }
+            for snap in &state.snapshots {
+                let m = &snap.manifest;
+                let when = backup_time(m.created);
+                let title = if m.label.is_empty() { when } else { format!("{}   |   {when}", m.label) };
+                let selected = state.selected.as_ref() == Some(&snap.id);
+                if ui.selectable_label(selected, title).clicked() {
+                    state.selected = Some(snap.id.clone());
+                    state.rename = m.label.clone();
+                    state.confirm = None;
+                }
+                let kind = kind_label(m.kind);
+                let short = m.files.first().and_then(|f| f.sha256.get(..10)).unwrap_or_default();
+                let build = if m.engine_build.is_empty() { tr("saves.unknown_build") } else { &m.engine_build };
+                ui.label(theme::dim(format!("{kind}   |   {}   |   {build}   |   {short}", display_size(m.total_size))).size(12.5));
+            }
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_enabled_ui(!busy && state.pending.is_none(), |ui| {
+                if let Some(id) = &state.selected {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button(tr("saves.restore")).clicked() {
+                            state.confirm = Some(SaveAction::Restore(id.clone()));
+                        }
+                        if ui.button(tr("saves.verify")).clicked() {
+                            action = Some(SaveAction::Verify(id.clone()));
+                        }
+                        if ui.button(tr("saves.export")).clicked() && !core.ui.demo {
+                            let file = format!("{id}.zip");
+                            action = save_file(&file, ("ZIP", &["zip"])).map(|out| SaveAction::Export(id.clone(), out));
+                        }
+                        if ui.button(tr("saves.delete")).clicked() {
+                            state.confirm = Some(SaveAction::Delete(id.clone()));
+                        }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut state.rename).hint_text(tr("saves.optional_label")).desired_width(180.0).char_limit(120));
+                        if ui.button(tr("saves.rename")).clicked() {
+                            action = Some(SaveAction::Rename(id.clone(), state.rename.clone()));
+                        }
+                    });
+                }
+                if ui.button(tr("saves.cleanup")).clicked() {
+                    match saves::retention_plan(&state.snapshots, core.settings.backups.retention, storage::now().as_secs()) {
+                        Ok(ids) if ids.is_empty() => state.note = Some((false, tr("saves.cleanup_empty").into())),
+                        Ok(ids) => state.confirm = Some(SaveAction::Cleanup(ids)),
+                        Err(error) => state.note = Some((true, error.to_string())),
+                    }
+                }
+                if let Some(confirm) = &state.confirm {
+                    match confirm {
+                        SaveAction::Restore(_) => ui.label(theme::warn_text(ui, tr("saves.confirm_restore"))),
+                        SaveAction::Delete(_) => ui.label(theme::warn_text(ui, tr("saves.confirm_delete"))),
+                        SaveAction::Cleanup(ids) => {
+                            ui.label(theme::warn_text(ui, tr("saves.confirm_cleanup")));
+                            for id in ids {
+                                ui.label(id);
+                            }
+                            ui.label("")
+                        }
+                        _ => ui.label(""),
+                    };
+                    ui.horizontal(|ui| {
+                        if ui.button(tr("saves.confirm")).clicked() {
+                            action = state.confirm.take();
+                        }
+                        if ui.button(tr("play.cancel")).clicked() {
+                            state.confirm = None;
+                        }
+                    });
+                }
+            });
+        });
+    });
+    if !core.ui.demo && (refresh || action.is_some()) {
+        start_saves_job(core, action);
+    }
+}
+
+fn kind_label(kind: saves::Kind) -> &'static str {
+    tr(match kind {
+        saves::Kind::BeforeLaunch => "saves.kind_before",
+        saves::Kind::AfterExit => "saves.kind_after",
+        saves::Kind::Manual => "saves.kind_manual",
+        saves::Kind::BeforeRestore => "saves.kind_restore",
+        saves::Kind::BeforeMove => "saves.kind_move",
+    })
+}
+
+fn backup_time(secs: u64) -> String {
+    let stamp = super::runner::timestamp_at(secs);
+    match stamp.split_once('-') {
+        Some((d, t)) if d.len() == 8 && t.len() == 6 => format!("{}-{}-{} {}:{}:{} UTC", &d[..4], &d[4..6], &d[6..], &t[..2], &t[2..4], &t[4..]),
+        _ => stamp,
+    }
+}
+
+fn display_size(bytes: u64) -> String {
+    if bytes >= 1 << 30 {
+        format!("{:.2} GiB", bytes as f64 / (1u64 << 30) as f64)
+    } else if bytes >= 1 << 20 {
+        format!("{:.1} MiB", bytes as f64 / (1u64 << 20) as f64)
+    } else if bytes >= 1 << 10 {
+        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn demo_saves() -> Vec<saves::Snapshot> {
+    let sample = |id: &str, created, kind, label: &str, total_size, hash: &str| saves::Snapshot {
+        id: id.into(),
+        manifest: saves::Manifest {
+            schema: 1, created, kind, engine_build: "a1b2c3d4-release".into(), launcher_version: env!("CARGO_PKG_VERSION").into(),
+            label: label.into(), total_size,
+            files: vec![saves::SavedFile { path: "DEADBEEF/saves/profile.bin".into(), size: total_size, modified_ns: None, sha256: hash.into() }],
+        },
+    };
+    vec![
+        sample("20261127-184600-example-manual", 1_795_805_160, saves::Kind::Manual, "Before the next build", 3_670_016, "71fc7622ac734d60"),
+        sample("20261127-182400-example-after-exit", 1_795_803_840, saves::Kind::AfterExit, "", 3_670_016, "9fc250ac4673c8b4"),
+        sample("20261126-203000-example-before-launch", 1_795_725_000, saves::Kind::BeforeLaunch, "", 3_145_728, "ee71033d81ad7192"),
+    ]
 }

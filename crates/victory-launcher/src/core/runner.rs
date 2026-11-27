@@ -3,9 +3,10 @@
 //! No polling anywhere. A worker thread blocks on the child's stdout while warming and on `Child::wait`
 //! while the game runs; it sends events through a channel and calls `ctx.request_repaint()` once per event.
 //! The UI drains the channel at the start of each frame (frames only happen on input or events).
-use super::launch::Plan;
+use super::{launch::Plan, saves};
 use eframe::egui;
 use std::{
+    fs::File,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -46,8 +47,26 @@ pub enum RunState {
 enum Event {
     Progress(u64, u64),
     WarmFinished,
+    BackupWarning(String),
     Started { pid: u32, log: PathBuf },
     Ended(Summary),
+}
+
+pub struct RunStorage {
+    pub _guard: File,
+    pub backups: PathBuf,
+    pub before: bool,
+    pub after: bool,
+    pub retention: saves::Retention,
+}
+
+impl RunStorage {
+    fn snapshot(&self, plan: &Plan, kind: saves::Kind, deadline: Option<Instant>) -> anyhow::Result<bool> {
+        let build = plan.engine.parent().and_then(Path::file_name).and_then(|name| name.to_str()).unwrap_or_default();
+        Ok(saves::create(&plan.data_dir, &self.backups, saves::Create {
+            kind, label: "", engine_build: build, deadline, force: false,
+        })?.is_some())
+    }
 }
 
 pub struct Runner {
@@ -58,12 +77,13 @@ pub struct Runner {
     child_pid: Arc<AtomicU32>,
     cancel: Arc<AtomicBool>,
     skip: Arc<AtomicBool>,
+    pub backup_warning: Option<String>,
 }
 
 impl Runner {
     pub fn new(ctx: egui::Context) -> Self {
         let (tx, rx) = channel();
-        Self { state: RunState::Idle, rx, tx, ctx, child_pid: Arc::new(AtomicU32::new(0)), cancel: Arc::new(AtomicBool::new(false)), skip: Arc::new(AtomicBool::new(false)) }
+        Self { state: RunState::Idle, rx, tx, ctx, child_pid: Arc::new(AtomicU32::new(0)), cancel: Arc::new(AtomicBool::new(false)), skip: Arc::new(AtomicBool::new(false)), backup_warning: None }
     }
 
     pub fn busy(&self) -> bool {
@@ -86,10 +106,11 @@ impl Runner {
     }
 
     /// Starts the whole flow on a worker thread.
-    pub fn start(&mut self, plan: Plan, logs_dir: PathBuf, warm: bool, flags_active: bool) {
+    pub fn start(&mut self, plan: Plan, logs_dir: PathBuf, warm: bool, flags_active: bool, storage: Option<RunStorage>) {
         if self.busy() {
             return;
         }
+        self.backup_warning = None;
         self.cancel.store(false, Ordering::SeqCst);
         self.skip.store(false, Ordering::SeqCst);
         self.child_pid.store(0, Ordering::SeqCst);
@@ -108,7 +129,36 @@ impl Runner {
                 }
                 send(Event::WarmFinished);
             }
-            run_game(&plan, &logs_dir, flags_active, &pid, &cancel, &send);
+            let mut before_created = false;
+            if let Some(storage) = &storage {
+                if storage.before && !cancel.load(Ordering::SeqCst) {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    match storage.snapshot(&plan, saves::Kind::BeforeLaunch, Some(deadline)) {
+                        Ok(created) => before_created = created,
+                        Err(error) => send(Event::BackupWarning(format!("{error:#}"))),
+                    }
+                }
+            }
+            let finish = |clean: bool| {
+                if let Some(storage) = &storage {
+                    let mut created = before_created;
+                    if clean && storage.after {
+                        match storage.snapshot(&plan, saves::Kind::AfterExit, None) {
+                            Ok(after) => created |= after,
+                            Err(error) => send(Event::BackupWarning(format!("{error:#}"))),
+                        }
+                    }
+                    if created {
+                        if let Err(error) = saves::auto_cleanup(&storage.backups, storage.retention) {
+                            send(Event::BackupWarning(format!("{error:#}")));
+                        }
+                    }
+                }
+            };
+            let summary = run_game(&plan, &logs_dir, flags_active, &pid, &cancel, &send);
+            finish(summary.code == Some(0) && !summary.cancelled);
+            drop(storage);
+            send(Event::Ended(summary));
         });
     }
 
@@ -135,6 +185,7 @@ impl Runner {
                         self.state = RunState::Warming { done, total, since };
                     }
                 }
+                Event::BackupWarning(message) => self.backup_warning = Some(message),
                 Event::WarmFinished => self.state = RunState::Starting,
                 Event::Started { pid, log } => self.state = RunState::Running { pid, since: Instant::now(), log },
                 Event::Ended(s) => self.state = RunState::Ended(s),
@@ -169,12 +220,12 @@ fn run_warmup(plan: &Plan, logs_dir: &Path, pid: &AtomicU32, send: &dyn Fn(Event
     pid.store(0, Ordering::SeqCst);
 }
 
-fn run_game(plan: &Plan, logs_dir: &Path, flags_active: bool, pid: &AtomicU32, cancel: &AtomicBool, send: &dyn Fn(Event)) {
-    let fail = |msg: String, log: Option<PathBuf>| {
-        send(Event::Ended(Summary { code: None, log, secs: 0, quick_exit_with_flags: false, error: Some(msg), cancelled: false }));
+fn run_game(plan: &Plan, logs_dir: &Path, flags_active: bool, pid: &AtomicU32, cancel: &AtomicBool, send: &dyn Fn(Event)) -> Summary {
+    let fail = |msg: String, log: Option<PathBuf>| Summary {
+        code: None, log, secs: 0, quick_exit_with_flags: false, error: Some(msg), cancelled: false,
     };
     if cancel.load(Ordering::SeqCst) {
-        return fail("Stopped.".into(), None);
+        return Summary { cancelled: true, ..fail("Stopped.".into(), None) };
     }
     if let Err(e) = std::fs::create_dir_all(logs_dir) {
         return fail(format!("Cannot create the log folder: {e}"), None);
@@ -199,14 +250,14 @@ fn run_game(plan: &Plan, logs_dir: &Path, flags_active: bool, pid: &AtomicU32, c
     pid.store(0, Ordering::SeqCst);
     let secs = started.elapsed().as_secs();
     let stopped = cancel.load(Ordering::SeqCst);
-    send(Event::Ended(Summary {
+    Summary {
         code: status.as_ref().ok().and_then(|s| s.code()),
         log: Some(log_path),
         secs,
         quick_exit_with_flags: flags_active && !stopped && secs < QUICK_EXIT_SECS,
         error: status.err().map(|e| e.to_string()),
         cancelled: stopped,
-    }));
+    }
 }
 
 /// The engine command: working folder is the engine's own, inherited `VICTORY_*` values other than the
@@ -302,7 +353,11 @@ pub fn shader_entries(cache_dir: &Path, limit: usize) -> usize {
 
 /// `YYYYMMDD-HHMMSS` in UTC (no time zone database needed; the name only has to sort).
 pub fn timestamp() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs() as i64;
+    timestamp_at(super::storage::now().as_secs())
+}
+
+pub fn timestamp_at(secs: u64) -> String {
+    let secs = secs.min(i64::MAX as u64) as i64;
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     // civil-from-days (Howard Hinnant)
     let z = days + 719_468;
@@ -404,7 +459,7 @@ mod tests {
         let plan = Plan::new(engine, &d, d.join("game.exe"), Console::SeriesX, &Resolved::default(), &BTreeMap::new(), &d.join("cache"), &d);
         let ctx = egui::Context::default();
         let mut r = Runner::new(ctx);
-        r.start(plan, d.join("logs"), true, true);
+        r.start(plan, d.join("logs"), true, true, None);
         let t0 = Instant::now();
         let mut saw_progress = false;
         while !matches!(r.state, RunState::Ended(_)) && t0.elapsed() < Duration::from_secs(10) {

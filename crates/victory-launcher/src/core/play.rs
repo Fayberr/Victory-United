@@ -17,6 +17,10 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.set_width(left);
             play_card(core, ui);
+            if let Some(warning) = &core.runner.backup_warning {
+                ui.add_space(10.0);
+                notice(ui, &trf("saves.warning", &[("reason", warning)]), false);
+            }
             if let Some(n) = core.notice.clone() {
                 ui.add_space(10.0);
                 notice(ui, &n, true);

@@ -25,6 +25,21 @@ impl Default for Appearance {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct Backups {
+    pub root: Option<PathBuf>,
+    pub before_launch: bool,
+    pub after_exit: bool,
+    pub retention: super::saves::Retention,
+}
+
+impl Default for Backups {
+    fn default() -> Self {
+        Self { root: None, before_launch: true, after_exit: true, retention: Default::default() }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -43,6 +58,7 @@ pub struct Settings {
     /// The first-run walk-through was finished or skipped.
     pub setup_done: bool,
     pub appearance: Appearance,
+    pub backups: Backups,
 }
 
 impl Default for Settings {
@@ -56,6 +72,7 @@ impl Default for Settings {
             dirs: Default::default(),
             setup_done: false,
             appearance: Appearance::default(),
+            backups: Backups::default(),
         }
     }
 }
@@ -67,7 +84,8 @@ impl Settings {
     }
 
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
-        write_atomic(path, toml::to_string_pretty(self).unwrap_or_default().as_bytes())
+        let text = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
+        write_atomic(path, text.as_bytes())
     }
 
     pub fn load() -> Self {
@@ -81,12 +99,14 @@ impl Settings {
 
 /// Writes through a temp file and a rename so a crash never leaves half a file.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
+    use std::io::Write;
+    let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    tmp.write_all(bytes)?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(path)?;
+    Ok(())
 }
 
 #[cfg(test)]

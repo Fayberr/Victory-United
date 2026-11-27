@@ -7,6 +7,7 @@ use eframe::egui;
 pub enum Tab {
     Play,
     Settings,
+    Saves,
     Flags,
     Monitor,
     Updates,
@@ -16,9 +17,10 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 8] = [
+    pub const ALL: [Tab; 9] = [
         Tab::Play,
         Tab::Settings,
+        Tab::Saves,
         Tab::Flags,
         Tab::Monitor,
         Tab::Updates,
@@ -30,6 +32,7 @@ impl Tab {
         match self {
             Tab::Play => tr("tab.play"),
             Tab::Settings => tr("tab.settings"),
+            Tab::Saves => tr("tab.saves"),
             Tab::Flags => tr("tab.flags"),
             Tab::Monitor => tr("tab.monitor"),
             Tab::Updates => tr("tab.updates"),
@@ -118,8 +121,8 @@ impl App {
                 });
                 ui.add_space(8.0);
                 for (n, tab) in Tab::ALL.into_iter().enumerate() {
-                    if n == 2 {
-                        // Players use the first two; everything after is one click further for developers.
+                    if n == 3 {
+                        // Players use the first three; everything after is one click further for developers.
                         ui.add_space(8.0);
                         ui.separator();
                         ui.add_space(8.0);
@@ -179,6 +182,7 @@ impl eframe::App for App {
             match self.tab {
                 Tab::Play => core::play::show(&mut self.core, &self.shared, ui),
                 Tab::Settings => core::settings::show(&mut self.core, &self.shared, ui),
+                Tab::Saves => core::settings::show_saves(&mut self.core, ui),
                 Tab::Flags => core::flags::show(&mut self.core, &self.shared, ui),
                 Tab::Report => core::report::show(&mut self.core, &self.shared, ui),
                 Tab::About => core::about::show(&mut self.core, &self.shared, &self.logo, ui),

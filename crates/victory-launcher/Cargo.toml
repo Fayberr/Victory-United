@@ -17,6 +17,8 @@ victory-update = { path = "../victory-update" }
 serde.workspace = true
 toml.workspace = true
 anyhow.workspace = true
+sha2 = "0.10"
+tempfile.workspace = true
 serde_json = "1"
 eframe = { version = "0.33.3", default-features = false, features = ["glow", "default_fonts", "x11"] }
 egui_plot = "0.34.1"
@@ -33,8 +35,6 @@ windows = { workspace = true, features = [
 [lints]
 workspace = true
 
-[dev-dependencies]
-tempfile.workspace = true
 
 [build-dependencies]
 cc = "1"
