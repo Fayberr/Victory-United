@@ -63,7 +63,7 @@ impl Capture {
         let step = &self.steps[self.idx];
         *tab = step.tab;
         core.force_screen = step.screen;
-        core.page_scroll = (step.scroll > 0.0).then_some(step.scroll);
+        core.page_scroll = Some(step.scroll);
         // Collect a finished screenshot.
         let shot = ctx.input(|i| {
             i.events.iter().find_map(|e| match e {
