@@ -1,6 +1,7 @@
 //! "Core" half of the launcher: play, settings, presets, flags, profiles, bug report. Owned by the core worker.
 pub mod about;
 pub mod firstrun;
+pub mod flagreg;
 pub mod flags;
 pub mod game;
 pub mod hw;

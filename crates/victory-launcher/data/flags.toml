@@ -1,0 +1,4250 @@
+# Registry of every VICTORY_* variable the code reads. Generated first by tools/gen_flags.py, then
+# documented by hand: entries are never overwritten by the script. `doc = ""` means not documented yet.
+# type: switch | number | text | choice.  risk: safe | advanced | experimental.
+# off: how a switch is turned off. `"0"` writes 0 (the engine treats presence as on only for names
+# marked `presence`), `remove` takes the variable out of the environment.
+
+[[flag]]
+name = "VICTORY_A"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_AB"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ACTIVATE_RAYS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ADAPTER"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ADDRLIB"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_AGILITY_SDK"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_AHEAD_EARLY"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_AHEAD_FIRST"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_AHEAD_SPLIT"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ALIAS_COPY"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_AMBIENT"
+type = "text"
+default = "constant:0.1"
+group = "graphics"
+risk = "advanced"
+doc = "Stand-in for the indirect light the game traces rays for. A number is a share of the estimate (1 is all of it), constant:<level> is a fixed level, 0 is the game's own output."
+
+[[flag]]
+name = "VICTORY_AMBIENT_AIR"
+type = "number"
+default = "0.8"
+group = "graphics"
+min = 0
+max = 8
+risk = "advanced"
+doc = "Upper limit for the light the air scatters, as a multiple of the light around. Stops a brown veil indoors without ray tracing. 0 keeps the game's own value."
+
+[[flag]]
+name = "VICTORY_AMBIENT_MOST"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_AMBIENT_RT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_AMBIENT_SETTLE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_AMBIENT_SHADE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ASK_EARLY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ASK_NORESET"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ASK_ONCE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ASK_SPREAD"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ASYNC_SUBMIT"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_AUDIO_CAPTURE"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_AUDIO_CAPTURE_OF"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_B"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BACK_READS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BAKE_EXACT"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BAKE_SOURCES"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BAKE_SOURCES_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BAKE_TEXTURES_MS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BARRIER_TEST"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BCPACK_CASES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BCPACK_TABLES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BENCH_CS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BENCH_FILE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BENCH_HOLES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BENCH_N"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BENCH_S"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BENCH_THREADS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BENCH_WARP"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BIND_CACHE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BLOCK_WAY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BOOK"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BURY_LAG"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BVH_BOUNDS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BVH_BUILDER"
+type = "switch"
+default = ""
+off = "remove"
+group = "graphics"
+risk = "advanced"
+doc = "Run the console's ray-tracing structure builder so the game's own ray-traced light works. Lit interiors, about a third slower."
+
+[[flag]]
+name = "VICTORY_BVH_FAULTS_ALL"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BVH_FENCES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BVH_MISS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BVH_NO_HIT"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BVH_QUARANTINE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BVH_SIZES_WAIT"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_BVH_TRACE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CACHE_CORES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CACHE_DIR"
+type = "text"
+default = ""
+group = "paths"
+risk = "safe"
+doc = "Where shaders and pipelines are cached. The launcher sets one folder per game."
+
+[[flag]]
+name = "VICTORY_CACHE_PAIRS_KEY_CHILD"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CAPTURE"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CAPTURE_FRAMES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CAPTURE_WORLD"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CAPTURE_WORLD_ALSO"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_ACCOUNTING"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_ALL"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_AWAKE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = "Keep the card's clocks up between submissions. Helps on AMD cards whose driver lowers clocks when the card idles."
+
+[[flag]]
+name = "VICTORY_CARD_BUFFERS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_BUFFERS_MB"
+type = "number"
+default = ""
+group = "memory"
+min = 64
+max = 16384
+risk = "advanced"
+doc = "Most video memory, in MB, used for copies of the game's buffers on the card. Unset: worked out from the card's budget."
+
+[[flag]]
+name = "VICTORY_CARD_BUFFERS_MIN_KB"
+type = "number"
+default = "64"
+group = "memory"
+min = 1
+max = 4096
+risk = "advanced"
+doc = "Smallest buffer, in KB, that gets a copy in video memory. 64 includes every buffer the game uses."
+
+[[flag]]
+name = "VICTORY_CARD_BUFFERS_MIN_MB"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_CHANGED_LIST"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_COMPARE_JOIN"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_FETCH_INFLIGHT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_FILLS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_FLAGGED"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_HASH_LEN"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_HASH_WIDE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_METER"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_METER_CLAMPS"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_METER_PIPELINES"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_REHASH_RUNS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "experimental"
+doc = "Hash the pieces sent to the card's copy in runs of touching pieces, each once."
+
+[[flag]]
+name = "VICTORY_CARD_RESERVE_BUDGETS"
+type = "switch"
+default = ""
+off = "remove"
+group = "memory"
+risk = "advanced"
+doc = "Set the card buffer budgets aside first, so textures cannot take the memory they need."
+
+[[flag]]
+name = "VICTORY_CARD_ROOM_FOR_BUFFERS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_ROOM_FOR_TARGETS_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_SPANS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_STEPS"
+type = "number"
+default = "2"
+min = 0
+max = 2
+risk = "experimental"
+doc = "Do steps that read the game's memory on the card instead of the CPU."
+
+[[flag]]
+name = "VICTORY_CARD_SYNC_BATCH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_WINDOWS_MB"
+type = "number"
+default = "1280"
+group = "memory"
+min = 0
+max = 8192
+risk = "advanced"
+doc = "Most video memory, in MB, for copies of windows outside buffers that go to the card's memory. 0 turns them off."
+
+[[flag]]
+name = "VICTORY_CLAMP_LEAN"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CLAMP_WINDOW"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CLZERO_ASK"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_COALESCE_COMPARES"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_COMMITTED_QUERY"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_COMPILER_GUARD"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_COMPOSE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CONFIG"
+type = "text"
+default = ""
+group = "paths"
+risk = "safe"
+doc = "Config file the engine reads instead of victory.toml. The launcher does not set it."
+
+[[flag]]
+name = "VICTORY_CONSOLE_DXC"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CONSTANT_MARKS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_COPIES_IN_PLACE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_COPY_ASK"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_COPY_BESIDE"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_COPY_MODE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_COPY_OVER_TITLE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_COPY_PLAIN"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CRASH_SAVE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CUT_WAITS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CUT_WRITES"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_D3D12_ADAPTER"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_D3D12_BACKGROUND"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_D3D12_DEBUG"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_D3D12_DRED"
+type = "choice"
+default = "light"
+group = "debug"
+choices = ["light", "full"]
+risk = "safe"
+doc = "Keep a record of who owned which video memory, so a lost device can be explained."
+
+[[flag]]
+name = "VICTORY_D3D12_DRED_FRAME_NAMES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_D3D12_GBV"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_D3D12_WARP"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DATA_DIR"
+type = "text"
+default = ""
+group = "paths"
+risk = "safe"
+doc = "Where the game's saves and storage live. The launcher sets it."
+
+[[flag]]
+name = "VICTORY_DECLARE_ONCE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DECODE"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DECODE_WAVE64"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DENY_PIPELINES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DENY_PIPELINES_FILE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DEPTH_TWINS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DESC_WHY"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DIFF_ONLY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DIRECT_WRITES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DIRTY_4K"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DISPATCH_SPREAD"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DISPLAY_MODE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DISPLAY_PROFILE_TEST_IMAGE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DLSS"
+type = "choice"
+default = ""
+group = "graphics"
+choices = ["quality", "balanced", "performance", "ultra-performance"]
+risk = "advanced"
+doc = "NVIDIA DLSS super resolution mode. Only in engine builds that include DLSS."
+
+[[flag]]
+name = "VICTORY_DLSS_DIR"
+type = "text"
+default = ""
+group = "paths"
+risk = "safe"
+doc = "Folder with the DLSS files from NVIDIA. The launcher does not include them."
+
+[[flag]]
+name = "VICTORY_DRIVER_WATCH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DSTORAGE_HALF"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DSTORAGE_IO"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DSTORAGE_LOG"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DSTORAGE_RETRIES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DSTORAGE_STAGING_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DSTORAGE_TRACE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DUALSENSE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DUMP_MATCH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DUMP_TARGETS"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DXC"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DXIL"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_DYNAMIC_SLOTS"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_EARLY_ALL"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_EARLY_TEXTURES_MS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_EFFICIENCY_MODE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_EMIT_DUMP"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_EXACT_BACK"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_EXIT_CHILD"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_F16_NEAREST"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FAIL_DUMP"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FAIR_DUE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FAST_CORES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FAULT_BOOK"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FAULT_BOOK_AT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FETCH_CHECK"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FFX_SCALE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FIDELITYFX_DIR"
+type = "text"
+default = ""
+group = "paths"
+risk = "safe"
+doc = "Folder with amd_fidelityfx_upscaler_dx12.dll, needed for FSR."
+
+[[flag]]
+name = "VICTORY_FILLS_PLAIN"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FILL_TITLE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FILL_WAIT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FIRSTLANE_OWN"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FIRST_HALF"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FPS_COUNTER"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FRAMEGEN"
+type = "switch"
+default = ""
+off = "remove"
+group = "graphics"
+risk = "experimental"
+doc = "DLSS frame generation. Only in engine builds that include it; RTX 40 natively."
+
+[[flag]]
+name = "VICTORY_FRAME_INTERVAL_MS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FRAME_LOG"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FSR_4K"
+type = "choice"
+default = ""
+group = "graphics"
+choices = ["quality", "balanced", "performance"]
+risk = "safe"
+doc = "Upscale to 3840 by 2160 with AMD FidelityFX FSR. Needs amd_fidelityfx_upscaler_dx12.dll (see VICTORY_FIDELITYFX_DIR)."
+
+[[flag]]
+name = "VICTORY_FSR_TEST_PRESET"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_FULLSCREEN"
+type = "switch"
+default = ""
+off = "remove"
+group = "graphics"
+risk = "safe"
+doc = "Fill the whole screen with no frame, as a console does. Off gives a normal window."
+
+[[flag]]
+name = "VICTORY_FULL_CARD_PASS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_GAMEPAD_MOUSE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_GAME_DIR"
+type = "text"
+default = ""
+group = "paths"
+risk = "safe"
+doc = "The game folder. The launcher sets it from your choice."
+
+[[flag]]
+name = "VICTORY_GATHER_BY_COPY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_GATHER_DISPATCHES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_GATHER_SEGMENTS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_GPU_LOAD_MS"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_GPU_TIMING"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_GROUP_SYNC"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_GUARD_ASK"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_GUARD_HOLES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_GUARD_HOT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_GUARD_REST"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEADS_ONLY"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_PASS_ASIDE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_PASS_MARKED"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_RECHECK"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_RECHECK_EVERY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_SPREAD"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_SYNC"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_SYNC_ASIDE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_SYNC_CUT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_SYNC_EARLY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_SYNC_TABLES"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_TEXTURES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HEAP_WORKER"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HELD_LEVELS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HELPER_OWN"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HIDDEN_WINDOW"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HOST_LOCK_CHILD"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HOST_MAX_WAVE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HOST_RDNA"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_HOST_WAVE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_IMAGE_WATCH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_INDIRECT_BATCH"
+type = "number"
+default = "2"
+min = 0
+max = 2
+risk = "experimental"
+doc = "Clamp indirect executions in batches. 0 does each on its own."
+
+[[flag]]
+name = "VICTORY_INDIRECT_CARD_BUDGET"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_INDIRECT_GATHER"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_INDIRECT_PREPARE_LOG"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_INDIRECT_REST"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_INDIRECT_WIDE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_INDIRECT_WINDOW"
+type = "switch"
+default = ""
+off = "remove"
+risk = "experimental"
+doc = "Clamp indirect draws that read record after record of one argument buffer a window at a time."
+
+[[flag]]
+name = "VICTORY_INDIRECT_WINDOW_CHECK"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_INPLACE"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_INPLACE_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_INPLACE_PROBE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_INPLACE_PROBE_MB"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_JOIN_BARRIERS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_JOIN_COPIES"
+type = "switch"
+default = ""
+off = "remove"
+risk = "experimental"
+doc = "Join a buffer copy with the one recorded before it into a single step."
+
+[[flag]]
+name = "VICTORY_JOIN_LISTS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_JOIN_PARTS"
+type = "number"
+default = "8"
+min = 1
+max = 64
+risk = "experimental"
+doc = "How many parts of a submission are joined and refreshed together."
+
+[[flag]]
+name = "VICTORY_KEEP_FREED"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_KEEP_SHOWN"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_KEEP_SNAPSHOTS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_KEEP_SNAPSHOTS_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_KEEP_VIEWS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_KEPT_THREADS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_KEYS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_KEYS_FILE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_KNOWN_HOLES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LAND"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LAND_ANYTIME"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LAND_BESIDE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LAND_ECHO"
+type = "switch"
+default = "1"
+off = "0"
+risk = "experimental"
+doc = "Skip sending up what a landing wrote itself. 0 copies and sends it as before (safe mode)."
+
+[[flag]]
+name = "VICTORY_LAND_SKIP"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LAND_TAKEN"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LAND_THREADS"
+type = "number"
+default = ""
+group = "threads"
+min = 1
+max = 16
+risk = "advanced"
+doc = "Threads that copy what shaders wrote back into the game's memory. Unset: a quarter of the logical processors, 1 to 4."
+
+[[flag]]
+name = "VICTORY_LANE_CORE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LATE_WAIT"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LATE_WAITS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LATE_WAIT_LISTS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LATE_WAIT_WRITES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LAZY_PRELUDE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LAZY_TEXTURES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LDS_FLAGS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LENT_HEAP"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LEVELS_MIN_KB"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LEVELS_ON_DEMAND"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIBRARY_HANDLE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIBRARY_LOCK"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIBRARY_MAP"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIBRARY_TRIM"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIGHT_PROBE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIGHT_PROBE_LUX"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIGHT_REFRESH"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIST_POOL"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIST_REUSE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIST_SLOTS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIST_VIEWS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LOG"
+type = "text"
+default = ""
+group = "debug"
+risk = "safe"
+doc = "Log filter, for example victory_loader=trace,info. Debug and trace output exist only in diagnostics builds."
+
+[[flag]]
+name = "VICTORY_LOG_FILE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LOOKUP_CACHE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MAPPED_BY_PAGE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MAPPED_BY_VIEWS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MAP_LEAN"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MAP_THREADS"
+type = "text"
+default = ""
+group = "threads"
+risk = "advanced"
+doc = "Threads that map pages while the game streams. A number, or auto. The newer default of 8 is replaced by 1 or auto in the presets."
+
+[[flag]]
+name = "VICTORY_MASKED_PATCH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MEMORY_CARD_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MEMORY_CATEGORIES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MEMORY_DUMP"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MEMORY_MAP"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MERGE_ON_CARD"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MERGE_RUNS"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MERGE_RUNS_ALT"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MESH_LAUNCH"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MESH_OUTPUT_STRICT"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MESH_TEST"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_METER_THREAD"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_NAN_GUARD"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_NAN_SCRUB"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_NATIVE_HEADS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_NATIVE_PSO_DUMP"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_NEAR_WRITES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_NONE_SUCH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_NO_WAIT_PARTIAL"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_NO_WATCHDOG"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_NULL_MAGENTA"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_NVIDIA_HARDWARE_TESTS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_OCCLUSION"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ONE_PAD"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_OPEN_ONE_VIEW"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_OUTPUT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_OWNERLESS_VIEWS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_OWN_UPSCALER"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PAGE_PARTS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PAGE_WRITES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PAIRED_SHADER_DIR"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PAIRS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PANEL"
+type = "switch"
+default = ""
+off = "remove"
+group = "graphics"
+risk = "safe"
+doc = "Show frame rate, frame times, GPU, CPU, video memory and RAM in the upper left corner. F3 hides it while playing."
+
+[[flag]]
+name = "VICTORY_PARALLEL_REFRESH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PASSES_AHEAD"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PATCH_CLZERO"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PATCH_WAITS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PC_DXC"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PICKED_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PICKED_WRITES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PIPELINE_BOOK"
+type = "switch"
+default = ""
+off = "remove"
+group = "debug"
+risk = "advanced"
+doc = "Write down every pipeline the game creates so the warm command can build them ahead of a run."
+
+[[flag]]
+name = "VICTORY_PIPELINE_COMPUTE_WAIT"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PIPELINE_COMPUTE_WAIT_FRAME_MS"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PIPELINE_COMPUTE_WAIT_MS"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PIPELINE_HISTORY"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PIPELINE_LOWEST"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PIPELINE_SLOW"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PIPELINE_WAIT_MS"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PIPELINE_WAIT_ONCE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PIPELINE_WAIT_SHARED"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PIPELINE_WORKERS"
+type = "number"
+default = ""
+group = "threads"
+min = 1
+max = 64
+risk = "advanced"
+doc = "Workers that build graphics pipelines in the background. Unset: two thirds of the logical processors, 2 to 16."
+
+[[flag]]
+name = "VICTORY_PLACED_FILLER"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PLACED_ORDER"
+type = "switch"
+default = ""
+off = "remove"
+risk = "experimental"
+doc = "Fill the constant-buffer ring in list order. Used on NVIDIA cards."
+
+[[flag]]
+name = "VICTORY_PLACED_READERS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PLANES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PLANE_PREMULTIPLIED"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_POKE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_POOL_SMALL"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_POP_ALL"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_POP_FOLDER"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_POP_WATCH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_CBV"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_CBV_PLACE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_CONSTANTS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "experimental"
+doc = "Keep the game's 32-bit graphics heap as the card's own memory."
+
+[[flag]]
+name = "VICTORY_PORT_CONSTANTS_ORDER"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_CONSTANTS_ORDER_ALONE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_COPIES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_DESCRIPTORS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_DESCRIPTORS_CHECK"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_DESCRIPTORS_EVERY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_GUARD"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_GUARD_PLAN"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_JOURNAL"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PORT_RT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PROBE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PROBE_SECS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PROCESS_PRIORITY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_PROFILE"
+type = "text"
+default = ""
+group = "debug"
+risk = "advanced"
+doc = "Sampling profiler: <from>,<to>,<ms>,<file>. Needs the engine's pdb file."
+
+[[flag]]
+name = "VICTORY_QUEUE2"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_QUEUE2_LANDING_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_QUEUE_WAIT"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_QUICK_FIND"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_QUICK_MIRROR"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RAW_VIEWS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RDNA_FLOAT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_READBACK_POOL"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_READBACK_POOL_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_READY_ONCE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_READ_BACK"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_READ_WATCH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REAPER"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REASK_BLANK"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RECHECK_SOON"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RECORD"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RECORD_ALWAYS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RECORD_AT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RECORD_FRAMES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REFRESH_AHEAD"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REFRESH_CHECK"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REFRESH_COUNT"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REFRESH_FRONT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REF_PS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REF_VS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REGION_SKIP"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RELAUNCHED_FROM"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RELAY"
+type = "number"
+default = "2"
+group = "threads"
+min = 0
+max = 2
+risk = "advanced"
+doc = "Copy back what shaders wrote on a thread of its own instead of the submitting thread. 1 or 2 turns it on."
+
+[[flag]]
+name = "VICTORY_RELAY_COPY"
+type = "switch"
+default = ""
+off = "remove"
+risk = "experimental"
+doc = "Fetch the relay's pieces over the card's copy queue instead of the drawing queue."
+
+[[flag]]
+name = "VICTORY_RELOOK_MS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REMAP_METER"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REMAP_SPLIT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RENDERDOC_AT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RENDER_SCALE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REPLAY_GBV"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REPLAY_PEEK"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RESIDENCY_LIMITED"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RETIRE_LEAN"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_REUPLOAD_WHEN_FULL"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RIPE_BLOCKS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ROOT_SRV_DIRECT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ROOT_UAV_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_ROOT_VIEW_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RTV_FORMAT_LOG"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RT_MISS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RT_RESOLVE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RT_SHADOW"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RT_SKIN"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RT_STAMPS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_RT_TRACE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SAFE_COPY"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SAME_RECORDS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SAVE_CHILD"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SAVE_OP"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SAVE_STOP"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SCC_LOCAL_ANY"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SCISSOR_TEST"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SCRATCH_ANY_SIZE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SCRATCH_POOL"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SCRATCH_SPARE_MB"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SCREEN_WAIT_MS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SECTION_WINDOW"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SEGMENTS_ACROSS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SEND_BAR"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SEND_CHANGED"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SEND_OWN"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SETTLE_ROOM"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHADER_CENSUS"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHADER_FAST_BITS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHADER_FRESH"
+type = "switch"
+default = ""
+off = "remove"
+group = "debug"
+risk = "advanced"
+doc = "Translate shaders again that an earlier translator build cached, and keep the new ones."
+
+[[flag]]
+name = "VICTORY_SHADER_KEY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHADER_LOOP_LIMIT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHADER_OPT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHADER_SAVE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHADER_SOURCE_HASH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHADER_SWITCHES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHOT"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHOT_AT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHOT_FULL"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHOT_LISTS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHOT_MAX"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHOT_MB"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHOT_TIMES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SHOW_AFTER"
+type = "switch"
+default = "1"
+off = "remove"
+group = "graphics"
+risk = "experimental"
+doc = "Wait until a texture's background upload has finished before a draw samples it, so a gray stand-in is not baked into the picture."
+
+[[flag]]
+name = "VICTORY_SHOW_NEW_LATER"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SKIP_CPU_CHECK"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SKIP_PIPELINES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SKIP_RT_SHADOW"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SLOT_CHECK"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SLOT_HOLDS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SNAPSHOT_POOL"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SPANS_QUICK"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SPLIT_WAITS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SPREAD"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SPREAD_LEAN"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_STACKS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_STAGE_EXTENTS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_STALE_TEXTURES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_STATS"
+type = "switch"
+default = "1"
+off = "0"
+group = "debug"
+risk = "safe"
+doc = "Publish live statistics for the launcher's monitor. 0 turns the block off."
+
+[[flag]]
+name = "VICTORY_STEP_INDEX"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_STORE_BESIDE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_STREAM_NOTICE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_STREAM_PRIORITY"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_STRICT_JOINS"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_STRICT_TESTS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_STRUCTURED_RAW"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SUBMIT_DEPTH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SUBMIT_FRAMES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SWEEP"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SYNC_BESIDE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SYNC_FINE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SYNC_IN_PLACE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SYNC_NULL_SKIP"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TABLED_TEXTURES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TABLE_BUFFERS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TABLE_STAGES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TAKE_PARTS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TARGET_VARIANTS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEST_D3D_DEBUG"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEST_DIRECT_CLOSE_CHILD"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEST_ROUNDS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEST_TITLES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXBACK_ASYNC"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_AWAY_MS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_BACK"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_BUDGET_MB"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_CATCHUP"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_COPY"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_FILL"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_GUARD"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_HEAPS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_HOT"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_IDLE_MS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_KEEP"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_LOOK_MS"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_MAX"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_NO_WAIT"
+type = "switch"
+default = ""
+off = "remove"
+risk = "experimental"
+doc = "Do not wait when a texture refresh finds the game remapping its memory."
+
+[[flag]]
+name = "VICTORY_TEXTURE_ONCE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_POOL"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_ROOM_PERCENT"
+type = "number"
+default = "90"
+group = "memory"
+min = 50
+max = 97
+risk = "advanced"
+doc = "Share of the card's memory budget, in percent, that textures may fill. Lower it on 12 GB cards if the frame rate collapses when memory is full."
+
+[[flag]]
+name = "VICTORY_TEXTURE_SAME"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_STAGE_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_STAGE_MS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_STORE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TEXTURE_SWEEP"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_THIN"
+type = "switch"
+default = ""
+off = "remove"
+risk = "experimental"
+doc = "Record the once-a-frame passes over the heap's views into a list that runs ahead of the first submission."
+
+[[flag]]
+name = "VICTORY_THIN_THREADS"
+type = "number"
+default = "8"
+group = "threads"
+min = 1
+max = 32
+risk = "advanced"
+doc = "Threads that translate the game's command lists. More helps on CPUs with many cores."
+
+[[flag]]
+name = "VICTORY_THREAD_DIMENSIONS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_THREAD_TICKET"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TILES_SMALL_WHEN_FULL_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TILES_TEST_CARD"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TIMELINE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TIMELINE_AT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TIMELINE_FRAMES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TIMER_LOG"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TITLE_FPS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TITLE_PRIORITIES"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = "Keep the game's own thread priorities except the lowest two, which become below normal. 0 keeps them all."
+
+[[flag]]
+name = "VICTORY_TRAIL"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TRANSLATE_ONLY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TRANSLATOR"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_TRAP_LOG"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_UNDER_FUSED"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_UNDER_THREADS"
+type = "number"
+default = "6"
+group = "threads"
+min = 1
+max = 32
+risk = "advanced"
+doc = "Threads that compare memory pages for changes the game made under the engine's feet."
+
+[[flag]]
+name = "VICTORY_UNDER_WIDE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "experimental"
+doc = "Compare memory pages on several threads. 0 uses the submitting thread only (safe mode)."
+
+[[flag]]
+name = "VICTORY_UNDER_WORDS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_UNWATCHED_FRAMES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_UPCOPY_CHECK"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_UPLOAD_AHEAD"
+type = "switch"
+default = ""
+off = "remove"
+risk = "experimental"
+doc = "Upload textures in the background on the copy queue ahead of use."
+
+[[flag]]
+name = "VICTORY_UPLOAD_LOW"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_UPSCALER"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_UP_QUEUE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIDEO_HOT_FRAMES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIDEO_LOOK"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIDEO_PLANES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIEWS_REMADE_QUIET"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIEW_BYTES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIEW_COPY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIEW_EXTENT"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIEW_GUARD"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIEW_INLINE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIEW_LIMIT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIEW_OWN_COPY"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_VIEW_THREADS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAIT_ASK"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAIT_FORCE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAIT_RESIDENT"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WALLS_TRACE"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WARM_BAD"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WARM_SECONDS"
+type = "number"
+default = ""
+group = "debug"
+min = 1
+max = 86400
+risk = "safe"
+doc = "Stop translating shaders after this many seconds. What is done stays; the next warm-up goes on from there."
+
+[[flag]]
+name = "VICTORY_WARP"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WATCH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAVE_DEEP_SKIPS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAVE_DUMP"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAVE_LDS_LOOSE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAVE_LOCAL"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAVE_OWN_BITS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAVE_PAIRS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAVE_PAIRS_ONLY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAVE_WHY"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAVE_WIDE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAVE_WIDE_ONLY"
+type = "text"
+default = ""
+risk = "experimental"
+doc = "Hashes of wave64 compute programs allowed to run in a wave-wide form on 32-lane cards."
+
+[[flag]]
+name = "VICTORY_WIDE_BACK"
+type = "switch"
+default = "1"
+off = "remove"
+group = "threads"
+risk = "advanced"
+doc = "Snapshot and compare shader-written ranges on several threads."
+
+[[flag]]
+name = "VICTORY_WIDE_FILLS"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WIDE_MERGE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WIDE_REFRESH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WIDE_SPIN_US"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WIDE_TEXTURES"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WINDOWS_BAR_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WINDOWS_OWN"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WINDOW_BUDGET_MB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WINDOW_KB"
+type = "number"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WINDOW_MAX"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WINDOW_TAILS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WRITE_PATTERNS"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WRITE_SITES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WRITE_SKIP"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_XMA_DUMP"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_XMA_REFERENCE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_XMA_STREAMS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
