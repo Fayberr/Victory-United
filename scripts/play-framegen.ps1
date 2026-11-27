@@ -1,9 +1,9 @@
-# One-click the title on foxhound (VIctory-NVIDIA base): DLSS Super Resolution + DLSS frame generation.
+# One-click the title on VIctory_sm86 (VIctory-NVIDIA base): DLSS Super Resolution + DLSS frame generation.
 # PLAY_FRAMEGEN.bat runs this. What it does, in order:
 #   1. finds the game folder (game_dir.txt in the repository folder, else a search of every drive)
 #   2. backs up the saves (%LOCALAPPDATA%\victory\data\7952987A) and checks every file by SHA-256
 #   3. checks that NVIDIA's DLSS files are installed (they are not fetched by this repository)
-#   4. starts scripts\play-foxhound.ps1, which builds the layer the first time (a few minutes)
+#   4. starts scripts\play-VIctory_sm86.ps1, which builds the layer the first time (a few minutes)
 # Modes: 1 Series X 1440p + DLSS Quality + frame generation (2x; 4x on RTX 50) (default)
 #        2 same without frame generation
 #        3 Series S + DLSS Quality + frame generation (2x; 4x on RTX 50) (faster, softer)
@@ -97,13 +97,13 @@ if (-not (Test-Path (Join-Path $sl 'sl.interposer.dll'))) {
 }
 if ($hags -ne 2) { Write-Host 'Hardware-accelerated GPU scheduling is off: frame generation will not work until it is on.' }
 
-# 4. Start (play-foxhound.ps1 builds target\release\victory.exe the first time).
+# 4. Start (play-VIctory_sm86.ps1 builds target\release\victory.exe the first time).
 if (-not (Test-Path $victory)) { Write-Host 'First start: building the layer, a few minutes ...' }
 Write-Host "Starting the title: $what"
 Write-Host 'In the game: F1 settings menu, F3 stats panel. Keep this window open while playing.'
 $env:VICTORY_GAME_DIR = $GameDir
 $ErrorActionPreference = 'Continue'
-# foxhound reads these but play-foxhound.ps1 does not set them: AnyXboxX's worker pools for 16/24+ logical CPUs
+# VIctory_sm86 reads these but play-VIctory_sm86.ps1 does not set them: AnyXboxX's worker pools for 16/24+ logical CPUs
 # (measured on an RTX 4070 SUPER: heavy scenes +22-29 %) and Vice-Tay's placed order. TITLE_NO_TUNE=1: leave them out.
 $cpus = [Environment]::ProcessorCount
 $more = @{ VICTORY_PLACED_ORDER = '1' }
@@ -111,7 +111,7 @@ if ($cpus -ge 24) { $more.VICTORY_THIN_THREADS = '12'; $more.VICTORY_UNDER_THREA
 elseif ($cpus -ge 16) { $more.VICTORY_THIN_THREADS = '12'; $more.VICTORY_UNDER_THREADS = '8'; $more.VICTORY_LAND_THREADS = '6' }
 # Extreme: the landing pool sat full at 8 (x6.1-6.6 of 8 in AnyXboxX's heavy scenes), one more pipeline worker.
 if (($Mode -in @('5', '6')) -and $cpus -ge 24) { $more.VICTORY_LAND_THREADS = '12'; $more.VICTORY_PIPELINE_WORKERS = '4' }
-if ($env:TITLE_NO_TUNE -eq '1') { $more = @{}; Write-Host 'TITLE_NO_TUNE=1: foxhound defaults (no pool or placed-order tuning).' }
+if ($env:TITLE_NO_TUNE -eq '1') { $more = @{}; Write-Host 'TITLE_NO_TUNE=1: VIctory_sm86 defaults (no pool or placed-order tuning).' }
 else { Write-Host ("Tuning for {0} logical CPUs: {1}" -f $cpus, (($more.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ' ')) }
 $opts.More = $more
 # RTX 50 cards do multi frame generation: 4x there (the layer asks the driver and gives no more than it does).
@@ -136,4 +136,4 @@ if ($Mode -in @('5', '6')) {
     }
     Write-Host 'Extreme: the game process goes to High priority once it starts.'
 }
-& (Join-Path $PSScriptRoot 'play-foxhound.ps1') -Exe $gameExe -Build release @opts
+& (Join-Path $PSScriptRoot 'play-VIctory_sm86.ps1') -Exe $gameExe -Build release @opts

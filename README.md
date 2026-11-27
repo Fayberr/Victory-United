@@ -1,12 +1,12 @@
-# foxhound
+# VIctory_sm86
 
 A fork of [VIctory](https://github.com/Marvisak/VIctory), a compatibility layer that runs an Xbox Series title
-natively on Windows from files **you** supply. foxhound is tuned for **NVIDIA RTX** GPUs: DLSS Super Resolution and
+natively on Windows from files **you** supply. VIctory_sm86 is tuned for **NVIDIA RTX** GPUs: DLSS Super Resolution and
 DLSS Frame Generation in place of the title's own upscaling, the Series X profile at a native 2560x1440, and fewer
 stalls at scene cuts.
 
 > **This repository contains no game files, code or assets.** You need your own legally obtained copy of the
-> title. foxhound is not affiliated with or endorsed by the title's developer or publisher, nor by NVIDIA.
+> title. VIctory_sm86 is not affiliated with or endorsed by the title's developer or publisher, nor by NVIDIA.
 > See [docs/asset-policy.md](docs/asset-policy.md).
 
 ## Where it stands
@@ -69,7 +69,7 @@ automatic NVIDIA SDK downloader is deliberately left out; install Streamline you
   `VICTORY_WATER_LIGHT=1` runs them as before (green water, dark blocks).
 - **One-click launcher and extreme modes.** `PLAY_FRAMEGEN.bat` (or `scripts\play-framegen.ps1 -Mode 1..6`)
   finds the dump, backs up and verifies the saves, tunes the worker pools by CPU count, and starts through
-  `play-foxhound.ps1`. On RTX 50 frame generation starts at 4x (`TITLE_FRAMEGEN_X=2..6` overrides;
+  `play-VIctory_sm86.ps1`. On RTX 50 frame generation starts at 4x (`TITLE_FRAMEGEN_X=2..6` overrides;
   `TITLE_NO_TUNE=1` skips the pool tuning); modes 5 and 6 raise the game to High priority. NVIDIA's files are
   checked for, never downloaded.
 
@@ -90,8 +90,8 @@ automatic NVIDIA SDK downloader is deliberately left out; install Streamline you
 ## Build
 
 ```powershell
-git clone https://github.com/readmet3xt-lab/foxhound
-cd foxhound
+git clone https://github.com/whiteh4cker-tr/VIctory_sm86
+cd VIctory_sm86
 cargo build --release --locked -p victory
 ```
 
@@ -110,7 +110,7 @@ The diagnostics build (frame timelines, captures, GPU timing) is optional:
 
 2. **DLSS (optional, recommended on RTX).** Download the Streamline SDK release from
    <https://github.com/NVIDIA-RTX/Streamline/releases> (tested: `streamline-sdk-v2.14.16.zip`; it comes under
-   NVIDIA's RTX SDK license, which you accept yourself), unpack it **outside** the repository, and point foxhound
+   NVIDIA's RTX SDK license, which you accept yourself), unpack it **outside** the repository, and point VIctory_sm86
    at its `bin\x64` folder:
 
    ```powershell
@@ -122,7 +122,7 @@ The diagnostics build (frame timelines, captures, GPU timing) is optional:
 
    **Frame Generation on RTX 30 and 20** (optional; RTX 40 and later need nothing): NVIDIA's DLSS-G is Ada-only,
    so take `sdli1995/dlssg_for_sm86` (MIT; binaries only, **not** in this repository), unpack its release so that
-   `version.dll`, `dlssg_sm86.ini` and the `dlssg_sm86` folder sit together, and point foxhound at that folder:
+   `version.dll`, `dlssg_sm86.ini` and the `dlssg_sm86` folder sit together, and point VIctory_sm86 at that folder:
 
    ```powershell
    [Environment]::SetEnvironmentVariable('VICTORY_DLSSG_SM86_DIR', 'D:\sdk\dlssg_for_sm86-0.4.2', 'User')
@@ -130,11 +130,11 @@ The diagnostics build (frame timelines, captures, GPU timing) is optional:
 
    It needs driver R580 or newer. Without the variable the folder is searched for in the working directory and
    beside `victory.exe` (the repository root works for a `target` release build; the files are git-ignored).
-   Foxhound loads the add-on before Streamline, and makes the D3D12 device on the GPU the add-on uses (CUDA
+   VIctory_sm86 loads the add-on before Streamline, and makes the D3D12 device on the GPU the add-on uses (CUDA
    device 0) — on a PC with two NVIDIA GPUs the default adapter can be the other one, and frame generation then
    never starts.
 
-3. **Translate the shaders ahead** (a few minutes, once per new build of foxhound):
+3. **Translate the shaders ahead** (a few minutes, once per new build of VIctory_sm86):
 
    ```powershell
    $env:VICTORY_HOST_WAVE = '32'   # NVIDIA runs 32-lane waves; leave it out on AMD
@@ -153,7 +153,7 @@ or put `victory.exe` beside `game_scarlett_master.exe` and double-click it. The 
 settings and more options:
 
 ```powershell
-.\scripts\play-foxhound.ps1 -Exe 'D:\Games\MyDump\game_scarlett_master.exe'
+.\scripts\play-VIctory_sm86.ps1 -Exe 'D:\Games\MyDump\game_scarlett_master.exe'
 ```
 
 | Option | What |
@@ -193,7 +193,7 @@ The NVIDIA driver keeps its compiled pipelines **per program path**: a build run
 ## Switches worth knowing
 
 Every `VICTORY_...` switch is described in a comment where the code reads it. The launcher's full set is in
-`scripts/play-foxhound.ps1`; these are the ones foxhound added or changed:
+`scripts/play-VIctory_sm86.ps1`; these are the ones VIctory_sm86 added or changed:
 
 | Switch | Launcher | What |
 |---|---|---|

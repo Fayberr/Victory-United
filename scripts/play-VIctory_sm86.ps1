@@ -1,12 +1,12 @@
-# Starts your own copy of the title on foxhound with the settings tested on an RTX 4070 SUPER (Series X profile,
+# Starts your own copy of the title on VIctory_sm86 with the settings tested on an RTX 4070 SUPER (Series X profile,
 # 2560x1440 output, DLSS Quality when NVIDIA Streamline is set up).
 #
-#   .\scripts\play-foxhound.ps1 -Exe 'D:\MyDump\game_scarlett_master.exe'
-#   .\scripts\play-foxhound.ps1 -Exe ... -Dlss off            the title's own upscaling, no DLSS
-#   .\scripts\play-foxhound.ps1 -Exe ... -Dlss balanced -FrameGen
-#   .\scripts\play-foxhound.ps1 -Exe ... -SeriesS             Series S profile (1280x720 inside, faster, softer)
-#   .\scripts\play-foxhound.ps1 -Exe ... -Build diag          diagnostics build (slower; captures, timelines)
-#   .\scripts\play-foxhound.ps1 -Exe ... -More @{VICTORY_AMBIENT_SPECULAR='0'}   add or override switches
+#   .\scripts\play-VIctory_sm86.ps1 -Exe 'D:\MyDump\game_scarlett_master.exe'
+#   .\scripts\play-VIctory_sm86.ps1 -Exe ... -Dlss off            the title's own upscaling, no DLSS
+#   .\scripts\play-VIctory_sm86.ps1 -Exe ... -Dlss balanced -FrameGen
+#   .\scripts\play-VIctory_sm86.ps1 -Exe ... -SeriesS             Series S profile (1280x720 inside, faster, softer)
+#   .\scripts\play-VIctory_sm86.ps1 -Exe ... -Build diag          diagnostics build (slower; captures, timelines)
+#   .\scripts\play-VIctory_sm86.ps1 -Exe ... -More @{VICTORY_AMBIENT_SPECULAR='0'}   add or override switches
 #
 # In the game, F1 opens a settings menu (arrow keys pick and change, Enter does it). What it saves goes to
 # victory-settings.txt in the repository's folder and is applied here at every start, over the options above;
@@ -145,7 +145,7 @@ Get-ChildItem Env:VICTORY_* -ErrorAction SilentlyContinue | Where-Object { $_.Na
 foreach ($k in $settings.Keys) { Set-Item "Env:$k" $settings[$k] }
 
 $logs = Join-Path $env:LOCALAPPDATA 'victory\logs'; New-Item -ItemType Directory -Force $logs | Out-Null
-$log = Join-Path $logs ('foxhound-{0:yyyyMMdd-HHmmss}.log' -f (Get-Date))
+$log = Join-Path $logs ('VIctory_sm86-{0:yyyyMMdd-HHmmss}.log' -f (Get-Date))
 $writer = [IO.StreamWriter]::new($log, $false, [Text.UTF8Encoding]::new($false)); $writer.AutoFlush = $true
 $writer.WriteLine("# console=$console build=$Build switches: " + (($settings.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ' '))
 Write-Host "Log: $log"

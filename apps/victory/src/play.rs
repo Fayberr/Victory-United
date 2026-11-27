@@ -1,7 +1,7 @@
 //! `victory play`, and `victory` started with no command at all (a double
 //! click): the title with the settings this fork plays with, so that the
 //! program alone, put beside the title's `game_scarlett_master.exe`, is all
-//! there is to start. What `scripts\play-foxhound.ps1` does, built in.
+//! there is to start. What `scripts\play-VIctory_sm86.ps1` does, built in.
 //!
 //! Nothing is written beside the program or into the title's folder: the
 //! settings the F1 menu saves (`victory-settings.txt`), the logs and NVIDIA's
@@ -21,7 +21,7 @@ use anyhow::{Context, Result};
 /// The title's executable, looked for beside this program.
 const GAME: &str = "game_scarlett_master.exe";
 
-/// The settings the title is started with (`scripts\play-foxhound.ps1` has
+/// The settings the title is started with (`scripts\play-VIctory_sm86.ps1` has
 /// the same, with what each is for).
 const SETTINGS: &[(&str, &str)] = &[
     // Submission and copy machinery

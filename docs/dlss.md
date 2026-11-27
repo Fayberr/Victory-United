@@ -50,7 +50,7 @@ below) is a third-party binary release too; nothing of it is here.
    dlssg_sm86\
    ```
 
-   Foxhound loads `version.dll` by its full path itself, so the proxies in the
+   VIctory_sm86 loads `version.dll` by its full path itself, so the proxies in the
    release's `alternatives\` folder are never needed. Then point
    `VICTORY_DLSSG_SM86_DIR` at that folder, or put it where it is found
    without one: the working directory, `victory.exe`'s folder, or the
@@ -62,7 +62,7 @@ below) is a third-party binary release too; nothing of it is here.
    adapter `D3D12CreateDevice(NULL)` picks: the bridge then lands on an
    adapter the device is not on, and the NGX core refuses `CreateFeature`
    (`0xbad00002`, no frame is generated; the add-on's issue #674, where the
-   reporter had to disable the second GPU). With the add-on loaded, foxhound
+   reporter had to disable the second GPU). With the add-on loaded, VIctory_sm86
    makes the host device on CUDA device 0's adapter: on one GPU nothing
    changes. The log's `host D3D12 device ready` line names the adapter.
 

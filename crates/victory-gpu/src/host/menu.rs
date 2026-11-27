@@ -5,7 +5,7 @@
 //! input module); a pad still works.
 //!
 //! The settings are read once at start, so a change is saved to the file
-//! `VICTORY_MENU_FILE` names (`scripts\play-foxhound.ps1` sets it to
+//! `VICTORY_MENU_FILE` names (`scripts\play-VIctory_sm86.ps1` sets it to
 //! `victory-settings.txt` in the repository's folder and applies it at every
 //! start) and takes effect at the next start; "SAVE AND RESTART" starts the
 //! launcher again (`VICTORY_MENU_PLAY`, with `VICTORY_MENU_ARGS`) and ends
