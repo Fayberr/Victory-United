@@ -971,6 +971,9 @@ extern "system" fn present(
     } else {
         None
     };
+    // The room kept for render targets, and its line.
+    #[cfg(windows)]
+    crate::resource::targets_presented(frame);
     if frame.is_power_of_two() {
         let (draws, dispatches) = crate::list::take_counts();
         #[cfg(windows)]
