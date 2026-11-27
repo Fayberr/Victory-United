@@ -35,7 +35,8 @@ stubs for exposure, ambient light and the shadow mask, playing through an open-w
   [Vice-Tay's known problems](https://github.com/TaynanGT/Vice-Tay#known-problems) for upstream shader notes).
 - **Stability:** a 40 minute open-world session played by hand on this tree ran smoothly at around 9.5 fps
   with no crashes, and all 7 minute open-world sessions played by hand completed cleanly with no crashes,
-  panics or device-lost errors.
+  panics or device-lost errors. A 36 minute open-world run of the same build averaged 10.0 fps over minutes 3
+  to 36 with no panic or device-lost line in the log; 2,541 of its 2,569 saved frames from minute 2 on were lit.
 - **Earlier tree, played by hand:** on commit `3588725d` (before moving to Vice-Tay's code), a 34.7 minute
   session played by hand (33.6 minutes in the room after the intro, median 8.5 fps over 361 five-second reports)
   ended normally when the window was closed, with no crash, panic or device-removed errors.
