@@ -98,8 +98,18 @@ impl Upload {
         let (a, first) = match found {
             Some(place) => place,
             None => {
-                let blocks = n.max(ARENA / BLOCK);
-                let at = reserve(blocks * BLOCK)?;
+                let preferred = n.max(ARENA / BLOCK);
+                // A title memory pool can leave only holes smaller than a
+                // whole arena once it has grown (the late cutscenes do): the
+                // blocks this request needs may still fit. The structure
+                // builder writes through the pointer without looking for
+                // null, so a 4 MiB request that fails when 64 KiB would do is
+                // a crash, not a fallback.
+                let (at, blocks) = match reserve(preferred * BLOCK) {
+                    Some(at) => (at, preferred),
+                    None if preferred > n => (reserve(n * BLOCK)?, n),
+                    None => return None,
+                };
                 crate::shadow::register(at, at as u64, (blocks * BLOCK) as u64);
                 tracing::info!(at = format_args!("{at:#x}"), bytes = blocks * BLOCK, "memory for lists' uploads, where shaders reach it by address");
                 arenas.push(Arena { at, taken: vec![false; blocks] });
