@@ -1267,7 +1267,11 @@ thread_local! {
 #[derive(Default)]
 pub(crate) struct TextureQueue {
     slots: std::collections::BTreeMap<u32, Waiting>,
-    writes: u64,
+    /// Each slot write, requeue or new pass gets a later revision.
+    revision: u64,
+    active_passes: usize,
+    /// The revision whose due slots a bake finished serving.
+    baked: Option<u64>,
     /// Slots held back because the card had no room for the host copy
     /// they need ([`TextureQueue::hold`]), each with the write it was
     /// held as.
@@ -1275,6 +1279,28 @@ pub(crate) struct TextureQueue {
     /// Which slots are in `slots`, for those who only want one out
     /// ([`Queued`]).
     queued: std::sync::Arc<Queued>,
+}
+
+/// Only a pass that did not overlap another can certify a bake. Ordinary
+/// passes can defer slots while the bake is reading its snapshot.
+pub(crate) struct TexturePass<'a> {
+    queue: &'a Mutex<TextureQueue>,
+    pub(crate) revision: Option<u64>,
+}
+
+impl<'a> TexturePass<'a> {
+    fn begin(queue: &'a Mutex<TextureQueue>) -> Self {
+        let mut textures = queue.lock().unwrap_or_else(|e| e.into_inner());
+        let revision = textures.next_revision();
+        textures.active_passes += 1;
+        Self { queue, revision: (textures.active_passes == 1).then_some(revision) }
+    }
+}
+
+impl Drop for TexturePass<'_> {
+    fn drop(&mut self) {
+        self.queue.lock().unwrap_or_else(|e| e.into_inner()).active_passes -= 1;
+    }
 }
 
 /// A bit for each slot of a heap's [`TextureQueue`], changed under its lock
@@ -1314,6 +1340,21 @@ impl Queued {
 type Due = [Vec<(u64, u32, u64)>; 2];
 
 impl TextureQueue {
+    fn next_revision(&mut self) -> u64 {
+        self.revision += 1;
+        self.revision
+    }
+
+    fn bake_covered(&self) -> bool {
+        self.baked == Some(self.revision)
+    }
+
+    fn finish_bake(&mut self, revision: u64) {
+        if self.revision == revision {
+            self.baked = Some(revision);
+        }
+    }
+
     fn insert(&mut self, index: u32, waiting: Waiting) {
         if self.slots.insert(index, waiting).is_none() {
             self.queued.set(index, true);
@@ -1336,8 +1377,7 @@ impl TextureQueue {
         if seen && self.slots.contains_key(&index) {
             return;
         }
-        self.writes += 1;
-        let write = self.writes;
+        let write = self.next_revision();
         let (since, waited, away) = self.kept(index);
         self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, checked: (0, 0, 0, 0, 0), since, waited, away });
     }
@@ -1548,8 +1588,7 @@ impl TextureQueue {
     /// written now, whatever was known of it (a pass at work on it does
     /// not take it out).
     fn changed(&mut self, index: u32, frame: u64, due: u64) {
-        self.writes += 1;
-        let write = self.writes;
+        let write = self.next_revision();
         let due = self.slots.get(&index).map_or(due, |w| w.due.min(due));
         let (since, waited, away) = self.kept(index);
         self.insert(index, Waiting { due, written: frame, write, looks: 0, mapped: 0, checked: (0, 0, 0, 0, 0), since, waited, away });
@@ -2417,12 +2456,20 @@ impl HostHeap {
         (TextureQueue::in_order(due, max), census)
     }
 
-    /// A number that changes when a slot is written or made due anew, and
-    /// whether memory was noted since a pass last took the notes.
-    pub(crate) fn texture_news(&self) -> (u64, bool) {
-        let writes = self.textures.lock().unwrap_or_else(|e| e.into_inner()).writes;
+    /// A new pass invalidates earlier coverage before gathering the due slots.
+    pub(crate) fn begin_texture_pass(&self) -> TexturePass<'_> {
+        TexturePass::begin(&self.textures)
+    }
+
+    pub(crate) fn finish_bake(&self, revision: u64) {
+        self.textures.lock().unwrap_or_else(|e| e.into_inner()).finish_bake(revision);
+    }
+
+    /// Whether a completed bake covered this heap and there are no pending memory notes.
+    pub(crate) fn bake_covered(&self) -> bool {
+        let covered = self.textures.lock().unwrap_or_else(|e| e.into_inner()).bake_covered();
         let noted = |ranges: &Mutex<Vec<(u64, u64)>>| !ranges.lock().unwrap_or_else(|e| e.into_inner()).is_empty();
-        (writes, noted(&REMAPPED) || noted(&PAGE_WRITTEN) || noted(&BAKE_PAGE_WRITTEN))
+        covered && !noted(&REMAPPED) && !noted(&PAGE_WRITTEN) && !noted(&BAKE_PAGE_WRITTEN)
     }
 
     /// See [`TextureQueue::requeue`].
@@ -3335,7 +3382,7 @@ impl HostHeap {
         }
         self.put(index);
         self.clear_twin(index);
-        self.write_stride(index, 0);
+        self.write_view_metadata(index, 0, 0);
         self.keep(index, None);
     }
 
@@ -3559,10 +3606,7 @@ impl HostHeap {
             }
             _ => stride.unwrap_or(0) | kind,
         };
-        self.write_stride(index, word);
-        if let Some((_, _, data)) = &self.strides {
-            write_view_address(*data, index, view);
-        }
+        self.write_view_metadata(index, word, view.and_then(view_address).unwrap_or(0));
         let range = view.and_then(buffer_range);
         if let Some((_, _, data)) = &self.views
             && index < victory_shader::emit::SLOT_VIEWS_COUNT
@@ -3591,10 +3635,9 @@ impl HostHeap {
         stale
     }
 
-    /// Writes `word` (stride | format kind) for view-heap slot `index` into
-    /// the host's [`victory_shader::emit::SLOT_STRIDES`] table.
+    /// Writes the stride, format kind and title address for a view-heap slot.
     #[inline]
-    fn write_stride(&self, index: u32, word: u32) {
+    fn write_view_metadata(&self, index: u32, word: u32, address: u64) {
         if let Some((_, _, data)) = &self.strides
             && index < victory_shader::emit::SLOT_STRIDES_COUNT
         {
@@ -3602,6 +3645,7 @@ impl HostHeap {
             // single aligned dword: either value is one the slot had, and
             // dynamic slots are exclusively owned until submission finishes).
             unsafe { (*data as *mut u32).add(index as usize).write_volatile(word) };
+            write_view_address(*data, index, address);
         }
     }
 
@@ -3635,7 +3679,12 @@ impl HostHeap {
         }
         self.put(index);
         self.twin_made(index, kept.is_some() && twinned(view));
-        self.write_stride(index, if kept.is_some() { view_stride_word(view) } else { 0 });
+        let (stride, address) = if kept.is_some() {
+            (view_stride_word(view), view_address(view).unwrap_or(0))
+        } else {
+            (0, 0)
+        };
+        self.write_view_metadata(index, stride, address);
         self.keep(index, kept.flatten());
     }
 
@@ -3669,13 +3718,14 @@ impl HostHeap {
                 let twin = twinned(&view);
                 let kept = make_twinned(&view, views.slot(at), Some(views.slot(at + 1)))?;
                 let stride_word = view_stride_word(&view);
+                let address = view_address(&view).unwrap_or(0);
                 let listed = Listed {
                     kind: crate::draw::view_kind(&view),
                     texture: is_texture_view(&view),
                     ready: (0, 0, false),
                     tabled: None,
                 };
-                views.made.insert(words, ListView { view, at, twin, stride_word, kept, listed });
+                views.made.insert(words, ListView { view, at, twin, stride_word, address, kept, listed });
             }
             let made = &views.made[&words];
             self.copy_from(index, views.slot(made.at));
@@ -3685,7 +3735,7 @@ impl HostHeap {
             } else {
                 self.clear_twin(index);
             }
-            self.write_stride(index, made.stride_word);
+            self.write_view_metadata(index, made.stride_word, made.address);
             self.keep(index, made.kept.clone());
             Some(made.listed)
         })
@@ -3710,7 +3760,7 @@ impl HostHeap {
         } else {
             null_view(self.at(index));
             self.put(index);
-            self.write_stride(index, 0);
+            self.write_view_metadata(index, 0, 0);
         }
         self.clear_twin(index);
         self.keep(index, None);
@@ -3797,7 +3847,7 @@ impl HostHeap {
         self.put(index);
         // (Bound by its handle, not read by index.)
         self.clear_twin(index);
-        self.write_stride(index, 1);
+        self.write_view_metadata(index, 1, 0);
         self.keep(index, Some(buffer.clone()));
     }
 
@@ -3807,7 +3857,7 @@ impl HostHeap {
         null_buffer_view(self.at(index));
         self.put(index);
         self.clear_twin(index);
-        self.write_stride(index, 0);
+        self.write_view_metadata(index, 0, 0);
         self.keep(index, None);
     }
 
@@ -3842,7 +3892,7 @@ impl HostHeap {
         };
         self.put(index);
         self.clear_twin(index);
-        self.write_stride(index, 1);
+        self.write_view_metadata(index, 1, 0);
         self.keep(index, Some(buffer.clone()));
     }
 
@@ -3872,7 +3922,7 @@ impl HostHeap {
         };
         self.put(index);
         self.clear_twin(index);
-        self.write_stride(index, 0);
+        self.write_view_metadata(index, 0, 0);
         self.keep(index, None);
     }
 
@@ -3930,7 +3980,7 @@ impl HostHeap {
             unsafe { host.device.CreateShaderResourceView(buffer, Some(&raw), twin) };
         }
         self.twin_made(index, twin.is_some());
-        self.write_stride(index, 0);
+        self.write_view_metadata(index, 0, 0);
         // After the descriptor: what it showed is let go when nothing shows
         // it any more.
         self.keep(index, holds.then(|| buffer.clone()));
@@ -3983,7 +4033,7 @@ impl HostHeap {
         self.twin_made(index, true);
         // A constant buffer, as every other writer of a slot says: a slot
         // reused from a structured or typed view must not keep its word.
-        self.write_stride(index, 0);
+        self.write_view_metadata(index, 0, 0);
         self.keep(index, Some(buffer.clone()));
         true
     }
@@ -4850,17 +4900,15 @@ pub(crate) fn view_address(view: &View) -> Option<u64> {
     }
 }
 
-/// Enters the title address of `view` (0 for none, or a view that is no
-/// buffer's or structure's) at title slot `index` of the view addresses
+/// Enters `address` (0 for a view without a title address) at slot `index`
 /// after the strides in the mapping at `data`
 /// (`victory_shader::emit::VIEW_ADDRESSES`): shaders that pick a view at a
 /// computed index and read its address as a pointer read it there.
-fn write_view_address(data: usize, index: u32, view: Option<&View>) {
+fn write_view_address(data: usize, index: u32, address: u64) {
     use victory_shader::emit::{SLOT_STRIDES_COUNT, VIEW_ADDRESSES};
     if index >= SLOT_STRIDES_COUNT {
         return;
     }
-    let address = view.and_then(view_address).unwrap_or(0);
     let at = (data + VIEW_ADDRESSES as usize) as *mut u32;
     // SAFETY: inside the mapping (`SLOT_STRIDES_BYTES`); shaders read it
     // while we write (each dword is one the slot had or has).
@@ -5826,7 +5874,7 @@ fn make_twinned(
                     from_base(desc, copy.base, own_mips);
                 }
                 // Made whole from the store: all its levels.
-                let prefilled = copy.prefilled.load(std::sync::atomic::Ordering::Relaxed);
+                let prefilled = copy.prefill.as_deref().map_or(0, crate::texture::Prefill::published);
                 if prefilled > 0
                     && let Some(desc) = &mut desc
                 {
@@ -7128,11 +7176,11 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         (desc[1], desc[4], desc[5]) = (STRUCTURE, 0x1234_5600, 0x42);
         let view = View::Shader(0, Some(desc));
         assert_eq!(view_address(&view), Some(0x42_1234_5600));
-        write_view_address(data, 7, Some(&view));
-        write_view_address(data, 8, None);
-        write_view_address(data, SLOT_STRIDES_COUNT - 1, Some(&view));
+        write_view_address(data, 7, 0x42_1234_5600);
+        write_view_address(data, 8, 0);
+        write_view_address(data, SLOT_STRIDES_COUNT - 1, 0x42_1234_5600);
         // Past the table: nothing written.
-        write_view_address(data, SLOT_STRIDES_COUNT, Some(&view));
+        write_view_address(data, SLOT_STRIDES_COUNT, 0x42_1234_5600);
         let at = VIEW_ADDRESSES as usize / 4;
         assert_eq!(table[at + 14..at + 18], [0x1234_5600, 0x42, 0, 0]);
         assert_eq!(table[at + 12..at + 14], [0xdead_beef; 2], "slot 6 untouched");
@@ -7458,6 +7506,48 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
             // SAFETY: a live buffer.
             assert_eq!(width(&v), unsafe { copy.buffer.GetDesc() }.Width);
         }
+    }
+
+    #[test]
+    fn bake_coverage_is_local_to_the_heap_and_the_pass_revision() {
+        let mut first = TextureQueue::default();
+        let mut second = TextureQueue::default();
+        for queue in [&mut first, &mut second] {
+            queue.written(3, 1, 1, false);
+        }
+        let pass = first.next_revision();
+        let other_pass = second.next_revision();
+        assert_eq!(pass, other_pass);
+        second.finish_bake(other_pass);
+        assert!(second.bake_covered());
+        assert!(!first.bake_covered());
+
+        let write = first.due(1, 1)[0].1;
+        first.written(3, 1, 1, false);
+        first.done(3, write);
+        first.finish_bake(pass);
+        assert!(!first.bake_covered());
+        assert_eq!(first.due(1, 1).len(), 1);
+        assert!(second.bake_covered());
+    }
+
+    #[test]
+    fn overlapping_texture_passes_cannot_certify_a_bake() {
+        let queue = Mutex::new(TextureQueue::default());
+        let earlier = TexturePass::begin(&queue);
+        let revision = earlier.revision.unwrap();
+        let later = TexturePass::begin(&queue);
+        assert!(later.revision.is_none());
+        drop(later);
+        drop(earlier);
+        queue.lock().unwrap().finish_bake(revision);
+        assert!(!queue.lock().unwrap().bake_covered());
+
+        let next = TexturePass::begin(&queue).revision.unwrap();
+        queue.lock().unwrap().finish_bake(next);
+        assert!(queue.lock().unwrap().bake_covered());
+        let _normal = TexturePass::begin(&queue);
+        assert!(!queue.lock().unwrap().bake_covered());
     }
 
     /// The queue of textures picked by index serves the slots looked at
@@ -8149,8 +8239,8 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
     }
 
     #[test]
-    fn dynamic_slots_populate_and_clear_stride_table() {
-        use victory_shader::emit::{VIEW_INTEGER, VIEW_SIGNED};
+    fn dynamic_slots_populate_and_clear_view_metadata() {
+        use victory_shader::emit::{VIEW_ADDRESSES, VIEW_INTEGER, VIEW_SIGNED};
         let Some(heap) = HostHeap::new(false, 4) else {
             return; // no host GPU
         };
@@ -8160,6 +8250,12 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         let read_stride = |slot: u32| -> u32 {
             // SAFETY: inside `SLOT_STRIDES_COUNT` mapping of `heap.strides`.
             unsafe { *(data as *const u32).add(slot as usize) }
+        };
+        let read_address = |slot: u32| -> u64 {
+            let words = (data + VIEW_ADDRESSES as usize) as *const u32;
+            let index = 2 * slot as usize;
+            // SAFETY: both dwords are inside the heap's title-address table.
+            unsafe { u64::from(*words.add(index)) | (u64::from(*words.add(index + 1)) << 32) }
         };
         let memory = vec![0u64; 1 << 11];
         let addr = (memory.as_ptr() as u64).next_multiple_of(4096);
@@ -8182,6 +8278,7 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         let u16x4 = placed_typed(true, 12, 64);
         heap.make_at(s0, &u16x4);
         assert_eq!(read_stride(s0), 8 | VIEW_INTEGER);
+        assert_eq!(read_address(s0), addr);
 
         // R16_SINT (59): 2 bytes + VIEW_INTEGER | VIEW_SIGNED
         let s16 = placed_typed(false, 59, 64);
@@ -8196,10 +8293,13 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         // Clearing / nulling / raw views overwrite stale bits cleanly.
         heap.make_null(s0);
         assert_eq!(read_stride(s0), 0);
+        assert_eq!(read_address(s0), 0);
         heap.null_raw_at(s0 + 1);
         assert_eq!(read_stride(s0 + 1), 0);
+        assert_eq!(read_address(s0 + 1), 0);
         heap.null_raw_uav_at(s0 + 2);
         assert_eq!(read_stride(s0 + 2), 0);
+        assert_eq!(read_address(s0 + 2), 0);
 
         // `make_listed` (both cold creation and cached copy hit) must populate strides.
         let mut slot_mem = [0u32; 8];
@@ -8207,10 +8307,12 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         let rec = [slot_mem[0], slot_mem[1], slot_mem[2]];
         assert!(heap.make_listed(0x1234, rec, s0).is_some());
         assert_eq!(read_stride(s0), 8 | VIEW_INTEGER);
+        assert_eq!(read_address(s0), addr);
         heap.make_null(s0 + 3);
         assert_eq!(read_stride(s0 + 3), 0);
         assert!(heap.make_listed(0x1234, rec, s0 + 3).is_some());
         assert_eq!(read_stride(s0 + 3), 8 | VIEW_INTEGER);
+        assert_eq!(read_address(s0 + 3), addr);
     }
 
     /// Contiguous free dynamic slot ranges that cross the search cursor are found.
@@ -8258,6 +8360,7 @@ struct ListView {
     at: u32,
     twin: bool,
     stride_word: u32,
+    address: u64,
     kept: Kept,
     listed: Listed,
 }
