@@ -2199,7 +2199,6 @@ mod title_memory_tests {
         unsafe { VirtualFree(at as *mut _, 0, MEM_RELEASE) };
     }
 
-)
     /// Title memory whose tail is reserved and not committed reads through
     /// the copy as its bytes and then zeros, without a fault; so does
     /// memory a page of which is taken away between two reads, and the
