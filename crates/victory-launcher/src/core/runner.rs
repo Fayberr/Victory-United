@@ -415,7 +415,10 @@ pub fn format_duration(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{launch::{Console, Plan, Resolved}, testutil::tempdir};
+    use crate::core::testutil::tempdir;
+    #[cfg(unix)]
+    use crate::core::launch::{Console, Plan, Resolved};
+    #[cfg(unix)]
     use std::collections::BTreeMap;
 
     #[test]

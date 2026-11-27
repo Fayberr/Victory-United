@@ -110,11 +110,14 @@ impl Args {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, args: Args, icon: &egui::IconData, settings: Settings) -> Self {
         let ctx = cc.egui_ctx.clone();
-        let (core, ops, shared) = if args.demo {
+        let (mut core, ops, shared) = if args.demo {
             (core::CoreState::demo(), ops::OpsState::demo(), core::demo_shared())
         } else {
             (core::CoreState::new(ctx.clone(), settings), ops::OpsState::new(ctx), Default::default())
         };
+        if args.demo && args.tab == Some(Tab::Saves) {
+            core.force_screen = Some(core::Screen::Idle);
+        }
         theme::set_appearance(&cc.egui_ctx, &core.settings.appearance);
         let capture = args.capture.map(Capture::new);
         let logo = cc.egui_ctx.load_texture(

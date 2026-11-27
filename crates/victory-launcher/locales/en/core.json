@@ -78,7 +78,7 @@
   "hw.ram": "Memory",
   "hw.cpu": "Processor",
   "settings.title": "Settings",
-  "settings.sub": "Everything here is saved in the active profile.",
+  "settings.sub": "Launcher preferences and settings for the active launch profile.",
   "settings.preset": "Preset",
   "settings.automatic": "Automatic:",
   "settings.reset_all": "Reset to preset",

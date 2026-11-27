@@ -34,6 +34,7 @@ pub enum Screen {
     FirstRun,
     WarmUp,
     Unsupported,
+    Idle,
 }
 
 pub struct CoreState {
@@ -163,6 +164,7 @@ impl CoreState {
     pub fn tick(&mut self, ctx: &egui::Context, shared: &mut Shared) {
         if self.ui.demo {
             self.apply_demo_screen();
+            shared.game_pid = self.runner.running_pid();
         } else {
             self.runner.drain();
             settings::tick_storage(self);
@@ -202,15 +204,18 @@ impl CoreState {
             return;
         }
         self.shown_demo = Some(want);
-        self.hw = Some(hw::Hardware {
-            mesh_shaders: Some(want != Screen::Unsupported),
-            ..hw::Hardware::demo()
-        });
+        let mut hardware = hw::Hardware::demo();
+        if want == Screen::Unsupported {
+            hardware.gpu_name = "NVIDIA GeForce GTX 1060".into();
+            hardware.mesh_shaders = Some(false);
+            hardware.vram_mb = 6144;
+        }
+        self.hw = Some(hardware);
         // The first-run screenshot shows the walk-through before anything is chosen.
         self.game = if want == Screen::FirstRun { None } else { self.demo_game.clone() };
         let log: PathBuf = "logs/run-20260101-120000.log".into();
         self.runner.state = match want {
-            Screen::Unsupported => RunState::Idle,
+            Screen::Unsupported | Screen::Idle => RunState::Idle,
             Screen::WarmUp => RunState::Warming { done: 38_000_000, total: 120_000_000, since: Instant::now() - Duration::from_secs(95) },
             _ => RunState::Running { pid: 4242, since: Instant::now() - Duration::from_secs(312), log },
         };
@@ -271,6 +276,9 @@ impl CoreState {
 
     /// The Play button.
     pub fn play(&mut self, acknowledged: bool) {
+        if !self.persist {
+            return;
+        }
         self.notice = None;
         if let Err(error) = play::hardware_allows_play(self.hw.as_ref(), acknowledged) {
             self.notice = Some(error.to_string());
