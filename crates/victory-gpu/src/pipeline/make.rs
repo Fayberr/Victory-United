@@ -612,8 +612,11 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
     }
     if p.made.get().is_none() {
         start(p, REQUESTED);
-        if p.graphics.is_none() && compute_waits() {
-            // Made here, or waited for while a worker makes it.
+        // A compute pipeline in the first 600 frames (the title's one-shot
+        // world and lighting set-up passes) or with `compute_waits`: made
+        // here, or waited for while a worker makes it, instead of dropping
+        // its dispatch after the frame's budget. `make` keeps its panic guard.
+        if p.graphics.is_none() && (compute_waits() || crate::frame::current() < 600) {
             p.make();
         } else {
             let frame = crate::frame::current();

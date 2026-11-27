@@ -3810,7 +3810,7 @@ impl State {
             // The bake draw's own, due or not, held or not.
             Some(slots) => (host.texture_slots_queued(slots), 0),
             None => {
-                let (mut due, census) = host.texture_slots_due(frame, if baking { 1 << 16 } else { 4096 });
+                let (mut due, census) = host.texture_slots_due(frame, if baking { 1 << 16 } else { 8192 });
                 // (Those that are due later after all that are due.)
                 let on_time = due.len();
                 if baking {
@@ -5003,6 +5003,7 @@ impl State {
         self.gather_ends(list, self.may_store());
         #[cfg(feature = "diagnostics")]
         self.trace("mesh", x, 0);
+        let launch = crate::pipeline::host_pipeline(self.pipeline as This).and_then(|p| p.launch.as_ref());
         let ran = mesh_test() != 1
             && mesh_kept(self.pipeline)
             && self.prepare_for(list, false, true)
@@ -5020,8 +5021,30 @@ impl State {
                     if x > 65_535 {
                         once!(x, "a mesh dispatch of more groups than the host takes: cut");
                     }
-                    // SAFETY: an open list with everything set.
-                    unsafe { l6.DispatchMesh(x.min(65_535), 1, 1) };
+                    let count = x.min(65_535);
+                    // With the launch stage the count goes to it as a root
+                    // constant (`crate::launch`).
+                    match launch {
+                        Some(launch) if crate::launch::now() => {
+                            crate::launch::record(list, launch.roots, crate::launch::Launch::Direct(count));
+                        }
+                        // The phase without (`VICTORY_MESH_LAUNCH=alt`): the
+                        // same pipeline without the stage.
+                        Some(launch) => {
+                            if let Some(plain) = launch.plain() {
+                                // SAFETY: an open list and a live pipeline of
+                                // the same root signature; everything set.
+                                unsafe {
+                                    list.list.SetPipelineState(plain);
+                                    l6.DispatchMesh(count, 1, 1);
+                                }
+                                self.host_pipeline = windows::core::Interface::as_raw(plain) as usize;
+                                list.keep(plain);
+                            }
+                        }
+                        // SAFETY: an open list with everything set.
+                        None => unsafe { l6.DispatchMesh(count, 1, 1) },
+                    }
                     self.drew(
                         list,
                         crate::pipeline::host_pipeline(self.pipeline as This),
@@ -5595,6 +5618,16 @@ impl State {
                                 None => crate::port_cbv::copied(true),
                             }
                         }
+                        // Where shaders wrote (`VICTORY_CARD_FILLS`): copied
+                        // on the card, in order.
+                        if crate::host::shaders_wrote(address as usize, size as usize)
+                            && let Some(shadow) = crate::shadow::find(address, u64::from(size))
+                            && let Some(gpu) = list.card_fill(&shadow, address, u64::from(size))
+                        {
+                            shadow.refresh(list, address, u64::from(size));
+                            host.constant_at(index, &shadow.buffer, gpu, size);
+                            continue;
+                        }
                         let Some((buffer, gpu, to)) = list.scratch_held(u64::from(size)) else {
                             host.make_null(index);
                             continue;
@@ -6092,6 +6125,40 @@ impl State {
         if kind == MESH && (mesh_test() == 1 || !mesh_kept(self.pipeline)) {
             why("mesh draws are switched off (VICTORY_MESH_TEST=skip)");
             return false;
+        }
+        // One mesh record of a pipeline with the launch stage: the draw
+        // reads it itself (`crate::launch`), no clamp of ours before it.
+        if kind == MESH
+            && max == 1
+            && count.is_none()
+            && let Some(launch) = &p.launch
+            && crate::launch::now()
+        {
+            let offset = args.offset(arguments);
+            if !offset.is_multiple_of(4) {
+                why("a mesh record not 4-byte aligned");
+                return false;
+            }
+            self.window = None;
+            args.refresh(list, arguments, len);
+            if !self.prepare_for(list, false, true) {
+                why("prepare failed");
+                return false;
+            }
+            #[cfg(feature = "diagnostics")]
+            list.note_op(|| self.op_text(format!("indirect kind {kind} max {max} at {arguments:#x} launched"), false));
+            // SAFETY: a live buffer.
+            let record = unsafe { args.buffer.GetGPUVirtualAddress() } + offset;
+            list.keep(&args.buffer);
+            self.mesh_scissor(list, true);
+            let launched = crate::launch::record(list, launch.roots, crate::launch::Launch::Record(record));
+            self.mesh_scissor(list, false);
+            if !launched {
+                why("no budget for the launch");
+                return false;
+            }
+            DRAWN.fetch_add(1, Ordering::Relaxed);
+            return true;
         }
         // Renderer port 1: arguments (or their count) in the title's memory
         // read in place ([`in_place_order`]): clamped alone, right before

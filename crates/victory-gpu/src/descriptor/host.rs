@@ -4229,6 +4229,15 @@ impl HostHeap {
         // asks, from five recording threads, behind one lock while another
         // held it to make a descriptor (15 % of a recording thread's time in
         // the opening, profile cpu-1).
+        if !for_draw
+            && tag != VIEW_TAG
+            && quick_mirror()
+            && self.made.get(index) == Some(0)
+        {
+            #[cfg(feature = "diagnostics")]
+            mirror_how(MIRROR_NOT_VIEW);
+            return None;
+        }
         if tag == VIEW_TAG
             && quick_mirror()
             && self.quick.get(index as usize).is_some_and(|k| k.load(std::sync::atomic::Ordering::Acquire) == key)
