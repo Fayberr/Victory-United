@@ -1556,6 +1556,7 @@ fn create() -> windows::core::Result<Host> {
                  and needs the D3D12 Agility SDK runtime beside victory.exe"
             );
         }
+        crate::upload::reserve_early();
         Ok(Host {
             device,
             queue,
