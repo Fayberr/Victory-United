@@ -217,3 +217,28 @@ fn registry_list(core: &mut CoreState, ui: &mut egui::Ui) {
         core.save_extra();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adding_flags_picks_sensible_values() {
+        let mut core = CoreState::demo();
+        add_flag(&mut core, "VICTORY_UNDER_WIDE", None);
+        add_flag(&mut core, "VICTORY_MY_OWN_THING", None);
+        core.ui.flags.add_value = "5".into();
+        add_flag(&mut core, "VICTORY_THIN_THREADS", None);
+        fn get(core: &CoreState, n: &str) -> ExtraFlag {
+            core.extra.iter().find(|e| e.name == n).unwrap().clone()
+        }
+        let get = |n: &str| get(&core, n);
+        assert_eq!(get("VICTORY_UNDER_WIDE").value.as_deref(), Some("1"), "a known switch is switched on");
+        assert_eq!(get("VICTORY_MY_OWN_THING").value, None, "an unknown name is presence only");
+        assert_eq!(get("VICTORY_THIN_THREADS").value.as_deref(), Some("5"));
+        let _ = get;
+        add_flag(&mut core, "VICTORY_THIN_THREADS", Some("7".into()));
+        assert_eq!(core.extra.iter().filter(|e| e.name == "VICTORY_THIN_THREADS").count(), 1, "adding again replaces");
+        assert_eq!(core.extra.iter().find(|e| e.name == "VICTORY_THIN_THREADS").unwrap().value.as_deref(), Some("7"));
+    }
+}

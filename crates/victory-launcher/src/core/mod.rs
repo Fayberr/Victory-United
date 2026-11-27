@@ -231,6 +231,11 @@ impl CoreState {
         }
     }
 
+    #[cfg(test)]
+    pub fn is_changed_for_test(&self, name: &str) -> bool {
+        self.profile.edits.contains_key(name) || self.profile.removed.iter().any(|r| r == name)
+    }
+
     pub fn gpu(&self) -> (String, u32) {
         self.hw.as_ref().map(|h| (h.gpu_name.clone(), h.vendor_id)).unwrap_or_default()
     }

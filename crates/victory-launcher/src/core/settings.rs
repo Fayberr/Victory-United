@@ -535,3 +535,48 @@ fn preview_section(core: &mut CoreState, ui: &mut egui::Ui, resolved: &Resolved)
     });
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn switches_are_removed_unless_the_engine_wants_zero() {
+        let mut core = CoreState::demo();
+        let reg = registry();
+        // CARD_RESERVE_BUDGETS is a presence style switch: on is 1, off removes it from the environment.
+        let flag = reg.get("VICTORY_CARD_RESERVE_BUDGETS").unwrap();
+        set_switch(&mut core, flag, true);
+        assert_eq!(core.resolved().0.env["VICTORY_CARD_RESERVE_BUDGETS"], "1");
+        set_switch(&mut core, flag, false);
+        assert!(!core.resolved().0.env.contains_key("VICTORY_CARD_RESERVE_BUDGETS"));
+        assert!(!core.profile.edits.values().any(|v| v == "0"), "never written as 0");
+        // UNDER_WIDE is read as "0 means off", so off writes 0.
+        let wide = reg.get("VICTORY_UNDER_WIDE").unwrap();
+        set_switch(&mut core, wide, false);
+        assert_eq!(core.resolved().0.env["VICTORY_UNDER_WIDE"], "0");
+        set_edit(&mut core, wide, None);
+        assert!(!core.is_changed_for_test("VICTORY_UNDER_WIDE"));
+    }
+
+    #[test]
+    fn an_edit_marks_the_field_and_reset_clears_it() {
+        let mut core = CoreState::demo();
+        let flag = registry().get("VICTORY_TEXTURE_ROOM_PERCENT").unwrap();
+        set_edit(&mut core, flag, Some("70".into()));
+        assert!(is_changed(&core, &flag.name));
+        assert_eq!(core.resolved().0.env["VICTORY_TEXTURE_ROOM_PERCENT"], "70");
+        set_edit(&mut core, flag, None);
+        assert!(!is_changed(&core, &flag.name));
+    }
+
+    #[test]
+    fn option_controlled_flags_are_not_listed_twice() {
+        let owned = owned_by_options();
+        assert!(owned.contains("VICTORY_FULLSCREEN") && owned.contains("VICTORY_FSR_4K"));
+        // every group on the Settings tab has at least one raw field left
+        for g in ["graphics", "memory", "threads", "debug"] {
+            assert!(registry().group(g).any(|f| !owned.contains(&f.name)), "{g}");
+        }
+    }
+}
