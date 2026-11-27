@@ -13817,6 +13817,8 @@ struct Meter {
     copy_stats_frames: u64,
     drawn: u64,
     logged: std::time::Instant,
+    /// The block the launcher reads (`crate::launcher_stats`); `None` when off or refused.
+    stats: Option<crate::launcher_stats::Publisher>,
     /// The caption the window had, once read.
     caption: Option<Vec<u16>>,
 }
@@ -13832,6 +13834,7 @@ impl Meter {
             copy_stats_frames: 0,
             drawn: crate::draw::drawn(),
             logged: now,
+            stats: crate::launcher_stats::Publisher::new(),
             caption: None,
         }
     }
@@ -13867,11 +13870,18 @@ impl Meter {
         {
             self.copy_stats_frames += 1;
         }
+        // For the launcher's monitor: a few atomic stores, nothing else.
+        if let Some(stats) = &mut self.stats {
+            stats.frame([0, 1].map(|i| SUBMISSION_US[i].load(Ordering::Relaxed)));
+        }
         let elapsed = self.since.elapsed();
         if elapsed < std::time::Duration::from_secs(1) {
             return;
         }
         let drawn = crate::draw::drawn();
+        if let Some(stats) = &mut self.stats {
+            stats.slow(drawn, crate::draw::dispatched());
+        }
         let frames = f64::from(self.frames);
         let fps = frames / elapsed.as_secs_f64();
         let ms = elapsed.as_secs_f64() * 1000.0 / frames;
@@ -14847,6 +14857,9 @@ impl Host {
         VIDEO_PEAK[1].fetch_min(own.Budget, Ordering::Relaxed);
         VIDEO_PEAK[2].fetch_max(shared.CurrentUsage, Ordering::Relaxed);
         VIDEO_PEAK[3].fetch_add(1, Ordering::Relaxed);
+        // And for the launcher's monitor (`crate::launcher_stats`).
+        crate::launcher_stats::VRAM[0].store(own.CurrentUsage, Ordering::Relaxed);
+        crate::launcher_stats::VRAM[1].store(own.Budget, Ordering::Relaxed);
         // And for the seconds a removal's report says ([`SECOND_ROWS`]).
         second_look(own.Budget, own.CurrentUsage, shared.CurrentUsage);
         Some([own.Budget, own.CurrentUsage, shared.Budget, shared.CurrentUsage])

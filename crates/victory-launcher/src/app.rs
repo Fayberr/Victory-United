@@ -94,7 +94,7 @@ impl App {
         let (core, ops, shared) = if args.demo {
             (core::CoreState::demo(), ops::OpsState::demo(), core::demo_shared())
         } else {
-            (core::CoreState::new(ctx), Default::default(), Default::default())
+            (core::CoreState::new(ctx.clone()), ops::OpsState::new(ctx), Default::default())
         };
         let capture = args.capture.map(Capture::new);
         Self { tab: Tab::Play, core, ops, shared, capture }
@@ -156,6 +156,7 @@ impl eframe::App for App {
             }
         }
         self.core.tick(ctx, &mut self.shared);
+        self.ops.tick(ctx, &self.shared, self.tab == Tab::Monitor);
         if self.core.screen() == core::Screen::FirstRun {
             egui::CentralPanel::default().show(ctx, |ui| core::firstrun::show(&mut self.core, &self.shared, ui));
             return;
