@@ -6,6 +6,7 @@ use super::{
     launch::{self, Resolved, Source},
     presets::builtin,
     widgets::{open_folder, page_scroll, page_title, pick_file, pick_folder, save_file},
+    store::{Appearance, ThemeChoice},
     CoreState,
 };
 use crate::{app::Shared, i18n::tr, theme};
@@ -24,6 +25,8 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
     page_scroll(ui, scroll, |ui| {
         ui.set_max_width(820.0);
         let (resolved, preset_id) = core.resolved();
+        appearance_section(core, ui);
+        ui.add_space(12.0);
         preset_section(core, ui, &preset_id);
         ui.add_space(12.0);
         options_section(core, ui);
@@ -41,11 +44,43 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
     });
 }
 
+fn appearance_section(core: &mut CoreState, ui: &mut egui::Ui) {
+    let before = core.settings.appearance;
+    let mut appearance = before;
+    theme::card(ui).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(theme::strong(tr("appearance.title")).size(16.0));
+            if ui.add_enabled(appearance != Appearance::default(), egui::Button::new(tr("appearance.reset"))).clicked() {
+                appearance = Appearance::default();
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label(tr("appearance.theme"));
+            for (choice, label) in [
+                (ThemeChoice::System, "appearance.system"),
+                (ThemeChoice::Dark, "appearance.dark"),
+                (ThemeChoice::Light, "appearance.light"),
+            ] {
+                ui.selectable_value(&mut appearance.theme, choice, tr(label));
+            }
+        });
+        ui.label(theme::dim(tr("appearance.theme_help")).size(12.5));
+        ui.add(egui::Slider::new(&mut appearance.scale_percent, 80..=150).suffix("%").text(tr("appearance.scale")));
+        ui.label(theme::dim(tr("appearance.scale_help")).size(12.5));
+    });
+    if appearance != before {
+        core.settings.appearance = appearance;
+        core.save_settings();
+        theme::set_appearance(ui.ctx(), &appearance);
+    }
+}
+
 // ---------------------------------------------------------------- preset
 
 fn preset_section(core: &mut CoreState, ui: &mut egui::Ui, preset_id: &str) {
     let file = builtin();
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("settings.preset")).size(16.0));
         ui.add_space(4.0);
@@ -90,7 +125,7 @@ fn preset_section(core: &mut CoreState, ui: &mut egui::Ui, preset_id: &str) {
 fn options_section(core: &mut CoreState, ui: &mut egui::Ui) {
     let file = builtin();
     let mut changed = false;
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("settings.options")).size(16.0));
         ui.add_space(6.0);
@@ -221,7 +256,7 @@ fn flag_group(core: &mut CoreState, ui: &mut egui::Ui, resolved: &Resolved, grou
     if flags.is_empty() {
         return;
     }
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(title).size(16.0));
         ui.add_space(4.0);
@@ -272,7 +307,7 @@ fn field_row(core: &mut CoreState, ui: &mut egui::Ui, resolved: &Resolved, flag:
         ui.vertical(|ui| {
             ui.set_width(430.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(flag.name.trim_start_matches("VICTORY_")).monospace().color(theme::TEXT_STRONG));
+                ui.label(egui::RichText::new(flag.name.trim_start_matches("VICTORY_")).monospace().color(ui.visuals().strong_text_color()));
                 if changed {
                     theme::badge(ui, tr("settings.changed"), true);
                 }
@@ -343,7 +378,7 @@ fn edit_control(core: &mut CoreState, ui: &mut egui::Ui, flag: &Flag, value: Opt
 // ---------------------------------------------------------------- profiles
 
 fn profiles_section(core: &mut CoreState, ui: &mut egui::Ui) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("settings.profiles")).size(16.0));
         ui.label(theme::dim(tr("settings.profiles_help")).size(12.5));
@@ -443,7 +478,7 @@ fn profiles_section(core: &mut CoreState, ui: &mut egui::Ui) {
 // ---------------------------------------------------------------- engine, game
 
 fn engine_section(core: &mut CoreState, ui: &mut egui::Ui) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("settings.engine")).size(16.0));
         ui.add_space(4.0);
@@ -455,7 +490,7 @@ fn engine_section(core: &mut CoreState, ui: &mut egui::Ui) {
                 ui.label(theme::dim(p.to_string_lossy()).size(12.5));
             }
             None => {
-                ui.label(theme::warn_text(tr("settings.engine_none")));
+                ui.label(theme::warn_text(ui, tr("settings.engine_none")));
             }
         }
         ui.add_space(4.0);
@@ -478,7 +513,7 @@ fn engine_section(core: &mut CoreState, ui: &mut egui::Ui) {
                 ui.label(theme::dim(g.exe.to_string_lossy()).size(12.5));
             }
             None => {
-                ui.label(theme::warn_text(tr("play.need_game")));
+                ui.label(theme::warn_text(ui, tr("play.need_game")));
             }
         }
         if ui.button(tr("settings.game_change")).clicked() {
@@ -509,7 +544,7 @@ pub fn preview_text(core: &CoreState, resolved: &Resolved) -> String {
 }
 
 fn preview_section(core: &mut CoreState, ui: &mut egui::Ui, resolved: &Resolved) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         egui::CollapsingHeader::new(theme::strong(tr("settings.final")).size(16.0)).default_open(core.ui.demo).show(ui, |ui| {
             ui.label(theme::dim(tr("settings.final_help")).size(12.5));
@@ -518,11 +553,11 @@ fn preview_section(core: &mut CoreState, ui: &mut egui::Ui, resolved: &Resolved)
                 ui.label(egui::RichText::new(plan.command_line()).monospace().size(12.5));
             }
             ui.add_space(4.0);
-            egui::Frame::new().fill(theme::FIELD).corner_radius(egui::CornerRadius::same(6)).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+            egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(egui::CornerRadius::same(6)).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 for (k, v) in &resolved.env {
                     let src = resolved.source.get(k).copied().unwrap_or(Source::Preset);
-                    ui.label(egui::RichText::new(format!("{k}={v}")).monospace().size(12.5).color(if src == Source::Preset { theme::TEXT_DIM } else { theme::TEXT_STRONG }))
+                    ui.label(egui::RichText::new(format!("{k}={v}")).monospace().size(12.5).color(if src == Source::Preset { ui.visuals().weak_text_color() } else { ui.visuals().strong_text_color() }))
                         .on_hover_text(src.label());
                 }
             });

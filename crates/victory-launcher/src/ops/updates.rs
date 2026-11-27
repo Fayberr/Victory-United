@@ -211,7 +211,7 @@ pub fn show(ops: &mut OpsState, shared: &Shared, ui: &mut egui::Ui) {
     ui.add_space(10.0);
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         let running = shared.game_pid.is_some();
-        theme::card().show(ui, |ui| {
+        theme::card(ui).show(ui, |ui| {
             ui.set_width(ui.available_width());
             let current = victory_update::installed(&paths::engine_root()).into_iter().find(|b| b.is_current).map(|b| b.name);
             let current = ops.updates.installed.iter().find(|b| b.is_current).map(|b| b.name.clone()).or(current).unwrap_or_else(|| tr("updates.none").to_string());
@@ -253,12 +253,12 @@ pub fn show(ops: &mut OpsState, shared: &Shared, ui: &mut egui::Ui) {
             });
             if let Some((is_err, text)) = &ops.updates.note {
                 ui.add_space(4.0);
-                ui.label(if *is_err { theme::error_text(text.clone()) } else { theme::dim(text.clone()) });
+                ui.label(if *is_err { theme::error_text(ui, text.clone()) } else { theme::dim(text.clone()) });
             }
         });
         if let Some(u) = ops.updates.update.clone() {
             ui.add_space(12.0);
-            theme::card().show(ui, |ui| {
+            theme::card(ui).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(theme::strong(trf("updates.release_title", &[("name", &u.folder)])));
                 ui.label(theme::dim(trf("updates.release_facts", &[("translator", &u.engine.translator), ("size", &size_text(u.engine.size))])).size(12.5));
@@ -283,7 +283,7 @@ pub fn show(ops: &mut OpsState, shared: &Shared, ui: &mut egui::Ui) {
                                 ops.updates.install(u.clone());
                             }
                             if running {
-                                ui.label(theme::warn_text(tr("updates.close_game")));
+                                ui.label(theme::warn_text(ui, tr("updates.close_game")));
                             }
                         });
                     }
@@ -297,7 +297,7 @@ pub fn show(ops: &mut OpsState, shared: &Shared, ui: &mut egui::Ui) {
 }
 
 fn installed_card(ui: &mut egui::Ui, ops: &mut OpsState, running: bool) {
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("updates.installed_title")));
         ui.add_space(6.0);

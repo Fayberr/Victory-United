@@ -2796,6 +2796,7 @@ name = "victory-launcher"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cc",
  "eframe",
  "egui_plot",
  "image",

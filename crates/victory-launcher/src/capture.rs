@@ -1,4 +1,4 @@
-//! `--ui-demo --capture <dir>`: render every screen to `<dir>/<name>.png` through eframe's screenshot
+//! `--ui-demo --capture <dir>`: render every screen to `<dir>/<dark|light>/<name>.png` through eframe's screenshot
 //! support, then close by itself. A watchdog thread ends the process if anything gets stuck, so no window
 //! can stay open. Only used for review screenshots; normal runs never touch this.
 use crate::{app::Tab, core};
@@ -27,7 +27,9 @@ pub struct Capture {
 
 impl Capture {
     pub fn new(dir: PathBuf) -> Self {
-        let _ = std::fs::create_dir_all(&dir);
+        let failed = ["dark", "light"].iter().any(|name| {
+            std::fs::create_dir_all(dir.join(name)).is_err()
+        });
         std::thread::spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(HARD_TIMEOUT_SECS));
             eprintln!("capture: hard timeout, exiting");
@@ -47,12 +49,12 @@ impl Capture {
             s("08-bug-report", Tab::Report, Some(core::Screen::Main), 0.0),
             s("09-about", Tab::About, Some(core::Screen::Main), 0.0),
         ];
-        Self { dir, steps, idx: 0, waited: 0, requested: false, failed: false }
+        Self { dir, steps, idx: 0, waited: 0, requested: false, failed }
     }
 
     /// Called at the start of every frame. Returns true when finished (the window is told to close).
     pub fn drive(&mut self, ctx: &egui::Context, tab: &mut Tab, core: &mut core::CoreState) -> bool {
-        if self.idx >= self.steps.len() {
+        if self.idx >= 2 * self.steps.len() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             if self.failed {
                 std::process::exit(2);
@@ -60,7 +62,13 @@ impl Capture {
             return true;
         }
         ctx.request_repaint(); // capture mode only
-        let step = &self.steps[self.idx];
+        let (name, color) = if self.idx < self.steps.len() {
+            ("dark", egui::Theme::Dark)
+        } else {
+            ("light", egui::Theme::Light)
+        };
+        ctx.set_theme(color);
+        let step = &self.steps[self.idx % self.steps.len()];
         *tab = step.tab;
         core.force_screen = step.screen;
         core.page_scroll = Some(step.scroll);
@@ -72,7 +80,7 @@ impl Capture {
             })
         });
         if let Some(img) = shot {
-            let path = self.dir.join(format!("{}.png", step.name));
+            let path = self.dir.join(name).join(format!("{}.png", step.name));
             let [w, h] = img.size;
             if image::save_buffer(&path, img.as_raw(), w as u32, h as u32, image::ColorType::Rgba8).is_err() {
                 eprintln!("capture: cannot write {}", path.display());

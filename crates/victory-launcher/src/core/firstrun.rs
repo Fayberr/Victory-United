@@ -5,18 +5,20 @@ use super::{
 use crate::{app::Shared, i18n::tr, theme};
 use eframe::egui;
 
-pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
-    ui.vertical_centered(|ui| {
-        ui.add_space(36.0);
+pub fn show(core: &mut CoreState, _shared: &Shared, logo: &egui::TextureHandle, ui: &mut egui::Ui) {
+    egui::ScrollArea::vertical().show(ui, |ui| ui.vertical_centered(|ui| {
+        ui.add_space(22.0);
+        theme::mark(ui, logo, 44.0);
         ui.label(theme::strong(tr("firstrun.title")).size(28.0));
         ui.add_space(4.0);
         ui.label(theme::dim(tr("firstrun.sub")));
         ui.add_space(22.0);
-        ui.allocate_ui(egui::vec2(640.0, 0.0), |ui| {
-            ui.set_width(640.0);
+        let width = ui.available_width().min(640.0);
+        ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
+            ui.set_width(width);
             ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| body(core, ui));
         });
-    });
+    }));
 }
 
 fn step_header(ui: &mut egui::Ui, n: u8, title: &str, done: bool) {
@@ -30,7 +32,7 @@ fn step_header(ui: &mut egui::Ui, n: u8, title: &str, done: bool) {
 
 fn body(core: &mut CoreState, ui: &mut egui::Ui) {
     // 1: game folder
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         step_header(ui, 1, tr("firstrun.step_game"), core.game.is_some());
         if let Some(g) = core.game.clone() {
@@ -64,7 +66,7 @@ fn body(core: &mut CoreState, ui: &mut egui::Ui) {
     ui.add_space(12.0);
     // 2: engine
     let engine = core.engine_exe();
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         step_header(ui, 2, tr("firstrun.step_engine"), engine.is_some());
         match &engine {
@@ -86,7 +88,7 @@ fn body(core: &mut CoreState, ui: &mut egui::Ui) {
     });
     ui.add_space(12.0);
     // 3: play
-    theme::card().show(ui, |ui| {
+    theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         step_header(ui, 3, tr("firstrun.step_play"), false);
         ui.label(theme::dim(tr("firstrun.play_text")));
