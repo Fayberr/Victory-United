@@ -206,7 +206,7 @@ fn builds_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
         ui.add_space(8.0);
         ui.label(tr("dev.own_engine"));
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut ops.cfg.own_engine).desired_width(ui.available_width() - 190.0).hint_text(tr("dev.own_hint")));
+            ui.add(egui::TextEdit::singleline(&mut ops.cfg.own_engine).desired_width((ui.available_width() - 330.0).max(120.0)).hint_text(tr("dev.own_hint")));
             #[cfg(windows)]
             if ui.button(tr("dev.browse")).clicked() {
                 if let Some(p) = rfd::FileDialog::new().add_filter("victory.exe", &["exe"]).pick_file() {
@@ -227,7 +227,7 @@ fn profiler_card(ui: &mut egui::Ui, ops: &mut OpsState) {
     theme::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("dev.profiler")));
-        ui.label(theme::dim(tr("dev.profiler_help")).size(12.5));
+        ui.add(egui::Label::new(theme::dim(tr("dev.profiler_help")).size(12.5)).wrap());
         ui.add_space(6.0);
         let d = &mut ops.dev;
         ui.horizontal(|ui| {

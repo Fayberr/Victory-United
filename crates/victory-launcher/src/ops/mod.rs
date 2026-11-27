@@ -59,7 +59,7 @@ impl OpsState {
         let wants = (monitor_visible && !self.minimized) || self.cfg.overlay;
         if shared.game_pid.is_none() {
             self.monitor.forget();
-        } else if wants {
+        } else if wants && self.persist {
             self.monitor.poll(shared.game_pid, std::time::Instant::now());
         }
         if wants && shared.game_pid.is_some() && self.persist {
