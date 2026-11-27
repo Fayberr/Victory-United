@@ -34,6 +34,12 @@ mod compose;
 pub mod console;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod copystat;
+/// The host's allocator in a plain build (a diagnostics build counts through
+/// `copystat`, on top of the same allocator): the system heap is slow with
+/// the many threads and millions of short-lived host objects a frame makes.
+#[cfg(all(windows, not(feature = "diagnostics")))]
+#[global_allocator]
+static HEAP: mimalloc::MiMalloc = mimalloc::MiMalloc;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod faultbook;
 #[cfg(windows)]

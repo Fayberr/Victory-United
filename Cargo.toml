@@ -12,6 +12,8 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [workspace.dependencies]
+# The host's allocator on Windows (the system heap is slow under many threads)
+mimalloc = { version = "0.1", default-features = false, features = ["v2"] }
 # Internal crates
 victory-core = { path = "crates/victory-core" }
 victory-pe = { path = "crates/victory-pe" }
