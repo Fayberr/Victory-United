@@ -1,5 +1,5 @@
 # One-click the title on VIctory_sm86 (VIctory-NVIDIA base): DLSS Super Resolution + DLSS frame generation.
-# PLAY_FRAMEGEN.bat runs this. What it does, in order:
+# PLAY_FRAMEGEN.cmd runs this. What it does, in order:
 #   1. finds the game folder (game_dir.txt in the repository folder, else a search of every drive)
 #   2. backs up the saves (%LOCALAPPDATA%\victory\data\7952987A) and checks every file by SHA-256
 #   3. checks that NVIDIA's DLSS files are installed (they are not fetched by this repository)

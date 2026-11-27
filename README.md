@@ -67,7 +67,7 @@ automatic NVIDIA SDK downloader is deliberately left out; install Streamline you
   XInput pad wins).
 - **Open water without dark blocks.** On a 32-lane-wave host the two tiled water-light programs are left out;
   `VICTORY_WATER_LIGHT=1` runs them as before (green water, dark blocks).
-- **One-click launcher and extreme modes.** `PLAY_FRAMEGEN.bat` (or `scripts\play-framegen.ps1 -Mode 1..6`)
+- **One-click launcher and extreme modes.** `PLAY_FRAMEGEN.cmd` (or `scripts\play-framegen.ps1 -Mode 1..6`)
   finds the dump, backs up and verifies the saves, tunes the worker pools by CPU count, and starts through
   `play-VIctory_sm86.ps1`. On RTX 50 frame generation starts at 4x (`TITLE_FRAMEGEN_X=2..6` overrides;
   `TITLE_NO_TUNE=1` skips the pool tuning); modes 5 and 6 raise the game to High priority. NVIDIA's files are
