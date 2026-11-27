@@ -1232,6 +1232,11 @@ fn heap_buffer_pass(heap: &crate::descriptor::Heap, host: &crate::descriptor::ho
     found
 }
 
+fn dedup_draw_state() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| crate::switch::on("VICTORY_STATE_DEDUP"))
+}
+
 impl State {
     pub(crate) fn reset(&mut self, pipeline: This) {
         *self = State::default();
@@ -1241,6 +1246,9 @@ impl State {
     /// The title's topology; console-only ones become host lists (see
     /// [`crate::primitive`]).
     pub(crate) fn set_topology(&mut self, list: &HostList, topology: u32) {
+        if self.topology_set && self.topology == topology && dedup_draw_state() {
+            return;
+        }
         self.topology = topology;
         self.topology_set = true;
         let host = match topology {
@@ -1426,6 +1434,9 @@ impl State {
     }
 
     pub(crate) fn set_scissors(&mut self, list: &HostList, rects: &[RECT]) {
+        if !rects.is_empty() && self.scissors == rects && dedup_draw_state() {
+            return;
+        }
         self.scissors.clear();
         self.scissors.extend_from_slice(rects);
         if scissor_test() {
@@ -1450,6 +1461,9 @@ impl State {
     }
 
     pub(crate) fn set_stencil_ref(&mut self, list: &HostList, reference: u32) {
+        if self.stencil == Some(reference) && dedup_draw_state() {
+            return;
+        }
         self.stencil = Some(reference);
         crate::draw::stencil_ref(list, reference);
     }
@@ -1477,6 +1491,7 @@ impl State {
         self.host_heaps = [0; 2];
         self.host_heaps_set = false;
         if self.topology_set {
+            self.topology_set = false;
             self.set_topology(list, self.topology);
         }
         self.host_targets = None;

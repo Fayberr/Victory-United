@@ -2082,6 +2082,12 @@ fn scratch_pool() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_SCRATCH_POOL").is_none_or(|v| v != "0"))
 }
 
+/// `VICTORY_SCRATCH_ANY_SIZE=1` lets a small request reuse a spare 4 MiB chunk.
+fn scratch_any_size() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::switch::on("VICTORY_SCRATCH_ANY_SIZE"))
+}
+
 /// Things of some sizes that nothing holds now, kept for whoever next asks
 /// for one of the same size.
 struct Spare<T> {
@@ -2443,24 +2449,32 @@ mod readback_pool_tests {
 /// Scratch chunks no list holds.
 static SPARE: Mutex<Spare<Chunk>> = Mutex::new(Spare::new());
 
-/// A scratch chunk of `size` bytes: one kept ([`SPARE`]) or a new one.
-fn take_chunk(host: &Host, size: u64) -> Option<Chunk> {
-    if scratch_pool()
-        && let Some(chunk) = SPARE.lock().unwrap_or_else(|e| e.into_inner()).take(size)
-    {
-        ALIVE[3].fetch_sub(1, Ordering::Relaxed);
-        ALIVE[4].fetch_sub(size, Ordering::Relaxed);
-        ALIVE[5].fetch_add(1, Ordering::Relaxed);
-        return Some(chunk);
+/// A spare or newly allocated scratch chunk, paired with its actual size.
+fn take_chunk(host: &Host, size: u64) -> Option<(Chunk, u64)> {
+    if scratch_pool() {
+        let mut spare = SPARE.lock().unwrap_or_else(|e| e.into_inner());
+        let kept = spare.take(size).map(|chunk| (chunk, size)).or_else(|| {
+            if size == SCRATCH_FIRST && scratch_any_size() {
+                spare.take(SCRATCH_CHUNK).map(|chunk| (chunk, SCRATCH_CHUNK))
+            } else {
+                None
+            }
+        });
+        if let Some((chunk, actual_size)) = kept {
+            ALIVE[3].fetch_sub(1, Ordering::Relaxed);
+            ALIVE[4].fetch_sub(actual_size, Ordering::Relaxed);
+            ALIVE[5].fetch_add(1, Ordering::Relaxed);
+            return Some((chunk, actual_size));
+        }
     }
     let (buffer, data) = host.upload_buffer(size)?;
     name(&buffer, || "list scratch".into());
     ALIVE[1].fetch_add(1, Ordering::Relaxed);
     ALIVE[2].fetch_add(size, Ordering::Relaxed);
-    Some(Chunk {
+    Some((Chunk {
         buffer,
         data: data as usize,
-    })
+    }, size))
 }
 
 /// A list is done with `chunks` (it was reset after its submissions ran,
@@ -8089,8 +8103,7 @@ impl HostList {
             } else {
                 SCRATCH_CHUNK
             };
-            let chunk = take_chunk(host, size)?;
-            s.chunks.push((chunk, size));
+            s.chunks.push(take_chunk(host, size)?);
             s.used = 0;
         }
         let (data, buffer) = (s.chunks[s.current].0.data, s.chunks[s.current].0.buffer.clone());
@@ -8421,7 +8434,7 @@ impl HostList {
         read: (usize, usize),
         fill: impl Fn(usize) + Send + 'static,
     ) -> Option<ID3D12Resource> {
-        let chunk = take_chunk(host()?, size)?;
+        let (chunk, size) = take_chunk(host()?, size)?;
         let source = chunk.buffer.clone();
         let destination = chunk.data;
         let mut deferred = self.deferred();

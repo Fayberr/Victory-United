@@ -868,6 +868,17 @@ fn a_first_lane_read_of_a_wave_alike_sum_under_a_wave_alike_loop() {
 }
 
 #[test]
+fn a_counted_wave_prefix_lowers_on_32_lane_waves() {
+    let native = wave_prefix_program(false);
+    let p = ir::build(&native.code, native.wave64, native.vgprs).expect("ir::build");
+    let shader = lowered_counted(&native, &p, &HashSet::new(), 32, true).expect("lower counted prefix");
+    assert!(shader.user_data.iter().any(|u| u.root == RootType::Other(super::USER_DISPATCH_THREADS_X)));
+    if let Ok(mut validator) = validator::Validator::load(validator::Validator::default_path().as_deref()) {
+        validator.validate(&mut shader.dxil.clone()).expect("DXIL validation failed");
+    }
+}
+
+#[test]
 fn a_lane_dependent_prefix_cannot_take_its_own_first_lane() {
     let native = wave_prefix_program(true);
     let p = ir::build(&native.code, native.wave64, native.vgprs).expect("ir::build");

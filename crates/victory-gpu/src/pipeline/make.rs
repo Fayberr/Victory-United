@@ -271,8 +271,16 @@ pub(crate) fn waiting() -> u64 {
     WAITING.load(Ordering::Relaxed)
 }
 
-/// The host pipeline if it is made (or is made within the frame's budget);
-/// queues it on first use.
+/// By default, a dispatch waits within the same frame budget as a draw.
+/// `VICTORY_PIPELINE_COMPUTE_WAIT=1` waits for compute pipelines to finish.
+/// This can stall a frame, but a one-time dispatch can leave stale state
+/// for the rest of a scene if it is skipped.
+fn compute_waits() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::switch::on("VICTORY_PIPELINE_COMPUTE_WAIT"))
+}
+
+/// Queues the host pipeline on first use and returns it if it is made.
 pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
     if p.left_out.is_some() {
         return None;
@@ -284,7 +292,11 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
     }
     if p.made.get().is_none() {
         start(p, REQUESTED);
-        wait(p, crate::frame::current());
+        if p.graphics.is_none() && compute_waits() {
+            p.make();
+        } else {
+            wait(p, crate::frame::current());
+        }
     }
     p.made.get()?.as_ref()
 }
