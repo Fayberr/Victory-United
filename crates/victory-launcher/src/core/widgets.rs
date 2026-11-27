@@ -9,6 +9,7 @@ pub struct UiState {
     pub demo: bool,
     /// "Start without my flags" for the next start.
     pub start_without_flags: bool,
+    pub confirm_stop: bool,
     pub settings: super::settings::SettingsUi,
     pub flags: super::flags::FlagsUi,
     pub report: super::report::ReportUi,

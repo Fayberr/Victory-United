@@ -1,6 +1,6 @@
 //! Updates tab: engine channel, check, download and install with progress, roll back, remove old builds.
 //! Network and disk work runs on a thread that reports through a channel; the UI never blocks.
-use crate::{app::Shared, i18n::{tr, trf}, ops::{OpsSettings, OpsState}, paths, theme};
+use crate::{app::Shared, core::store::UpdateSchedule, i18n::{tr, trf}, ops::{OpsSettings, OpsState}, paths, theme};
 use eframe::egui;
 use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc};
 use victory_update::{Engine, Error, Installed, Update, http::System};
@@ -33,6 +33,8 @@ pub struct UpdatesState {
     pub progress: Arc<(AtomicU64, AtomicU64)>,
     cancel: Arc<AtomicBool>,
     pub confirm_cleanup: bool,
+    pub last_check_started: Option<u64>,
+    banner_dismissed: bool,
 }
 
 impl Default for UpdatesState {
@@ -49,6 +51,8 @@ impl Default for UpdatesState {
             progress: Default::default(),
             cancel: Default::default(),
             confirm_cleanup: false,
+            last_check_started: None,
+            banner_dismissed: false,
         }
     }
 }
@@ -102,6 +106,8 @@ impl UpdatesState {
             return;
         }
         self.phase = Phase::Checking;
+        self.last_check_started = Some(crate::core::storage::now().as_secs());
+        self.banner_dismissed = false;
         self.note = None;
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         let (channel, kind) = (cfg.channel.clone(), cfg.engine_kind.clone());
@@ -205,6 +211,45 @@ fn size_text(b: u64) -> String {
     format!("{:.0} MB", b as f64 / (1u64 << 20) as f64)
 }
 
+pub fn check_due(schedule: UpdateSchedule, last: Option<u64>, now: u64, startup: bool) -> bool {
+    match schedule {
+        UpdateSchedule::Off => false,
+        UpdateSchedule::AtStartup => startup,
+        UpdateSchedule::Daily => last.is_none_or(|last| last > now || now - last >= 86_400),
+    }
+}
+
+pub fn play_banner(state: &mut UpdatesState, ui: &mut egui::Ui) -> bool {
+    let Some(update) = &state.update else { return false };
+    let launcher = newer_launcher(&update.manifest.launcher_version);
+    if state.banner_dismissed || (!update.newer && !launcher) {
+        return false;
+    }
+    let mut open = false;
+    theme::card(ui).inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal_wrapped(|ui| {
+            if update.newer {
+                ui.label(trf("startup_updates.engine", &[("build", &update.folder)]));
+                if ui.small_button(tr("startup_updates.open")).clicked() {
+                    open = true;
+                }
+            }
+            if launcher {
+                ui.label(trf("startup_updates.launcher", &[("version", &update.manifest.launcher_version)]));
+                if update.manifest.launcher_url.starts_with("https://") {
+                    ui.hyperlink_to(tr("updates.open_release"), &update.manifest.launcher_url);
+                }
+            }
+            if ui.small_button(tr("startup_updates.dismiss")).clicked() {
+                state.banner_dismissed = true;
+            }
+        });
+    });
+    ui.add_space(12.0);
+    open
+}
+
 pub fn show(ops: &mut OpsState, shared: &Shared, ui: &mut egui::Ui) {
     let before = ops.cfg.clone();
     ui.label(theme::strong(tr("updates.title")).size(24.0));
@@ -239,7 +284,6 @@ pub fn show(ops: &mut OpsState, shared: &Shared, ui: &mut egui::Ui) {
                     ui.selectable_value(&mut ops.cfg.engine_kind, id.to_string(), label);
                 }
             });
-            ui.checkbox(&mut ops.cfg.check_on_launch, tr("updates.check_on_launch"));
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let idle = ops.updates.phase == Phase::Idle;
@@ -352,6 +396,18 @@ pub fn newer_launcher(theirs: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn startup_schedule_respects_the_day_and_opt_out() {
+        use super::{check_due, UpdateSchedule::*};
+        assert!(check_due(Daily, None, 1, true));
+        assert!(!check_due(Daily, Some(0), 86_399, true));
+        assert!(check_due(Daily, Some(0), 86_400, false));
+        assert!(check_due(Daily, Some(60), 40, true));
+        assert!(!check_due(Off, None, 86_400, true));
+        assert!(check_due(AtStartup, Some(0), 1, true));
+        assert!(!check_due(AtStartup, None, 86_400, false));
+    }
+
     use super::*;
 
     #[test]

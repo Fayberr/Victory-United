@@ -27,12 +27,19 @@ fn main() -> eframe::Result {
         .into_rgba8();
     let (width, height) = logo.dimensions();
     let icon = std::sync::Arc::new(egui::IconData { rgba: logo.into_raw(), width, height });
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
+    let settings = if args.demo { Default::default() } else { core::store::Settings::load() };
+    let mut viewport = egui::ViewportBuilder::default()
             .with_title("Victory Launcher")
             .with_inner_size([980.0, 660.0])
             .with_min_inner_size([780.0, 520.0])
-            .with_icon(icon.clone()),
+            .with_icon(icon.clone());
+    if settings.behavior.remember_window {
+        if let Some(saved) = settings.window.filter(|saved| saved.valid()) {
+            viewport = viewport.with_inner_size(saved.size).with_position(saved.position);
+        }
+    }
+    let options = eframe::NativeOptions {
+        viewport,
         renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
@@ -41,7 +48,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             theme::apply(&cc.egui_ctx);
-            Ok(Box::new(app::App::new(cc, args, &icon)))
+            Ok(Box::new(app::App::new(cc, args, &icon, settings)))
         }),
     )
 }

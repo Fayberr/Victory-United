@@ -48,6 +48,51 @@ pub struct StorageSettings {
     pub verify_cache_by_hash: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AfterPlay {
+    #[default]
+    KeepOpen,
+    Minimize,
+    Close,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct Behavior {
+    pub after_play: AfterPlay,
+    pub remember_window: bool,
+    pub confirm_stop: bool,
+}
+
+impl Default for Behavior {
+    fn default() -> Self {
+        Self { after_play: AfterPlay::KeepOpen, remember_window: true, confirm_stop: true }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct WindowPlacement {
+    pub size: [f32; 2],
+    pub position: [f32; 2],
+}
+
+impl WindowPlacement {
+    pub fn valid(self) -> bool {
+        self.size.into_iter().all(|v| (400.0..=16_384.0).contains(&v))
+            && self.position.into_iter().all(|v| v.is_finite() && v.abs() <= 32_768.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UpdateSchedule {
+    Off,
+    #[default]
+    Daily,
+    AtStartup,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -68,6 +113,10 @@ pub struct Settings {
     pub appearance: Appearance,
     pub backups: Backups,
     pub storage: StorageSettings,
+    pub behavior: Behavior,
+    pub window: Option<WindowPlacement>,
+    pub update_schedule: UpdateSchedule,
+    pub last_update_check: Option<u64>,
 }
 
 impl Default for Settings {
@@ -83,6 +132,10 @@ impl Default for Settings {
             appearance: Appearance::default(),
             backups: Backups::default(),
             storage: StorageSettings::default(),
+            behavior: Behavior::default(),
+            window: None,
+            update_schedule: UpdateSchedule::default(),
+            last_update_check: None,
         }
     }
 }
@@ -107,7 +160,9 @@ impl Settings {
         // have completed a move since this window last loaded Settings.
         edit_settings(&crate::paths::settings_file(), |current| {
             let (cache, data) = (current.storage.cache.take(), current.storage.data.take());
+            let last_check = current.last_update_check;
             *current = self.clone();
+            current.last_update_check = current.last_update_check.max(last_check);
             current.storage.cache = cache;
             current.storage.data = data;
             Ok(())

@@ -76,12 +76,13 @@ fn mine(core: &mut CoreState, ui: &mut egui::Ui) {
         add_row(core, ui, &mut changed);
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            ui.add_enabled_ui(!core.runner.busy(), |ui| {
+            let allowed = super::play::hardware_allows_play(core.hw.as_ref(), false).is_ok();
+            ui.add_enabled_ui(!core.runner.busy() && allowed, |ui| {
                 if ui.button(tr("play.start_without_flags")).clicked() {
-                    core.play_without_flags();
+                    core.play_without_flags(false);
                 }
             });
-            ui.label(theme::dim(tr("flags.without_help")).size(12.5));
+            ui.label(theme::dim(tr(if allowed { "flags.without_help" } else { "play.mesh_flags_help" })).size(12.5));
         });
         if changed {
             core.save_extra();

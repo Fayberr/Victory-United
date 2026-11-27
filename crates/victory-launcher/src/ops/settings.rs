@@ -34,7 +34,6 @@ pub struct OpsSettings {
     /// `stable` or `dev`.
     pub channel: String,
     /// Look for an engine update once per launch (off by default).
-    pub check_on_launch: bool,
     /// Which engine build to download: `release` or `diagnostics`.
     pub engine_kind: String,
     /// A developer's own victory.exe (Developer tab). Empty: the installed build is used.
@@ -47,7 +46,6 @@ impl Default for OpsSettings {
             overlay: false,
             overlay_corner: Corner::TopLeft,
             channel: "stable".into(),
-            check_on_launch: false,
             engine_kind: "release".into(),
             own_engine: String::new(),
         }
@@ -81,6 +79,5 @@ mod tests {
         assert_eq!(toml::from_str::<OpsSettings>(&t).unwrap(), s);
         // Missing keys fall back to defaults; unknown keys do not break loading.
         assert_eq!(toml::from_str::<OpsSettings>("overlay = true\nfuture = 1").unwrap().channel, "stable");
-        assert!(!OpsSettings::default().check_on_launch);
     }
 }

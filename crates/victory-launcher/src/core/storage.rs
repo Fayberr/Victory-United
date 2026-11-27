@@ -9,14 +9,25 @@ use std::{
 };
 
 pub fn now() -> Duration {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
 }
 
 /// Holds the same OS lock while an engine or a storage action owns the data.
 pub fn lock(path: &Path) -> Result<File> {
-    fs::create_dir_all(path.parent().context("Activity lock needs a parent folder")?)?;
-    let file = File::options().read(true).write(true).create(true).truncate(false).open(path)?;
-    file.try_lock().context("Close the game or wait for the current storage operation to finish.")?;
+    fs::create_dir_all(
+        path.parent()
+            .context("Activity lock needs a parent folder")?,
+    )?;
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.try_lock()
+        .context("Close the game or wait for the current storage operation to finish.")?;
     Ok(file)
 }
 
@@ -32,7 +43,11 @@ pub fn metadata(path: &Path) -> Result<Option<Metadata>> {
         use std::os::windows::fs::MetadataExt;
         link || meta.file_attributes() & 0x400 != 0
     };
-    ensure!(!link && (meta.is_file() || meta.is_dir()), "Unsupported file or link: {}", path.display());
+    ensure!(
+        !link && (meta.is_file() || meta.is_dir()),
+        "Unsupported file or link: {}",
+        path.display()
+    );
     Ok(Some(meta))
 }
 
@@ -63,14 +78,22 @@ fn walk_from(
     visit: &mut impl FnMut(Entry) -> Result<()>,
 ) -> Result<()> {
     check()?;
-    ensure!(relative.components().count() < 64, "Folder nesting is too deep: {}", relative.display());
+    ensure!(
+        relative.components().count() < 64,
+        "Folder nesting is too deep: {}",
+        relative.display()
+    );
     for item in fs::read_dir(root.join(relative))? {
         check()?;
         let path = relative.join(item?.file_name());
         if filter(&path) {
-            let meta = metadata(&root.join(&path))?.context("A file disappeared while reading the folder")?;
+            let meta = metadata(&root.join(&path))?
+                .context("A file disappeared while reading the folder")?;
             let is_dir = meta.is_dir();
-            visit(Entry { path: path.clone(), meta })?;
+            visit(Entry {
+                path: path.clone(),
+                meta,
+            })?;
             if is_dir {
                 walk_from(root, &path, filter, check, visit)?;
             }
@@ -118,15 +141,23 @@ pub fn new_file(path: &Path) -> Result<File> {
 
 pub fn digest(path: &Path, bytes: u64, check: impl FnMut(u64) -> Result<()>) -> Result<String> {
     let expected = metadata(path)?.with_context(|| format!("File missing: {}", path.display()))?;
-    ensure!(expected.is_file() && expected.len() == bytes, "File size differs: {}", path.display());
-    transfer(File::open(path)?, io::sink(), bytes, true, check)?
-        .context("SHA-256 was requested")
+    ensure!(
+        expected.is_file() && expected.len() == bytes,
+        "File size differs: {}",
+        path.display()
+    );
+    transfer(File::open(path)?, io::sink(), bytes, true, check)?.context("SHA-256 was requested")
 }
 
 /// Canonicalize the existing prefix so links and junctions cannot conceal containment.
 pub fn absolute(path: &Path) -> Result<PathBuf> {
     let path = std::path::absolute(path)?;
-    ensure!(!path.components().any(|c| c == std::path::Component::ParentDir), "Choose a path without parent traversal");
+    ensure!(
+        !path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir),
+        "Choose a path without parent traversal"
+    );
     let mut prefix = path.as_path();
     let mut tail = Vec::new();
     loop {
@@ -141,7 +172,9 @@ pub fn absolute(path: &Path) -> Result<PathBuf> {
                 tail.push(prefix.file_name().context("Storage drive is unavailable")?);
                 prefix = prefix.parent().context("Storage drive is unavailable")?;
             }
-            Err(e) => return Err(e).with_context(|| format!("Could not resolve {}", prefix.display())),
+            Err(e) => {
+                return Err(e).with_context(|| format!("Could not resolve {}", prefix.display()));
+            }
         }
     }
 }
@@ -163,7 +196,10 @@ pub fn overlap(first: &Path, second: &Path) -> Result<bool> {
     Ok(within(&first, &second) || within(&second, &first))
 }
 
-use super::{saves, store::{self, Settings}};
+use super::{
+    saves,
+    store::{self, Settings},
+};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -176,11 +212,16 @@ pub enum Location {
 
 impl Location {
     pub fn default_path(self, base: &Path) -> PathBuf {
-        base.join(match self { Self::Cache => "cache", Self::Data => "data" })
+        base.join(match self {
+            Self::Cache => "cache",
+            Self::Data => "data",
+        })
     }
 
     pub fn path(self, base: &Path, settings: &Settings) -> PathBuf {
-        self.setting(settings).clone().unwrap_or_else(|| self.default_path(base))
+        self.setting(settings)
+            .clone()
+            .unwrap_or_else(|| self.default_path(base))
     }
 
     fn setting(self, settings: &Settings) -> &Option<PathBuf> {
@@ -198,7 +239,10 @@ impl Location {
     }
 
     fn other(self) -> Self {
-        match self { Self::Cache => Self::Data, Self::Data => Self::Cache }
+        match self {
+            Self::Cache => Self::Data,
+            Self::Data => Self::Cache,
+        }
     }
 }
 
@@ -210,7 +254,9 @@ pub struct MoveContext<'a> {
 
 impl MoveContext<'_> {
     fn base(&self) -> Result<&Path> {
-        self.settings.parent().context("Settings need a parent folder")
+        self.settings
+            .parent()
+            .context("Settings need a parent folder")
     }
 
     fn journal(&self) -> Result<PathBuf> {
@@ -222,7 +268,11 @@ impl MoveContext<'_> {
     }
 
     fn backups(&self, settings: &Settings) -> Result<PathBuf> {
-        Ok(settings.backups.root.clone().unwrap_or(self.base()?.join("backups")))
+        Ok(settings
+            .backups
+            .root
+            .clone()
+            .unwrap_or(self.base()?.join("backups")))
     }
 }
 
@@ -246,7 +296,9 @@ pub struct MoveJournal {
 
 pub fn read_journal(path: &Path) -> Result<Option<MoveJournal>> {
     match fs::read_to_string(path) {
-        Ok(text) => Ok(Some(toml::from_str(&text).context("The move journal could not be read")?)),
+        Ok(text) => Ok(Some(
+            toml::from_str(&text).context("The move journal could not be read")?,
+        )),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e).context("The move journal could not be read"),
     }
@@ -258,37 +310,65 @@ fn journal_write(ctx: &MoveContext<'_>, journal: &MoveJournal) -> Result<()> {
 }
 
 fn ensure_separate(first: &Path, other: &Path, what: &str) -> Result<()> {
-    ensure!(!overlap(first, other)?, "Choose a folder separate from {what}: {}", other.display());
+    ensure!(
+        !overlap(first, other)?,
+        "Choose a folder separate from {what}: {}",
+        other.display()
+    );
     Ok(())
 }
 
-fn validate_location(path: &Path, location: Location, ctx: &MoveContext<'_>, settings: &Settings) -> Result<()> {
+fn validate_location(
+    path: &Path,
+    location: Location,
+    ctx: &MoveContext<'_>,
+    settings: &Settings,
+) -> Result<()> {
     let resolved = absolute(path)?;
-    ensure!(resolved.file_name().is_some(), "Choose a folder inside a drive.");
+    ensure!(
+        resolved.file_name().is_some(),
+        "Choose a folder inside a drive."
+    );
     for anc in resolved.ancestors() {
-        ensure!(!anc.join(".victory-root").exists() && !anc.join(".git").exists(),
-            "Storage must be outside source repositories.");
+        ensure!(
+            !anc.join(".victory-root").exists() && !anc.join(".git").exists(),
+            "Storage must be outside source repositories."
+        );
     }
     let base = ctx.base()?;
-    ensure!(!within(&absolute(base)?, &resolved), "Choose a location outside the launcher settings folder itself.");
+    ensure!(
+        !within(&absolute(base)?, &resolved),
+        "Choose a location outside the launcher settings folder itself."
+    );
     ensure_separate(path, ctx.engine, "the launcher engine folder")?;
     if let Some(game) = ctx.game {
         ensure_separate(path, game, "the installed game's folder")?;
     }
-    ensure_separate(path, &location.other().path(base, settings), "the other storage location")?;
+    ensure_separate(
+        path,
+        &location.other().path(base, settings),
+        "the other storage location",
+    )?;
     ensure_separate(path, &ctx.backups(settings)?, "the backups folder")?;
     for name in ["profiles", "logs", "reports", "downloads"] {
         ensure_separate(path, &base.join(name), "launcher files")?;
     }
     if let Some(m) = metadata(path)? {
-        ensure!(m.is_dir(), "The location must be a folder: {}", path.display());
+        ensure!(
+            m.is_dir(),
+            "The location must be a folder: {}",
+            path.display()
+        );
     }
     Ok(())
 }
 
 pub fn validate_data_work(ctx: &MoveContext<'_>, settings: &Settings) -> Result<()> {
     if let Some(journal) = read_journal(&ctx.journal()?)? {
-        ensure!(journal.phase == MovePhase::Switched, "Resume or cancel the interrupted move in Settings.");
+        ensure!(
+            journal.phase == MovePhase::Switched,
+            "Resume or cancel the interrupted move in Settings."
+        );
     }
     let data = Location::Data.path(ctx.base()?, settings);
     let cache = Location::Cache.path(ctx.base()?, settings);
@@ -296,12 +376,26 @@ pub fn validate_data_work(ctx: &MoveContext<'_>, settings: &Settings) -> Result<
     Ok(())
 }
 
-pub fn validate_backup_root(path: &Path, ctx: &MoveContext<'_>, settings: &Settings) -> Result<PathBuf> {
+pub fn validate_backup_root(
+    path: &Path,
+    ctx: &MoveContext<'_>,
+    settings: &Settings,
+) -> Result<PathBuf> {
     let resolved = absolute(path)?;
-    ensure!(resolved.file_name().is_some(), "Choose a folder inside a drive.");
-    ensure!(!within(&absolute(ctx.base()?)?, &resolved), "Choose a dedicated backup folder.");
-    ensure!(!resolved.ancestors().any(|p| p.join(".victory-root").exists() || p.join(".git").exists()),
-        "Backups must be outside source repositories.");
+    ensure!(
+        resolved.file_name().is_some(),
+        "Choose a folder inside a drive."
+    );
+    ensure!(
+        !within(&absolute(ctx.base()?)?, &resolved),
+        "Choose a dedicated backup folder."
+    );
+    ensure!(
+        !resolved
+            .ancestors()
+            .any(|p| p.join(".victory-root").exists() || p.join(".git").exists()),
+        "Backups must be outside source repositories."
+    );
     ensure_separate(path, ctx.engine, "the launcher engine folder")?;
     if let Some(game) = ctx.game {
         ensure_separate(path, game, "the installed game's folder")?;
@@ -320,7 +414,10 @@ pub fn validate_backup_root(path: &Path, ctx: &MoveContext<'_>, settings: &Setti
 
 fn existing_dir(path: &Path) -> Result<PathBuf> {
     let path = absolute(path)?;
-    path.ancestors().find(|p| p.is_dir()).map(Path::to_path_buf).context("The storage drive is unavailable")
+    path.ancestors()
+        .find(|p| p.is_dir())
+        .map(Path::to_path_buf)
+        .context("The storage drive is unavailable")
 }
 
 #[cfg(windows)]
@@ -353,13 +450,18 @@ fn free_space(path: &Path) -> Result<u64> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn free_space(_path: &Path) -> Result<u64> { anyhow::bail!("Drive free space is unavailable") }
+fn free_space(_path: &Path) -> Result<u64> {
+    anyhow::bail!("Drive free space is unavailable")
+}
 
 pub fn network_drive(path: &Path) -> Result<bool> {
     #[cfg(windows)]
     {
         use std::path::{Component, Prefix};
-        use windows::{Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumePathNameW}, core::PCWSTR};
+        use windows::{
+            Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumePathNameW},
+            core::PCWSTR,
+        };
         if matches!(path.components().next(), Some(Component::Prefix(p))
             if matches!(p.kind(), Prefix::UNC(..) | Prefix::VerbatimUNC(..)))
         {
@@ -401,18 +503,28 @@ pub fn measure(path: &Path) -> Result<Usage> {
         }
         Ok(())
     })?;
-    Ok(Usage { bytes, free: free_space(path)?, network: network_drive(path)? })
+    Ok(Usage {
+        bytes,
+        free: free_space(path)?,
+        network: network_drive(path)?,
+    })
 }
 
 fn empty_or_absent(path: &Path) -> Result<()> {
     if let Some(meta) = metadata(path)? {
-        ensure!(meta.is_dir() && fs::read_dir(path)?.next().is_none(), "Choose an empty destination folder.");
+        ensure!(
+            meta.is_dir() && fs::read_dir(path)?.next().is_none(),
+            "Choose an empty destination folder."
+        );
     }
     Ok(())
 }
 
 fn check_cancel(cancel: &AtomicBool) -> Result<()> {
-    ensure!(!cancel.load(Ordering::Relaxed), "Move paused. Resume it or cancel it from Storage.");
+    ensure!(
+        !cancel.load(Ordering::Relaxed),
+        "Move paused. Resume it or cancel it from Storage."
+    );
     Ok(())
 }
 
@@ -425,7 +537,10 @@ pub fn start_move(
     progress: impl FnMut(u64, u64),
 ) -> Result<MoveJournal> {
     let _guard = ctx.activity_lock()?;
-    ensure!(read_journal(&ctx.journal()?)?.is_none(), "Finish the previous move first.");
+    ensure!(
+        read_journal(&ctx.journal()?)?.is_none(),
+        "Finish the previous move first."
+    );
     let settings = Settings::load_from(ctx.settings);
     let source = std::path::absolute(location.path(ctx.base()?, &settings))?;
     let destination = std::path::absolute(wanted)?;
@@ -434,18 +549,34 @@ pub fn start_move(
     ensure_separate(&destination, &source, "the current location")?;
     empty_or_absent(&destination)?;
     check_cancel(cancel)?;
-    let parent = destination.parent().context("Choose a destination folder")?;
+    let parent = destination
+        .parent()
+        .context("Choose a destination folder")?;
     fs::create_dir_all(parent)?;
-    let stage = tempfile::Builder::new().prefix(".victory-moving-").tempdir_in(parent)?;
+    let stage = tempfile::Builder::new()
+        .prefix(".victory-moving-")
+        .tempdir_in(parent)?;
     if location == Location::Data {
         saves::recover_restore(&source)?;
         check_cancel(cancel)?;
-        saves::create(&source, &ctx.backups(&settings)?, saves::Create {
-            kind: saves::Kind::BeforeMove, label: "", engine_build: build, deadline: None, force: false,
-        })?;
+        saves::create(
+            &source,
+            &ctx.backups(&settings)?,
+            saves::Create {
+                kind: saves::Kind::BeforeMove,
+                label: "",
+                engine_build: build,
+                deadline: None,
+                force: false,
+            },
+        )?;
     }
     let mut journal = MoveJournal {
-        location, source, destination, stage: stage.path().to_path_buf(), phase: MovePhase::Copying,
+        location,
+        source,
+        destination,
+        stage: stage.path().to_path_buf(),
+        phase: MovePhase::Copying,
         hash: location == Location::Data || settings.storage.verify_cache_by_hash,
     };
     journal_write(ctx, &journal)?;
@@ -454,7 +585,11 @@ pub fn start_move(
     Ok(journal)
 }
 
-pub fn resume_move(ctx: &MoveContext<'_>, cancel: &AtomicBool, progress: impl FnMut(u64, u64)) -> Result<MoveJournal> {
+pub fn resume_move(
+    ctx: &MoveContext<'_>,
+    cancel: &AtomicBool,
+    progress: impl FnMut(u64, u64),
+) -> Result<MoveJournal> {
     let _guard = ctx.activity_lock()?;
     let mut journal = read_journal(&ctx.journal()?)?.context("There is no move to resume")?;
     continue_move(ctx, &mut journal, cancel, progress)?;
@@ -462,9 +597,15 @@ pub fn resume_move(ctx: &MoveContext<'_>, cancel: &AtomicBool, progress: impl Fn
 }
 
 fn stage_for(journal: &MoveJournal) -> Result<&Path> {
-    ensure!(journal.stage.parent() == journal.destination.parent()
-        && journal.stage.file_name().and_then(|p| p.to_str()).is_some_and(|n| n.starts_with(".victory-moving-")),
-        "Unsafe move staging folder");
+    ensure!(
+        journal.stage.parent() == journal.destination.parent()
+            && journal
+                .stage
+                .file_name()
+                .and_then(|p| p.to_str())
+                .is_some_and(|n| n.starts_with(".victory-moving-")),
+        "Unsafe move staging folder"
+    );
     Ok(&journal.stage)
 }
 
@@ -483,14 +624,24 @@ fn continue_move(
     let settings = Settings::load_from(ctx.settings);
     let active = journal.location.path(ctx.base()?, &settings);
     if journal.phase == MovePhase::Switched || same_path(&active, &journal.destination)? {
-        ensure!(same_path(&active, &journal.destination)?, "The selected location changed after the move.");
+        ensure!(
+            same_path(&active, &journal.destination)?,
+            "The selected location changed after the move."
+        );
         journal.phase = MovePhase::Switched;
         return journal_write(ctx, journal);
     }
-    ensure!(same_path(&active, &journal.source)?, "The current location changed since this move began.");
+    ensure!(
+        same_path(&active, &journal.source)?,
+        "The current location changed since this move began."
+    );
     validate_location(&journal.source, journal.location, ctx, &settings)?;
     validate_location(&journal.destination, journal.location, ctx, &settings)?;
-    ensure_separate(&journal.destination, &journal.source, "the current location")?;
+    ensure_separate(
+        &journal.destination,
+        &journal.source,
+        "the current location",
+    )?;
     let stage = stage_for(journal)?.to_path_buf();
     if journal.phase == MovePhase::Copying {
         empty_or_absent(&journal.destination)?;
@@ -502,7 +653,11 @@ fn continue_move(
         journal.phase = MovePhase::Ready;
         journal_write(ctx, journal)?;
     } else {
-        let copied = if metadata(&stage)?.is_some() { &stage } else { &journal.destination };
+        let copied = if metadata(&stage)?.is_some() {
+            &stage
+        } else {
+            &journal.destination
+        };
         verify_tree(&journal.source, copied, journal.hash, cancel)?;
     }
     check_cancel(cancel)?;
@@ -513,13 +668,22 @@ fn continue_move(
         }
         fs::rename(&stage, &journal.destination).context("Could not publish the moved folder")?;
     }
-    ensure!(metadata(&journal.destination)?.is_some_and(|m| m.is_dir()), "Moved folder is missing.");
+    ensure!(
+        metadata(&journal.destination)?.is_some_and(|m| m.is_dir()),
+        "Moved folder is missing."
+    );
     store::edit_settings(ctx.settings, |settings| {
-        ensure!(same_path(&journal.location.path(ctx.base()?, settings), &journal.source)?,
-            "The current location changed before the move could finish.");
+        ensure!(
+            same_path(
+                &journal.location.path(ctx.base()?, settings),
+                &journal.source
+            )?,
+            "The current location changed before the move could finish."
+        );
         validate_location(&journal.destination, journal.location, ctx, settings)?;
         let default = journal.location.default_path(ctx.base()?);
-        let path = (!same_path(&journal.destination, &default)?).then(|| journal.destination.clone());
+        let path =
+            (!same_path(&journal.destination, &default)?).then(|| journal.destination.clone());
         journal.location.set(settings, path);
         Ok(())
     })?;
@@ -529,10 +693,15 @@ fn continue_move(
 
 fn inventory(root: &Path, cancel: &AtomicBool) -> Result<Vec<Entry>> {
     let mut entries = Vec::new();
-    walk(root, &|_| true, &mut || check_cancel(cancel), &mut |entry| {
-        entries.push(entry);
-        Ok(())
-    })?;
+    walk(
+        root,
+        &|_| true,
+        &mut || check_cancel(cancel),
+        &mut |entry| {
+            entries.push(entry);
+            Ok(())
+        },
+    )?;
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(entries)
 }
@@ -545,10 +714,16 @@ fn copy_tree(
     progress: &mut impl FnMut(u64, u64),
 ) -> Result<()> {
     let entries = inventory(source, cancel)?;
-    let total = entries.iter().filter(|e| e.meta.is_file()).try_fold(0u64, |sum, entry| sum.checked_add(entry.meta.len()))
+    let total = entries
+        .iter()
+        .filter(|e| e.meta.is_file())
+        .try_fold(0u64, |sum, entry| sum.checked_add(entry.meta.len()))
         .context("Storage size overflow")?;
     let free = free_space(target)?;
-    ensure!(free >= total, "The destination drive needs {total} bytes, but only {free} are free.");
+    ensure!(
+        free >= total,
+        "The destination drive needs {total} bytes, but only {free} are free."
+    );
     let mut done = 0;
     progress(done, total);
     for entry in entries {
@@ -564,29 +739,47 @@ fn copy_tree(
             done += size;
             progress(done, total);
             check_cancel(cancel)
-        }).with_context(|| format!("Could not copy {}", entry.path.display()))?;
+        })
+        .with_context(|| format!("Could not copy {}", entry.path.display()))?;
         file.sync_all()?;
         let actual = metadata(&to)?.context("Copied file went missing")?;
-        ensure!(actual.len() == entry.meta.len(), "Size differs: {}", entry.path.display());
+        ensure!(
+            actual.len() == entry.meta.len(),
+            "Size differs: {}",
+            entry.path.display()
+        );
         if let Some(expected) = expected {
-            ensure!(digest(&to, entry.meta.len(), |_| check_cancel(cancel))? == expected,
-                "SHA-256 differs: {}", entry.path.display());
+            ensure!(
+                digest(&to, entry.meta.len(), |_| check_cancel(cancel))? == expected,
+                "SHA-256 differs: {}",
+                entry.path.display()
+            );
         }
         let after = metadata(&from)?.context("Source file went missing")?;
-        ensure!(after.len() == entry.meta.len() && after.modified().ok() == entry.meta.modified().ok(),
-            "The source changed during copying: {}", entry.path.display());
+        ensure!(
+            after.len() == entry.meta.len() && after.modified().ok() == entry.meta.modified().ok(),
+            "The source changed during copying: {}",
+            entry.path.display()
+        );
     }
     Ok(())
 }
 
 fn verify_tree(source: &Path, target: &Path, hash: bool, cancel: &AtomicBool) -> Result<()> {
-    ensure!(metadata(target)?.is_some_and(|meta| meta.is_dir()), "The copied folder is missing.");
+    ensure!(
+        metadata(target)?.is_some_and(|meta| meta.is_dir()),
+        "The copied folder is missing."
+    );
     let left = inventory(source, cancel)?;
     let right = inventory(target, cancel)?;
     ensure!(left.len() == right.len(), "The copied file list differs.");
     for (a, b) in left.iter().zip(&right) {
         check_cancel(cancel)?;
-        ensure!(a.path == b.path && a.meta.is_file() == b.meta.is_file(), "Unexpected file: {}", b.path.display());
+        ensure!(
+            a.path == b.path && a.meta.is_file() == b.meta.is_file(),
+            "Unexpected file: {}",
+            b.path.display()
+        );
         if a.meta.is_file() {
             let size = a.meta.len();
             ensure!(size == b.meta.len(), "Size differs: {}", a.path.display());
@@ -611,13 +804,19 @@ pub fn finish_move(ctx: &MoveContext<'_>, delete_old: bool) -> Result<()> {
         if delete_old {
             validate_location(&journal.source, journal.location, ctx, &settings)?;
             ensure_separate(&journal.source, &journal.destination, "the active location")?;
-            ensure!(metadata(&journal.destination)?.is_some_and(|m| m.is_dir()), "The moved folder is missing.");
+            ensure!(
+                metadata(&journal.destination)?.is_some_and(|m| m.is_dir()),
+                "The moved folder is missing."
+            );
             if metadata(&journal.source)?.is_some() {
                 fs::remove_dir_all(&journal.source).context("Could not remove the old folder")?;
             }
         }
     } else {
-        ensure!(!delete_old && same_path(&active, &journal.source)?, "The active storage location changed.");
+        ensure!(
+            !delete_old && same_path(&active, &journal.source)?,
+            "The active storage location changed."
+        );
         let stage = stage_for(&journal)?;
         if metadata(stage)?.is_some() {
             fs::remove_dir_all(stage)?;
@@ -631,24 +830,36 @@ pub fn finish_move(ctx: &MoveContext<'_>, delete_old: bool) -> Result<()> {
 
 pub fn clear(ctx: &MoveContext<'_>, location: Location, build: &str) -> Result<()> {
     let _guard = ctx.activity_lock()?;
-    ensure!(read_journal(&ctx.journal()?)?.is_none_or(|j| j.phase == MovePhase::Switched),
-        "Finish the move before clearing a folder.");
+    ensure!(
+        read_journal(&ctx.journal()?)?.is_none_or(|j| j.phase == MovePhase::Switched),
+        "Finish the move before clearing a folder."
+    );
     let settings = Settings::load_from(ctx.settings);
     let path = location.path(ctx.base()?, &settings);
     validate_location(&path, location, ctx, &settings)?;
     if location == Location::Data {
         saves::recover_restore(&path)?;
-        saves::create(&path, &ctx.backups(&settings)?, saves::Create {
-            kind: saves::Kind::BeforeMove, label: "", engine_build: build, deadline: None, force: true,
-        })?;
+        saves::create(
+            &path,
+            &ctx.backups(&settings)?,
+            saves::Create {
+                kind: saves::Kind::BeforeMove,
+                label: "",
+                engine_build: build,
+                deadline: None,
+                force: true,
+            },
+        )?;
     }
     if metadata(&path)?.is_some() {
-        let staged = tempfile::Builder::new().prefix(".victory-clear-").tempdir_in(
-            path.parent().context("Storage needs a parent folder")?
-        )?;
+        let staged = tempfile::Builder::new()
+            .prefix(".victory-clear-")
+            .tempdir_in(path.parent().context("Storage needs a parent folder")?)?;
         let discarded = staged.path().join("cleared");
         fs::rename(&path, &discarded)?;
-        staged.close().context("The location was cleared, but the old files could not be removed")?;
+        staged
+            .close()
+            .context("The location was cleared, but the old files could not be removed")?;
     }
     Ok(())
 }
@@ -658,7 +869,10 @@ mod tests {
     use super::*;
 
     fn setup(root: &Path) -> (PathBuf, PathBuf) {
-        (root.join("launcher/settings.toml"), root.join("portable/engine"))
+        (
+            root.join("launcher/settings.toml"),
+            root.join("portable/engine"),
+        )
     }
 
     #[test]
@@ -667,7 +881,11 @@ mod tests {
         let root = temp.path();
         let (settings, engine) = setup(root);
         let base = settings.parent().unwrap();
-        let ctx = MoveContext { settings: &settings, engine: &engine, game: None };
+        let ctx = MoveContext {
+            settings: &settings,
+            engine: &engine,
+            game: None,
+        };
         let source = base.join("data");
         let target = root.join("other-drive/game data");
         let slot = Path::new("DEADBEEF/saves/slot");
@@ -676,19 +894,33 @@ mod tests {
         fs::write(source.join(slot), [126; 1024]).unwrap();
         let stop = AtomicBool::new(false);
         let failed = start_move(&ctx, Location::Data, &target, "test", &stop, |done, _| {
-            if done > 0 { stop.store(true, Ordering::Relaxed); }
+            if done > 0 {
+                stop.store(true, Ordering::Relaxed);
+            }
         });
         assert!(failed.is_err());
-        assert_eq!(read_journal(&ctx.journal().unwrap()).unwrap().unwrap().phase, MovePhase::Copying);
+        assert_eq!(
+            read_journal(&ctx.journal().unwrap())
+                .unwrap()
+                .unwrap()
+                .phase,
+            MovePhase::Copying
+        );
         assert!(Settings::load_from(&settings).storage.data.is_none());
         assert!(source.join(slot).is_file());
         assert!(!target.exists());
-        assert_eq!(saves::list(&base.join("backups")).unwrap()[0].manifest.kind, saves::Kind::BeforeMove);
+        assert_eq!(
+            saves::list(&base.join("backups")).unwrap()[0].manifest.kind,
+            saves::Kind::BeforeMove
+        );
 
         let fresh = AtomicBool::new(false);
         let moved = resume_move(&ctx, &fresh, |_, _| {}).unwrap();
         assert_eq!(moved.phase, MovePhase::Switched);
-        assert_eq!(Settings::load_from(&settings).storage.data.as_ref(), Some(&target));
+        assert_eq!(
+            Settings::load_from(&settings).storage.data.as_ref(),
+            Some(&target)
+        );
         assert_eq!(fs::read(target.join(slot)).unwrap(), [126; 1024]);
         assert!(target.join("empty").is_dir());
         assert!(source.join(slot).is_file());
@@ -703,22 +935,40 @@ mod tests {
     fn resume_after_destination_rename_checks_hash_before_switching() {
         let temp = tempfile::tempdir().unwrap();
         let (settings, engine) = setup(temp.path());
-        let ctx = MoveContext { settings: &settings, engine: &engine, game: None };
+        let ctx = MoveContext {
+            settings: &settings,
+            engine: &engine,
+            game: None,
+        };
         let source = settings.parent().unwrap().join("data");
         let destination = temp.path().join("new-data");
         fs::create_dir_all(&source).unwrap();
         fs::create_dir_all(&destination).unwrap();
         fs::write(source.join("new-file"), b"same").unwrap();
         fs::write(destination.join("new-file"), b"bad!").unwrap();
-        let journal = MoveJournal { location: Location::Data, source: source.clone(), destination: destination.clone(),
-            stage: temp.path().join(".victory-moving-crash"), phase: MovePhase::Ready, hash: true };
+        let journal = MoveJournal {
+            location: Location::Data,
+            source: source.clone(),
+            destination: destination.clone(),
+            stage: temp.path().join(".victory-moving-crash"),
+            phase: MovePhase::Ready,
+            hash: true,
+        };
         journal_write(&ctx, &journal).unwrap();
         let cancel = AtomicBool::new(false);
-        assert!(resume_move(&ctx, &cancel, |_, _| {}).unwrap_err().to_string().contains("SHA-256 differs"));
+        assert!(
+            resume_move(&ctx, &cancel, |_, _| {})
+                .unwrap_err()
+                .to_string()
+                .contains("SHA-256 differs")
+        );
         assert!(Settings::load_from(&settings).storage.data.is_none());
         assert_eq!(fs::read(source.join("new-file")).unwrap(), b"same");
         fs::write(destination.join("new-file"), b"same").unwrap();
-        assert_eq!(resume_move(&ctx, &cancel, |_, _| {}).unwrap().phase, MovePhase::Switched);
+        assert_eq!(
+            resume_move(&ctx, &cancel, |_, _| {}).unwrap().phase,
+            MovePhase::Switched
+        );
         finish_move(&ctx, false).unwrap();
         assert!(source.exists());
     }
@@ -731,17 +981,51 @@ mod tests {
         let base = settings.parent().unwrap();
         let game = root.join("game");
         let repo = root.join("checkout");
-        let ctx = MoveContext { settings: &settings, engine: &engine, game: Some(&game) };
+        let ctx = MoveContext {
+            settings: &settings,
+            engine: &engine,
+            game: Some(&game),
+        };
         fs::create_dir_all(&repo).unwrap();
         fs::write(repo.join(".victory-root"), []).unwrap();
         let not_empty = root.join("occupied");
         fs::create_dir_all(&not_empty).unwrap();
         fs::write(not_empty.join("keep"), []).unwrap();
-        for target in [base.join("cache/inner"), base.join("data"), engine.join("storage"), game.clone(), game.join("folder"), repo.join("cache"), not_empty, base.into()] {
-            assert!(start_move(&ctx, Location::Cache, &target, "", &AtomicBool::new(false), |_, _| {}).is_err(), "{target:?}");
+        for target in [
+            base.join("cache/inner"),
+            base.join("data"),
+            engine.join("storage"),
+            game.clone(),
+            game.join("folder"),
+            repo.join("cache"),
+            not_empty,
+            base.into(),
+        ] {
+            assert!(
+                start_move(
+                    &ctx,
+                    Location::Cache,
+                    &target,
+                    "",
+                    &AtomicBool::new(false),
+                    |_, _| {}
+                )
+                .is_err(),
+                "{target:?}"
+            );
         }
         let guard = ctx.activity_lock().unwrap();
-        assert!(start_move(&ctx, Location::Cache, &root.join("elsewhere"), "", &AtomicBool::new(false), |_, _| {}).is_err());
+        assert!(
+            start_move(
+                &ctx,
+                Location::Cache,
+                &root.join("elsewhere"),
+                "",
+                &AtomicBool::new(false),
+                |_, _| {}
+            )
+            .is_err()
+        );
         drop(guard);
         assert!(read_journal(&ctx.journal().unwrap()).unwrap().is_none());
     }
@@ -755,7 +1039,11 @@ mod tests {
         let path = data.join("DEADBEEF/saves/slot");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, b"persistent").unwrap();
-        let ctx = MoveContext { settings: &settings, engine: &engine, game: None };
+        let ctx = MoveContext {
+            settings: &settings,
+            engine: &engine,
+            game: None,
+        };
         let root = base.join("backups");
         fs::write(&root, b"cannot create a backup here").unwrap();
         assert!(clear(&ctx, Location::Data, "test").is_err());

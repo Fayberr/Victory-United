@@ -1,6 +1,10 @@
 //! Window shell: navigation and dispatch. The two halves keep their own state (`core`, `ops`) and only
 //! see each other through `Shared`, which the core half fills in once per frame.
-use crate::{capture::Capture, core, i18n::tr, ops, theme};
+use crate::{
+    capture::Capture,
+    core::{self, store::{AfterPlay, Settings, WindowPlacement}},
+    i18n::tr, ops, theme,
+};
 use eframe::egui;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -63,6 +67,11 @@ pub struct App {
     pub shared: Shared,
     capture: Option<Capture>,
     logo: egui::TextureHandle,
+    initial_update: bool,
+    was_focused: bool,
+    seen_launch: u64,
+    hidden_until_exit: bool,
+    window: Option<WindowPlacement>,
 }
 
 /// Command line switches: `--ui-demo` and `--capture <dir>` (the latter implies the former).
@@ -71,6 +80,7 @@ pub struct Args {
     pub demo: bool,
     pub capture: Option<std::path::PathBuf>,
     pub hw_dump: Option<std::path::PathBuf>,
+    pub tab: Option<Tab>,
 }
 
 impl Args {
@@ -80,6 +90,11 @@ impl Args {
         while let Some(a) = it.next() {
             match a.as_str() {
                 "--ui-demo" => args.demo = true,
+                "--ui-tab" => {
+                    if it.next().as_deref() == Some("saves") {
+                        args.tab = Some(Tab::Saves);
+                    }
+                }
                 "--hw-dump" => args.hw_dump = it.next().map(Into::into),
                 "--capture" => {
                     args.demo = true;
@@ -93,12 +108,12 @@ impl Args {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, args: Args, icon: &egui::IconData) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, args: Args, icon: &egui::IconData, settings: Settings) -> Self {
         let ctx = cc.egui_ctx.clone();
         let (core, ops, shared) = if args.demo {
             (core::CoreState::demo(), ops::OpsState::demo(), core::demo_shared())
         } else {
-            (core::CoreState::new(ctx.clone()), ops::OpsState::new(ctx), Default::default())
+            (core::CoreState::new(ctx.clone(), settings), ops::OpsState::new(ctx), Default::default())
         };
         theme::set_appearance(&cc.egui_ctx, &core.settings.appearance);
         let capture = args.capture.map(Capture::new);
@@ -107,7 +122,87 @@ impl App {
             egui::ColorImage::from_rgba_unmultiplied([icon.width as usize, icon.height as usize], &icon.rgba),
             egui::TextureOptions::LINEAR,
         );
-        Self { tab: Tab::Play, core, ops, shared, capture, logo }
+        Self {
+            tab: args.tab.unwrap_or(Tab::Play), core, ops, shared, capture, logo,
+            initial_update: !args.demo, was_focused: false, seen_launch: 0, hidden_until_exit: false, window: None,
+        }
+    }
+
+    fn update_checks(&mut self, ctx: &egui::Context) {
+        let starting = std::mem::take(&mut self.initial_update);
+        let focused = ctx.input(|i| i.focused);
+        let was_focused = std::mem::replace(&mut self.was_focused, focused);
+        let gained_focus = focused && !was_focused;
+        if (starting || gained_focus) && ops::updates::check_due(
+            self.core.settings.update_schedule,
+            self.core.settings.last_update_check,
+            core::storage::now().as_secs(),
+            starting,
+        ) {
+            self.ops.updates.check(&self.ops.cfg);
+        }
+        if let Some(time) = self.ops.updates.last_check_started.take() {
+            self.core.settings.last_update_check = Some(time);
+            self.core.save_settings();
+        }
+    }
+
+    fn remember_window(&mut self) {
+        if self.core.settings.behavior.remember_window && self.window.is_some()
+            && self.core.settings.window != self.window
+        {
+            self.core.settings.window = self.window;
+            self.core.save_settings();
+        }
+    }
+
+    /// A hidden window can finish the after-exit backup without running an overlay or monitor.
+    fn window_behavior(&mut self, ctx: &egui::Context) -> bool {
+        if self.hidden_until_exit {
+            if !self.core.runner.busy() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            return true;
+        }
+        let zoom = ctx.zoom_factor();
+        let viewport = ctx.input(|i| i.viewport().clone());
+        if !viewport.minimized.unwrap_or(false) && !viewport.maximized.unwrap_or(false) {
+            if let (Some(inner), Some(outer)) = (viewport.inner_rect, viewport.outer_rect) {
+                let placement = WindowPlacement { size: (inner.size() * zoom).into(), position: (outer.min.to_vec2() * zoom).into() };
+                if placement.valid() {
+                    self.window = Some(placement);
+                }
+            }
+        }
+        if viewport.close_requested() {
+            self.remember_window();
+            if self.core.runner.busy() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.hide_until_game_exit(ctx);
+                return true;
+            }
+        }
+        let launched = self.core.runner.launch_revision;
+        if launched != self.seen_launch {
+            self.seen_launch = launched;
+            if self.shared.game_pid.is_some() {
+                match self.core.settings.behavior.after_play {
+                    AfterPlay::KeepOpen => {}
+                    AfterPlay::Minimize => ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
+                    AfterPlay::Close => {
+                        self.remember_window();
+                        self.hide_until_game_exit(ctx);
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn hide_until_game_exit(&mut self, ctx: &egui::Context) {
+        self.hidden_until_exit = true;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
     }
 
     fn header(&mut self, ctx: &egui::Context) {
@@ -171,6 +266,12 @@ impl eframe::App for App {
             }
         }
         self.core.tick(ctx, &mut self.shared);
+        if self.core.persist {
+            if self.window_behavior(ctx) {
+                return;
+            }
+            self.update_checks(ctx);
+        }
         self.ops.tick(ctx, &self.shared, self.tab == Tab::Monitor);
         if self.core.screen() == core::Screen::FirstRun {
             egui::CentralPanel::default().show(ctx, |ui| core::firstrun::show(&mut self.core, &self.shared, &self.logo, ui));
@@ -180,7 +281,13 @@ impl eframe::App for App {
         self.status_bar(ctx);
         egui::CentralPanel::default().frame(egui::Frame::new().fill(ctx.style().visuals.panel_fill).inner_margin(egui::Margin::symmetric(28, 22))).show(ctx, |ui| {
             match self.tab {
-                Tab::Play => core::play::show(&mut self.core, &self.shared, ui),
+                Tab::Play => {
+                    if self.core.force_screen != Some(core::Screen::WarmUp) && ops::updates::play_banner(&mut self.ops.updates, ui) {
+                        self.tab = Tab::Updates;
+                        ctx.request_repaint();
+                    }
+                    core::play::show(&mut self.core, &self.shared, ui);
+                }
                 Tab::Settings => core::settings::show(&mut self.core, &self.shared, ui),
                 Tab::Saves => core::settings::show_saves(&mut self.core, ui),
                 Tab::Flags => core::flags::show(&mut self.core, &self.shared, ui),

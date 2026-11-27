@@ -7,7 +7,7 @@ use super::{
     presets::builtin,
     widgets::{open_folder, page_scroll, page_title, pick_file, pick_folder, save_file},
     saves, storage,
-    store::{Appearance, Backups, ThemeChoice},
+    store::{AfterPlay, Appearance, Backups, Behavior, ThemeChoice, UpdateSchedule},
     CoreState,
 };
 use crate::{app::Shared, i18n::{tr, trf}, paths, theme};
@@ -29,6 +29,10 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
         ui.set_max_width(820.0);
         let (resolved, preset_id) = core.resolved();
         appearance_section(core, ui);
+        ui.add_space(12.0);
+        behavior_section(core, ui);
+        ui.add_space(12.0);
+        startup_updates_section(core, ui);
         ui.add_space(12.0);
         backup_section(core, ui);
         ui.add_space(12.0);
@@ -80,6 +84,69 @@ fn appearance_section(core: &mut CoreState, ui: &mut egui::Ui) {
         core.settings.appearance = appearance;
         core.save_settings();
         theme::set_appearance(ui.ctx(), &appearance);
+    }
+}
+
+fn behavior_section(core: &mut CoreState, ui: &mut egui::Ui) {
+    let before = core.settings.behavior;
+    let behavior = &mut core.settings.behavior;
+    theme::card(ui).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(theme::strong(tr("behavior.title")).size(16.0));
+            if ui.add_enabled(*behavior != Behavior::default(), egui::Button::new(tr("appearance.reset"))).clicked() {
+                *behavior = Behavior::default();
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label(tr("behavior.after"));
+            for (action, name) in [
+                (AfterPlay::KeepOpen, "behavior.keep"), (AfterPlay::Minimize, "behavior.minimize"),
+                (AfterPlay::Close, "behavior.close"),
+            ] {
+                ui.selectable_value(&mut behavior.after_play, action, tr(name));
+            }
+        });
+        ui.label(theme::dim(tr("behavior.after_help")).size(12.5));
+        ui.checkbox(&mut behavior.remember_window, tr("behavior.remember"));
+        ui.label(theme::dim(tr("behavior.remember_help")).size(12.5));
+        ui.checkbox(&mut behavior.confirm_stop, tr("behavior.confirm_stop"));
+        ui.label(theme::dim(tr("behavior.confirm_help")).size(12.5));
+    });
+    if core.settings.behavior != before {
+        if !core.settings.behavior.remember_window {
+            core.settings.window = None;
+        }
+        core.save_settings();
+    }
+}
+
+fn startup_updates_section(core: &mut CoreState, ui: &mut egui::Ui) {
+    let before = core.settings.update_schedule;
+    let schedule = &mut core.settings.update_schedule;
+    theme::card(ui).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(theme::strong(tr("startup_updates.title")).size(16.0));
+            if ui.add_enabled(*schedule != UpdateSchedule::default(), egui::Button::new(tr("appearance.reset"))).clicked() {
+                *schedule = UpdateSchedule::default();
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            for (choice, name) in [
+                (UpdateSchedule::Off, "startup_updates.off"), (UpdateSchedule::Daily, "startup_updates.daily"),
+                (UpdateSchedule::AtStartup, "startup_updates.startup"),
+            ] {
+                ui.selectable_value(schedule, choice, tr(name));
+            }
+        });
+        ui.label(theme::dim(tr("startup_updates.help")).size(12.5));
+        if let Some(t) = core.settings.last_update_check {
+            ui.label(theme::dim(trf("startup_updates.last", &[("time", &backup_time(t))])).size(12.5));
+        }
+    });
+    if core.settings.update_schedule != before {
+        core.save_settings();
     }
 }
 

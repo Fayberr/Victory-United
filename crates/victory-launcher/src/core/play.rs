@@ -6,7 +6,21 @@ use super::{
 use crate::{app::Shared, i18n::{tr, trf}, theme};
 use eframe::egui;
 
+pub fn hardware_allows_play(hw: Option<&super::hw::Hardware>, acknowledged: bool) -> anyhow::Result<()> {
+    anyhow::ensure!(hw.is_some() || !cfg!(windows), "{}", tr("play.checking"));
+    anyhow::ensure!(!mesh_blocked(hw) || acknowledged, "{}", tr("play.mesh_blocked"));
+    Ok(())
+}
+
+pub fn mesh_blocked(hw: Option<&super::hw::Hardware>) -> bool {
+    hw.is_some_and(|hw| hw.mesh_shaders == Some(false))
+}
+
 pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
+    egui::ScrollArea::vertical().id_salt("play-page").show(ui, |ui| show_scroll(core, ui));
+}
+
+fn show_scroll(core: &mut CoreState, ui: &mut egui::Ui) {
     let title = core.game.as_ref().map(|g| g.title.clone()).unwrap_or_else(|| tr("play.no_game").to_string());
     page_title(ui, &title, core.game.as_ref().map(|g| g.folder.to_string_lossy().into_owned()).as_deref().unwrap_or(""));
     let wide = ui.available_width() > 720.0;
@@ -34,6 +48,10 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
             });
         }
     });
+    if !wide {
+        ui.add_space(12.0);
+        machine_card(core, ui);
+    }
 }
 
 fn play_card(core: &mut CoreState, ui: &mut egui::Ui) {
@@ -53,6 +71,9 @@ fn play_card(core: &mut CoreState, ui: &mut egui::Ui) {
                 ui.add_space(10.0);
                 stop_button(core, ui);
             }
+            RunState::Finishing { .. } => {
+                ui.label(theme::strong(tr("play.finishing")).size(18.0));
+            }
             RunState::Ended(s) => {
                 ended(core, ui, &s);
             }
@@ -67,12 +88,7 @@ fn play_card(core: &mut CoreState, ui: &mut egui::Ui) {
 
 fn idle(core: &mut CoreState, ui: &mut egui::Ui) {
     let engine = core.engine_exe();
-    let ready = core.game.is_some() && engine.is_some();
-    ui.add_enabled_ui(ready, |ui| {
-        if theme::primary_button(ui, tr("play.play")).clicked() {
-            core.play();
-        }
-    });
+    launch_button(core, ui, "play.play", false);
     ui.add_space(8.0);
     if core.game.is_none() {
         ui.label(theme::dim(tr("play.need_game")));
@@ -120,10 +136,12 @@ fn warmup(core: &mut CoreState, ui: &mut egui::Ui, done: u64, total: u64, elapse
     ui.add_space(12.0);
     ui.horizontal(|ui| {
         if ui.button(tr("play.skip")).clicked() {
-            core.runner.skip_warmup();
+            if let Err(error) = core.runner.skip_warmup() {
+                core.notice = Some(error.to_string());
+            }
         }
         if ui.button(tr("play.cancel")).clicked() {
-            core.runner.stop();
+            request_stop(core);
         }
     });
 }
@@ -132,10 +150,62 @@ fn mib(bytes: u64) -> String {
     format!("{} MB", bytes >> 20)
 }
 
-fn stop_button(core: &mut CoreState, ui: &mut egui::Ui) {
-    if ui.add(egui::Button::new(tr("play.stop")).min_size(egui::vec2(120.0, 34.0))).clicked() {
-        core.runner.stop();
+fn request_stop(core: &mut CoreState) {
+    if let Err(error) = core.runner.stop() {
+        core.notice = Some(error.to_string());
     }
+}
+
+fn stop_button(core: &mut CoreState, ui: &mut egui::Ui) {
+    if core.ui.confirm_stop && core.settings.behavior.confirm_stop {
+        ui.label(theme::warn_text(ui, tr("play.stop_question")));
+        ui.horizontal(|ui| {
+            if ui.button(tr("play.stop_confirm")).clicked() {
+                core.ui.confirm_stop = false;
+                request_stop(core);
+            }
+            if ui.button(tr("play.cancel")).clicked() {
+                core.ui.confirm_stop = false;
+            }
+        });
+    } else if ui.add(egui::Button::new(tr("play.stop")).min_size(egui::vec2(120.0, 34.0))).clicked() {
+        if core.settings.behavior.confirm_stop {
+            core.ui.confirm_stop = true;
+        } else {
+            request_stop(core);
+        }
+    }
+}
+
+fn launch_button(core: &mut CoreState, ui: &mut egui::Ui, label: &'static str, without_flags: bool) {
+    let blocked = mesh_blocked(core.hw.as_ref());
+    if blocked {
+        notice(ui, tr("play.mesh_blocked"), true);
+        ui.label(theme::dim(tr("play.mesh_override_help")).size(12.5));
+    }
+    let ready = core.game.is_some() && core.engine_exe().is_some() && !super::settings::storage_busy(core)
+        && hardware_allows_play(core.hw.as_ref(), blocked).is_ok();
+    let label = if blocked {
+        if without_flags { "play.mesh_force_without" } else { "play.mesh_force" }
+    } else {
+        label
+    };
+    ui.add_enabled_ui(ready, |ui| {
+        let pressed = if without_flags || blocked {
+            ui.button(tr(label)).clicked()
+        } else {
+            theme::primary_button(ui, tr(label)).clicked()
+        };
+        if pressed {
+            core.ui.confirm_stop = false;
+            if without_flags {
+                core.play_without_flags(blocked);
+            } else {
+                core.ui.start_without_flags = false;
+                core.play(blocked);
+            }
+        }
+    });
 }
 
 fn ended(core: &mut CoreState, ui: &mut egui::Ui, s: &super::runner::Summary) {
@@ -159,21 +229,13 @@ fn ended(core: &mut CoreState, ui: &mut egui::Ui, s: &super::runner::Summary) {
         ui.add_space(8.0);
         notice(ui, tr("play.quick_exit"), false);
         ui.add_space(6.0);
-        if ui.button(tr("play.start_without_flags")).clicked() {
-            core.play_without_flags();
-            return;
-        }
+        launch_button(core, ui, "play.start_without_flags", true);
     }
     ui.add_space(12.0);
-    ui.horizontal(|ui| {
-        if theme::primary_button(ui, tr("play.play_again")).clicked() {
-            core.ui.start_without_flags = false;
-            core.play();
-        }
-        if ui.button(tr("play.open_logs")).clicked() {
-            open_folder(&crate::paths::logs_dir());
-        }
-    });
+    launch_button(core, ui, "play.play_again", false);
+    if ui.button(tr("play.open_logs")).clicked() {
+        open_folder(&crate::paths::logs_dir());
+    }
 }
 
 fn preset_card(core: &mut CoreState, ui: &mut egui::Ui) {
@@ -226,11 +288,28 @@ fn machine_card(core: &CoreState, ui: &mut egui::Ui) {
                 kv(ui, tr("hw.driver"), &hw.driver);
                 kv(ui, tr("hw.ram"), &format!("{:.0} GB", hw.ram_mb as f64 / 1024.0));
                 kv(ui, tr("hw.cpu"), &format!("{} cores, {} threads", hw.cpu_cores, hw.cpu_threads));
-                for w in super::hw::warnings(hw) {
+                for w in super::hw::warnings(hw).into_iter().filter(|w| w.severity == super::hw::Severity::Warning) {
                     ui.add_space(8.0);
-                    notice(ui, &w.text, w.severity == super::hw::Severity::Blocker);
+                    notice(ui, &w.text, false);
                 }
             }
         }
     });
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_explicit_mesh_override_can_launch_unsupported_hardware() {
+        let mut hardware = super::super::hw::Hardware { mesh_shaders: Some(false), ram_mb: 1024, ..Default::default() };
+        assert!(hardware_allows_play(Some(&hardware), false).is_err());
+        assert!(hardware_allows_play(Some(&hardware), true).is_ok());
+        hardware.mesh_shaders = None;
+        assert!(hardware_allows_play(Some(&hardware), false).is_ok());
+        hardware.mesh_shaders = Some(true);
+        assert!(hardware_allows_play(Some(&hardware), false).is_ok());
+    }
 }

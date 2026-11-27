@@ -16,9 +16,9 @@ The first start translates the game's shaders. That takes a while once; later st
 skip it, but the game then stutters more at first. The bar shows how far it is and how long it will
 probably take.
 
-The Play tab shows the preset it picked for your graphics card. "Automatic" is a good choice. If the
-launcher warns about your PC (no mesh shader support, little memory), take that seriously: the game may not
-run or may run badly.
+The Play tab shows the preset it picked for your graphics card. "Automatic" works for most players.
+The game requires mesh shaders. On a card without them, developers can choose **Start anyway** to test
+the engine. Low RAM or video memory shows a warning and still allows Play.
 
 When the game stops, the Play tab says how it ended and where the log is. If it stopped within 30 seconds
 while you had extra flags set, it offers to start again without them.
@@ -27,9 +27,18 @@ Windows or antivirus may warn about an unsigned program. That is expected for a 
 
 ## Settings
 
-Settings are saved in a profile. The top of the tab has the everyday things: preset, console model (Series
-X or Series S), full screen, the performance panel (F3 hides it in the game), ray tracing, safe mode,
-upscaling. Safe mode leaves out every way that is still on trial, so try it first when something is wrong.
+**Appearance** switches between Dark, Light and Follow Windows. Interface size ranges from 80% to 150%.
+
+**Launcher behavior** lets you keep the launcher open, minimize it or close its window when the game starts.
+Closing disables the monitor and launcher overlay. The launcher stays in the background long enough to finish
+an enabled backup after a clean exit. You can also remember window placement and require confirmation before Stop.
+
+**Updates** checks GitHub Releases at startup and, by default, checks again on focus once 24 hours have passed.
+Choose Off or At every start as needed. The Play tab shows a notice when a newer build is available.
+Install updates from the Updates tab when you are ready.
+
+Each profile keeps its own preset, console model (Series X or Series S), full screen, the F3 performance panel,
+ray tracing, safe mode and upscaling. Safe mode leaves out experimental options.
 
 Below that are the settings that matter most, with a description each: graphics, memory, threads and
 debugging. Anything you changed from the preset is marked, with a Reset button for each, and "Reset to
@@ -40,6 +49,21 @@ include NVIDIA's files; when support arrives it says which files are needed and 
 
 Profiles let you keep several sets of settings: create, duplicate, rename, delete, export to a `.toml` file
 and import one.
+
+## Saves and storage
+
+The **Saves** tab creates, verifies, restores and exchanges backups as ZIP files. Backups include saves and
+persistent local storage for each title. The launcher takes a recovery backup before replacing your current
+data. Close the game before working with backups.
+
+Automatic backups are on before launch and after a clean exit. Change their schedule, location and retention
+under **Settings > Save backups**. By default the launcher keeps the latest eight automatic backups and one
+per day for 14 UTC days within a 5 GiB limit. Manual backups, labeled backups and the last valid backup stay.
+
+Use **Settings > Storage** to move saves and game data or the shader and pipeline cache. Pick an empty folder
+on another drive or elsewhere on the same drive. The launcher verifies the copy before selecting it. Keep or
+delete the old folder after the move. If a move is interrupted, open Storage to resume or cancel it.
+Clearing game data requires typing CLEAR and first makes a recovery backup.
 
 ## For developers and testers
 
@@ -65,8 +89,9 @@ hardware and settings. You see every item first and can untick any. Your Windows
 folder are replaced by placeholders. Nothing is uploaded: attach the ZIP to an issue yourself. A ready
 issue text goes to the clipboard.
 
-**Where things are.** Settings, profiles, logs, caches and reports are in `%APPDATA%\Victory-United`. The
-About tab has buttons that open them. Each game folder gets its own shader cache.
+**Where things are.** Settings, profiles, logs and reports are in `%APPDATA%\Victory-United`. Game data,
+backups and caches start there and can move separately. About opens the active data and cache folders.
+Each game folder gets its own shader cache.
 
 **Adding presets and flags.** Presets are in `crates/victory-launcher/data/presets.toml`, the flag list in
 `crates/victory-launcher/data/flags.toml`. A test fails when the code reads a `VICTORY_*` variable that is

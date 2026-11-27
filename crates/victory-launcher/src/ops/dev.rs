@@ -20,8 +20,7 @@ pub struct DevState {
     pub profile_ms: String,
     pub profile_file: String,
     pub profile_note: Option<String>,
-    pub cache_bytes: Option<u64>,
-    pub confirm_clear: bool,
+
     pub note: Option<String>,
 }
 
@@ -39,7 +38,7 @@ impl DevState {
             profile_to: "40".into(),
             profile_ms: "5".into(),
             profile_file: "profile.txt".into(),
-            cache_bytes: Some(3_400 << 20),
+
             ..Default::default()
         }
     }
@@ -77,37 +76,9 @@ pub fn newest_log(dir: &Path) -> Option<PathBuf> {
         .map(|e| e.path())
 }
 
-pub fn dir_bytes(p: &Path) -> u64 {
-    std::fs::read_dir(p)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| match e.metadata() {
-            Ok(m) if m.is_dir() => dir_bytes(&e.path()),
-            Ok(m) => m.len(),
-            Err(_) => 0,
-        })
-        .sum()
-}
+
 
 /// Deletes what is inside the shader cache folder. Refuses any folder that is not named `cache`, so a
-/// wrong path can never wipe something else. Returns the bytes freed.
-pub fn clear_cache(root: &Path) -> Result<u64, String> {
-    if root.file_name().and_then(|n| n.to_str()) != Some("cache") {
-        return Err(format!("{} is not a cache folder", root.display()));
-    }
-    if !root.is_dir() {
-        return Ok(0);
-    }
-    let size = dir_bytes(root);
-    for e in std::fs::read_dir(root).map_err(|e| e.to_string())?.flatten() {
-        let p = e.path();
-        let r = if e.file_type().map(|t| t.is_dir()).unwrap_or(false) { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
-        r.map_err(|e| format!("{}: {e}", p.display()))?;
-    }
-    Ok(size)
-}
-
 /// The value of `VICTORY_PROFILE`, or why it is not valid. Matches what the engine's parser accepts:
 /// from and to in seconds, the sampling step in milliseconds, then the file.
 pub fn profile_value(from: &str, to: &str, ms: &str, file: &str) -> Result<String, &'static str> {
@@ -171,7 +142,7 @@ pub fn show(ops: &mut OpsState, shared: &Shared, ui: &mut egui::Ui) {
         ui.add_space(12.0);
         log_card(ui, ops, shared);
         ui.add_space(12.0);
-        folders_card(ui, ops, shared);
+        folders_card(ui);
         ui.add_space(12.0);
         env_card(ui, shared);
     });
@@ -321,7 +292,7 @@ fn log_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
     });
 }
 
-fn folders_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
+fn folders_card(ui: &mut egui::Ui) {
     theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(theme::strong(tr("dev.folders")));
@@ -338,36 +309,7 @@ fn folders_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
             }
         });
         ui.add_space(8.0);
-        ui.label(theme::strong(tr("dev.cache")));
-        ui.label(theme::dim(tr("dev.cache_help")).size(12.5));
-        let running = shared.game_pid.is_some();
-        ui.horizontal(|ui| {
-            if ui.button(tr("dev.cache_measure")).clicked() {
-                ops.dev.cache_bytes = Some(dir_bytes(&paths::cache_root()));
-            }
-            if let Some(b) = ops.dev.cache_bytes {
-                ui.label(trf("dev.cache_size", &[("size", &mb(b))]));
-            }
-            if ops.dev.confirm_clear {
-                ui.label(theme::warn_text(ui, tr("dev.cache_ask")));
-                if ui.button(tr("dev.cache_yes")).clicked() {
-                    ops.dev.note = Some(match clear_cache(&paths::cache_root()) {
-                        Ok(b) => trf("dev.cache_cleared", &[("size", &mb(b))]),
-                        Err(e) => e,
-                    });
-                    ops.dev.cache_bytes = Some(dir_bytes(&paths::cache_root()));
-                    ops.dev.confirm_clear = false;
-                }
-                if ui.button(tr("updates.no")).clicked() {
-                    ops.dev.confirm_clear = false;
-                }
-            } else if ui.add_enabled(!running, egui::Button::new(tr("dev.cache_clear"))).clicked() {
-                ops.dev.confirm_clear = true;
-            }
-        });
-        if let Some(n) = &ops.dev.note {
-            ui.label(theme::dim(n.clone()).size(12.5));
-        }
+        ui.label(theme::dim(tr("storage.developer_hint")).size(12.5));
     });
 }
 
@@ -413,23 +355,7 @@ mod tests {
         assert!(newest_log(&dir.path().join("none")).is_none());
     }
 
-    #[test]
-    fn cache_clear_is_fenced() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = dir.path().join("cache");
-        std::fs::create_dir_all(cache.join("game1")).unwrap();
-        std::fs::write(cache.join("game1/a.bin"), vec![0u8; 1000]).unwrap();
-        std::fs::write(cache.join("b.bin"), vec![0u8; 500]).unwrap();
-        // Something that is not named cache is refused and untouched.
-        let other = dir.path().join("settings");
-        std::fs::create_dir_all(&other).unwrap();
-        std::fs::write(other.join("keep.toml"), "x").unwrap();
-        assert!(clear_cache(&other).is_err());
-        assert!(other.join("keep.toml").exists());
-        assert_eq!(clear_cache(&cache).unwrap(), 1500);
-        assert!(cache.is_dir() && std::fs::read_dir(&cache).unwrap().count() == 0);
-        assert_eq!(clear_cache(&dir.path().join("x/cache")).unwrap(), 0);
-    }
+
 
     #[test]
     fn profile_value_matches_the_engine_parser() {

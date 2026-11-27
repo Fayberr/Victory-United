@@ -41,6 +41,7 @@ pub enum RunState {
     Warming { done: u64, total: u64, since: Instant },
     Starting,
     Running { pid: u32, since: Instant, log: PathBuf },
+    Finishing { log: PathBuf },
     Ended(Summary),
 }
 
@@ -49,6 +50,7 @@ enum Event {
     WarmFinished,
     BackupWarning(String),
     Started { pid: u32, log: PathBuf },
+    GameExited { log: PathBuf },
     Ended(Summary),
 }
 
@@ -79,16 +81,17 @@ pub struct Runner {
     skip: Arc<AtomicBool>,
     pub backup_warning: Option<String>,
     pub backup_revision: u64,
+    pub launch_revision: u64,
 }
 
 impl Runner {
     pub fn new(ctx: egui::Context) -> Self {
         let (tx, rx) = channel();
-        Self { state: RunState::Idle, rx, tx, ctx, child_pid: Arc::new(AtomicU32::new(0)), cancel: Arc::new(AtomicBool::new(false)), skip: Arc::new(AtomicBool::new(false)), backup_warning: None, backup_revision: 0 }
+        Self { state: RunState::Idle, rx, tx, ctx, child_pid: Arc::new(AtomicU32::new(0)), cancel: Arc::new(AtomicBool::new(false)), skip: Arc::new(AtomicBool::new(false)), backup_warning: None, backup_revision: 0, launch_revision: 0 }
     }
 
     pub fn busy(&self) -> bool {
-        matches!(self.state, RunState::Warming { .. } | RunState::Starting | RunState::Running { .. })
+        matches!(self.state, RunState::Warming { .. } | RunState::Starting | RunState::Running { .. } | RunState::Finishing { .. })
     }
 
     pub fn running_pid(&self) -> Option<u32> {
@@ -100,7 +103,7 @@ impl Runner {
 
     pub fn log_file(&self) -> Option<PathBuf> {
         match &self.state {
-            RunState::Running { log, .. } => Some(log.clone()),
+            RunState::Running { log, .. } | RunState::Finishing { log } => Some(log.clone()),
             RunState::Ended(s) => s.log.clone(),
             _ => None,
         }
@@ -164,17 +167,18 @@ impl Runner {
     }
 
     /// Ends the warm-up early and goes on to the game.
-    pub fn skip_warmup(&self) {
+    pub fn skip_warmup(&self) -> std::io::Result<()> {
         if matches!(self.state, RunState::Warming { .. }) {
             self.skip.store(true, Ordering::SeqCst);
-            kill_tree(self.child_pid.load(Ordering::SeqCst));
+            return kill_tree(self.child_pid.load(Ordering::SeqCst));
         }
+        Ok(())
     }
 
     /// Stops what is running: the warm-up or the game, with its child processes.
-    pub fn stop(&self) {
+    pub fn stop(&self) -> std::io::Result<()> {
         self.cancel.store(true, Ordering::SeqCst);
-        kill_tree(self.child_pid.load(Ordering::SeqCst));
+        kill_tree(self.child_pid.load(Ordering::SeqCst))
     }
 
     /// Takes the events that arrived since the last frame.
@@ -188,7 +192,11 @@ impl Runner {
                 }
                 Event::BackupWarning(message) => self.backup_warning = Some(message),
                 Event::WarmFinished => self.state = RunState::Starting,
-                Event::Started { pid, log } => self.state = RunState::Running { pid, since: Instant::now(), log },
+                Event::Started { pid, log } => {
+                    self.state = RunState::Running { pid, since: Instant::now(), log };
+                    self.launch_revision = self.launch_revision.wrapping_add(1);
+                }
+                Event::GameExited { log } => self.state = RunState::Finishing { log },
                 Event::Ended(s) => {
                     self.state = RunState::Ended(s);
                     self.backup_revision = self.backup_revision.wrapping_add(1);
@@ -249,9 +257,13 @@ fn run_game(plan: &Plan, logs_dir: &Path, flags_active: bool, pid: &AtomicU32, c
         Err(e) => return fail(format!("Could not start the engine ({}): {e}", plan.engine.display()), Some(log_path)),
     };
     pid.store(child.id(), Ordering::SeqCst);
+    if cancel.load(Ordering::SeqCst) {
+        let _ = kill_tree(child.id());
+    }
     send(Event::Started { pid: child.id(), log: log_path.clone() });
     let status = child.wait();
     pid.store(0, Ordering::SeqCst);
+    send(Event::GameExited { log: log_path.clone() });
     let secs = started.elapsed().as_secs();
     let stopped = cancel.load(Ordering::SeqCst);
     Summary {
@@ -291,19 +303,22 @@ fn hide_window(cmd: &mut Command) {
 fn hide_window(_cmd: &mut Command) {}
 
 /// Kills a process and everything it started.
-pub fn kill_tree(pid: u32) {
+pub fn kill_tree(pid: u32) -> std::io::Result<()> {
     if pid == 0 {
-        return;
+        return Ok(());
     }
     #[cfg(windows)]
-    {
+    let status = {
         use std::os::windows::process::CommandExt;
-        let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).creation_flags(0x0800_0000).stdout(Stdio::null()).stderr(Stdio::null()).status();
-    }
+        Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(0x0800_0000).stdout(Stdio::null()).stderr(Stdio::null()).status()?
+    };
     #[cfg(not(windows))]
-    {
-        let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    let status = Command::new("kill").args(["-9", &pid.to_string()]).status()?;
+    if !status.success() {
+        return Err(std::io::Error::other(format!("Stop returned {status}")));
     }
+    Ok(())
 }
 
 pub fn parse_progress(line: &str) -> Option<(u64, u64)> {

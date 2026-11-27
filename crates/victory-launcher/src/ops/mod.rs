@@ -33,9 +33,6 @@ impl OpsState {
         let cfg = OpsSettings::load();
         let mut s = Self { persist: true, ..Default::default() };
         s.updates = updates::UpdatesState::new(ctx);
-        if cfg.check_on_launch {
-            s.updates.check(&cfg);
-        }
         s.cfg = cfg;
         s
     }

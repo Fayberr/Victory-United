@@ -1,6 +1,8 @@
 //! Neutral gray themes. Layers, selection and focus use lightness and outlines.
 use crate::core::store::Appearance;
-use eframe::egui::{self, Color32, CornerRadius, FontFamily, FontId, Margin, Stroke, TextStyle, Visuals};
+use eframe::egui::{
+    self, Color32, CornerRadius, FontFamily, FontId, Margin, Stroke, TextStyle, Visuals,
+};
 
 pub fn apply(ctx: &egui::Context) {
     for theme in [egui::Theme::Dark, egui::Theme::Light] {
@@ -13,11 +15,24 @@ pub fn apply(ctx: &egui::Context) {
             s.spacing.scroll.bar_width = 8.0;
             s.spacing.scroll.floating = true;
             s.animation_time = 0.0; // no animation: draw on input only
-            s.text_styles.insert(TextStyle::Heading, FontId::new(22.0, FontFamily::Proportional));
-            s.text_styles.insert(TextStyle::Body, FontId::new(14.5, FontFamily::Proportional));
-            s.text_styles.insert(TextStyle::Button, FontId::new(14.5, FontFamily::Proportional));
-            s.text_styles.insert(TextStyle::Small, FontId::new(12.0, FontFamily::Proportional));
-            s.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
+            s.text_styles.insert(
+                TextStyle::Heading,
+                FontId::new(22.0, FontFamily::Proportional),
+            );
+            s.text_styles
+                .insert(TextStyle::Body, FontId::new(14.5, FontFamily::Proportional));
+            s.text_styles.insert(
+                TextStyle::Button,
+                FontId::new(14.5, FontFamily::Proportional),
+            );
+            s.text_styles.insert(
+                TextStyle::Small,
+                FontId::new(12.0, FontFamily::Proportional),
+            );
+            s.text_styles.insert(
+                TextStyle::Monospace,
+                FontId::new(13.0, FontFamily::Monospace),
+            );
         });
     }
 }
@@ -35,7 +50,11 @@ pub fn set_appearance(ctx: &egui::Context, appearance: &Appearance) {
 fn visuals(theme: egui::Theme) -> Visuals {
     let dark = theme == egui::Theme::Dark;
     let gray = |d, l| Color32::from_gray(if dark { d } else { l });
-    let mut v = if dark { Visuals::dark() } else { Visuals::light() };
+    let mut v = if dark {
+        Visuals::dark()
+    } else {
+        Visuals::light()
+    };
     let panel = gray(27, 245);
     let line = gray(52, 198);
     let outline = gray(113, 105);
@@ -52,8 +71,16 @@ fn visuals(theme: egui::Theme) -> Visuals {
     v.window_corner_radius = CornerRadius::same(8);
     v.weak_text_color = Some(gray(186, 70));
     v.hyperlink_color = strong;
-    v.warn_fg_color = if dark { Color32::from_rgb(215, 178, 107) } else { Color32::from_rgb(112, 71, 19) };
-    v.error_fg_color = if dark { Color32::from_rgb(231, 145, 138) } else { Color32::from_rgb(143, 47, 44) };
+    v.warn_fg_color = if dark {
+        Color32::from_rgb(215, 178, 107)
+    } else {
+        Color32::from_rgb(112, 71, 19)
+    };
+    v.error_fg_color = if dark {
+        Color32::from_rgb(231, 145, 138)
+    } else {
+        Color32::from_rgb(143, 47, 44)
+    };
     v.selection.bg_fill = gray(70, 188);
     v.selection.stroke = Stroke::new(1.0_f32, strong);
     v.popup_shadow = egui::Shadow::NONE;
@@ -83,7 +110,11 @@ pub struct Palette {
 }
 
 pub fn palette(v: &Visuals) -> Palette {
-    let chart = if v.dark_mode { [235, 182, 133, 99] } else { [26, 67, 100, 124] };
+    let chart = if v.dark_mode {
+        [235, 182, 133, 99]
+    } else {
+        [26, 67, 100, 124]
+    };
     Palette {
         chart: chart.map(Color32::from_gray),
         badge: Stroke::new(1.0_f32, v.weak_text_color()),
@@ -109,7 +140,9 @@ pub fn mark(ui: &mut egui::Ui, logo: &egui::TextureHandle, size: f32) {
 }
 
 pub fn bar(ctx: &egui::Context) -> egui::Frame {
-    egui::Frame::new().fill(ctx.style().visuals.window_fill).inner_margin(Margin::symmetric(18, 10))
+    egui::Frame::new()
+        .fill(ctx.style().visuals.window_fill)
+        .inner_margin(Margin::symmetric(18, 10))
 }
 
 pub fn dim(text: impl Into<String>) -> egui::RichText {
@@ -122,17 +155,26 @@ pub fn strong(text: impl Into<String>) -> egui::RichText {
 
 pub fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let v = ui.visuals();
-    let b = egui::Button::new(egui::RichText::new(text).color(v.panel_fill).strong().size(17.0))
-        .fill(v.strong_text_color())
-        .stroke(Stroke::NONE)
-        .min_size(egui::vec2(180.0, 46.0))
-        .corner_radius(CornerRadius::same(8));
+    let b = egui::Button::new(
+        egui::RichText::new(text)
+            .color(v.panel_fill)
+            .strong()
+            .size(17.0),
+    )
+    .fill(v.strong_text_color())
+    .stroke(Stroke::NONE)
+    .min_size(egui::vec2(180.0, 46.0))
+    .corner_radius(CornerRadius::same(8));
     ui.add(b)
 }
 
 pub fn badge(ui: &mut egui::Ui, text: &str, strong_look: bool) {
     let colors = palette(ui.visuals());
-    let stroke = if strong_look { colors.badge_selected } else { colors.badge };
+    let stroke = if strong_look {
+        colors.badge_selected
+    } else {
+        colors.badge
+    };
     egui::Frame::new()
         .stroke(stroke)
         .corner_radius(CornerRadius::same(4))
@@ -157,7 +199,11 @@ mod tests {
     fn luminance(color: Color32) -> f64 {
         let linear = |s: u8| {
             let s = f64::from(s) / 255.0;
-            if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+            if s <= 0.04045 {
+                s / 12.92
+            } else {
+                ((s + 0.055) / 1.055).powf(2.4)
+            }
         };
         0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
     }
@@ -171,7 +217,13 @@ mod tests {
     fn both_themes_meet_text_contrast() {
         for theme in [egui::Theme::Dark, egui::Theme::Light] {
             let v = visuals(theme);
-            for bg in [v.panel_fill, v.window_fill, card_fill(&v), v.extreme_bg_color, v.selection.bg_fill] {
+            for bg in [
+                v.panel_fill,
+                v.window_fill,
+                card_fill(&v),
+                v.extreme_bg_color,
+                v.selection.bg_fill,
+            ] {
                 for fg in [v.text_color(), v.weak_text_color()] {
                     assert!(contrast(fg, bg) >= 4.5, "{theme:?}: {fg:?} on {bg:?}");
                 }
@@ -187,10 +239,16 @@ mod tests {
         apply(&ctx);
         set_appearance(&ctx, &Appearance::default());
         for theme in [egui::Theme::Light, egui::Theme::Dark] {
-            let _ = ctx.run(egui::RawInput { system_theme: Some(theme), ..Default::default() }, |ctx| {
-                assert_eq!(ctx.theme(), theme);
-                assert_eq!(ctx.style().visuals.panel_fill, visuals(theme).panel_fill);
-            });
+            let _ = ctx.run(
+                egui::RawInput {
+                    system_theme: Some(theme),
+                    ..Default::default()
+                },
+                |ctx| {
+                    assert_eq!(ctx.theme(), theme);
+                    assert_eq!(ctx.style().visuals.panel_fill, visuals(theme).panel_fill);
+                },
+            );
         }
     }
 }

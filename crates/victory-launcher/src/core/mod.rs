@@ -33,6 +33,7 @@ pub enum Screen {
     Main,
     FirstRun,
     WarmUp,
+    Unsupported,
 }
 
 pub struct CoreState {
@@ -61,12 +62,11 @@ pub struct CoreState {
     shown_demo: Option<Screen>,
     demo_game: Option<game::Game>,
     pub last_env: Vec<(String, String)>,
-    pub last_engine: Option<PathBuf>,
+
 }
 
 impl CoreState {
-    pub fn new(ctx: egui::Context) -> Self {
-        let settings = store::Settings::load();
+    pub fn new(ctx: egui::Context, settings: store::Settings) -> Self {
         paths::configure_storage(&settings);
         let game = settings.game_folder.as_deref().and_then(game::from_pick).or_else(|| settings.game_exe.as_deref().and_then(game::from_pick));
         let profiles = launch::list_profiles(&paths::profiles_dir());
@@ -102,7 +102,7 @@ impl CoreState {
             shown_demo: None,
             demo_game: None,
             last_env: Vec::new(),
-            last_engine: None,
+
         }
     }
 
@@ -130,7 +130,7 @@ impl CoreState {
 
     pub fn screen(&self) -> Screen {
         if let Some(s) = self.force_screen {
-            return if s == Screen::WarmUp { Screen::Main } else { s };
+            return if s == Screen::FirstRun { s } else { Screen::Main };
         }
         if !self.settings.setup_done && self.game.is_none() { Screen::FirstRun } else { Screen::Main }
     }
@@ -202,10 +202,15 @@ impl CoreState {
             return;
         }
         self.shown_demo = Some(want);
+        self.hw = Some(hw::Hardware {
+            mesh_shaders: Some(want != Screen::Unsupported),
+            ..hw::Hardware::demo()
+        });
         // The first-run screenshot shows the walk-through before anything is chosen.
         self.game = if want == Screen::FirstRun { None } else { self.demo_game.clone() };
         let log: PathBuf = "logs/run-20260101-120000.log".into();
         self.runner.state = match want {
+            Screen::Unsupported => RunState::Idle,
             Screen::WarmUp => RunState::Warming { done: 38_000_000, total: 120_000_000, since: Instant::now() - Duration::from_secs(95) },
             _ => RunState::Running { pid: 4242, since: Instant::now() - Duration::from_secs(312), log },
         };
@@ -265,8 +270,12 @@ impl CoreState {
     }
 
     /// The Play button.
-    pub fn play(&mut self) {
+    pub fn play(&mut self, acknowledged: bool) {
         self.notice = None;
+        if let Err(error) = play::hardware_allows_play(self.hw.as_ref(), acknowledged) {
+            self.notice = Some(error.to_string());
+            return;
+        }
         if self.runner.busy() || settings::storage_busy(self) {
             return;
         }
@@ -306,9 +315,9 @@ impl CoreState {
     }
 
     /// Starts again after a quick exit, without the extra flags.
-    pub fn play_without_flags(&mut self) {
+    pub fn play_without_flags(&mut self, acknowledged: bool) {
         self.ui.start_without_flags = true;
-        self.play();
+        self.play(acknowledged);
     }
 
     pub fn save_extra(&mut self) {
