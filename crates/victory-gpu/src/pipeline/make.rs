@@ -792,11 +792,13 @@ fn wait_compute(p: &Pending, frame: u64) {
             .0;
     }
     drop(held);
+    let elapsed = started.elapsed();
+    crate::launcher_stats::PIPELINE_WAIT_US.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
     waiting.end();
     {
         let mut w = FRAME_WAITED.lock().unwrap_or_else(|e| e.into_inner());
         if w.0 == frame {
-            w.1 += started.elapsed();
+            w.1 += elapsed;
         }
     }
     if p.made.get().is_none() {
@@ -911,7 +913,9 @@ fn wait(p: &Pending, frame: u64) {
         held = done.wait_timeout(held, rest).unwrap_or_else(|e| e.into_inner()).0;
     }
     drop(held);
-    let waited = started.elapsed().min(left);
+    let elapsed = started.elapsed();
+    crate::launcher_stats::PIPELINE_WAIT_US.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+    let waited = elapsed.min(left);
     waiting.end();
     if wait_once() && p.made.get().is_none() {
         let before = p.waited_us.fetch_add(waited.as_micros() as u64, Ordering::Relaxed);

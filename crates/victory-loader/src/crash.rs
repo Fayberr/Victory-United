@@ -658,13 +658,17 @@ pub(crate) struct Aligned16(pub(crate) CONTEXT);
 /// pushes no more than `MAX_FRAMES`, so it does not allocate when `frames`
 /// has that capacity (another thread may be suspended holding the heap).
 pub(crate) fn unwind_into(context: CONTEXT, low: usize, high: usize, frames: &mut Vec<u64>) {
+    unwind_into_limit(context, low, high, frames, MAX_FRAMES);
+}
+
+pub(crate) fn unwind_into_limit(context: CONTEXT, low: usize, high: usize, frames: &mut Vec<u64>, depth: usize) {
     // `RtlVirtualUnwind` writes the context with 16-byte aligned stores, and
     // windows-sys declares `CONTEXT` without that alignment: a by-value copy on
     // the stack can land 8 bytes off and fault (seen in a debug build).
     let mut aligned = Aligned16(context);
     let context = &mut aligned.0;
     frames.push(context.Rip);
-    while frames.len() < MAX_FRAMES {
+    while frames.len() < depth {
         // Stop where reading the stack would fault inside this handler.
         let rsp = context.Rsp as usize;
         if rsp < low || rsp + 8 > high {

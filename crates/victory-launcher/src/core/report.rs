@@ -149,7 +149,7 @@ pub fn build_items(core: &CoreState, id: &Identity) -> Vec<Item> {
         core.profile.options.console.arg()
     );
     items.push(Item { file: "versions.txt", title: "Launcher and engine version", text: versions, include: true });
-    let hw = core.hw.as_ref().map(|h| h.summary()).unwrap_or_else(|| "(hardware check not finished)\n".into());
+    let hw = core.hw.as_ref().map(|h| h.summary_with_adapter(core.rendering_adapter)).unwrap_or_else(|| "(hardware check not finished)\n".into());
     items.push(Item { file: "hardware.txt", title: "Hardware and Windows build", text: anonymize(&hw, id), include: true });
     let mut settings = format!("Profile: {}\n{}", core.profile.name, toml::to_string_pretty(&core.profile).unwrap_or_default());
     if !core.extra.is_empty() {
@@ -204,6 +204,9 @@ pub fn issue_text(core: &CoreState, id: &Identity, zip: Option<&Path>) -> String
         t.push_str(&format!("- {extra_on} extra flag(s) set\n"));
     }
     if let Some(h) = hw {
+        for (key, value) in h.capabilities(core.rendering_adapter) {
+            t.push_str(&format!("- {}: {value}\n", tr(key)));
+        }
         t.push_str(&format!("- {}, {} MB VRAM, driver {}\n- {} MB RAM, {}, Windows build {}\n", h.gpu_name, h.vram_mb, h.driver, h.ram_mb, h.cpu_name, h.windows_build));
     }
     t.push_str(&format!("- Last run: {outcome}\n"));

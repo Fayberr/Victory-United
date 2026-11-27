@@ -2592,7 +2592,40 @@ type = "text"
 default = ""
 group = "debug"
 risk = "advanced"
-doc = "Sampling profiler: <from>,<to>,<ms>,<file>. Needs the engine's pdb file."
+doc = "Sampling profiler schedule for diagnostics builds: <from>,<to>,<ms>,<file>. Separate windows with semicolons."
+
+[[flag]]
+name = "VICTORY_PROFILE_DEPTH"
+type = "number"
+default = "40"
+group = "debug"
+risk = "advanced"
+doc = "Maximum frames to unwind per sampled thread (1 to 40)."
+
+[[flag]]
+name = "VICTORY_PROFILE_FILTER"
+type = "text"
+default = ""
+group = "debug"
+risk = "advanced"
+doc = "Only sample threads whose name contains this text, ignoring case."
+
+[[flag]]
+name = "VICTORY_PROFILE_SYMBOLIZE"
+type = "switch"
+default = "0"
+off = "0"
+group = "debug"
+risk = "advanced"
+doc = "Resolve symbols when writing a sampling profile. Uses the PDB next to the engine when available."
+
+[[flag]]
+name = "VICTORY_PROFILE_THREADS"
+type = "number"
+default = "28"
+group = "debug"
+risk = "advanced"
+doc = "Number of busiest threads to sample (4 to 28)."
 
 [[flag]]
 name = "VICTORY_QUEUE2"

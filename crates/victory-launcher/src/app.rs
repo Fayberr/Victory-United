@@ -81,6 +81,8 @@ pub struct Args {
     pub capture: Option<std::path::PathBuf>,
     pub hw_dump: Option<std::path::PathBuf>,
     pub tab: Option<Tab>,
+    pub monitor_demo: bool,
+    pub overlay_demo: bool,
 }
 
 impl Args {
@@ -95,6 +97,8 @@ impl Args {
                         args.tab = Some(Tab::Saves);
                     }
                 }
+                "--monitor-demo" => { args.demo = true; args.monitor_demo = true; }
+                "--overlay-demo" => { args.demo = true; args.monitor_demo = true; args.overlay_demo = true; }
                 "--hw-dump" => args.hw_dump = it.next().map(Into::into),
                 "--capture" => {
                     args.demo = true;
@@ -110,7 +114,7 @@ impl Args {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, args: Args, icon: &egui::IconData, settings: Settings) -> Self {
         let ctx = cc.egui_ctx.clone();
-        let (mut core, ops, shared) = if args.demo {
+        let (mut core, mut ops, shared) = if args.demo {
             (core::CoreState::demo(), ops::OpsState::demo(), core::demo_shared())
         } else {
             (core::CoreState::new(ctx.clone(), settings), ops::OpsState::new(ctx), Default::default())
@@ -119,6 +123,9 @@ impl App {
             core.force_screen = Some(core::Screen::Idle);
         }
         theme::set_appearance(&cc.egui_ctx, &core.settings.appearance);
+        ops.monitor_demo = args.monitor_demo && args.capture.is_none();
+        ops.cfg.overlay |= args.overlay_demo && ops.monitor_demo;
+        let tab = if args.monitor_demo { Tab::Monitor } else { args.tab.unwrap_or(Tab::Play) };
         let capture = args.capture.map(Capture::new);
         let logo = cc.egui_ctx.load_texture(
             "victory-logo",
@@ -126,7 +133,7 @@ impl App {
             egui::TextureOptions::LINEAR,
         );
         Self {
-            tab: args.tab.unwrap_or(Tab::Play), core, ops, shared, capture, logo,
+            tab, core, ops, shared, capture, logo,
             initial_update: !args.demo, was_focused: false, seen_launch: 0, hidden_until_exit: false, window: None,
         }
     }
@@ -262,8 +269,19 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        // The root panels paint their own background. Keep the overlay viewport transparent.
+        [0.0; 4]
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(cap) = &mut self.capture {
+            self.ops.monitor_page = match cap.page() {
+                "05-monitor-customize" => ops::monitor::Page::Customize,
+                "05-overlay" => ops::monitor::Page::Overlay,
+                _ => ops::monitor::Page::Live,
+            };
+            self.ops.dev.profiler_tab = matches!(cap.page(), "07-profiler" | "07-profiler-schedule");
             if cap.drive(ctx, &mut self.tab, &mut self.core) {
                 self.capture = None;
             }
@@ -276,6 +294,7 @@ impl eframe::App for App {
             self.update_checks(ctx);
         }
         self.ops.tick(ctx, &self.shared, self.tab == Tab::Monitor);
+        self.core.rendering_adapter = self.ops.monitor.summary.as_ref().and_then(|sample| sample.adapter_luid);
         if self.core.screen() == core::Screen::FirstRun {
             egui::CentralPanel::default().show(ctx, |ui| core::firstrun::show(&mut self.core, &self.shared, &self.logo, ui));
             return;
@@ -296,9 +315,9 @@ impl eframe::App for App {
                 Tab::Flags => core::flags::show(&mut self.core, &self.shared, ui),
                 Tab::Report => core::report::show(&mut self.core, &self.shared, ui),
                 Tab::About => core::about::show(&mut self.core, &self.shared, &self.logo, ui),
-                Tab::Monitor => ops::monitor::show(&mut self.ops, &self.shared, ui),
+                Tab::Monitor => ops::monitor::show(&mut self.ops, &self.shared, self.core.hw.as_ref(), self.core.page_scroll.take(), ui),
                 Tab::Updates => ops::updates::show(&mut self.ops, &self.shared, ui),
-                Tab::Dev => ops::dev::show(&mut self.ops, &self.shared, ui),
+                Tab::Dev => ops::dev::show(&mut self.ops, &self.shared, self.core.page_scroll.take(), ui),
             }
         });
     }

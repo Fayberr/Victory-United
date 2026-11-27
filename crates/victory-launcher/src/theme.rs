@@ -104,19 +104,53 @@ fn visuals(theme: egui::Theme) -> Visuals {
 }
 
 pub struct Palette {
-    pub chart: [Color32; 4],
+    pub chart: [Color32; 6],
+    pub target: Color32,
+    pub good: Color32,
+    pub warn: Color32,
+    pub bad: Color32,
     pub badge: Stroke,
     pub badge_selected: Stroke,
 }
 
 pub fn palette(v: &Visuals) -> Palette {
-    let chart = if v.dark_mode {
-        [235, 182, 133, 99]
+    let (chart, target, good, warn, bad) = if v.dark_mode {
+        (
+            [
+                Color32::from_rgb(96, 165, 250),  // sky blue
+                Color32::from_rgb(245, 166, 91),  // warm amber-orange
+                Color32::from_rgb(76, 195, 138),  // teal-emerald
+                Color32::from_rgb(232, 106, 125), // coral-rose
+                Color32::from_rgb(167, 139, 250), // soft violet
+                Color32::from_rgb(56, 189, 248),  // cyan
+            ],
+            Color32::from_rgb(110, 200, 155),
+            Color32::from_rgb(76, 195, 138),
+            Color32::from_rgb(215, 178, 107),
+            Color32::from_rgb(231, 145, 138),
+        )
     } else {
-        [26, 67, 100, 124]
+        (
+            [
+                Color32::from_rgb(37, 99, 235),   // cobalt blue
+                Color32::from_rgb(217, 119, 6),   // burnt amber-orange
+                Color32::from_rgb(5, 150, 105),   // emerald green
+                Color32::from_rgb(220, 38, 38),   // crimson rose
+                Color32::from_rgb(124, 58, 237),  // violet
+                Color32::from_rgb(2, 132, 199),   // deep cyan
+            ],
+            Color32::from_rgb(16, 145, 100),
+            Color32::from_rgb(5, 150, 105),
+            Color32::from_rgb(180, 110, 20),
+            Color32::from_rgb(190, 50, 45),
+        )
     };
     Palette {
-        chart: chart.map(Color32::from_gray),
+        chart,
+        target,
+        good,
+        warn,
+        bad,
         badge: Stroke::new(1.0_f32, v.weak_text_color()),
         badge_selected: Stroke::new(1.0_f32, v.strong_text_color()),
     }

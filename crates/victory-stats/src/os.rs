@@ -4,12 +4,16 @@ use super::{Block, SIZE};
 #[cfg(windows)]
 mod imp {
     use super::*;
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::Memory::{
-        CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MapViewOfFile, OpenFileMappingW, PAGE_READWRITE,
-        UnmapViewOfFile,
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
     };
-    use windows_sys::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
+    use windows_sys::Win32::System::Memory::{
+        CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MapViewOfFile, OpenFileMappingW,
+        PAGE_READWRITE, UnmapViewOfFile,
+    };
+    use windows_sys::Win32::System::Performance::{
+        QueryPerformanceCounter, QueryPerformanceFrequency,
+    };
 
     pub enum Owner {
         Mapped { handle: HANDLE, view: *const Block },
@@ -21,9 +25,11 @@ mod imp {
             if let Owner::Mapped { handle, view } = self {
                 // SAFETY: both came from the calls in `create` or `open` and are released once.
                 unsafe {
-                    UnmapViewOfFile(windows_sys::Win32::System::Memory::MEMORY_MAPPED_VIEW_ADDRESS {
-                        Value: *view as *mut _,
-                    });
+                    UnmapViewOfFile(
+                        windows_sys::Win32::System::Memory::MEMORY_MAPPED_VIEW_ADDRESS {
+                            Value: *view as *mut _,
+                        },
+                    );
                     CloseHandle(*handle);
                 }
             }
@@ -38,8 +44,19 @@ mod imp {
         let w = wide(name);
         // SAFETY: plain FFI with a valid zero terminated name; default security (own session only).
         unsafe {
-            let handle = CreateFileMappingW(INVALID_HANDLE_VALUE, std::ptr::null(), PAGE_READWRITE, 0, SIZE as u32, w.as_ptr());
+            let handle = CreateFileMappingW(
+                INVALID_HANDLE_VALUE,
+                std::ptr::null(),
+                PAGE_READWRITE,
+                0,
+                SIZE as u32,
+                w.as_ptr(),
+            );
             if handle.is_null() {
+                return None;
+            }
+            if GetLastError() == ERROR_ALREADY_EXISTS {
+                CloseHandle(handle);
                 return None;
             }
             let view = MapViewOfFile(handle, FILE_MAP_WRITE | FILE_MAP_READ, 0, 0, SIZE);
@@ -52,7 +69,7 @@ mod imp {
         }
     }
 
-    pub fn open(name: &str) -> Option<(Owner, *const Block)> {
+    pub fn open(name: &str) -> Option<(Owner, *const u8, usize)> {
         let w = wide(name);
         // SAFETY: as above; the view is read only.
         unsafe {
@@ -60,13 +77,15 @@ mod imp {
             if handle.is_null() {
                 return None;
             }
-            let view = MapViewOfFile(handle, FILE_MAP_READ, 0, 0, SIZE);
-            if view.Value.is_null() {
-                CloseHandle(handle);
-                return None;
+            for len in [SIZE, super::super::V1_SIZE] {
+                let view = MapViewOfFile(handle, FILE_MAP_READ, 0, 0, len);
+                if !view.Value.is_null() {
+                    let p = view.Value as *const Block;
+                    return Some((Owner::Mapped { handle, view: p }, p.cast(), len));
+                }
             }
-            let p = view.Value as *const Block;
-            Some((Owner::Mapped { handle, view: p }, p))
+            CloseHandle(handle);
+            None
         }
     }
 
@@ -102,7 +121,7 @@ mod imp {
     pub fn create(_name: &str) -> Option<(Owner, *const Block)> {
         None
     }
-    pub fn open(_name: &str) -> Option<(Owner, *const Block)> {
+    pub fn open(_name: &str) -> Option<(Owner, *const u8, usize)> {
         None
     }
     pub fn heap() -> (Owner, *const Block) {

@@ -46,7 +46,6 @@ pub(crate) struct Staging {
     /// Back in the pool with the last list that names it.
     _piece: Option<crate::pool::StagingPiece>,
     /// Its bytes.
-    #[cfg(feature = "diagnostics")]
     total: u64,
     data: *mut u8,
     footprints: Vec<D3D12_PLACED_SUBRESOURCE_FOOTPRINT>,
@@ -925,6 +924,7 @@ fn record_upload(
     if let Some(prefill) = prefill {
         record_prefill(list, texture, resource as usize, staging.memory as u64, prefill);
     }
+    crate::launcher_stats::TEXTURE_UPLOAD_BYTES.fetch_add(staging.total, Relaxed);
     // The staging/plane upload buffer lives until the list is reset.
     for (i, footprint) in staging.footprints.iter().enumerate() {
         #[cfg(feature = "diagnostics")]
@@ -1094,6 +1094,7 @@ impl PreludeUpload {
         if let Some(claim) = self.prefill.lock().unwrap_or_else(|e| e.into_inner()).take() {
             record_prefill_cmd(host_list, cmd_list, texture, self.resource, self.staging.memory as u64, claim);
         }
+        crate::launcher_stats::TEXTURE_UPLOAD_BYTES.fetch_add(self.staging.total, Ordering::Relaxed);
         // The staging buffer lives as long as `self.staging`, which the list's
         // deferred steps hold until the list is reset after GPU completion.
         for (i, footprint) in self.staging.footprints.iter().enumerate() {
@@ -1211,6 +1212,7 @@ fn record_prefill_cmd(
     // SAFETY: the mapping holds `total` bytes.
     unsafe { std::ptr::copy_nonoverlapping(claim.bytes.as_ptr(), data, total as usize) };
     list.keep(&buffer);
+    crate::launcher_stats::TEXTURE_UPLOAD_BYTES.fetch_add(total, Ordering::Relaxed);
     for (i, footprint) in footprints.iter().enumerate() {
         let to = D3D12_TEXTURE_COPY_LOCATION {
             // SAFETY: a borrowed pointer the location never releases.
@@ -2337,7 +2339,6 @@ fn staging(resource: This, copy: &crate::resource::HostTexture, first: u32) -> O
         buffer,
         base,
         _piece: piece,
-        #[cfg(feature = "diagnostics")]
         total,
         data,
         footprints,
