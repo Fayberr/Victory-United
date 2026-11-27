@@ -1704,6 +1704,11 @@ impl Staging {
             size
         } else if last.hash.is_none() && fill_unlocked() {
             self.fill(last, size)
+        } else if last.hash.is_none() {
+            refresh_unlocked_with(self.memory, last, size, |bytes| {
+                self.detile(bytes);
+                self.keep_whole(bytes);
+            })
         } else {
             UNLOCKED[1].fetch_add(1, Relaxed);
             last.asked = 0;
@@ -2299,6 +2304,47 @@ fn staging(resource: This, copy: &crate::resource::HostTexture, first: u32) -> O
     Some(s)
 }
 
+/// Shared body of [`Staging::refresh_unlocked`], separated for unit tests.
+fn refresh_unlocked_with(
+    memory: *const u8,
+    last: &mut Last,
+    size: usize,
+    detile: impl FnOnce(&[u8]),
+) -> usize {
+    use std::sync::atomic::Ordering::Relaxed;
+    let read = with_read(size, |read| {
+        if crate::host::read_into(memory, read) {
+            let hash = digest(read);
+            if last.hash != Some(hash) {
+                last.hash = Some(hash);
+                detile(read);
+            }
+            return true;
+        }
+        // If the staging buffer was never filled, a partly mapped streamed
+        // texture would otherwise stay all zeros forever when `no_wait()`
+        // misses the remap lock. Read mapped pages via `copy_mapped` instead.
+        if last.hash.is_none() {
+            crate::host::copy_mapped(read.as_mut_ptr(), memory, size, false);
+            if read.iter().any(|&b| b != 0) {
+                last.hash = Some(digest(read));
+                last.partial = Some(crate::frame::current());
+                detile(read);
+                return true;
+            }
+        }
+        false
+    });
+    if read {
+        UNLOCKED[0].fetch_add(1, Relaxed);
+        size
+    } else {
+        UNLOCKED[1].fetch_add(1, Relaxed);
+        last.asked = 0;
+        0
+    }
+}
+
 #[cfg(test)]
 mod title_memory_tests {
     use super::with_title;
@@ -2351,6 +2397,44 @@ mod title_memory_tests {
                 assert!(bytes[0x5_0000..HEAD].iter().all(|&b| b == 0x5a));
                 assert!(bytes[HEAD..].iter().all(|&b| b == 0));
             });
+            assert_ne!(VirtualFree(base.cast(), 0, MEM_RELEASE), 0);
+        }
+    }
+
+    #[test]
+    fn no_wait_unlocked_falls_back_for_never_filled_partly_mapped_texture() {
+        use windows_sys::Win32::System::Memory::*;
+        const MAPPED: usize = 0x1000;
+        const SIZE: usize = 0x4000;
+        // SAFETY: private reservation owned by this test; committed head has
+        // known bytes, uncommitted tail forces `read_into` to fail.
+        unsafe {
+            let base = VirtualAlloc(std::ptr::null(), SIZE, MEM_RESERVE, PAGE_NOACCESS).cast::<u8>();
+            assert!(!base.is_null());
+            assert_eq!(VirtualAlloc(base.cast(), MAPPED, MEM_COMMIT, PAGE_READWRITE), base.cast());
+            base.write_bytes(0x3c, MAPPED);
+
+            let mut last = super::Last { asked: 7, ..Default::default() };
+            let mut detiled = Vec::new();
+            let read = super::refresh_unlocked_with(base, &mut last, SIZE, |bytes| {
+                detiled = bytes.to_vec();
+            });
+            assert_eq!(read, SIZE);
+            assert!(last.hash.is_some());
+            assert!(last.partial.is_some());
+            assert_eq!(detiled.len(), SIZE);
+            assert!(detiled[..MAPPED].iter().all(|&b| b == 0x3c));
+            assert!(detiled[MAPPED..].iter().all(|&b| b == 0));
+
+            // Once filled, a failed `read_into` does not overwrite the staging buffer.
+            let mut detiled_again = false;
+            let read2 = super::refresh_unlocked_with(base, &mut last, SIZE, |_| {
+                detiled_again = true;
+            });
+            assert_eq!(read2, 0);
+            assert_eq!(last.asked, 0);
+            assert!(!detiled_again);
+
             assert_ne!(VirtualFree(base.cast(), 0, MEM_RELEASE), 0);
         }
     }
