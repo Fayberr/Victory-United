@@ -2802,6 +2802,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "tempfile",
  "toml",
  "victory-stats",
  "victory-update",
