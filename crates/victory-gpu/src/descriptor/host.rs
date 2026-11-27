@@ -7343,17 +7343,73 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         };
         assert_ne!(a.ptr, b.ptr);
         assert_ne!(Some(a.ptr), std::thread::spawn(|| staged(false, 0).map(|h| h.ptr)).join().unwrap());
-        let (buffer, _) = host.shared_buffer(1 << 16).unwrap();
+        let (buffer, source) = host.shared_buffer(1 << 16).unwrap();
+        let (result, destination) = host.shared_buffer(64).unwrap();
         let index = heap.dynamic(1).unwrap();
-        let bytes = |at: D3D12_CPU_DESCRIPTOR_HANDLE| {
-            let mut bytes = [0u8; 32];
-            crate::host::read_into(at.ptr as *const u8, &mut bytes).then_some(bytes)
+        assert_eq!(heap.at(index).ptr, a.ptr);
+        assert_ne!(a.ptr, heap.cpu(index).ptr);
+
+        // Verify what the GPU can read instead of dereferencing driver-owned
+        // CPU descriptor handles. A volatile table range keeps the SRV
+        // bounds checks with a version 1.1 root signature.
+        const READ_VIEW: &str = r#"
+            ByteAddressBuffer input : register(t0);
+            RWByteAddressBuffer output : register(u0);
+            [RootSignature("DescriptorTable(SRV(t0, flags=DESCRIPTORS_VOLATILE)), UAV(u0)")]
+            [numthreads(1, 1, 1)]
+            void main() {
+                output.Store3(0, uint3(input.Load(0), input.Load(1020), input.Load(1024)));
+            }
+        "#;
+        let code = crate::host::compile(
+            READ_VIEW,
+            windows::core::s!("main"),
+            windows::core::s!("cs_5_1"),
+        )
+        .expect("compile descriptor readback shader");
+        // SAFETY: the compiled shader and root signature live through pipeline
+        // creation. D3D12 borrows the root pointer in the descriptor.
+        let (root, pipeline) = unsafe {
+            let root: ID3D12RootSignature = host.device.CreateRootSignature(0, &code).unwrap();
+            let desc = D3D12_COMPUTE_PIPELINE_STATE_DESC {
+                pRootSignature: std::mem::transmute_copy(&root),
+                CS: D3D12_SHADER_BYTECODE {
+                    pShaderBytecode: code.as_ptr().cast(),
+                    BytecodeLength: code.len(),
+                },
+                ..Default::default()
+            };
+            let pipeline: ID3D12PipelineState = host.device.CreateComputePipelineState(&desc).unwrap();
+            (root, pipeline)
+        };
+        // SAFETY: the initialized dwords fit in the mapped input buffer.
+        unsafe {
+            source.add(64).cast::<u32>().write(0x1234);
+            source.add(64 + 1020).cast::<u32>().write(0x5678);
+            source.add(64 + 1024).cast::<u32>().write(0x9abc);
+        }
+        let read_view = || {
+            let list = host.new_list().unwrap();
+            // SAFETY: this list is open and the heap, pipeline, and both
+            // resources remain live until after the submitted work completes.
+            unsafe {
+                destination.cast::<[u32; 3]>().write([u32::MAX; 3]);
+                list.list.SetDescriptorHeaps(&[Some(heap.heap.clone())]);
+                list.list.SetComputeRootSignature(&root);
+                list.list.SetPipelineState(&pipeline);
+                list.list.SetComputeRootDescriptorTable(0, heap.gpu_handle(index));
+                list.list.SetComputeRootUnorderedAccessView(1, result.GetGPUVirtualAddress());
+                list.list.Dispatch(1, 1, 1);
+            }
+            list.close();
+            host.execute_sync_internal(&list);
+            // SAFETY: the submission completed and the mapping holds the result.
+            unsafe { destination.cast::<[u32; 3]>().read_volatile() }
         };
         heap.raw_at(index, &buffer, 64, 1024);
-        let (slot, beside) = (bytes(heap.cpu(index)), bytes(staged(false, 0).unwrap()));
-        assert_eq!(slot, beside, "copied as it was made");
+        assert_eq!(read_view(), [0x1234, 0x5678, 0], "copied as it was made");
         heap.null_raw_at(index);
-        assert_ne!(bytes(heap.cpu(index)), slot, "another view since");
+        assert_eq!(read_view(), [0; 3], "replaced by a null view");
         // SAFETY: a plain query.
         assert!(unsafe { host.device.GetDeviceRemovedReason() }.is_ok());
     }

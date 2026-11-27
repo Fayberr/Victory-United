@@ -3098,9 +3098,36 @@ impl<T> Drop for ReadbackLease<'_, T> {
     }
 }
 
+fn texture_readback_fence_error(
+    completed: u64,
+    submitted: u64,
+    report_removed: impl FnOnce() -> String,
+) -> Option<String> {
+    // D3D12 uses UINT64_MAX for a removed device.
+    if completed == u64::MAX {
+        Some(report_removed())
+    } else if completed < submitted {
+        Some(format!("texture readback pool cannot retire before fence {submitted} (completed {completed})"))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod readback_pool_tests {
     use super::*;
+
+    #[test]
+    fn readback_fence_preserves_device_removal_details() {
+        let describe = || "device removed with breadcrumbs".to_owned();
+        assert_eq!(
+            texture_readback_fence_error(u64::MAX, 8, describe).as_deref(),
+            Some("device removed with breadcrumbs")
+        );
+        assert!(texture_readback_fence_error(7, 8, || panic!("no device removal"))
+            .unwrap().contains("before fence 8 (completed 7)"));
+        assert!(texture_readback_fence_error(8, 8, || panic!("fence complete")).is_none());
+    }
 
     #[test]
     fn readback_pool_leases_are_exclusive_until_retired_and_idle_bytes_are_bounded() {
@@ -5959,7 +5986,11 @@ fn relay_worker() {
                 let completed = unsafe { host.fence.GetCompletedValue() };
                 if completed == u64::MAX {
                     drop(line);
-                    fail(format_args!("relay fence reported device removal"));
+                    if texture_readback_idle_limit() != 0 {
+                        fail(format_args!("texture readback pool cannot retire after device removal"));
+                    } else {
+                        fail(format_args!("relay fence reported device removal"));
+                    }
                 }
                 let n = landable(&fences, completed);
                 if n == 0 {
@@ -8492,7 +8523,21 @@ impl Host {
                         Err(e) => tracing::warn!(error = %e, "submissions sent ahead not waited for"),
                     }
                 }
-                self.verify_texture_readback_fence(*submitted);
+                let report_removed = || {
+                    let runs: Vec<&HostList> = items
+                        .iter()
+                        .filter_map(|i| match i {
+                            Late::Run(f) => Some(f),
+                            _ => None,
+                        })
+                        .flat_map(|f| f.order.iter().map(|&i| f.lists[i].host()))
+                        .collect();
+                    format!(
+                        "host GPU device removed after {flights} submissions sent ahead (VICTORY_LATE_WAIT=1) of {} lists{}{}",
+                        runs.len(), self.removal_data(&runs), last_notes(&runs)
+                    )
+                };
+                self.verify_texture_readback_fence(*submitted, report_removed);
                 let gpu = waiting.elapsed();
                 LATE_STATS[12].fetch_add(gpu.as_micros() as u64, Ordering::Relaxed);
                 LATE_WAITED[why.min(10)].fetch_add(gpu.as_micros() as u64, Ordering::Relaxed);
@@ -8503,20 +8548,7 @@ impl Host {
                 });
                 // SAFETY: a plain query.
                 if unsafe { self.device.GetDeviceRemovedReason() }.is_err() {
-                    let runs: Vec<&HostList> = items
-                        .iter()
-                        .filter_map(|i| match i {
-                            Late::Run(f) => Some(f),
-                            _ => None,
-                        })
-                        .flat_map(|f| f.order.iter().map(|&i| f.lists[i].host()))
-                        .collect();
-                    fail(format_args!(
-                        "host GPU device removed after {flights} submissions sent ahead (VICTORY_LATE_WAIT=1) of {} lists{}{}",
-                        runs.len(),
-                        self.removal_data(&runs),
-                        last_notes(&runs)
-                    ));
+                    fail(format_args!("{}", report_removed()));
                 }
                 submitting(3, flights);
                 let copying = std::time::Instant::now();
@@ -8979,6 +9011,12 @@ impl Host {
         };
         #[cfg(not(feature = "diagnostics"))]
         let groups = [(lists, ())];
+        let report_removed = || {
+            format!(
+                "host GPU device removed after a submission of {} lists{}{}",
+                runs.len(), self.removal_data(runs), last_notes(runs)
+            )
+        };
         submitting(2, runs.len());
         for (i, &(group, _kind)) in groups.iter().enumerate() {
             *submitted += 1;
@@ -9008,7 +9046,7 @@ impl Host {
                     Err(e) => tracing::warn!(error = %e, "host submission not waited for"),
                 }
             }
-            self.verify_texture_readback_fence(*submitted);
+            self.verify_texture_readback_fence(*submitted, report_removed);
             // With timing on each group is one of `runs`: every
             // command's time on the card goes to the sums by pipeline.
             // The list's time from its sending to the card's signal, by what
@@ -9068,12 +9106,7 @@ impl Host {
         }
         // SAFETY: a plain query.
         if unsafe { self.device.GetDeviceRemovedReason() }.is_err() {
-            fail(format_args!(
-                "host GPU device removed after a submission of {} lists{}{}",
-                runs.len(),
-                self.removal_data(runs),
-                last_notes(runs)
-            ));
+            fail(format_args!("{}", report_removed()));
         }
         submitting(3, runs.len());
         stage.next("submit: copying back");
@@ -13297,18 +13330,15 @@ impl Host {
     /// The synchronous wait paths can warn and proceed when setting the
     /// event fails. A pooled buffer cannot be retired on an unverified wait.
     /// The relay already selects flights by their completed fence value.
-    fn verify_texture_readback_fence(&self, submitted: u64) {
+    fn verify_texture_readback_fence(&self, submitted: u64, report_removed: impl FnOnce() -> String) {
         if texture_readback_idle_limit() != 0 {
-            // SAFETY: a plain query. MAX is D3D12's device-removed sentinel.
+            // SAFETY: a plain query.
             let completed = unsafe { self.fence.GetCompletedValue() };
-            if completed < submitted || completed == u64::MAX {
-                fail(format_args!(
-                    "texture readback pool cannot retire before fence {submitted} (completed {completed})"
-                ));
+            if let Some(error) = texture_readback_fence_error(completed, submitted, report_removed) {
+                fail(format_args!("{error}"));
             }
         }
     }
-
     /// A buffer of `size` bytes the card writes and we read (a read back),
     /// in the state copies into it need.
     pub(crate) fn read_back_buffer(&self, size: u64) -> Option<ID3D12Resource> {
