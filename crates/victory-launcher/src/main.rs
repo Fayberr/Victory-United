@@ -5,6 +5,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod capture;
 mod core;
 mod i18n;
 mod ops;
@@ -14,6 +15,7 @@ mod theme;
 use eframe::egui;
 
 fn main() -> eframe::Result {
+    let args = app::Args::parse();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Victory Launcher")
@@ -27,7 +29,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             theme::apply(&cc.egui_ctx);
-            Ok(Box::new(app::App::new(cc)))
+            Ok(Box::new(app::App::new(cc, args)))
         }),
     )
 }
