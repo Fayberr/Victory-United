@@ -1012,11 +1012,9 @@ impl Layout {
         let runs = plan.map_or(&[][..], |p| p.runs.as_slice());
         let (body, last) = runs.split_at(runs.len().saturating_sub(1));
         let chunk_size = plan.and_then(|p| p.chunk_size);
-        let offsets = plan.map_or(&[][..], |p| p.rows.as_slice());
         for z in 0..depth {
             let (s, _) = self.split(first + z);
             let base = u64::from(s) * self.slice_size + m.offset;
-            let rows = inner as usize * m.height as usize;
             for y in 0..m.height {
                 let linear_row = z as usize * depth_pitch + y as usize * row_pitch;
                 let Some(flips) = &self.flips else {
@@ -1033,7 +1031,7 @@ impl Layout {
                 }
                 if xor & columns != 0 {
                     // XOR modes: the row flips bits the columns set too.
-                    for &(tiled, linear, len) in &runs {
+                    for &(tiled, linear, len) in runs {
                         copy_run::<DETILE>(src, dst, tiled_row + (tiled ^ xor as usize), linear_row + linear, len);
                     }
                 } else {

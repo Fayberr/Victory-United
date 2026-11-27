@@ -599,7 +599,7 @@ impl Launch {
                     &r.describe,
                 );
                 let none = D3D12_SHADER_BYTECODE::default();
-                match mesh_pipeline(&host.device, &r.root, none, ms, ps, &r.state, r.depth_bounds, &name) {
+                match mesh_pipeline(&host.device, &r.root, none, ms, ps, &r.state, r.depth_bounds, Some(&name)) {
                     Ok(pso) => {
                         tracing::info!(shaders = %r.shaders, "host mesh pipeline without the launch stage, for an indirect call it does not launch");
                         crate::host::name(&pso, || format!("{} without the launch stage", r.shaders));
@@ -2481,11 +2481,11 @@ mod tests {
         let state = MeshState::of(&g);
         let none = D3D12_SHADER_BYTECODE::default();
         let name = super::super::library::name("launch test", &root_blob, &[&ms, crate::launch::bytes()], &g.describe());
-        let pso = mesh_pipeline(&host.device, &root, crate::launch::code(), code(&ms), none, &state, false, &name)
+        let pso = mesh_pipeline(&host.device, &root, crate::launch::code(), code(&ms), none, &state, false, Some(&name))
             .expect("the mesh pipeline with the launch stage");
         // The same mesh shader without the stage, as `Launch::plain` makes it.
         let plain_name = super::super::library::name("launch test plain", &root_blob, &[&ms], &g.describe());
-        mesh_pipeline(&host.device, &root, none, code(&ms), none, &state, false, &plain_name)
+        mesh_pipeline(&host.device, &root, none, code(&ms), none, &state, false, Some(&plain_name))
             .expect("the mesh pipeline without the launch stage");
 
         // The groups one list runs: the direct count first if any, then the

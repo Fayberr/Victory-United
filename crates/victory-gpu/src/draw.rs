@@ -4209,6 +4209,11 @@ impl State {
                     }
                 }).1
             };
+            let at_once = || {
+                if (late || (sync_bake && upload_key.is_some())) && let Some(handle) = heap.handle(index) {
+                    let _ = host.mirror(index, handle, true);
+                }
+            };
             let at_once_deferred = || (late || (sync_bake && upload_key.is_some())) && mirror_deferred();
             // Under a budget (early or bake pass): recheck time before the
             // heavy work of making and staging a texture, and cap each
@@ -5788,6 +5793,9 @@ impl State {
                         }
                     }
                     Some(view) => {
+                        let kind = used.map(|u| u.kind).or_else(|| {
+                            selected.binary_search(&k).ok().and_then(|_| view_kind(&view))
+                        });
                         let (_, deferred) = crate::residency::upload_deferred_during(|| {
                             match halved(self, slot, k * 8) {
                                 Some(shown) => host.make_at(index, &shown),

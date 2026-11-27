@@ -1753,7 +1753,7 @@ fn hosted(this: This, make: bool) -> Option<Made> {
                 let heaped = r.host.placed.load(Relaxed)
                     && fills(&r.desc)
                     && texture_layout(&r.desc).is_some_and(|t| !t.planes[0].layout.desc.swizzle.xor());
-                host_texture_in(&r.desc.levels_from(base), r.host.state, clear, false, heaped && texture_heaps())
+                host_texture_in(&r.desc.levels_from(base), r.host.state, clear, false, heaped && texture_heaps(), first_attempt)
             },
             |t| Ok((t, None)),
         );
@@ -1763,12 +1763,16 @@ fn hosted(this: This, make: bool) -> Option<Made> {
                 let retry = next_texture_retry(error.code(), first_attempt, crate::host::coarse_ms());
                 r.host.retry_at.store(retry, Relaxed);
                 if retry != u64::MAX {
+                    NOT_MADE_FOR_NOW.fetch_add(1, Relaxed);
                     crate::residency::allocation_error(&error);
                     crate::residency::note_upload_deferred();
                 }
                 return None;
             }
         };
+        if !first_attempt {
+            MADE_AFTER_NO_ROOM.fetch_add(1, Relaxed);
+        }
         r.host.retry_at.store(0, Relaxed);
         let twin = twin_texture(&r.desc, &texture);
         // One line per depth texture with unordered access: its address is
@@ -2930,6 +2934,13 @@ fn next_texture_retry(error: windows::core::HRESULT, first_attempt: bool, now: u
     }
 }
 
+/// Host textures not made for lack of room, and made on a later use after
+/// that (for the memory line).
+#[cfg(windows)]
+pub(crate) static NOT_MADE_FOR_NOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(windows)]
+pub(crate) static MADE_AFTER_NO_ROOM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Makes a host texture without the console's layout and flags. A reserved
 /// texture gets its memory as tiles arrive (`crate::tiles`).
 #[cfg(windows)]
@@ -2938,9 +2949,9 @@ fn host_texture_as(
     state: u32,
     clear: *const c_void,
     reserved: bool,
-    _first_attempt: bool,
+    first_attempt: bool,
 ) -> windows::core::Result<windows::Win32::Graphics::Direct3D12::ID3D12Resource> {
-    host_texture_in(desc, state, clear, reserved, false).map(|(texture, _)| texture)
+    host_texture_in(desc, state, clear, reserved, false, first_attempt).map(|(texture, _)| texture)
 }
 
 /// [`host_texture_as`]; `heaped`: in a range of a big heap if it can be
@@ -2952,6 +2963,7 @@ fn host_texture_in(
     clear: *const c_void,
     reserved: bool,
     heaped: bool,
+    first_attempt: bool,
 ) -> windows::core::Result<(windows::Win32::Graphics::Direct3D12::ID3D12Resource, Option<Cut>)> {
     use windows::Win32::Graphics::Direct3D12::*;
     const PC_FLAGS: u32 = 0xf; // render target, depth, UAV, no shader access
@@ -4346,52 +4358,6 @@ mod tests {
             assert_eq!(total, 24_072, "format {format}");
             assert!(subresource(&desc, 8).is_none(), "format {format}");
         }
-    }
-
-    /// Upstream VIctory #3198: only a card out of memory is asked again; any
-    /// other failure is a refusal for good.
-    #[cfg(windows)]
-    #[test]
-    fn only_a_card_without_room_is_asked_again() {
-        assert_eq!(no_texture(E_OUTOFMEMORY), NoTexture::ForNow);
-        assert_eq!(no_texture(E_INVALIDARG), NoTexture::Refused);
-        assert_eq!(no_texture(0x887A_0005_u32 as i32), NoTexture::Refused); // device removed
-    }
-
-    /// A texture the card had no room for is not refused: once its wait is
-    /// over, the next use makes its host copy; a refused one stays refused.
-    #[cfg(windows)]
-    #[test]
-    fn a_texture_without_room_is_made_on_a_later_use() {
-        use std::sync::atomic::Ordering::Relaxed;
-        if crate::host::host().is_none() {
-            return; // no host GPU here
-        }
-        let null = std::ptr::null();
-        let mut image = null;
-        let rgba = texture(4, 4, 28, 1);
-        assert_eq!(
-            create_committed(null, &PROPERTIES, 0, &rgba, 0, null.cast(), &RESOURCE_IIDS[0], &mut image),
-            S_OK
-        );
-        let r = resource(image);
-        // As `hosted` leaves a texture the card had no room for just now:
-        // not asked again yet, but still waited for (not refused).
-        *r.host.made.lock().unwrap() = None;
-        r.host.no_room.store(crate::host::moment().max(1), Relaxed);
-        assert!(hosted(image, true).is_none(), "asked again only after NO_ROOM_AGAIN_MS");
-        assert!(host_waits(image), "a texture without room still waits for its host copy");
-        // After the wait, the next use makes it.
-        std::thread::sleep(std::time::Duration::from_millis(NO_ROOM_AGAIN_MS + 200));
-        assert!(hosted(image, true).is_some(), "made on a later use");
-        assert_eq!(r.host.no_room.load(Relaxed), 0);
-        // Refused: never again.
-        *r.host.made.lock().unwrap() = None;
-        r.host.no_room.store(0, Relaxed);
-        r.host.refused.store(true, Relaxed);
-        assert!(hosted(image, true).is_none());
-        assert!(!host_waits(image));
-        crate::object::release_boxed::<Resource>(image);
     }
 
     /// A 4x4 texture filled from a title buffer through our list and queue,

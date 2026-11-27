@@ -1772,6 +1772,7 @@ fn kind_index(view: &View) -> usize {
 #[cfg(all(windows, feature = "diagnostics"))]
 pub(crate) fn views_kept() -> ([u64; 8], [ViewKindUsage; 6]) {
     use std::sync::atomic::Ordering::Relaxed;
+    let views = views_read();
     let each = size_of::<(View, u32)>() as u64;
     let shape = size_of::<Shape>() as u64;
     let [constant, .., placed] = views.kind_usage;
@@ -1789,6 +1790,38 @@ pub(crate) fn views_kept() -> ([u64; 8], [ViewKindUsage; 6]) {
         NAMED_WHOLE[1].load(Relaxed),
     ];
     (summary, views.kind_usage)
+}
+
+#[cfg(all(windows, feature = "diagnostics"))]
+fn kept(views: &Views) -> ([u64; 8], [[u64; 3]; 6]) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let each = size_of::<(View, u32)>() as u64;
+    let shape = size_of::<Shape>() as u64;
+    let mut by_kind = [[0u64; 3]; 6];
+    for (view, _) in &views.list {
+        let k = kind_index(view);
+        by_kind[k][0] += 1;
+        by_kind[k][2] += each;
+    }
+    for &i in &views.free {
+        let k = kind_index(&views.list[i as usize].0);
+        by_kind[k][0] -= 1;
+        by_kind[k][1] += 1;
+    }
+    let summary = [
+        views.list.len() as u64,
+        views.free.len() as u64,
+        views.list.capacity() as u64 * each
+            + views.index.len() as u64 * each * 3 / 2
+            + views.shapes.capacity() as u64 * shape
+            + views.shape_index.len() as u64 * size_of::<(u64, u32)>() as u64 * 3 / 2,
+        by_kind[KIND_CONSTANT][0] + by_kind[KIND_CONSTANT][1],
+        by_kind[KIND_PLACED][0] + by_kind[KIND_PLACED][1],
+        views.shapes.len() as u64,
+        NAMED_WHOLE[0].load(Relaxed),
+        NAMED_WHOLE[1].load(Relaxed),
+    ];
+    (summary, by_kind)
 }
 
 impl View {

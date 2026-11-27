@@ -5974,7 +5974,7 @@ impl Shadow {
             return false;
         }
         let copied = self.copied.lock().unwrap_or_else(|e| e.into_inner());
-        crate::watch::unchanged_known(from, to, self.start as usize / PAGE, &copied)
+        crate::watch::unchanged_known(from, to, self.start as usize / PAGE, &copied.at)
     }
 
     /// Diagnostic (`VICTORY_REFRESH_CHECK=1`; off by default): after a
@@ -8108,7 +8108,9 @@ mod card_merge_tests {
                 staging: staging.clone(),
                 before: Mutex::new(None),
                 dirty: Mutex::default(),
+                has_dirty: std::sync::atomic::AtomicBool::new(false),
                 sent: Mutex::new(super::SentRuns::of(&[(title_byte, title_byte + 1, 7)])),
+                has_sent: std::sync::atomic::AtomicBool::new(true),
                 touched: Default::default(),
                 masked: Mutex::default(),
                 patch: Mutex::default(),
@@ -8154,7 +8156,9 @@ mod card_merge_tests {
                 staging: staging.clone(),
                 before: Mutex::new(None),
                 dirty: Mutex::default(),
+                has_dirty: std::sync::atomic::AtomicBool::new(false),
                 sent: Mutex::default(),
+                has_sent: std::sync::atomic::AtomicBool::new(false),
                 masked: Mutex::new(super::Masked {
                     pending: bits(&[(waiting, waiting + 1)]),
                     sent: vec![

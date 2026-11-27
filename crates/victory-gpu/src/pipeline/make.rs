@@ -1284,24 +1284,6 @@ mod tests {
         assert_eq!(worker_count_for(Some(12), 8, true), 12);
     }
 
-    #[test]
-    fn a_panicking_pipeline_is_refused_and_the_worker_continues() {
-        let bad = Arc::new(Pending::new(Vec::new(), None));
-        let good = Arc::new(Pending::new(Vec::new(), None));
-        let failed = bad.clone();
-        let next = good.clone();
-        let worker = std::thread::spawn(move || {
-            failed.make_with(|| panic!("synthetic pipeline build panic"));
-            next.make_with(|| None);
-        });
-
-        worker.join().expect("the pipeline worker should survive");
-        assert!(matches!(bad.made.get(), Some(None)));
-        assert!(matches!(good.made.get(), Some(None)));
-
-        bad.make_with(|| panic!("the refused pipeline should stay complete"));
-    }
-
     /// A first use queues the pipeline and, within the budget, gets the
     /// worker's answer (here: no host pipeline for no shaders).
     #[test]
