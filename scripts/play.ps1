@@ -7,7 +7,7 @@
 # -Console      series-x (the default) or series-s: the console the title takes this PC for
 # -Fsr4K        PC FidelityFX 4.1.2 at 3840x2160 (quality, balanced or performance)
 # -Build        target\diag (the default, the build all measurements are of) or target\release
-# -Machine      auto (the default: by the graphics card), 7900xtx, 4070 or 4090
+# -Machine      auto (the default: by the graphics card), 7900xtx, 4070, 3080ti or 4090
 # -More         other settings: -More @{VICTORY_PANEL='1'} or -More @{VICTORY_AMBIENT='1.0'}
 # On a smaller NVIDIA PC, compare the same Series S scene after a fresh start
 # with one override at a time, e.g. -More @{VICTORY_LAND_THREADS='3'} for
@@ -22,7 +22,7 @@ param(
     [ValidateSet('series-x', 'series-s')][string]$Console = 'series-x',
     [ValidateSet('quality', 'balanced', 'performance')][string]$Fsr4K,
     [ValidateSet('diag', 'release')][string]$Build = 'diag',
-    [ValidateSet('auto', '7900xtx', '4070', '4090')][string]$Machine = 'auto',
+    [ValidateSet('auto', '7900xtx', '4070', '3080ti', '4090')][string]$Machine = 'auto',
     [hashtable]$More = @{}
 )
 $settings = @{
@@ -35,7 +35,8 @@ $settings = @{
 if ($Machine -eq 'auto') {
     # Use the existing vendor defaults. The 4070 / 7800X3D profile is explicit.
     $cards = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | ForEach-Object { $_.PNPDeviceID })
-    $Machine = if ($cards -match 'VEN_10DE') { '4090' } else { '7900xtx' }
+    $names = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+    $Machine = if ($names -match 'RTX 3080 Ti') { '3080ti' } elseif ($cards -match 'VEN_10DE') { '4090' } else { '7900xtx' }
 }
 if ($Machine -eq '7900xtx') {
     # i9-12900K, RX 7900 XTX, 64 GB: the page-mapping lock was fastest with one
@@ -68,6 +69,18 @@ if ($Machine -eq '4070') {
     # shader buffers before textures consume it. No approximate shader modes.
     $settings.VICTORY_THIN_THREADS = '8'; $settings.VICTORY_UNDER_THREADS = '6'; $settings.VICTORY_LAND_THREADS = '4'
     $settings.VICTORY_MAP_THREADS = '1'; $settings.VICTORY_PIPELINE_WORKERS = '3'
+    if (-not $Safe) {
+        $settings.VICTORY_CARD_RESERVE_BUDGETS = '1'
+        $settings.VICTORY_CARD_BUFFERS_MIN_KB = '64'; $settings.VICTORY_CARD_BUFFERS_MB = '1536'
+        $settings.VICTORY_CARD_WINDOWS_MB = '1024'
+    }
+}
+if ($Machine -eq '3080ti') {
+    # Ryzen 7 5700X3D (eight cores), RTX 3080 Ti with 12 GB. Measured in the open-world
+    # harness (simulated movement, 240 s runs, minutes 1 to 3): 6 list translation, 4 memory
+    # update and 3 landing threads, and the 4070's card buffer set (reserve the budgets, 64 KB
+    # minimum, 1.5 GB, 1 GB windows), which beat the plain 1.5 GB and 2 GB sets.
+    $settings.VICTORY_THIN_THREADS = '6'; $settings.VICTORY_UNDER_THREADS = '4'; $settings.VICTORY_LAND_THREADS = '3'
     if (-not $Safe) {
         $settings.VICTORY_CARD_RESERVE_BUDGETS = '1'
         $settings.VICTORY_CARD_BUFFERS_MIN_KB = '64'; $settings.VICTORY_CARD_BUFFERS_MB = '1536'
