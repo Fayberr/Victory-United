@@ -1,6 +1,10 @@
-use crate::{i18n::tr, theme};
+use super::CoreState;
+use crate::{app::Shared, theme};
 use eframe::egui;
 
-pub fn show(_core: &mut super::CoreState, _shared: &crate::app::Shared, ui: &mut egui::Ui) {
-    ui.label(theme::strong(tr("stub.core")).size(24.0));
+#[derive(Default)]
+pub struct SettingsUi {}
+
+pub fn show(_core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
+    ui.label(theme::strong("Settings").size(24.0));
 }

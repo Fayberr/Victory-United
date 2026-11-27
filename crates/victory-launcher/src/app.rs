@@ -66,6 +66,7 @@ pub struct App {
 pub struct Args {
     pub demo: bool,
     pub capture: Option<std::path::PathBuf>,
+    pub hw_dump: Option<std::path::PathBuf>,
 }
 
 impl Args {
@@ -75,6 +76,7 @@ impl Args {
         while let Some(a) = it.next() {
             match a.as_str() {
                 "--ui-demo" => args.demo = true,
+                "--hw-dump" => args.hw_dump = it.next().map(Into::into),
                 "--capture" => {
                     args.demo = true;
                     args.capture = it.next().map(Into::into);

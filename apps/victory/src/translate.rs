@@ -407,6 +407,18 @@ pub fn run(
     Ok(())
 }
 
+/// Total size of the files `precompile` will read (those within `MAX_FILE`), without reading them.
+fn progress_total(paths: &[PathBuf]) -> u64 {
+    paths
+        .iter()
+        .flat_map(|root| walkdir::WalkDir::new(root).into_iter().flatten())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| m.len())
+        .filter(|&len| len <= MAX_FILE)
+        .sum()
+}
+
 /// Every shader found into the cache runs translate from.
 pub fn precompile(paths: Vec<PathBuf>, jobs: Option<usize>, list: Option<PathBuf>) -> Result<()> {
     let cfg = victory_core::Config::load()?;
@@ -420,8 +432,19 @@ pub fn precompile(paths: Vec<PathBuf>, jobs: Option<usize>, list: Option<PathBuf
     let failed = Mutex::new(BTreeMap::<String, (usize, String)>::new());
     let lines = Mutex::new(Vec::<String>::new());
     let mut scan = FileScan::new(MAX_FILE, false);
+    // For the launcher's progress bar: `VICTORY-PROGRESS shaders <bytes done> <bytes total>` (bytes of the
+    // files scanned, a cheap size-only pass first), at most twice a second and once at the end.
+    let bytes_total = progress_total(&paths);
+    let mut bytes_done = 0u64;
+    let mut last_progress = std::time::Instant::now();
+    println!("VICTORY-PROGRESS shaders 0 {bytes_total}");
     for root in &paths {
         for (path, data) in scan.files(root) {
+            bytes_done += data.len() as u64;
+            if last_progress.elapsed().as_millis() >= 500 {
+                println!("VICTORY-PROGRESS shaders {bytes_done} {bytes_total}");
+                last_progress = std::time::Instant::now();
+            }
             let jobs = sources(&data);
             let next = AtomicUsize::new(0);
             std::thread::scope(|s| {
@@ -456,6 +479,7 @@ pub fn precompile(paths: Vec<PathBuf>, jobs: Option<usize>, list: Option<PathBuf
             });
         }
     }
+    println!("VICTORY-PROGRESS shaders {bytes_total} {bytes_total}");
     let failed = failed.into_inner().unwrap_or_else(|e| e.into_inner());
     if let Some(list) = &list {
         let mut lines = lines.into_inner().unwrap_or_else(|e| e.into_inner());
@@ -997,6 +1021,17 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
+    /// The launcher's progress total counts the bytes of every file under the given paths.
+    #[test]
+    fn progress_total_sums_file_sizes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("a.bin"), [0u8; 10]).unwrap();
+        std::fs::write(dir.path().join("sub").join("b.bin"), [0u8; 5]).unwrap();
+        assert_eq!(super::progress_total(&[dir.path().to_path_buf()]), 15);
+        assert_eq!(super::progress_total(&[dir.path().join("missing")]), 0);
+    }
+
     /// Shader dumps are game-derived, so a dump directory in the repo is refused.
     #[test]
     fn emit_dump_inside_repo_is_refused() {

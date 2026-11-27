@@ -15,6 +15,9 @@ pub struct Settings {
     /// Name of the active launch profile (file `profiles\<name>.toml`).
     pub active_profile: String,
     pub language: String,
+    /// Folders the user chose for files the engine looks for, by environment variable name
+    /// (for example `VICTORY_FIDELITYFX_DIR`).
+    pub dirs: std::collections::BTreeMap<String, String>,
     /// The first-run walk-through was finished or skipped.
     pub setup_done: bool,
 }
@@ -27,6 +30,7 @@ impl Default for Settings {
             engine_override: None,
             active_profile: "Default".into(),
             language: "en".into(),
+            dirs: Default::default(),
             setup_done: false,
         }
     }

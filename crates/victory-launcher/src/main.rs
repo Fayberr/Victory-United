@@ -16,6 +16,12 @@ use eframe::egui;
 
 fn main() -> eframe::Result {
     let args = app::Args::parse();
+    if let Some(file) = &args.hw_dump {
+        // Verification aid: write the hardware check to a file and exit, no window.
+        let hw = core::hw::probe();
+        let _ = std::fs::write(file, format!("{}{:?}\n{:?}\n", hw.summary(), hw.note, core::hw::warnings(&hw)));
+        return Ok(());
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Victory Launcher")
