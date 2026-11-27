@@ -3,7 +3,10 @@
 //! No polling anywhere. A worker thread blocks on the child's stdout while warming and on `Child::wait`
 //! while the game runs; it sends events through a channel and calls `ctx.request_repaint()` once per event.
 //! The UI drains the channel at the start of each frame (frames only happen on input or events).
-use super::{launch::Plan, saves};
+use super::{
+    launch::{Plan, PATH_VARS},
+    saves,
+};
 use eframe::egui;
 use std::{
     fs::File,
@@ -13,7 +16,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         mpsc::{channel, Receiver, Sender},
-        Arc,
+        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -71,27 +74,57 @@ impl RunStorage {
     }
 }
 
+/// What every handle of one runner sees.
+struct Inner {
+    state: RunState,
+    rx: Receiver<Event>,
+    backup_warning: Option<String>,
+    backup_revision: u64,
+    launch_revision: u64,
+    env: Vec<(String, String)>,
+}
+
+/// A handle to the one game process the launcher looks after. The window and the agent interface each
+/// hold one; `drain` brings a handle up to date.
 pub struct Runner {
     pub state: RunState,
-    rx: Receiver<Event>,
+    pub backup_warning: Option<String>,
+    pub backup_revision: u64,
+    pub launch_revision: u64,
+    /// The `VICTORY_*` environment of the current or last start, without the path variables.
+    pub env: Vec<(String, String)>,
+    inner: Arc<Mutex<Inner>>,
     tx: Sender<Event>,
     ctx: egui::Context,
     child_pid: Arc<AtomicU32>,
     cancel: Arc<AtomicBool>,
     skip: Arc<AtomicBool>,
-    pub backup_warning: Option<String>,
-    pub backup_revision: u64,
-    pub launch_revision: u64,
 }
 
 impl Runner {
     pub fn new(ctx: egui::Context) -> Self {
         let (tx, rx) = channel();
-        Self { state: RunState::Idle, rx, tx, ctx, child_pid: Arc::new(AtomicU32::new(0)), cancel: Arc::new(AtomicBool::new(false)), skip: Arc::new(AtomicBool::new(false)), backup_warning: None, backup_revision: 0, launch_revision: 0 }
+        let inner = Inner { state: RunState::Idle, rx, backup_warning: None, backup_revision: 0, launch_revision: 0, env: Vec::new() };
+        Self {
+            state: RunState::Idle, backup_warning: None, backup_revision: 0, launch_revision: 0, env: Vec::new(),
+            inner: Arc::new(Mutex::new(inner)), tx, ctx,
+            child_pid: Arc::new(AtomicU32::new(0)), cancel: Arc::new(AtomicBool::new(false)), skip: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Another handle to the same runner.
+    pub fn handle(&self) -> Self {
+        let mut handle = Self {
+            state: RunState::Idle, backup_warning: None, backup_revision: 0, launch_revision: 0, env: Vec::new(),
+            inner: self.inner.clone(), tx: self.tx.clone(), ctx: self.ctx.clone(),
+            child_pid: self.child_pid.clone(), cancel: self.cancel.clone(), skip: self.skip.clone(),
+        };
+        handle.drain();
+        handle
     }
 
     pub fn busy(&self) -> bool {
-        matches!(self.state, RunState::Warming { .. } | RunState::Starting | RunState::Running { .. } | RunState::Finishing { .. })
+        busy(&self.state)
     }
 
     pub fn running_pid(&self) -> Option<u32> {
@@ -109,16 +142,22 @@ impl Runner {
         }
     }
 
-    /// Starts the whole flow on a worker thread.
-    pub fn start(&mut self, plan: Plan, logs_dir: PathBuf, warm: bool, flags_active: bool, storage: Option<RunStorage>) {
-        if self.busy() {
-            return;
+    /// Starts the whole flow on a worker thread. False when something is already running.
+    pub fn start(&mut self, plan: Plan, logs_dir: PathBuf, warm: bool, flags_active: bool, storage: Option<RunStorage>) -> bool {
+        let inner = self.inner.clone();
+        let mut inner = lock(&inner);
+        apply(&mut inner);
+        if busy(&inner.state) {
+            self.copy(&inner);
+            return false;
         }
-        self.backup_warning = None;
+        inner.backup_warning = None;
+        inner.env = plan.env.iter().filter(|(k, _)| !PATH_VARS.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
         self.cancel.store(false, Ordering::SeqCst);
         self.skip.store(false, Ordering::SeqCst);
         self.child_pid.store(0, Ordering::SeqCst);
-        self.state = if warm { RunState::Warming { done: 0, total: 0, since: Instant::now() } } else { RunState::Starting };
+        inner.state = if warm { RunState::Warming { done: 0, total: 0, since: Instant::now() } } else { RunState::Starting };
+        self.copy(&inner);
         let (tx, ctx, pid, cancel) = (self.tx.clone(), self.ctx.clone(), self.child_pid.clone(), self.cancel.clone());
         std::thread::spawn(move || {
             let send = |e: Event| {
@@ -164,6 +203,7 @@ impl Runner {
             drop(storage);
             send(Event::Ended(summary));
         });
+        true
     }
 
     /// Ends the warm-up early and goes on to the game.
@@ -181,27 +221,67 @@ impl Runner {
         kill_tree(self.child_pid.load(Ordering::SeqCst))
     }
 
-    /// Takes the events that arrived since the last frame.
+    /// Takes the events that arrived since the last call.
     pub fn drain(&mut self) {
-        while let Ok(e) = self.rx.try_recv() {
-            match e {
-                Event::Progress(done, total) => {
-                    if let RunState::Warming { since, .. } = self.state {
-                        self.state = RunState::Warming { done, total, since };
-                    }
-                }
-                Event::BackupWarning(message) => self.backup_warning = Some(message),
-                Event::WarmFinished => self.state = RunState::Starting,
-                Event::Started { pid, log } => {
-                    self.state = RunState::Running { pid, since: Instant::now(), log };
-                    self.launch_revision = self.launch_revision.wrapping_add(1);
-                }
-                Event::GameExited { log } => self.state = RunState::Finishing { log },
-                Event::Ended(s) => {
-                    self.state = RunState::Ended(s);
-                    self.backup_revision = self.backup_revision.wrapping_add(1);
-                }
+        let inner = self.inner.clone();
+        let mut inner = lock(&inner);
+        apply(&mut inner);
+        self.copy(&inner);
+    }
+
+    /// Blocks until nothing runs any more (the after-exit backup included). Only for a process that is
+    /// about to end: other handles wait while this does.
+    pub fn wait_idle(&mut self) {
+        let inner = self.inner.clone();
+        let mut inner = lock(&inner);
+        apply(&mut inner);
+        while busy(&inner.state) {
+            let Ok(event) = inner.rx.recv() else { break };
+            apply_one(&mut inner, event);
+        }
+        self.copy(&inner);
+    }
+
+    fn copy(&mut self, inner: &Inner) {
+        self.state = inner.state.clone();
+        self.backup_warning = inner.backup_warning.clone();
+        self.backup_revision = inner.backup_revision;
+        self.launch_revision = inner.launch_revision;
+        self.env.clone_from(&inner.env);
+    }
+}
+
+fn lock(inner: &Mutex<Inner>) -> std::sync::MutexGuard<'_, Inner> {
+    inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn busy(state: &RunState) -> bool {
+    matches!(state, RunState::Warming { .. } | RunState::Starting | RunState::Running { .. } | RunState::Finishing { .. })
+}
+
+fn apply(inner: &mut Inner) {
+    while let Ok(event) = inner.rx.try_recv() {
+        apply_one(inner, event);
+    }
+}
+
+fn apply_one(inner: &mut Inner, event: Event) {
+    match event {
+        Event::Progress(done, total) => {
+            if let RunState::Warming { since, .. } = inner.state {
+                inner.state = RunState::Warming { done, total, since };
             }
+        }
+        Event::BackupWarning(message) => inner.backup_warning = Some(message),
+        Event::WarmFinished => inner.state = RunState::Starting,
+        Event::Started { pid, log } => {
+            inner.state = RunState::Running { pid, since: Instant::now(), log };
+            inner.launch_revision = inner.launch_revision.wrapping_add(1);
+        }
+        Event::GameExited { log } => inner.state = RunState::Finishing { log },
+        Event::Ended(s) => {
+            inner.state = RunState::Ended(s);
+            inner.backup_revision = inner.backup_revision.wrapping_add(1);
         }
     }
 }

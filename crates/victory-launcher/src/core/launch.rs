@@ -5,7 +5,10 @@
 //! Settings tab, stored in the profile), 4 extra flags (the Flags tab, `launch-flags.txt`). Edits and
 //! extra flags can also remove a value: a switch that is off is removed, never set to `0`, unless the
 //! flag registry says the engine wants an explicit `0` (see `flagreg::Flag::off_value`).
-use super::presets::{Env, PresetFile};
+use super::{
+    flagreg::{registry, Flag, Kind},
+    presets::{Env, PresetFile},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -305,6 +308,79 @@ pub fn rename_profile(dir: &Path, from: &str, to: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The preset a profile uses: `auto` or a preset id from `data/presets.toml`.
+pub fn set_preset(file: &PresetFile, profile: &mut Profile, id: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(id == "auto" || file.preset(id).is_some(), "There is no preset called {id}.");
+    profile.options.preset = id.to_string();
+    Ok(())
+}
+
+impl Profile {
+    /// Stores one edit. `None` goes back to what the preset gives.
+    pub fn set_edit(&mut self, flag: &str, value: Option<String>) {
+        self.edits.remove(flag);
+        self.removed.retain(|r| r != flag);
+        if let Some(v) = value {
+            self.edits.insert(flag.to_string(), v);
+        }
+    }
+
+    /// Turns a switch on or off. Off removes the variable unless the registry says the engine wants an
+    /// explicit 0.
+    pub fn set_switch(&mut self, flag: &Flag, on: bool) {
+        self.set_edit(&flag.name, None);
+        if on {
+            self.edits.insert(flag.name.clone(), "1".into());
+        } else if let Some(zero) = flag.off_value() {
+            self.edits.insert(flag.name.clone(), zero.into());
+        } else {
+            self.removed.push(flag.name.clone());
+        }
+    }
+}
+
+/// Names of the saved profiles plus the active one (which may not be saved yet), sorted.
+pub fn profile_names(profiles: &[Profile], active: &str) -> Vec<String> {
+    let mut names: Vec<String> = profiles.iter().map(|p| p.name.clone()).collect();
+    if !names.iter().any(|n| n == active) {
+        names.push(active.to_string());
+    }
+    names.sort_by_key(|s| s.to_lowercase());
+    names
+}
+
+/// Saves a new profile. `from` copies the settings of another one.
+pub fn create_profile(dir: &Path, name: &str, from: Option<&Profile>) -> anyhow::Result<Profile> {
+    let name = name.trim();
+    anyhow::ensure!(!name.is_empty(), "A profile needs a name.");
+    anyhow::ensure!(!profile_path(dir, name).exists(), "A profile called {name} already exists.");
+    let mut p = from.cloned().unwrap_or_default();
+    p.name = name.to_string();
+    save_profile(dir, &p)?;
+    Ok(p)
+}
+
+/// Saves `profile` (already carrying its new name) and removes the file it had before.
+pub fn save_renamed(dir: &Path, profile: &Profile, old: &str) -> std::io::Result<()> {
+    save_profile(dir, profile)?;
+    if file_safe_name(old) != file_safe_name(&profile.name) && profile_path(dir, old).is_file() {
+        delete_profile(dir, old)?;
+    }
+    Ok(())
+}
+
+/// Deletes a profile and returns the one to use next. The last profile cannot be deleted.
+pub fn remove_profile(dir: &Path, name: &str, active: &str) -> anyhow::Result<Profile> {
+    let all = list_profiles(dir);
+    let names = profile_names(&all, active);
+    anyhow::ensure!(names.iter().any(|n| n == name), "There is no profile called {name}.");
+    anyhow::ensure!(names.len() > 1, "Keep at least one profile.");
+    if profile_path(dir, name).is_file() {
+        delete_profile(dir, name)?;
+    }
+    Ok(list_profiles(dir).into_iter().next().unwrap_or_default())
+}
+
 // ---------------------------------------------------------------- launch-flags.txt
 
 /// Format: one flag per line, `NAME=VALUE` or `NAME` (presence only); `#off ` in front switches a line off;
@@ -327,6 +403,36 @@ pub fn parse_extra(text: &str) -> Vec<ExtraFlag> {
             valid_name(name).then(|| ExtraFlag { name: name.to_string(), value, enabled })
         })
         .collect()
+}
+
+/// The value an added flag gets when none was typed: `1` for a known switch, presence only for an
+/// unknown name or a presence switch, otherwise the default from the registry.
+pub fn default_value(name: &str, typed: Option<String>) -> Option<String> {
+    match (typed, registry().get(name)) {
+        (Some(v), _) => Some(v),
+        (None, Some(f)) if f.kind == Kind::Switch && !f.presence => Some("1".to_string()),
+        (None, Some(f)) if f.kind == Kind::Switch => None,
+        (None, Some(f)) if !f.default.is_empty() => Some(f.default.clone()),
+        (None, _) => None,
+    }
+}
+
+/// Adds an extra flag or replaces the one with the same name, and switches it on.
+pub fn put_extra(list: &mut Vec<ExtraFlag>, name: &str, value: Option<String>) {
+    if let Some(existing) = list.iter_mut().find(|e| e.name == name) {
+        existing.value = value;
+        existing.enabled = true;
+    } else {
+        list.push(ExtraFlag { name: name.to_string(), value, enabled: true });
+    }
+}
+
+pub fn read_extra(path: &Path) -> Vec<ExtraFlag> {
+    std::fs::read_to_string(path).map(|t| parse_extra(&t)).unwrap_or_default()
+}
+
+pub fn write_extra(path: &Path, flags: &[ExtraFlag]) -> std::io::Result<()> {
+    super::store::write_atomic(path, format_extra(flags).as_bytes())
 }
 
 pub fn valid_name(n: &str) -> bool {

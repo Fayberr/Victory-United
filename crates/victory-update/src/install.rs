@@ -209,6 +209,25 @@ fn dir_size(p: &Path) -> u64 {
         .sum()
 }
 
+/// The builds `cleanup` would remove: all but the active one, the rollback target and the newest
+/// others up to `keep` in all.
+pub fn superseded(engine_root: &Path, keep: usize) -> Vec<String> {
+    let all = installed(engine_root);
+    let mut kept = all.iter().filter(|b| b.is_current || b.is_previous).count();
+    let mut old = Vec::new();
+    for b in all {
+        if b.is_current || b.is_previous {
+            continue;
+        }
+        if kept < keep {
+            kept += 1;
+            continue;
+        }
+        old.push(b.name);
+    }
+    old
+}
+
 /// Removes old builds, keeping the active one, the rollback target and the newest others up to
 /// `keep` in all. Also removes leftover `.partial` folders. Returns the names removed.
 pub fn cleanup(engine_root: &Path, keep: usize) -> Vec<String> {
@@ -219,18 +238,9 @@ pub fn cleanup(engine_root: &Path, keep: usize) -> Vec<String> {
             removed.push(n);
         }
     }
-    let all = installed(engine_root);
-    let mut kept = all.iter().filter(|b| b.is_current || b.is_previous).count();
-    for b in &all {
-        if b.is_current || b.is_previous {
-            continue;
-        }
-        if kept < keep {
-            kept += 1;
-            continue;
-        }
-        if std::fs::remove_dir_all(engine_root.join(&b.name)).is_ok() {
-            removed.push(b.name.clone());
+    for name in superseded(engine_root, keep) {
+        if std::fs::remove_dir_all(engine_root.join(&name)).is_ok() {
+            removed.push(name);
         }
     }
     removed

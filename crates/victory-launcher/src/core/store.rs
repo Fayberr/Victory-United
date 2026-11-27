@@ -117,6 +117,8 @@ pub struct Settings {
     pub window: Option<WindowPlacement>,
     pub update_schedule: UpdateSchedule,
     pub last_update_check: Option<u64>,
+    /// "Let AI agents control the launcher". Only the Settings tab changes it.
+    pub agent_control: bool,
 }
 
 impl Default for Settings {
@@ -136,6 +138,7 @@ impl Default for Settings {
             window: None,
             update_schedule: UpdateSchedule::default(),
             last_update_check: None,
+            agent_control: false,
         }
     }
 }

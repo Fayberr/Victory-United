@@ -70,15 +70,22 @@ impl OpsSettings {
     }
 
     pub fn load() -> Self {
-        std::fs::read_to_string(Self::file())
+        Self::load_from(&Self::file())
+    }
+
+    pub fn load_from(file: &std::path::Path) -> Self {
+        std::fs::read_to_string(file)
             .ok()
             .and_then(|t| toml::from_str(&t).ok())
             .unwrap_or_default()
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        std::fs::create_dir_all(paths::data_dir())?;
-        crate::core::store::write_atomic(&Self::file(), toml::to_string_pretty(self)?.as_bytes())?;
+        self.save_to(&Self::file())
+    }
+
+    pub fn save_to(&self, file: &std::path::Path) -> anyhow::Result<()> {
+        crate::core::store::write_atomic(file, toml::to_string_pretty(self)?.as_bytes())?;
         Ok(())
     }
 }

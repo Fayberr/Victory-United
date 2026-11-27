@@ -267,6 +267,19 @@ impl OpsState {
         }
     }
 
+    /// Reads the settings and the installed builds again after something else changed them.
+    pub fn reload_from_disk(&mut self) {
+        let cfg = OpsSettings::load();
+        if cfg.overlay != self.cfg.overlay {
+            self.overlay_mode = None;
+        }
+        if cfg.overlay_options.hotkey != self.cfg.overlay_options.hotkey {
+            self.hotkey_draft = cfg.overlay_options.hotkey.clone();
+        }
+        self.cfg = cfg;
+        self.updates.refresh_installed();
+    }
+
     /// Writes the settings when they changed.
     pub fn save_if_changed(&mut self, before: &OpsSettings) {
         if self.persist && *before != self.cfg {
