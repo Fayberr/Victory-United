@@ -1235,6 +1235,29 @@ fn drained() {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_panicking_pipeline_is_refused_and_the_worker_continues() {
+        let failed = Arc::new(Pending::new(Vec::new(), None));
+        let next = Arc::new(Pending::new(Vec::new(), None));
+        let failed_job = Arc::clone(&failed);
+        let next_job = Arc::clone(&next);
+        std::thread::spawn(move || {
+            failed_job.make_with(|| panic!("synthetic pipeline build panic"));
+            next_job.make_with(|| None);
+        })
+        .join()
+        .expect("the pipeline worker should survive");
+
+        assert!(matches!(failed.made.get(), Some(None)));
+        assert!(matches!(next.made.get(), Some(None)));
+        let mut rebuilt = false;
+        failed.make_with(|| {
+            rebuilt = true;
+            None
+        });
+        assert!(!rebuilt);
+    }
+
     #[cfg(feature = "diagnostics")]
     #[test]
     fn missing_distinguishes_omitted_and_pending_pipelines() {

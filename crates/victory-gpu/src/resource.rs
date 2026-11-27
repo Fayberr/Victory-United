@@ -4784,7 +4784,6 @@ mod tests {
         assert!(!textures().contains(&(source as usize)), "the last reference frees it");
         resource_release(view);
     }
-
     /// A 16-bit depth texture the title also asks unordered access for gets
     /// a colour twin, and the host copies one into the other, both ways: a
     /// pattern put into the twin is copied to the depth texture, the twin
@@ -5326,12 +5325,24 @@ mod tests {
         fill.close();
         host.execute(&[&fill]);
 
-        // A list in which a shader writes the twins: closing it draws the
-        // depth plane's twin into the plane.
+        // Closing a recording draws the depth plane's twin into the plane.
+        // Record two lists before executing to check both retain distinct heaps.
         let list = host.new_list().unwrap();
         assert!(list.twin_use(depth, true, true));
         list.twins_written();
         list.close();
+        let other = host.new_list().unwrap();
+        assert!(other.twin_use(depth, true, true));
+        other.twins_written();
+        other.close();
+        {
+            let first = list.kept_shader_heaps();
+            let second = other.kept_shader_heaps();
+            assert_eq!(first.len(), 1);
+            assert_eq!(second.len(), 1);
+            assert_ne!(first[0], second[0], "recorded passes share descriptor storage");
+        }
+        drop(other);
         host.execute(&[&list]);
 
         // The draws: a triangle over the target at the depth of a class,
