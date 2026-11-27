@@ -115,26 +115,21 @@ pub(crate) mod stat {
     pub(crate) const HAD_BYTES: usize = 24;
     /// Jobs.
     pub(crate) const JOBS: usize = 25;
-    /// Parts of [`READ_BACKS`]: textures shaders wrote that the title reads
-    /// (`texback::land`), buffer read-backs (map and copy into title memory),
-    /// and the flight's card plan and own work told done.
-    pub(crate) const RB_TEXTURES: usize = 26;
-    pub(crate) const RB_BUFFERS: usize = 27;
-    pub(crate) const RB_DONE: usize = 28;
-    /// Counts for those: texture read-backs landed, buffer read-backs and
-    /// their bytes.
-    pub(crate) const RB_TEXTURE_COUNT: usize = 29;
-    pub(crate) const RB_BUFFER_COUNT: usize = 30;
-    pub(crate) const RB_BUFFER_BYTES: usize = 31;
-    /// Writing texture read-backs into title memory (`texback::write`, on
-    /// its own thread unless `VICTORY_TEXBACK_ASYNC=0`): waiting for the
-    /// locks against mapping changes, the work after, read-backs written,
-    /// and those replaced by a newer one before they were.
-    pub(crate) const TB_WAIT: usize = 32;
-    pub(crate) const TB_WORK: usize = 33;
-    pub(crate) const TB_WRITTEN: usize = 34;
-    pub(crate) const TB_REPLACED: usize = 35;
-    pub(crate) const COUNT: usize = 36;
+    pub(crate) const TEXTURE_READBACK_US: usize = 26;
+    pub(crate) const BUFFER_READBACK_US: usize = 27;
+    pub(crate) const TEXTURE_READBACKS: usize = 28;
+    pub(crate) const BUFFER_READBACKS: usize = 29;
+    pub(crate) const RB_TEXTURES: usize = 30;
+    pub(crate) const RB_BUFFERS: usize = 31;
+    pub(crate) const RB_DONE: usize = 32;
+    pub(crate) const RB_TEXTURE_COUNT: usize = 33;
+    pub(crate) const RB_BUFFER_COUNT: usize = 34;
+    pub(crate) const RB_BUFFER_BYTES: usize = 35;
+    pub(crate) const TB_WAIT: usize = 36;
+    pub(crate) const TB_WORK: usize = 37;
+    pub(crate) const TB_WRITTEN: usize = 38;
+    pub(crate) const TB_REPLACED: usize = 39;
+    pub(crate) const COUNT: usize = 40;
 }
 
 static STATS: [AtomicU64; stat::COUNT] = [const { AtomicU64::new(0) }; stat::COUNT];
@@ -163,10 +158,18 @@ pub(crate) fn log(frames: f64) {
         );
     }
     let s: Vec<f64> = STATS.iter().map(|s| s.swap(0, Ordering::Relaxed) as f64 / frames).collect();
+    let ms = |i: usize| s[i] / 1000.0;
+    #[cfg(feature = "diagnostics")]
+    if s[stat::TEXTURE_READBACKS] > 0.0 || s[stat::BUFFER_READBACKS] > 0.0 {
+        tracing::info!(
+            "read-backs per frame: textures {:.2} ms ({:.1} queued), buffers {:.2} ms ({:.1} queued)",
+            ms(stat::TEXTURE_READBACK_US), s[stat::TEXTURE_READBACKS],
+            ms(stat::BUFFER_READBACK_US), s[stat::BUFFER_READBACKS],
+        );
+    }
     if s[stat::PIECES] == 0.0 && s[stat::REST] == 0.0 {
         return;
     }
-    let ms = |i: usize| s[i] / 1000.0;
     let mb = |v: f64| v / (1 << 20) as f64;
     tracing::info!(
         "landing per frame (VICTORY_LAND={}, {} threads): which pieces to fetch {:.2} ms, then the fetches (the relay's line); \
@@ -288,6 +291,8 @@ impl Pool {
     }
 
     fn help(&self) {
+        // (The thread that calls `each` waits for this one's share.)
+        let mut priority = crate::cores::Priority::new();
         let mut state = self.state();
         loop {
             let Some((work, i)) = take(&mut state) else {
@@ -296,6 +301,7 @@ impl Pool {
             };
             state.running += 1;
             drop(state);
+            priority.keep();
             let working = crate::timeline::span("a landing's job");
             // SAFETY: counted in `running`, so `each` has not returned.
             let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { (*work.0)(i) }));

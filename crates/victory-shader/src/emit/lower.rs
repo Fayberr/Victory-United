@@ -101,6 +101,9 @@ pub(crate) struct Lowered {
     /// Whether the program uses wave operations.
     #[cfg(test)]
     pub wave_ops: bool,
+    /// Whether the pixel program declares early depth-stencil.
+    #[cfg(test)]
+    pub early_depth: bool,
 }
 
 pub(crate) struct Parts<'a> {
@@ -162,9 +165,10 @@ pub(super) fn lower_with_thread_limit(
 /// at once (`shader.rs` `USER_DISPATCH_THREADS_X`; after DexNom/VIctory
 /// bc3cd4b0, which does so for two of the programs by their digests).
 pub(super) fn lower_counted(parts: &Parts, counted: bool) -> Result<Lowered, ShaderError> {
+    let early_depth = parts.native.stage == HwStage::Ps && super::early_depth_enabled();
     let mut bad = HashMap::new();
     loop {
-        match Lower::new(parts, &bad, counted).run(counted) {
+        match Lower::new(parts, &bad, early_depth).run(counted) {
             Ok(l) => return Ok(l),
             Err(Stop::Retry(v, why)) => {
                 if bad.insert(v, why).is_some() {
@@ -2333,7 +2337,7 @@ fn unsupported(offset: usize, what: Why) -> Stop {
 }
 
 impl<'a> Lower<'a> {
-    fn new(x: &'a Parts<'a>, bad: &'a HashMap<Value, Why>, _partial: bool) -> Self {
+    fn new(x: &'a Parts<'a>, bad: &'a HashMap<Value, Why>, early_depth: bool) -> Self {
         let p = x.p;
         let mut phi_at = HashMap::new();
         for (b, block) in p.blocks.iter().enumerate() {
@@ -2344,6 +2348,19 @@ impl<'a> Lower<'a> {
         let mut s = Shader::new(x.native.stage == HwStage::Ps);
         s.inputs = x.inputs.clone();
         s.outputs = x.outputs.clone();
+        // DB_SHADER_CONTROL: bit 12 requests testing before a pixel shader
+        // runs. Skip shaders that write depth or stencil, whether the export
+        // is recorded in bits 0..2 or in the DXIL output signature.
+        const DEPTH_BEFORE_SHADER: u32 = 1 << 12;
+        const DEPTH_STENCIL_EXPORTS: u32 = 0b111;
+        if early_depth
+            && let StageIo::Ps { db_shader_control, .. } = x.native.io
+            && db_shader_control & DEPTH_BEFORE_SHADER != 0
+            && db_shader_control & DEPTH_STENCIL_EXPORTS == 0
+            && !s.outputs.iter().any(|output| (17..=20).contains(&output.kind))
+        {
+            s.flags |= flags::EARLY_DEPTH_STENCIL;
+        }
         let insts = || p.blocks.iter().flat_map(|b| &b.insts);
         let writes_uavs = insts().any(|i| {
             matches!(i.fields, Fields::Image { .. } | Fields::Buffer { .. })
@@ -3495,6 +3512,8 @@ impl<'a> Lower<'a> {
             quad_reads: self.s.quad_reads,
             #[cfg(test)]
             wave_ops: self.s.flags & flags::WAVE_OPS != 0,
+            #[cfg(test)]
+            early_depth: self.s.flags & flags::EARLY_DEPTH_STENCIL != 0,
             dxil: self.s.finish(),
             user_data,
             samplers: self.samplers,

@@ -2,8 +2,8 @@
 //! (host slots 0-3), with PS5 HID input when XInput reports no pads or both
 //! sources are explicitly requested. With no pad the keyboard drives one
 //! stand-in gamepad (`FALLBACK_BUTTONS`). The keyboard is a device of its own
-//! too. A focused window also has a mouse. A poll thread records changes
-//! and runs device callbacks on connect and disconnect.
+//! too. `VICTORY_GAMEPAD_MOUSE=1` adds a mouse while the title has focus.
+//! A poll thread records changes and runs device callbacks.
 #![allow(non_snake_case)]
 // Title code calls these through the objects, passing pointers the real API
 // would trust.
@@ -24,6 +24,8 @@ use crate::{HleExport, HleModule};
 
 #[cfg(any(windows, test))]
 mod dualsense;
+#[cfg(windows)]
+pub(super) mod mouse;
 
 /// The documented errors.
 pub const DEVICE_DISCONNECTED: HRESULT = 0x838A_0001_u32 as i32;
@@ -111,7 +113,7 @@ struct KeyState {
 
 const _: () = assert!(size_of::<KeyState>() == 12 && size_of::<PadState>() == 28);
 
-/// GameInput v0 reports cumulative relative motion. Scroll axes stay at zero.
+/// GameInput v0 mouse state. The four axes are cumulative relative values.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct MouseState {
@@ -121,26 +123,8 @@ struct MouseState {
     wheel_x: i64,
     wheel_y: i64,
 }
-const _: () = assert!(size_of::<MouseState>() == 40);
-
-/// The next cursor reference and the motion since the previous focused sample.
-#[cfg(any(windows, test))]
-fn mouse_delta(
-    previous: Option<(i32, i32)>,
-    position: Option<(i32, i32)>,
-    size: (i32, i32),
-) -> (Option<(i32, i32)>, (i64, i64)) {
-    let current = position
-        .filter(|_| size.0 > 0 && size.1 > 0)
-        .map(|(x, y)| (x.clamp(0, size.0 - 1), y.clamp(0, size.1 - 1)));
-    let delta = match (previous, current) {
-        (Some((x, y)), Some((nx, ny))) => {
-            (i64::from(nx) - i64::from(x), i64::from(ny) - i64::from(y))
-        }
-        _ => (0, 0),
-    };
-    (current, delta)
-}
+const _: () =
+    assert!(size_of::<MouseState>() == 40 && std::mem::offset_of!(MouseState, position_x) == 8);
 
 /// Host input, or a fake in tests.
 trait Source: Send {
@@ -149,6 +133,7 @@ trait Source: Send {
     /// Keys held down: the keyboard's only while the title's window has
     /// focus, scripted ones (`VICTORY_KEYS_FILE`, `VICTORY_KEYS`) always.
     fn keys(&mut self) -> Vec<KeyState>;
+    /// The mouse while the title window has focus, if enabled.
     fn mouse(&mut self) -> Option<MouseState> {
         None
     }
@@ -577,10 +562,7 @@ impl State {
             }));
         }
         if was != slot.connected {
-            tracing::info!(device = index, kind = kind(index), connected = !was, "input device");
-            if index == MOUSE && !slot.connected {
-                slot.history.clear();
-            }
+            tracing::info!(device = index, connected = !was, "input device");
             let (current, previous) = if was {
                 (0, STATUS_CONNECTED)
             } else {
@@ -1126,14 +1108,17 @@ extern "system" fn gamepad_state(this: *const Reading, out: *mut PadState) -> bo
     }
 }
 extern "system" fn mouse_state(this: *const Reading, out: *mut MouseState) -> bool {
-    match &reading(this).value {
-        Value::Mouse(state) if !out.is_null() => {
-            // SAFETY: the caller supplies room for the v0 state.
-            unsafe { out.write(*state) };
-            true
-        }
-        _ => false,
+    if out.is_null() {
+        return false;
     }
+    let Value::Mouse(state) = &reading(this).value else {
+        // SAFETY: the title passes room for a v0 mouse state.
+        unsafe { out.write(MouseState::default()) };
+        return false;
+    };
+    // SAFETY: the same output contract as above.
+    unsafe { out.write(*state) };
+    true
 }
 /// Kinds our devices do not have: no count, no state.
 extern "system" fn nothing(_: *const c_void) -> usize {
@@ -1157,7 +1142,7 @@ static READING: Table<25> = Table([
     nothing as *const (),           // 0x68
     key_count as *const (),         // 0x70
     key_state as *const (),         // 0x78
-    mouse_state as *const (),       // 0x80 mouse
+    mouse_state as *const (),       // 0x80
     nothing as *const (),           // 0x88 touch
     nothing as *const (),           // 0x90
     nothing as *const (),           // 0x98 motion
@@ -1180,16 +1165,14 @@ pub(crate) fn module() -> HleModule {
     }
 }
 
-/// Host input: XInput pads, then PS5 pads, and keyboard and mouse while our process has focus.
+/// Host input: XInput pads, then PS5 pads, plus focused keyboard and mouse.
 #[cfg(windows)]
 mod host {
     use std::time::{Duration, Instant};
 
-    use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
-    use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, MAPVK_VK_TO_VSC_EX, MapVirtualKeyW, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
+        GetAsyncKeyState, MAPVK_VK_TO_VSC_EX, MapVirtualKeyW,
     };
     use windows_sys::Win32::UI::Input::XboxController::{
         XINPUT_GAMEPAD, XINPUT_GAMEPAD_A, XINPUT_GAMEPAD_B, XINPUT_GAMEPAD_BACK,
@@ -1200,7 +1183,7 @@ mod host {
         XInputSetState,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId,
+        GetForegroundWindow, GetWindowThreadProcessId,
     };
 
     use super::*;
@@ -1248,8 +1231,6 @@ mod host {
         /// The input snapshot for this poll and the HID connection owning each slot.
         pads: [Option<PadState>; PADS],
         hid_slots: [Option<u64>; PADS],
-        previous_cursor: Option<(i32, i32)>,
-        mouse: MouseState,
     }
 
     impl Host {
@@ -1302,7 +1283,7 @@ mod host {
         fn keys(&mut self) -> Vec<KeyState> {
             let mut down = asked_keys();
             down.extend(scripted());
-            if focused_window().is_some() {
+            if focused() {
                 // Left/right modifier keys only, as devices report them; no
                 // mouse buttons (below 0x08).
                 let held: Vec<u8> = (0x08..=0xFE_u8)
@@ -1325,39 +1306,7 @@ mod host {
         }
 
         fn mouse(&mut self) -> Option<MouseState> {
-            static ENABLED: LazyLock<bool> =
-                LazyLock::new(|| std::env::var_os("VICTORY_GAMEPAD_MOUSE").is_none_or(|v| v != "0"));
-            if !*ENABLED {
-                return None;
-            }
-            let (mut point, mut rect) = (POINT::default(), RECT::default());
-            let position = focused_window().and_then(|window| {
-                // SAFETY: all outputs are local and all coordinates use the same window.
-                let sampled = unsafe {
-                    GetCursorPos(&mut point) != 0
-                        && ScreenToClient(window, &mut point) != 0
-                        && GetClientRect(window, &mut rect) != 0
-                        && GetForegroundWindow() == window
-                };
-                sampled.then_some((point.x, point.y))
-            });
-            let (cursor, (dx, dy)) =
-                mouse_delta(self.previous_cursor, position, (rect.right, rect.bottom));
-            self.previous_cursor = cursor;
-            if cursor.is_none() {
-                self.mouse = MouseState::default();
-                return None;
-            }
-            self.mouse.position_x += dx;
-            self.mouse.position_y += dy;
-            self.mouse.buttons = 0;
-            for (bit, vk) in [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON].into_iter().enumerate() {
-                // SAFETY: virtual-key state query.
-                if unsafe { GetAsyncKeyState(i32::from(vk)) } < 0 {
-                    self.mouse.buttons |= 1 << bit;
-                }
-            }
-            Some(self.mouse)
+            super::mouse::sample()
         }
 
         fn rumble(&mut self, slot: usize, low: u16, high: u16) {
@@ -1480,13 +1429,12 @@ mod host {
     }
 
     /// The foreground window is one of ours (the title's or our fallback).
-    fn focused_window() -> Option<HWND> {
+    fn focused() -> bool {
         let mut process = 0;
         // SAFETY: plain queries; a null window gives process 0.
         unsafe {
-            let window = GetForegroundWindow();
-            GetWindowThreadProcessId(window, &mut process);
-            (process == GetCurrentProcessId()).then_some(window)
+            GetWindowThreadProcessId(GetForegroundWindow(), &mut process);
+            process == GetCurrentProcessId()
         }
     }
 
@@ -1749,31 +1697,19 @@ mod tests {
     }
 
     #[test]
-    fn mouse_motion_clamps_to_client_and_resets_on_focus_loss() {
-        let mut previous = None;
-        for (point, delta) in [
-            (Some((50, 40)), (0, 0)),
-            (Some((30, 10)), (-20, -30)),
-            (Some((200, -5)), (69, -10)),
-            (Some((201, -8)), (0, 0)),
-            (None, (0, 0)),
-            (Some((7, 9)), (0, 0)),
-        ] {
-            let (cursor, motion) = mouse_delta(previous, point, (100, 80));
-            assert_eq!(motion, delta);
-            previous = cursor;
-        }
-    }
-
-    #[test]
-    fn mouse_readings_and_callbacks_in_both_pad_modes() {
+    fn mouse_readings_connect_and_disconnect_in_both_pad_modes() {
         for one_pad in [false, true] {
             let (hub, host) = fake_with(one_pad);
             let log = Log::default();
             register(hub, MOUSE_KIND, 2, &log);
+            assert!(log.lock().unwrap().is_empty());
+            assert_eq!(current(hub, MOUSE_KIND, MOUSE), Err(DEVICE_DISCONNECTED));
+
             let sample = MouseState {
-                buttons: 5,
-                position_x: -3,
+                buttons: 0x9,
+                position_x: 30,
+                position_y: -12,
+                wheel_y: -120,
                 ..Default::default()
             };
             host.lock().unwrap().mouse = Some(sample);
@@ -1781,16 +1717,25 @@ mod tests {
             let r = current(hub, MOUSE_KIND, MOUSE).unwrap();
             let get =
                 slot::<extern "system" fn(*const Reading, *mut MouseState) -> bool, _>(r, 0x80);
-            let mut got = MouseState::default();
-            assert!(get(r, &mut got));
-            assert_eq!(got, sample);
+            let mut state = MouseState::default();
+            assert!(get(r, &mut state));
+            assert_eq!(state, sample);
+            assert!(!get(r, std::ptr::null_mut()));
+            assert_eq!(key_count(r), 0);
             release(r);
+
+            let p = current(hub, GAMEPAD_KIND, FALLBACK).unwrap();
+            assert!(!get(p, &mut state));
+            assert_eq!(state, MouseState::default());
+            release(p);
 
             host.lock().unwrap().mouse = None;
             hub.poll();
             assert_eq!(current(hub, MOUSE_KIND, MOUSE), Err(DEVICE_DISCONNECTED));
-            assert!(hub.state().slots[MOUSE].history.is_empty());
-            assert_eq!(*log.lock().unwrap(), [(MOUSE, 3, 0), (MOUSE, 0, 3)]);
+            assert_eq!(
+                *log.lock().unwrap(),
+                [(MOUSE, STATUS_CONNECTED, 0), (MOUSE, 0, STATUS_CONNECTED)]
+            );
         }
     }
 

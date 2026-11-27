@@ -40,7 +40,7 @@ pub fn run(jobs: Option<usize>, limit: Option<usize>, again: bool, used: bool, t
     let fingerprint = known::fingerprint();
     let done_file = dir.join("warm-done.txt");
     let bad_file = dir.join("warm-bad.txt");
-    let keys = known::keys(&dir);
+    let entries = known::warm_entries(&dir);
     let listed = std::fs::read_to_string(&done_file).unwrap_or_default();
     let mut done: HashSet<&str> = HashSet::new();
     for line in listed.lines() {
@@ -55,19 +55,21 @@ pub fn run(jobs: Option<usize>, limit: Option<usize>, again: bool, used: bool, t
     let early = std::fs::read_to_string(dir.join("early-pipelines.txt")).unwrap_or_default();
     let early: HashSet<&str> = early.lines().collect();
     // Those earlier runs drew with first, the others in no order (by key).
-    let mut all: Vec<usize> = (0..keys.len())
+    let mut all: Vec<usize> = (0..entries.len())
         .filter(|&n| {
-            let key = keys[n].as_str();
-            (again || !done.contains(key)) && !bad.contains(key) && (!used || early.contains(key))
+            let entry = &entries[n];
+            let key = entry.key.as_str();
+            !entry.skipped && (again || !done.contains(key)) && !bad.contains(key) && (!used || early.contains(key))
         })
         .collect();
-    all.sort_by_key(|&n| (!early.contains(keys[n].as_str()), &keys[n]));
+    all.sort_by_key(|&n| (!early.contains(entries[n].key.as_str()), &entries[n].key));
     all.truncate(limit.unwrap_or(usize::MAX));
     let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
     let jobs = jobs.unwrap_or(cores * 2 / 3).max(1);
+    let skipped = entries.iter().filter(|entry| entry.skipped).count();
     println!(
-        "{} pipelines known, {} made before ({fingerprint}), {} bad; {} to make, {jobs} processes",
-        keys.len(),
+        "{} pipelines known, {} made before ({fingerprint}), {} bad, {skipped} skipped by VICTORY_SKIP_PIPELINES. {} to make, {jobs} processes",
+        entries.len(),
         done.len(),
         bad.len(),
         all.len()
@@ -80,10 +82,10 @@ pub fn run(jobs: Option<usize>, limit: Option<usize>, again: bool, used: bool, t
     run_batches(
         &all,
         jobs,
-        start_worker,
+        |indices| start_worker(indices, &entries),
         |n, ms, there| {
             if ms >= SLOW_MS {
-                writeln!(lock(&slow_out), "\n{} {ms:.0}", keys[n]).context("writing slow-pipelines.txt")?;
+                writeln!(lock(&slow_out), "\n{} {ms:.0}", entries[n].key).context("writing slow-pipelines.txt")?;
             }
             let mut state = lock(&state);
             state.0.push(ms);
@@ -93,11 +95,11 @@ pub fn run(jobs: Option<usize>, limit: Option<usize>, again: bool, used: bool, t
                 println!("{count} of {}, {:.0} s", all.len(), began.elapsed().as_secs_f64());
             }
             drop(state);
-            writeln!(lock(&done_out), "{fingerprint} {}", keys[n]).context("writing warm-done.txt")
+            writeln!(lock(&done_out), "{fingerprint} {}", entries[n].key).context("writing warm-done.txt")
         },
         |n, why| {
-            println!("pipeline {n} {}: {why}", keys[n]);
-            writeln!(lock(&bad_out), "{} {why}", keys[n]).context("writing warm-bad.txt")?;
+            println!("pipeline {n} {}: {why}", entries[n].key);
+            writeln!(lock(&bad_out), "{} {why}", entries[n].key).context("writing warm-bad.txt")?;
             lock(&state).2 += 1;
             Ok(())
         },
@@ -169,11 +171,14 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn start_worker(these: &[usize]) -> Result<Child> {
+fn start_worker(these: &[usize], entries: &[known::WarmEntry]) -> Result<Child> {
     use std::os::windows::process::CommandExt;
     const IDLE_PRIORITY_CLASS: u32 = 0x40;
     let exe = std::env::current_exe().context("could not locate the warm worker executable")?;
-    let list: Vec<String> = these.iter().map(usize::to_string).collect();
+    let list: Vec<String> = these.iter().map(|&index| {
+        let recipe = &entries[index];
+        format!("{index}:{}:{}", recipe.offset, recipe.key)
+    }).collect();
     Command::new(&exe)
         .args(["warm", "--these", &list.join(",")])
         .stdin(Stdio::null())
@@ -316,7 +321,11 @@ fn child(
 
 /// What such a process does.
 fn make(dir: &Path, these: &str) -> Result<()> {
-    let these: Vec<usize> = these.split(',').map(|n| n.parse().context("--these")).collect::<Result<_>>()?;
+    let these = these.split(',').map(|request| {
+        let (index, details) = request.split_once(':').context("missing recipe offset in --these")?;
+        let (offset, key) = details.split_once(':').context("missing recipe key in --these")?;
+        Ok(known::WarmRecipe { index: index.parse()?, offset: offset.parse()?, key })
+    }).collect::<Result<Vec<_>>>()?;
     let cfg = victory_core::Config::load()?;
     victory_hle::known_pipelines::use_translations(cfg.cache_subdir("shaders")?);
     let mut out = std::io::stdout();
@@ -329,7 +338,7 @@ fn make(dir: &Path, these: &str) -> Result<()> {
             // Whoever asked is gone.
             std::process::exit(1);
         }
-    });
+    }).context("reading the selected pipeline recipes")?;
     // Without what a run's end does (nothing to save, the host's threads).
     let _ = out.flush();
     std::process::exit(0)

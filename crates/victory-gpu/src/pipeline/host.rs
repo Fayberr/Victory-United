@@ -858,6 +858,7 @@ impl HostPipeline {
                 return None;
             }
         };
+        let use_library = samplers.is_empty() || super::library::allows_static_samplers(host);
         let code = |i: usize| {
             stages.get(i).and_then(|(s, _)| s.translated()).map_or(
                 D3D12_SHADER_BYTECODE::default(),
@@ -876,7 +877,7 @@ impl HostPipeline {
             };
             let name = super::library::name("compute", &root_blob, &[&code_bytes(&code(0))], "");
             let made = super::library::pipeline(
-                &name,
+                use_library.then_some(name.as_str()),
                 // SAFETY: the description points at live data.
                 |library, name| unsafe { library.LoadComputePipeline(name, &desc) },
                 // SAFETY: as above.
@@ -948,7 +949,16 @@ impl HostPipeline {
                 } else {
                     super::library::name("mesh payload", &root_blob, &[&code_bytes(&code(0)), &code_bytes(&code(1))], &state)
                 };
-                mesh_pipeline(&host.device, &root, amplification, code(0), code(1), &mesh_state, depth_bounds, &name)
+                mesh_pipeline(
+                    &host.device,
+                    &root,
+                    amplification,
+                    code(0),
+                    code(1),
+                    &mesh_state,
+                    depth_bounds,
+                    use_library.then_some(name.as_str()),
+                )
             };
             let refused = |e: windows::core::Error| {
                 tracing::warn!(error = %e, ?shaders, "host mesh pipeline refused");
@@ -1071,11 +1081,12 @@ impl HostPipeline {
             ),
         };
         let make = |desc: &D3D12_GRAPHICS_PIPELINE_STATE_DESC, name: &str| {
+            let library_name = use_library.then_some(name);
             if depth_bounds {
-                return graphics_depth_bounds_pipeline(&host.device, &root, desc, g.depth1(), name);
+                return graphics_depth_bounds_pipeline(&host.device, &root, desc, g.depth1(), library_name);
             }
             super::library::pipeline(
-                name,
+                library_name,
                 // SAFETY: the description points at live data.
                 |library, name| unsafe { library.LoadGraphicsPipeline(name, desc) },
                 // SAFETY: as above.
@@ -1165,7 +1176,7 @@ struct Sub<T>(D3D12_PIPELINE_STATE_SUBOBJECT_TYPE, T);
 fn stream_pipeline<S>(
     device: &ID3D12Device,
     stream: &mut S,
-    name: &str,
+    name: Option<&str>,
 ) -> windows::core::Result<ID3D12PipelineState> {
     use windows::core::Interface;
     let desc = D3D12_PIPELINE_STATE_STREAM_DESC {
@@ -1190,7 +1201,7 @@ fn graphics_depth_bounds_pipeline(
     root: &ID3D12RootSignature,
     d: &D3D12_GRAPHICS_PIPELINE_STATE_DESC,
     depth: D3D12_DEPTH_STENCIL_DESC1,
-    name: &str,
+    name: Option<&str>,
 ) -> windows::core::Result<ID3D12PipelineState> {
     use windows::core::Interface;
     #[repr(C)]
@@ -1269,7 +1280,7 @@ fn mesh_pipeline(
     ps: D3D12_SHADER_BYTECODE,
     g: &MeshState,
     depth_bounds: bool,
-    name: &str,
+    name: Option<&str>,
 ) -> windows::core::Result<ID3D12PipelineState> {
     use windows::core::Interface;
     #[repr(C)]
@@ -1617,9 +1628,9 @@ mod tests {
         let name = super::super::library::name("mesh test", &root_blob, &[&ms, &ps], &g.describe());
         let none = D3D12_SHADER_BYTECODE::default();
         let state = MeshState::of(&g);
-        mesh_pipeline(&host.device, &root, none, code(&ms), code(&ps), &state, false, &name).expect("made");
+        mesh_pipeline(&host.device, &root, none, code(&ms), code(&ps), &state, false, Some(&name)).expect("made");
         let loaded = super::super::library::LOADED.load(Ordering::Relaxed);
-        mesh_pipeline(&host.device, &root, none, code(&ms), code(&ps), &state, false, &name).expect("made again");
+        mesh_pipeline(&host.device, &root, none, code(&ms), code(&ps), &state, false, Some(&name)).expect("made again");
         assert!(
             super::super::library::LOADED.load(Ordering::Relaxed) > loaded,
             "the mesh pipeline was compiled again instead of loaded from the library"
@@ -1861,10 +1872,10 @@ mod tests {
             &[&vs, &ps],
             &g.describe(),
         );
-        let pso = graphics_depth_bounds_pipeline(&host.device, &root, &desc, g.depth1(), &name)
+        let pso = graphics_depth_bounds_pipeline(&host.device, &root, &desc, g.depth1(), Some(&name))
             .expect("depth-bounds PSO made");
         let loaded = super::super::library::LOADED.load(Ordering::Relaxed);
-        graphics_depth_bounds_pipeline(&host.device, &root, &desc, g.depth1(), &name)
+        graphics_depth_bounds_pipeline(&host.device, &root, &desc, g.depth1(), Some(&name))
             .expect("depth-bounds PSO made again");
         assert!(
             super::super::library::LOADED.load(Ordering::Relaxed) > loaded,
