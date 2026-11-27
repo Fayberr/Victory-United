@@ -4248,7 +4248,7 @@ impl<'a> Lower<'a> {
         let base = self.s.m.i32(VIEW_ADDRESSES);
         let byte = self.s.m.bin(c, Bin::Add, byte, base);
         let h = self.s.root_srv_handle(SLOT_STRIDES);
-        let words = self.raw_dwords(h, byte, 2);
+        let words = self.raw_dwords(h, byte, 2, false);
         Ok(Some((words[0], words[1])))
     }
 
@@ -6349,7 +6349,8 @@ impl<'a> Lower<'a> {
                 return self.s.op(c, "quadOp.i32", Attr::NoUnwind, i32t, 123, &[x, k]);
             }
         }
-        self.quad_pick(x, src)
+        let pat_u8 = ((p[0] & 3) | ((p[1] & 3) << 2) | ((p[2] & 3) << 4) | ((p[3] & 3) << 6)) as u8;
+        self.quad_pick(x, src, Some(pat_u8))
     }
     /// `x` in the first lane of this host wave where `guard` holds, and whether it has such a
     /// lane: the console reads the first lane of EXEC, and a lane that got here with EXEC clear
@@ -7953,7 +7954,7 @@ impl<'a> Lower<'a> {
                 self.handle(site, src, false, (13, 0x1_0000))?
             };
             let mut both = Vec::new();
-            let dwords = if as_raw { self.raw_dwords(h, addr, raw.len() as u32) } else { Vec::new() };
+            let dwords = if as_raw { self.raw_dwords(h, addr, raw.len() as u32, true) } else { Vec::new() };
             for (k, &r) in raw.iter().enumerate() {
                 let b = self.cur;
                 let x = match dwords.get(k) {
@@ -8021,7 +8022,7 @@ impl<'a> Lower<'a> {
             return Ok(());
         }
         if let Some(h) = self.constants_raw(site, src)? {
-            for (k, x) in self.raw_dwords(h, addr, count).into_iter().enumerate() {
+            for (k, x) in self.raw_dwords(h, addr, count, true).into_iter().enumerate() {
                 self.write(inst, Reg::S(code + k as u8), x, None);
             }
             return Ok(());
@@ -9819,7 +9820,6 @@ impl<'a> Lower<'a> {
                 self.quad_read(x, src, [0, 1, 2, 3].map(|q| ctrl >> (2 * q) & 3))
             }
             _ => self.read_lane(x, src),
-        };
         };
         let mut enable = None;
         if let Some(inside) = inside {
@@ -12926,7 +12926,7 @@ impl<'a> Lower<'a> {
                 let four = self.s.m.i32(4 * k);
                 let a = self.s.m.bin(c, Bin::Add, byte, four);
                 let x = match raw {
-                    Some(_) => self.raw_dwords(h, a, 1)[0],
+                    Some(_) => self.raw_dwords(h, a, 1, false)[0],
                     None => self.cbuffer_dword(h, a),
                 };
                 self.write(inst, Reg::V(reg + k as u8), x, guard);

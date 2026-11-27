@@ -178,7 +178,6 @@ fn build() -> [u8; 32] {
 pub(crate) fn translation() -> [u8; 32] {
     build()
 }
-}
 
 fn translate_listed(c: &[u8]) -> Result<HostShader, String> {
     static LIST: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();

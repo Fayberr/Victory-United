@@ -991,15 +991,16 @@ impl HostPipeline {
             };
             tracing::info!(?shaders, launched = launch.is_some(), "host mesh pipeline");
             crate::host::name(&pso, || format!("{shaders:?}"));
+            let name = format!("{shaders:?}");
             return Some(HostPipeline {
                 compute: false,
                 mesh: true,
                 #[cfg(feature = "diagnostics")]
-                traced_targets: crate::draw::rtv_trace::enabled().then_some((name, g.targets)),
+                traced_targets: crate::draw::rtv_trace::enabled().then_some((name.clone(), g.targets)),
                 pso,
                 root,
                 stages: bound,
-                name: format!("{shaders:?}"),
+                name,
                 slots: 0,
                 inputs: Vec::new(),
                 rects: false,
@@ -2406,6 +2407,7 @@ mod tests {
     /// as the clamp does. The mesh shader counts its groups.
     #[test]
     fn mesh_records_are_launched_by_the_amplification_stage() {
+        use windows::core::Interface;
         let Some(host) = host() else {
             return;
         };
@@ -2492,7 +2494,7 @@ mod tests {
             out.unwrap()
         };
         let list = host.new_list().unwrap();
-        let list2 = windows::core::Interface::cast::<ID3D12GraphicsCommandList2>(&list.list).unwrap();
+        let list2 = list.list.cast::<ID3D12GraphicsCommandList2>().unwrap();
         // SAFETY: an open list and live buffers.
         unsafe {
             let at = groups.GetGPUVirtualAddress();

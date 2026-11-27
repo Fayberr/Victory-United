@@ -633,8 +633,6 @@ fn paired_lowering_scope_restores_on_unwind() {
     assert!(!super::PAIRED.get());
 }
 
-    const S_ENDPGM: u32 = 0xBF81_0000;
-
     /// A minimum and then an add on one LDS word are not interchangeable
     /// between the two host halves. Two adds of the same word are.
     #[test]

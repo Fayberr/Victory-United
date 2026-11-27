@@ -42,6 +42,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use windows::Win32::Graphics::Direct3D12::*;
+use windows::core::Interface;
 
 use crate::host::HostList;
 
@@ -147,7 +148,7 @@ static LAUNCHED: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 /// address on the card (the card reads it), or the group count the CPU
 /// knows. False if the list has no budget for a record.
 pub(crate) fn record(list: &HostList, roots: [u32; 3], what: Launch) -> bool {
-    let l6 = match windows::core::Interface::cast::<ID3D12GraphicsCommandList6>(&list.list) {
+    let l6 = match list.list.cast::<ID3D12GraphicsCommandList6>() {
         Ok(l6) => l6,
         Err(_) => return false,
     };
