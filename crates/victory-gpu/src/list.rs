@@ -1898,6 +1898,7 @@ mod state {
         super::count_draw();
         if indirect != 0 {
             static ONCE: std::sync::Once = std::sync::Once::new();
+            super::INDIRECT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             ONCE.call_once(|| tracing::warn!("indirect mesh dispatches dropped"));
             return;
         }
@@ -1957,7 +1958,7 @@ fn count_draw() {
 static TOTALS: [std::sync::atomic::AtomicU64; 3] = [const { std::sync::atomic::AtomicU64::new(0) }; 3];
 
 /// See [`TOTALS`] (read by `crate::popwatch`, a diagnostics module).
-#[cfg(all(windows, feature = "diagnostics"))]
+#[cfg(windows)]
 pub(crate) fn totals() -> [u64; 3] {
     TOTALS.each_ref().map(|t| t.load(std::sync::atomic::Ordering::Relaxed))
 }

@@ -1737,6 +1737,9 @@ fn hosted(this: This, make: bool) -> Option<Made> {
         let texture = match created {
             Ok(texture) => texture,
             Err(error) => {
+                if error.code() == windows::Win32::Foundation::E_OUTOFMEMORY {
+                    NOT_MADE_FOR_NOW.fetch_add(1, Relaxed);
+                }
                 let retry = next_texture_retry(error.code(), first_attempt, crate::host::coarse_ms());
                 r.host.retry_at.store(retry, Relaxed);
                 if retry != u64::MAX {
@@ -2579,6 +2582,11 @@ pub(crate) fn made_copy(this: This) -> Option<std::sync::Arc<HostTexture>> {
     }
     hosted(this, false).map(|made| made.0)
 }
+
+/// Title textures the host refused for lack of memory since the start (each
+/// ask counts), for the launcher.
+#[cfg(windows)]
+pub(crate) static NOT_MADE_FOR_NOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[cfg(windows)]
 fn next_texture_retry(error: windows::core::HRESULT, first_attempt: bool, now: u64) -> u64 {

@@ -302,6 +302,11 @@ pub(crate) fn parts_written(pages: &[(usize, u64)]) -> Vec<u16> {
 /// (shared will do: what notes an answer holds it alone).
 static ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Write-watch askings since the start.
+pub(crate) fn queries() -> u64 {
+    ASKED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn next_asking() -> u64 {
     ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }

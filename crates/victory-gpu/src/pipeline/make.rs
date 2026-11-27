@@ -293,7 +293,10 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
     if p.made.get().is_none() {
         start(p, REQUESTED);
         if p.graphics.is_none() && compute_waits() {
+            let started = Instant::now();
             p.make();
+            let waited = started.elapsed().as_micros() as u64;
+            crate::launcher_stats::PIPELINE_WAIT_US.fetch_add(waited, Ordering::Relaxed);
         } else {
             wait(p, crate::frame::current());
         }
@@ -387,7 +390,9 @@ fn wait(p: &Pending, frame: u64) {
         held = done.wait_timeout(held, rest).unwrap_or_else(|e| e.into_inner()).0;
     }
     drop(held);
-    let waited = started.elapsed().min(left);
+    let elapsed = started.elapsed();
+    crate::launcher_stats::PIPELINE_WAIT_US.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+    let waited = elapsed.min(left);
     waiting.end();
     if screen && waited > Duration::from_millis(500) {
         tracing::info!(
