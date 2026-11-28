@@ -6609,6 +6609,7 @@ fn build_loose_shadow(start: u64, len: u64, backing: LooseBacking) -> Arc<Shadow
                         sent: Mutex::default(),
                         has_sent: AtomicBool::new(false),
                         size: len,
+                        reserved: false,
                     };
                     (on_card, Some(card))
                 }
@@ -6871,7 +6872,8 @@ fn exact_with_limits(
             before: Mutex::default(),
             dirty: Mutex::default(),
             sent: Mutex::default(),
-            touched: Default::default(),
+            has_dirty: AtomicBool::new(false),
+            has_sent: AtomicBool::new(false),
             size,
             reserved,
         })),
@@ -6970,7 +6972,7 @@ mod exact_card_tests {
     }
 
     #[test]
-    #[ignore = "GPU integration: exact alignment copies upload and merge writes"]
+    #[ignore = "GPU integration: requires VICTORY_LARGE_CARD_COPIES=1 and a D3D12 hardware adapter"]
     fn alignment_copy_is_local_and_preserves_deferred_uploads_and_gpu_writes() {
         let host = host().expect("D3D12 required");
         const LEN: usize = 20 << 20;
@@ -7023,7 +7025,7 @@ mod exact_card_tests {
                 assert_eq!(offsets.map(|offset| ((address as usize + offset) as *const u32).read()), [101, 202, 303]);
             }
         }
-        EXACT.lock().unwrap_or_else(|e| e.into_inner()).1.remove(&(address, LEN as u64));
+        EXACT.write().unwrap_or_else(|e| e.into_inner()).remove(&(address, LEN as u64));
         unsafe { assert!(host.device.GetDeviceRemovedReason().is_ok()); }
     }
 }
