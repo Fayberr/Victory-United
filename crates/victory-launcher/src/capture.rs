@@ -48,6 +48,8 @@ impl Capture {
             s("03-settings-engine", Tab::Settings, Some(core::Screen::Main), 4520.0),
             s("03-saves", Tab::Saves, Some(core::Screen::Idle), 0.0),
             s("04-flags", Tab::Flags, Some(core::Screen::Main), 0.0),
+            s("04-flags-list", Tab::Flags, Some(core::Screen::Main), 520.0),
+            s("04-flags-more", Tab::Flags, Some(core::Screen::Main), 1500.0),
             s("05-monitor", Tab::Monitor, Some(core::Screen::Main), 0.0),
             s("05-monitor-detail", Tab::Monitor, Some(core::Screen::Main), 500.0),
             s("05-monitor-hardware", Tab::Monitor, Some(core::Screen::Main), 1_240.0),

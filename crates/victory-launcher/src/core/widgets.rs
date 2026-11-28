@@ -114,3 +114,25 @@ pub fn page_scroll(ui: &mut egui::Ui, core_scroll: Option<f32>, add: impl FnOnce
     }
     area.show(ui, add);
 }
+
+/// A small square button with an up or down chevron drawn as lines, so it never depends on the font
+/// having an arrow character.
+pub fn chevron_button(ui: &mut egui::Ui, up: bool, enabled: bool) -> egui::Response {
+    let size = egui::vec2(24.0, 22.0);
+    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        if enabled && (response.hovered() || response.has_focus()) {
+            ui.painter().rect(rect, visuals.corner_radius, visuals.bg_fill, visuals.bg_stroke, egui::StrokeKind::Inside);
+        }
+        let color = if enabled { visuals.fg_stroke.color } else { ui.visuals().weak_text_color().gamma_multiply(0.45) };
+        let c = rect.center();
+        let (dx, dy) = (4.5, 2.5);
+        let (a, b) = if up { (c.y + dy, c.y - dy) } else { (c.y - dy, c.y + dy) };
+        let stroke = egui::Stroke::new(1.6, color);
+        ui.painter().line_segment([egui::pos2(c.x - dx, a), egui::pos2(c.x, b)], stroke);
+        ui.painter().line_segment([egui::pos2(c.x, b), egui::pos2(c.x + dx, a)], stroke);
+    }
+    response
+}

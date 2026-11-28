@@ -28,7 +28,7 @@ Windows or antivirus may warn about an unsigned program. That is expected for a 
 
 ## Settings
 
-**Appearance** switches between Dark, Light and Follow Windows. Interface size ranges from 80% to 150%.
+**Appearance** switches between Dark, Light and Same as Windows. Interface size ranges from 80% to 150%.
 
 **Launcher behavior** lets you keep the launcher open, minimize it or close its window when the game starts.
 Closing disables the monitor and launcher overlay. The launcher stays in the background long enough to finish

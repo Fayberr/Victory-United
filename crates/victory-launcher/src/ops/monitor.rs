@@ -1016,10 +1016,10 @@ fn customize(ui: &mut egui::Ui, cfg: &mut MonitorSettings) {
         for (i, c) in cfg.cards.iter_mut().enumerate() {
             ui.push_id(c.card, |ui| {
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut c.visible, c.card.label());
                     if let Some(j) = move_buttons(ui, i, length) {
                         card_move = Some((i, j));
                     }
+                    ui.checkbox(&mut c.visible, c.card.label());
                 });
                 if !c.rows.is_empty() {
                     egui::CollapsingHeader::new(tr("monitor.rows")).show(ui, |ui| {
@@ -1028,10 +1028,10 @@ fn customize(ui: &mut egui::Ui, cfg: &mut MonitorSettings) {
                         for (j, r) in c.rows.iter_mut().enumerate() {
                             ui.push_id(r.field, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.checkbox(&mut r.visible, r.field.label());
                                     if let Some(k) = move_buttons(ui, j, len) {
                                         row_move = Some((j, k));
                                     }
+                                    ui.checkbox(&mut r.visible, r.field.label());
                                 });
                             });
                         }
@@ -1049,12 +1049,10 @@ fn customize(ui: &mut egui::Ui, cfg: &mut MonitorSettings) {
 }
 
 fn move_buttons(ui: &mut egui::Ui, index: usize, len: usize) -> Option<usize> {
-    let up = ui
-        .add_enabled(index > 0, egui::Button::new("↑"))
+    let up = crate::core::widgets::chevron_button(ui, true, index > 0)
         .on_hover_text(tr("monitor.move_up"))
         .clicked();
-    let down = ui
-        .add_enabled(index + 1 < len, egui::Button::new("↓"))
+    let down = crate::core::widgets::chevron_button(ui, false, index + 1 < len)
         .on_hover_text(tr("monitor.move_down"))
         .clicked();
     if up {

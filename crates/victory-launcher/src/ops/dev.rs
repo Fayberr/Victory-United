@@ -408,6 +408,8 @@ fn profile_overview(ui: &mut egui::Ui, ops: &mut OpsState) {
         if rows.is_empty() {
             ui.label(theme::dim(tr("dev.profile_empty")));
         } else {
+            // The name column takes what the two percentage columns leave, so names are not cut to "vict...".
+            let name_width = (ui.available_width() - 300.0).max(200.0);
             egui::ScrollArea::vertical()
                 .id_salt("profile-table")
                 .max_height(286.0)
@@ -417,12 +419,23 @@ fn profile_overview(ui: &mut egui::Ui, ops: &mut OpsState) {
                         .striped(true)
                         .spacing([16.0, 5.0])
                         .show(ui, |ui| {
-                            for name in [
+                            for (i, name) in [
                                 "dev.profile_name",
                                 "dev.profile_self",
                                 "dev.profile_inclusive",
-                            ] {
-                                ui.label(theme::strong(tr(name)));
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            {
+                                if i == 0 {
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(name_width, 18.0),
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| ui.label(theme::strong(tr(name))),
+                                    );
+                                } else {
+                                    ui.label(theme::strong(tr(name)));
+                                }
                             }
                             ui.end_row();
                             for row in &rows {

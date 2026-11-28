@@ -4,7 +4,7 @@
 use super::{
     flagreg::{registry, Flag, Kind, Risk},
     launch::{valid_name, ExtraFlag},
-    widgets::page_title,
+    widgets::{page_scroll, page_title},
     CoreState,
 };
 use crate::{app::Shared, i18n::{tr, trf}, theme};
@@ -14,7 +14,7 @@ use eframe::egui;
 pub struct FlagsUi {
     pub search: String,
     pub risk: Option<Risk>,
-    pub documented_only: bool,
+    pub show_undocumented: bool,
     pub add_name: String,
     pub add_value: String,
     pub message: String,
@@ -22,14 +22,15 @@ pub struct FlagsUi {
 }
 
 pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
-    if !core.ui.flags.initialised {
-        core.ui.flags.initialised = true;
-        core.ui.flags.documented_only = true;
-    }
+    core.ui.flags.initialised = true;
     page_title(ui, tr("flags.title"), tr("flags.sub"));
-    mine(core, ui);
-    ui.add_space(14.0);
-    registry_list(core, ui);
+    let scroll = core.page_scroll.take();
+    page_scroll(ui, scroll, |ui| {
+        mine(core, ui);
+        ui.add_space(14.0);
+        registry_list(core, ui);
+        ui.add_space(8.0);
+    });
 }
 
 fn risk_badge(ui: &mut egui::Ui, risk: Risk) {
@@ -152,76 +153,143 @@ fn add_flag(core: &mut CoreState, name: &str, value: Option<String>) {
     core.ui.flags.message = trf("flags.added", &[("name", name)]);
 }
 
+/// Groups shown on this tab, in this order. Flags without a group come last as "Experimental and other".
+const GROUPS: [(&str, &str); 5] = [
+    ("graphics", "settings.g_graphics"),
+    ("memory", "settings.g_memory"),
+    ("threads", "settings.g_threads"),
+    ("paths", "flags.g_paths"),
+    ("debug", "settings.g_debug"),
+];
+
 fn registry_list(core: &mut CoreState, ui: &mut egui::Ui) {
     let reg = registry();
     let state = &mut core.ui.flags;
     ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut state.search).desired_width(260.0).hint_text(tr("flags.search")));
+        ui.add(egui::TextEdit::singleline(&mut state.search).desired_width(240.0).hint_text(tr("flags.search")));
         if ui.selectable_label(state.risk.is_none(), tr("flags.all")).clicked() {
             state.risk = None;
         }
         for r in [Risk::Safe, Risk::Advanced, Risk::Experimental] {
-            if ui.selectable_label(state.risk == Some(r), r.label()).clicked() {
+            let word = r.label();
+            let word = format!("{}{}", word[..1].to_uppercase(), &word[1..]);
+            if ui.selectable_label(state.risk == Some(r), word).clicked() {
                 state.risk = Some(r);
             }
         }
-        ui.checkbox(&mut state.documented_only, tr("flags.documented_only"));
     });
+    let undocumented_total = reg.flags.len() - reg.documented().count();
+    ui.checkbox(&mut state.show_undocumented, trf("flags.show_undocumented", &[("count", &undocumented_total.to_string())]));
     let needle = state.search.trim().to_lowercase();
-    let rows: Vec<&Flag> = reg
-        .flags
-        .iter()
-        .filter(|f| !state.documented_only || !f.doc.is_empty())
-        .filter(|f| state.risk.is_none_or(|r| f.risk == r))
-        .filter(|f| needle.is_empty() || f.name.to_lowercase().contains(&needle) || f.doc.to_lowercase().contains(&needle))
-        .collect();
-    ui.label(theme::dim(trf("flags.count", &[("shown", &rows.len().to_string()), ("total", &reg.flags.len().to_string()), ("documented", &reg.documented().count().to_string())])).size(12.5));
-    ui.add_space(4.0);
-    let row_h = 56.0;
-    let scroll = core.page_scroll.take();
+    let matches = |f: &&Flag| {
+        state.risk.is_none_or(|r| f.risk == r)
+            && (needle.is_empty() || f.name.to_lowercase().contains(&needle) || f.doc.to_lowercase().contains(&needle))
+    };
+    let described: Vec<&Flag> = reg.flags.iter().filter(|f| !f.doc.is_empty()).filter(matches).collect();
+    // A search always looks at every flag, so a name that is not described yet can still be found.
+    let plain: Vec<&Flag> = if state.show_undocumented || !needle.is_empty() {
+        reg.flags.iter().filter(|f| f.doc.is_empty()).filter(matches).collect()
+    } else {
+        Vec::new()
+    };
+    ui.add_space(6.0);
     let mut to_add: Option<String> = None;
-    let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
-    if let Some(y) = scroll {
-        area = area.vertical_scroll_offset(y);
+    if described.is_empty() && plain.is_empty() {
+        ui.label(theme::dim(tr("flags.nothing")));
     }
-    area.show_rows(ui, row_h, rows.len(), |ui, range| {
-        for f in &rows[range] {
-            ui.horizontal(|ui| {
-                ui.set_height(row_h - 8.0);
-                ui.vertical(|ui| {
-                    ui.set_width((ui.available_width() - 90.0).max(200.0));
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(&f.name).monospace().color(ui.visuals().strong_text_color()));
-                        risk_badge(ui, f.risk);
-                        let kind = match f.kind {
-                            Kind::Switch => "switch",
-                            Kind::Number => "number",
-                            Kind::Text => "text",
-                            Kind::Choice => "choice",
-                        };
-                        ui.label(theme::dim(kind).size(12.0));
-                        if !f.default.is_empty() {
-                            ui.label(theme::dim(format!("default {}", f.default)).size(12.0));
+    let mut sections: Vec<(String, Vec<&Flag>)> = Vec::new();
+    for (group, title) in GROUPS {
+        sections.push((tr(title).to_string(), described.iter().copied().filter(|f| f.group.as_deref() == Some(group)).collect()));
+    }
+    sections.push((tr("flags.g_other").to_string(), described.iter().copied().filter(|f| f.group.is_none()).collect()));
+    for (title, flags) in sections.iter().filter(|(_, f)| !f.is_empty()) {
+        theme::card(ui).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(theme::strong(title).size(16.0));
+            for (i, f) in flags.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(2.0);
+                    ui.separator();
+                }
+                ui.add_space(2.0);
+                flag_row(ui, f, &mut to_add);
+            }
+        });
+        ui.add_space(10.0);
+    }
+    if !plain.is_empty() {
+        theme::card(ui).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(theme::strong(trf("flags.g_plain", &[("count", &plain.len().to_string())])).size(16.0));
+            ui.label(theme::dim(tr("flags.g_plain_help")).size(12.5));
+            ui.add_space(4.0);
+            for f in &plain {
+                ui.horizontal(|ui| {
+                    flag_name(ui, &f.name);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button(tr("flags.add")).clicked() {
+                            to_add = Some(f.name.clone());
                         }
                     });
-                    let doc = if f.doc.is_empty() { tr("flags.undocumented") } else { f.doc.as_str() };
-                    ui.add(egui::Label::new(theme::dim(doc).size(12.5)).truncate());
                 });
-                if ui.small_button(tr("flags.add")).clicked() {
-                    to_add = Some(f.name.clone());
-                }
-            });
-        }
-    });
+            }
+        });
+    }
     if let Some(name) = to_add {
         add_flag(core, &name, None);
         core.save_extra();
     }
 }
 
+/// `VICTORY_` in dim text, the rest of the name in strong monospace: the part that tells flags apart stands out.
+fn flag_name(ui: &mut egui::Ui, name: &str) {
+    let (prefix, rest) = name.strip_prefix("VICTORY_").map_or(("", name), |r| ("VICTORY_", r));
+    ui.spacing_mut().item_spacing.x = 0.0;
+    if !prefix.is_empty() {
+        ui.label(egui::RichText::new(prefix).monospace().weak());
+    }
+    ui.label(egui::RichText::new(rest).monospace().color(ui.visuals().strong_text_color()));
+}
+
+fn flag_row(ui: &mut egui::Ui, f: &Flag, to_add: &mut Option<String>) {
+    ui.horizontal(|ui| {
+        flag_name(ui, &f.name);
+        ui.spacing_mut().item_spacing.x = 10.0;
+        ui.add_space(4.0);
+        risk_badge(ui, f.risk);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button(tr("flags.add")).on_hover_text(tr("flags.add_help")).clicked() {
+                *to_add = Some(f.name.clone());
+            }
+        });
+    });
+    ui.add(egui::Label::new(theme::dim(&f.doc).size(13.0)).wrap());
+    let mut facts = vec![match f.kind {
+        Kind::Switch => tr("flags.kind_switch").to_string(),
+        Kind::Number => tr("flags.kind_number").to_string(),
+        Kind::Text => tr("flags.kind_text").to_string(),
+        Kind::Choice if f.choices.is_empty() => tr("flags.kind_choice").to_string(),
+        Kind::Choice => trf("flags.kind_choice_of", &[("choices", &f.choices.join(", "))]),
+    }];
+    if !f.default.is_empty() {
+        facts.push(trf("flags.default", &[("value", &f.default)]));
+    }
+    ui.label(theme::dim(facts.join("  |  ")).size(11.5));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_described_flag_lands_in_a_section() {
+        let known: Vec<&str> = GROUPS.iter().map(|(g, _)| *g).collect();
+        for f in registry().flags.iter().filter(|f| !f.doc.is_empty()) {
+            if let Some(g) = &f.group {
+                assert!(known.contains(&g.as_str()), "{} has the group {g}, which the Flags tab does not list", f.name);
+            }
+        }
+    }
 
     #[test]
     fn adding_flags_picks_sensible_values() {

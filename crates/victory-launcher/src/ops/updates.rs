@@ -228,22 +228,30 @@ pub fn play_banner(state: &mut UpdatesState, ui: &mut egui::Ui) -> bool {
     let mut open = false;
     theme::card(ui).inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.horizontal_wrapped(|ui| {
-            if update.newer {
-                ui.label(trf("startup_updates.engine", &[("build", &update.folder)]));
-                if ui.small_button(tr("startup_updates.open")).clicked() {
-                    open = true;
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                if update.newer {
+                    ui.horizontal(|ui| {
+                        ui.label(trf("startup_updates.engine", &[("build", &update.folder)]));
+                        if ui.small_button(tr("startup_updates.open")).clicked() {
+                            open = true;
+                        }
+                    });
                 }
-            }
-            if launcher {
-                ui.label(trf("startup_updates.launcher", &[("version", &update.manifest.launcher_version)]));
-                if update.manifest.launcher_url.starts_with("https://") {
-                    ui.hyperlink_to(tr("updates.open_release"), &update.manifest.launcher_url);
+                if launcher {
+                    ui.horizontal(|ui| {
+                        ui.label(trf("startup_updates.launcher", &[("version", &update.manifest.launcher_version)]));
+                        if update.manifest.launcher_url.starts_with("https://") {
+                            ui.hyperlink_to(tr("updates.open_release"), &update.manifest.launcher_url);
+                        }
+                    });
                 }
-            }
-            if ui.small_button(tr("startup_updates.dismiss")).clicked() {
-                state.banner_dismissed = true;
-            }
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button(tr("startup_updates.dismiss")).clicked() {
+                    state.banner_dismissed = true;
+                }
+            });
         });
     });
     ui.add_space(12.0);

@@ -86,7 +86,11 @@ fn appearance_section(core: &mut CoreState, ui: &mut egui::Ui) {
             }
         });
         ui.label(theme::dim(tr("appearance.theme_help")).size(12.5));
-        ui.add(egui::Slider::new(&mut appearance.scale_percent, 80..=150).suffix("%").text(tr("appearance.scale")));
+        ui.horizontal(|ui| {
+            ui.label(tr("appearance.scale"));
+            ui.spacing_mut().slider_width = 220.0;
+            ui.add(egui::Slider::new(&mut appearance.scale_percent, 80..=150).suffix("%"));
+        });
         ui.label(theme::dim(tr("appearance.scale_help")).size(12.5));
     });
     if appearance != before {
