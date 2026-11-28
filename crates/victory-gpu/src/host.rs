@@ -12286,8 +12286,13 @@ impl Host {
     #[cfg(test)]
     pub(crate) fn is_software(&self) -> bool {
         // SAFETY: a plain query on the adapter kept with this device.
-        let flags = unsafe { self.adapter.as_ref().and_then(|a| a.GetDesc1().ok()) }.map(|d| d.Flags);
-        flags.is_some_and(|f| f & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0)
+        let desc = unsafe { self.adapter.as_ref().and_then(|a| a.GetDesc1().ok()) };
+        // The software flag, or the system's own "Basic Render Driver" (vendor 0x1414, device
+        // 0x8c), which the default adapter is on a machine with no card and which does not carry
+        // the flag: the same two tests as `victory_shader::emit::host` makes when it picks a card.
+        desc.is_some_and(|d| {
+            d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 || (d.VendorId == 0x1414 && d.DeviceId == 0x8c)
+        })
     }
 
     /// PCI vendor ID of the adapter running the host device.
