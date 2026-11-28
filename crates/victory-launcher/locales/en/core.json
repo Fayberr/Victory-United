@@ -141,7 +141,7 @@
   "settings.engine_none": "The engine that comes with the launcher is missing.",
   "settings.engine_choose": "Choose victory.exe...",
   "settings.bcpack": "Texture data file (BCPack tables)",
-  "settings.bcpack_help": "Newer engine builds need this file to unpack some textures, such as character skin and clothes. It is not part of the launcher. Choose a copy you are allowed to use, or put it next to the launcher or in the engine folder as bcpack-tables.bin.",
+  "settings.bcpack_help": "Some engine builds (c21 and c22) need this file to unpack some textures, such as character skin and clothes. Builds from c23 on have the data built in, so you do nothing. A file you choose here, or one named bcpack-tables.bin next to the launcher or in the engine folder, is used instead of the built-in data.",
   "settings.bcpack_using": "In use: {path}",
   "settings.bcpack_missing": "No file found. Some textures will look broken (coloured checker patterns).",
   "settings.bcpack_not_needed": "No file found. This engine build has the data built in and does not need it.",

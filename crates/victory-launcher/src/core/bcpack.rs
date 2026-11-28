@@ -131,8 +131,14 @@ pub fn locate(dirs: &BTreeMap<String, String>, engine: Option<&Path>, app: &Path
     }
 }
 
-/// Does this engine build look for the tables? Older builds have them built in and never read the file, so
-/// a missing file is no problem for them. Looks for the variable's name in the executable, once per file.
+/// Text the engine carries when it has the tables built in (a debug line it logs when it uses them). The
+/// engine's source says to keep it.
+pub const BUILT_IN_MARK: &str = "bcpack tables: built in";
+
+/// Does this engine build need the tables file from the player? Old builds (c20x) have the tables built in
+/// and never read the variable. New builds read it but also carry the built-in tables, so a missing file is
+/// no problem there either. Only a build that reads the variable and has no tables of its own (c21 and c22)
+/// wants a file. Looks for both texts in the executable, once per file.
 pub fn engine_wants_tables(engine: &Path) -> bool {
     type Memo = Option<(PathBuf, Option<SystemTime>, bool)>;
     static MEMO: Mutex<Memo> = Mutex::new(None);
@@ -145,25 +151,33 @@ pub fn engine_wants_tables(engine: &Path) -> bool {
             }
         }
     }
-    let answer = file_contains(engine, TABLES_ENV.as_bytes());
+    let found = file_contains(engine, &[TABLES_ENV.as_bytes(), BUILT_IN_MARK.as_bytes()]);
+    let answer = found[0] && !found[1];
     *MEMO.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((engine.to_path_buf(), stamp, answer));
     answer
 }
 
-fn file_contains(path: &Path, needle: &[u8]) -> bool {
-    let Ok(mut file) = std::fs::File::open(path) else { return false };
+/// Which of the needles occur in the file, read in 1 MB chunks (a needle may straddle two chunks).
+fn file_contains(path: &Path, needles: &[&[u8]]) -> Vec<bool> {
+    let mut found = vec![false; needles.len()];
+    let Ok(mut file) = std::fs::File::open(path) else { return found };
+    let keep = needles.iter().map(|n| n.len()).max().unwrap_or(1).saturating_sub(1);
     let mut chunk = vec![0u8; 1 << 20];
     let mut window: Vec<u8> = Vec::new();
     loop {
-        let Ok(n) = file.read(&mut chunk) else { return false };
+        let Ok(n) = file.read(&mut chunk) else { return found };
         if n == 0 {
-            return false;
+            return found;
         }
         window.extend_from_slice(&chunk[..n]);
-        if window.windows(needle.len()).any(|w| w == needle) {
-            return true;
+        for (flag, needle) in found.iter_mut().zip(needles) {
+            if !*flag && window.windows(needle.len()).any(|w| w == *needle) {
+                *flag = true;
+            }
         }
-        let keep = needle.len() - 1;
+        if found.iter().all(|f| *f) {
+            return found;
+        }
         let from = window.len().saturating_sub(keep);
         window.drain(..from);
     }
@@ -253,16 +267,26 @@ mod tests {
     }
 
     #[test]
-    fn only_engines_that_read_the_variable_want_the_file() {
+    fn only_engines_that_read_the_variable_and_lack_the_tables_want_the_file() {
         let root = temp("wants");
-        let new = root.join("new.exe");
+        let write = |name: &str, texts: &[&str]| {
+            let mut body = vec![7u8; (1 << 20) - 5];
+            for text in texts {
+                body.extend_from_slice(text.as_bytes()); // the first one straddles the first read
+                body.extend_from_slice(&[9u8; 100]);
+            }
+            let path = root.join(name);
+            std::fs::write(&path, &body).unwrap();
+            path
+        };
+        let reads_only = write("c22.exe", &[TABLES_ENV]);
+        let built_in = write("c23.exe", &[TABLES_ENV, BUILT_IN_MARK]);
+        let built_in_first = write("c23b.exe", &[BUILT_IN_MARK, TABLES_ENV]);
         let old = root.join("old.exe");
-        let mut body = vec![7u8; (1 << 20) - 5];
-        body.extend_from_slice(TABLES_ENV.as_bytes()); // straddles the first read
-        body.extend_from_slice(&[9u8; 100]);
-        std::fs::write(&new, &body).unwrap();
         std::fs::write(&old, vec![7u8; 3 << 20]).unwrap();
-        assert!(engine_wants_tables(&new));
+        assert!(engine_wants_tables(&reads_only));
+        assert!(!engine_wants_tables(&built_in));
+        assert!(!engine_wants_tables(&built_in_first));
         assert!(!engine_wants_tables(&old));
         assert!(!engine_wants_tables(&root.join("missing.exe")));
     }
