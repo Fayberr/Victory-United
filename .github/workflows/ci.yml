@@ -55,7 +55,13 @@ jobs:
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       # Includes xtask's repository_passes_policy, the asset-policy check.
-      - run: cargo test --workspace --locked
+      - name: Tests
+        run: cargo test --workspace --locked --exclude victory-gpu
+      # The runner has no card, so these tests make their devices on Microsoft's software
+      # renderer, whose shader compiler has crashed the test program (access violation in
+      # d3d10warp) when several tests used it at once. One test at a time has not shown it.
+      - name: Tests, victory-gpu (one at a time)
+        run: cargo test -p victory-gpu --locked -- --test-threads=1
 
   test-diagnostics:
     name: Diagnostics tests

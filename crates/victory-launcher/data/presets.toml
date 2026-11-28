@@ -1,0 +1,88 @@
+# Launch presets. A preset is a named set of VICTORY_* values. Ported from scripts/play.ps1, which stays
+# the reference: change both together. Layers, later wins: common, the preset (and what it inherits),
+# then the options and edits the launcher adds (see src/core/launch.rs).
+
+# Values every preset starts from.
+[common]
+env = { VICTORY_TEXTURE_NO_WAIT = "1", VICTORY_RELAY = "2", VICTORY_WIDE_BACK = "1", VICTORY_CARD_REHASH_RUNS = "1", VICTORY_JOIN_COPIES = "1", VICTORY_INDIRECT_WINDOW = "1", VICTORY_RELAY_COPY = "1", VICTORY_CARD_STEPS = "2", VICTORY_TITLE_PRIORITIES = "0", VICTORY_CARD_AWAKE = "0", VICTORY_SHOW_AFTER = "1", VICTORY_AMBIENT = "constant:0.1", VICTORY_AMBIENT_AIR = "0.8", VICTORY_CARD_BUFFERS_MIN_KB = "64", VICTORY_PORT_CONSTANTS = "1", VICTORY_D3D12_DRED = "light" }
+# Added unless safe mode is on: the newer, faster ways.
+fast = { VICTORY_THIN = "1", VICTORY_JOIN_PARTS = "8", VICTORY_UPLOAD_AHEAD = "1", VICTORY_INDIRECT_BATCH = "2" }
+# Added in safe mode: every way still on trial is left out.
+safe = { VICTORY_UNDER_WIDE = "0", VICTORY_LAND_ECHO = "0" }
+
+# How the preset is chosen for "Automatic". First matching rule wins; same order as play.ps1.
+[[auto]]
+gpu_contains = "RTX 3080 Ti"
+preset = "3080ti"
+[[auto]]
+vendor = "nvidia"
+preset = "4090"
+[auto_fallback]
+preset = "7900xtx"
+
+[[preset]]
+id = "7900xtx"
+name = "AMD Radeon RX 7900 XTX"
+description = "Made for the Radeon RX 7900 XTX. Keeps the card awake, because the AMD driver otherwise lowers its clock speed between frames."
+env = { VICTORY_MAP_THREADS = "1", VICTORY_CARD_AWAKE = "1" }
+
+[[preset]]
+id = "4090"
+name = "NVIDIA RTX 4090"
+description = "Made for the GeForce RTX 4090. Uses many processor threads. Also the starting point for every other NVIDIA card."
+env = { VICTORY_THIN_THREADS = "12", VICTORY_UNDER_THREADS = "8", VICTORY_LAND_THREADS = "6", VICTORY_WAVE_WIDE_ONLY = "6f225b641c5b0708,5dc3b25986622949,369cbe906ea72764,2cc4c197ee29e291" }
+fast = { VICTORY_MAP_THREADS = "auto", VICTORY_PLACED_ORDER = "1" }
+
+[[preset]]
+id = "4070"
+name = "NVIDIA RTX 4070"
+description = "Made for the GeForce RTX 4070. Uses fewer processor threads than the 4090, and gives video memory to shader buffers before textures. Never chosen automatically."
+inherits = "4090"
+env = { VICTORY_THIN_THREADS = "8", VICTORY_UNDER_THREADS = "6", VICTORY_LAND_THREADS = "4", VICTORY_MAP_THREADS = "1", VICTORY_PIPELINE_WORKERS = "3" }
+fast = { VICTORY_CARD_RESERVE_BUDGETS = "1", VICTORY_CARD_BUFFERS_MIN_KB = "64", VICTORY_CARD_BUFFERS_MB = "1536", VICTORY_CARD_WINDOWS_MB = "1024" }
+
+[[preset]]
+id = "3080ti"
+name = "NVIDIA RTX 3080 Ti"
+description = "Made for the GeForce RTX 3080 Ti with 12 GB of video memory. Uses fewer processor threads than bigger cards, and textures take at most 85 percent of the video memory so the game does not stall when it fills up."
+inherits = "4090"
+env = { VICTORY_THIN_THREADS = "6", VICTORY_UNDER_THREADS = "4", VICTORY_LAND_THREADS = "3" }
+fast = { VICTORY_CARD_RESERVE_BUDGETS = "1", VICTORY_CARD_BUFFERS_MIN_KB = "64", VICTORY_CARD_BUFFERS_MB = "1536", VICTORY_CARD_WINDOWS_MB = "1024", VICTORY_TEXTURE_ROOM_PERCENT = "85" }
+
+# Simple switches in the launcher. `on` is applied when the switch is on.
+[[toggle]]
+id = "fullscreen"
+name = "Full screen"
+description = "The whole screen with no frame, as on the console. Off gives a normal window."
+default = true
+on = { VICTORY_FULLSCREEN = "1" }
+
+[[toggle]]
+id = "panel"
+name = "Performance panel"
+description = "Frame rate, frame times, GPU, CPU, video memory and RAM in the upper left corner. F3 hides it while playing."
+default = true
+on = { VICTORY_PANEL = "1" }
+
+[[toggle]]
+id = "ray_tracing"
+name = "Ray tracing"
+description = "The game's own ray-traced indirect light: lit interiors, about a third slower."
+default = false
+on = { VICTORY_BVH_BUILDER = "1" }
+
+# Upscalers. `{mode}` in a value is replaced by the chosen mode. An entry that is not available shows its
+# reason and cannot be selected. NVIDIA DLSS is not in this list: it is a modifier with its own section (core/dlss.rs).
+[[upscaler]]
+id = "off"
+name = "Off"
+available = true
+
+[[upscaler]]
+id = "fsr"
+name = "AMD FSR"
+available = true
+modes = ["quality", "balanced", "performance"]
+env = { VICTORY_FSR_4K = "{mode}" }
+files_env = "VICTORY_FIDELITYFX_DIR"
+files_note = "Needs amd_fidelityfx_upscaler_dx12.dll from AMD FidelityFX. Choose the folder that holds it."

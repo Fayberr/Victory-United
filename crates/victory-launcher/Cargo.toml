@@ -1,0 +1,46 @@
+[package]
+name = "victory-launcher"
+description = "Launcher for Victory United: settings, presets, flags, monitor, updates, bug report"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "victory-launcher"
+path = "src/main.rs"
+
+[dependencies]
+victory-stats = { path = "../victory-stats" }
+victory-update = { path = "../victory-update" }
+serde.workspace = true
+toml.workspace = true
+anyhow.workspace = true
+sha2 = "0.10"
+tempfile.workspace = true
+serde_json = "1"
+getrandom = "0.4"
+eframe = { version = "0.33.3", default-features = false, features = ["glow", "default_fonts", "x11"] }
+egui_plot = "0.34.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+rfd = { version = "0.17", default-features = false }
+windows = { workspace = true, features = [
+    "Win32_Foundation", "Win32_Graphics_Dxgi_Common", "Win32_Storage_FileSystem", "Win32_Graphics_Dxgi", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D12",
+    "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_Registry",
+    "Win32_System_Performance", "Win32_System_LibraryLoader",
+    "Win32_Security", "Win32_Security_Authorization", "Win32_System_Console", "Win32_UI_WindowsAndMessaging",
+] }
+
+[lints]
+workspace = true
+
+
+[build-dependencies]
+cc = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

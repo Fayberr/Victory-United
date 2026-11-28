@@ -48,7 +48,11 @@ fn documented_switches_are_read() {
     let read = |path: &String| std::fs::read_to_string(root.join(path)).ok();
     let mut documented = BTreeSet::new();
     let mut doc_of = Vec::new();
-    for path in files.iter().filter(|p| p.ends_with(".md")) {
+    // `diagnostics/` indexes logs of runs of older builds, with the switches those builds had.
+    for path in files
+        .iter()
+        .filter(|p| p.ends_with(".md") && !p.starts_with("diagnostics/"))
+    {
         for name in names(&read(path).unwrap_or_default()) {
             doc_of.push((name.clone(), path.clone()));
             documented.insert(name);

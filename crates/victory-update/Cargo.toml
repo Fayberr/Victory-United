@@ -1,0 +1,23 @@
+[package]
+name = "victory-update"
+description = "Release manifest, download, verification, install and rollback for the launcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json = "1"
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Networking_WinHttp"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

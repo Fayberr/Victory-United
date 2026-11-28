@@ -17,7 +17,8 @@
 #               for a card of 10 to 19 GB, title buffers in the card's memory),
 #               7900xtx, 4070, 4070tisuper, 4090, 3060 or laptop
 #               (3060: a six-core NVIDIA desktop with 16 GB of RAM and a 12 GB card, docs/rtx3060-16gb.md;
-#               laptop: an NVIDIA PC with 16 GB of RAM and a 6-8 GB card, docs/laptop-16gb.md)
+#               laptop: an NVIDIA PC with 16 GB of RAM and a 6-8 GB card, docs/laptop-16gb.md;
+#               3080ti: Ryzen 7 5700X3D with an RTX 3080 Ti 12 GB, asked for explicitly)
 # -More         other settings: -More @{VICTORY_PANEL='1'} or -More @{VICTORY_AMBIENT='1.0'}
 # On a smaller NVIDIA PC, compare the same Series S scene after a fresh start
 # with one override at a time, e.g. -More @{VICTORY_LAND_THREADS='3'} for
@@ -39,7 +40,7 @@ param(
     [ValidateSet('quality', 'balanced', 'performance')][string]$Dlss4K,
     [ValidateRange(0.0, 1000.0)][double]$FrameIntervalMs,
     [ValidateSet('diag', 'release')][string]$Build = 'diag',
-    [ValidateSet('auto', '7900xtx', '4070', '4070tisuper', '4090', '3060', 'laptop')][string]$Machine = 'auto',
+    [ValidateSet('auto', '7900xtx', '4070', '4070tisuper', '4090', '3060', '3080ti', 'laptop')][string]$Machine = 'auto',
     [hashtable]$More = @{}
 )
 $settings = @{
@@ -167,6 +168,20 @@ if ($Machine -in '4070', '3060') {
         $settings.VICTORY_CARD_RESERVE_BUDGETS = '1'
         $settings.VICTORY_CARD_BUFFERS_MIN_KB = '64'; $settings.VICTORY_CARD_BUFFERS_MB = '1536'
         $settings.VICTORY_CARD_WINDOWS_MB = '1024'
+    }
+}
+if ($Machine -eq '3080ti') {
+    # Ryzen 7 5700X3D (eight cores), RTX 3080 Ti with 12 GB. Measured in the open-world
+    # harness (240 s runs, minutes 1 to 3): 6 list translation, 4 memory update and 3 landing
+    # threads, and the 4070's card buffer set (reserve the budgets, 64 KB minimum, 1.5 GB, 1 GB
+    # windows). Textures may fill 85 percent of the budget the system gives (default 96): at 96 the
+    # card ended some room runs at 12.4 GB in use of 12 GB and ran at 4 to 5 fps.
+    $settings.VICTORY_THIN_THREADS = '6'; $settings.VICTORY_UNDER_THREADS = '4'; $settings.VICTORY_LAND_THREADS = '3'
+    if (-not $Safe) {
+        $settings.VICTORY_CARD_RESERVE_BUDGETS = '1'
+        $settings.VICTORY_CARD_BUFFERS_MIN_KB = '64'; $settings.VICTORY_CARD_BUFFERS_MB = '1536'
+        $settings.VICTORY_CARD_WINDOWS_MB = '1024'
+        $settings.VICTORY_TEXTURE_ROOM_PERCENT = '85'
     }
 }
 if ($Machine -eq '3060') {

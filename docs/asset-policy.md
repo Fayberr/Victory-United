@@ -64,6 +64,29 @@ What is known about it:
 The default test suite uses tables generated from synthetic data, plus the
 built-in file for one parse check.
 
+
+## The logo
+
+`branding/` holds the project's own logo, drawn by the project owner, by the owner's decision
+(2026-11-27): `vu-banner.png`, `vu-icon.png`, `vu-icon.ico`, `vu-social-preview.png`, `vu-mark-large.png` and
+`vu-mark-small.png`. They are our own artwork, used in the README, as the launcher's icon and logo and as
+the repository's social image. `xtask/src/policy.rs` allows exactly these six names, each only if it really is a PNG or ICO file and
+under 256 KiB. Any other picture anywhere is still refused.
+
+## Run logs
+
+`diagnostics/` holds the layer's own logs of test and play runs, by the
+project owner's decision (2026-11-26): every run's log is published there
+so that others can read what a run measured. A log is text the layer
+wrote; before it is committed it is scrubbed of the user's and the
+machine's names and paths, of the title's folder, file, product and
+program names, and of the title's own output lines. Nothing of the game is
+in it. Because logs are long, `xtask/src/policy.rs` gives the files
+directly under `diagnostics/` a rule of their own: a `.txt` up to 32 MiB
+that holds no binary data, or a gzipped `.txt.gz` up to 16 MiB. Pictures,
+frame shots and anything else a run produces are NOT published: they show
+the title.
+
 ## Where data lives
 
 Outside the repository, configured in `victory.toml`: `game_dir` (the
