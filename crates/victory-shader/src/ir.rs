@@ -1536,6 +1536,10 @@ fn effects(
                     regs(s, &mut r)?;
                 }
             }
+            if src_indexed && !r.contains(&Reg::V(0)) {
+                // An out-of-range source VGPR reads v0 (RDNA2 ISA §3.6.1).
+                r.push(Reg::V(0));
+            }
             // GFX10 compares into EXEC write nothing else.
             if name.starts_with("v_cmpx") {
                 w.extend(mask(EXEC));

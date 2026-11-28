@@ -8035,13 +8035,23 @@ impl<'a> Lower<'a> {
                 .collect()
         };
         let words = if total < 32 {
-            // A byte or half inside the dword that holds it.
+            // A byte or half inside the dword that holds it. A two-byte
+            // element reads only at an even byte address; at an odd one the
+            // typed load is like an out-of-bounds load and its channels are 0.
             let (not3, three) = (self.s.m.i32(!3), self.s.m.i32(3));
             let at = self.s.m.bin(c, Bin::And, off, not3);
             let w = load(self, at, 1)[0];
             let byte = self.s.m.bin(c, Bin::And, off, three);
             let sh = self.s.m.bin(c, Bin::Shl, byte, three);
-            vec![self.s.m.bin(c, Bin::LShr, w, sh)]
+            let x = self.s.m.bin(c, Bin::LShr, w, sh);
+            if total == 16 {
+                let (zero, one) = (self.s.m.i32(0), self.s.m.i32(1));
+                let low = self.s.m.bin(c, Bin::And, off, one);
+                let odd = self.s.m.cmp(c, pred::NE, low, zero);
+                vec![self.s.m.select(c, odd, zero, x)]
+            } else {
+                vec![x]
+            }
         } else {
             load(self, off, total / 32)
         };
@@ -9274,17 +9284,51 @@ impl<'a> Lower<'a> {
                 };
                 let indexed_src = name != "v_movreld_b32";
                 let value = if indexed_src {
-                    let mut r = self.s.m.i32(0);
-                    for k in 0..=255u8.saturating_sub(sreg) {
-                        let Some(x) = inst.read(Reg::V(sreg + k)) else {
+                    // An index outside the register array reads v0.
+                    let fallback = match inst.read(Reg::V(0)) {
+                        Some(o) => self.i32_of(o)?,
+                        None => self.s.m.i32(0),
+                    };
+                    let mut sources = Vec::new();
+                    for reg in sreg..=u8::MAX {
+                        let Some(x) = inst.read(Reg::V(reg)) else {
                             break;
                         };
-                        let x = self.i32_of(x)?;
-                        let kk = self.s.m.i32(u32::from(k));
-                        let is = self.s.m.cmp(c, pred::EQ, m0, kk);
-                        r = self.s.m.select(c, is, x, r);
+                        sources.push(self.i32_of(x)?);
                     }
-                    r
+                    let zero = self.s.m.i32(0);
+                    let count = sources.len();
+                    if count < 8 {
+                        let mut r = fallback;
+                        for (k, x) in sources.into_iter().enumerate() {
+                            let kk = self.s.m.i32(k as u32);
+                            let is = self.s.m.cmp(c, pred::EQ, m0, kk);
+                            r = self.s.m.select(c, is, x, r);
+                        }
+                        r
+                    } else {
+                        // Each level shares one index-bit test across every pair.
+                        // An unpaired last source already represents its pair.
+                        let mut bit = 1;
+                        while sources.len() > 1 {
+                            let mask = self.s.m.i32(bit);
+                            let masked = self.s.m.bin(c, Bin::And, m0, mask);
+                            let high = self.s.m.cmp(c, pred::NE, masked, zero);
+                            let next_count = sources.len().div_ceil(2);
+                            for i in 0..next_count {
+                                let first = sources[2 * i];
+                                sources[i] = match sources.get(2 * i + 1) {
+                                    Some(&second) => self.s.m.select(c, high, second, first),
+                                    None => first,
+                                };
+                            }
+                            sources.truncate(next_count);
+                            bit <<= 1;
+                        }
+                        let limit = self.s.m.i32(count as u32);
+                        let in_range = self.s.m.cmp(c, pred::IULT, m0, limit);
+                        self.s.m.select(c, in_range, sources[0], fallback)
+                    }
                 } else {
                     s(self, 0)?
                 };
@@ -9649,6 +9693,18 @@ impl<'a> Lower<'a> {
                     12 | 13 => self.trig_turns(a, op == 12),
                     22 => self.fract(a, 1.0, f32::from_bits(0x3F7F_FFFF)),
                     _ => self.unary(op, a),
+                };
+                let r = if matches!(op, 23..=25) {
+                    // An invalid negative input of v_log/v_sqrt/v_rsq_f32 gives
+                    // the negative quiet NaN 0xffc00000 on RDNA2 (measured on
+                    // gfx1030 by the Leonida project), while D3D12 hosts return
+                    // 0x7fffffff (NVIDIA) or 0xffffffff (WARP for log2).
+                    let zero = self.s.m.f32(0);
+                    let neg = self.s.m.cmp(c, pred::OLT, a, zero);
+                    let qnan = self.s.m.f32(0xFFC0_0000);
+                    self.s.m.select(c, neg, qnan, r)
+                } else {
+                    r
                 };
                 float(self, r)
             }
@@ -10695,6 +10751,17 @@ impl<'a> Lower<'a> {
                     let a = self.half_fsrc(inst, 0)?;
                     let one = self.s.m.f32(1.0f32.to_bits());
                     self.s.m.bin(c, Bin::SDiv, one, a)
+                }
+                "v_exp_f16" => {
+                    let a = self.half_fsrc(inst, 0)?;
+                    let r = self.unary(21, a);
+                    // Exact 2^(0x11c5) exceeds the 0x3c00/0x3c01 tie where f32
+                    // lands; return 0x3c01 directly (RDNA2 rounds f16 exp to
+                    // nearest in both RNE and RTZ modes).
+                    let x = self.s.m.f32(0x3A38_A000);
+                    let boundary = self.s.m.cmp(c, pred::OEQ, a, x);
+                    let up = self.s.m.f32(0x3F80_2000);
+                    self.s.m.select(c, boundary, up, r)
                 }
                 _ => {
                     let a = self.half_fsrc(inst, 0)?;

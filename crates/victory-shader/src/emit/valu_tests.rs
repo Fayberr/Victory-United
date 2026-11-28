@@ -372,10 +372,13 @@ fn f16_to_f32(bits: u16) -> f32 {
     f32::from_bits(f32_bits)
 }
 
-/// MTBUF `op vdata, off, s[srsrc:srsrc+3], 0 format:format` (at byte 0).
-const fn mtbuf(op: u8, vdata: u8, srsrc: u8, format: u8) -> [u32; 2] {
+/// MTBUF `op vdata, off, s[srsrc:srsrc+3], 0 format:format offset:byte_off`.
+const fn mtbuf_at(op: u8, vdata: u8, srsrc: u8, format: u8, byte_off: u16) -> [u32; 2] {
     [
-        0x3A << 26 | (format as u32 & 0x7F) << 19 | (op as u32 & 7) << 16,
+        0x3A << 26
+            | (format as u32 & 0x7F) << 19
+            | (op as u32 & 7) << 16
+            | byte_off as u32 & 0xFFF,
         0x80 << 24
             | (op as u32 >> 3 & 1) << 21
             | (srsrc as u32 >> 2 & 0x1F) << 16
@@ -383,12 +386,23 @@ const fn mtbuf(op: u8, vdata: u8, srsrc: u8, format: u8) -> [u32; 2] {
     ]
 }
 
+/// MTBUF `op vdata, off, s[srsrc:srsrc+3], 0 format:format` (at byte 0).
+const fn mtbuf(op: u8, vdata: u8, srsrc: u8, format: u8) -> [u32; 2] {
+    mtbuf_at(op, vdata, srsrc, format, 0)
+}
+
+/// Stores `v1` to the buffer, then reads it back into `v0` with the tbuffer
+/// load `op` in buffer format `format` at byte `byte_off`.
+fn tbuffer_load_of_v1_at(op: u8, format: u8, byte_off: u16) -> HostShader {
+    let mut body = buffer_store_dword(1, 8, 0).to_vec();
+    body.extend(mtbuf_at(op, 0, 8, format, byte_off));
+    build_valu_cs(&body)
+}
+
 /// Stores `v1` to the buffer, then reads it back into `v0` with the tbuffer
 /// load `op` in buffer format `format`.
 fn tbuffer_load_of_v1(op: u8, format: u8) -> HostShader {
-    let mut body = buffer_store_dword(1, 8, 0).to_vec();
-    body.extend(mtbuf(op, 0, 8, format));
-    build_valu_cs(&body)
+    tbuffer_load_of_v1_at(op, format, 0)
 }
 
 #[test]
@@ -412,6 +426,24 @@ fn tbuffer_d16_loads_pack_two_channels_per_dword() {
             assert_eq!(
                 got, want,
                 "{backend}: d16 opcode {op} format {format} of {stored:#010x} = {got:#010x}, want {want:#010x}",
+            );
+        });
+    }
+}
+
+#[test]
+fn two_byte_tbuffer_loads_at_odd_byte_offsets_read_zero() {
+    // tbuffer_load_format_x, 16_UINT: the console's buffer unit reads a
+    // two-byte element only at an even byte address; at an odd one the load
+    // is like an out-of-bounds one and gives zero.
+    let x = 0;
+    let cases: &[(u16, u32)] = &[(0, 0x5678), (1, 0), (2, 0x1234), (3, 0)];
+    for &(byte_off, want) in cases {
+        let shader = tbuffer_load_of_v1_at(x, 11, byte_off);
+        run_cases(&shader, &[[0x1234_5678, 0, 0, 0]], |backend, _, _, got| {
+            assert_eq!(
+                got, want,
+                "{backend}: 16_UINT at byte {byte_off} = {got:#010x}, want {want:#010x}",
             );
         });
     }
@@ -1028,6 +1060,31 @@ fn v_fract_f16_never_returns_one() {
                 inp[0],
             ),
         }
+    });
+}
+
+#[test]
+fn v_exp_f16_rounds_the_exact_result_once() {
+    // v_exp_f16 v0, v1 (VOP1 opcode 0x058). Input 0x11c5 is a double-rounding
+    // boundary: exact 2^x is slightly above the midpoint of f16 values
+    // 0x3c00 and 0x3c01, but the nearest f32 is exactly that midpoint.
+    let shader = build_valu_cs(&[vop1(0x058, 0, vgpr(1))]);
+    let cases: &[(u16, u16)] = &[
+        (0x0000, 0x3C00), // 2^0 = 1
+        (0xBC00, 0x3800), // 2^-1 = 0.5
+        (0x11C5, 0x3C01), // correctly rounded up, not a f32 midpoint tie to 1.0
+    ];
+    let inputs: Vec<[u32; 4]> = cases
+        .iter()
+        .map(|&(x, _)| [u32::from(x), 0, 0, 0])
+        .collect();
+    run_cases(&shader, &inputs, |backend, i, inp, got| {
+        let want = u32::from(cases[i].1);
+        assert_eq!(
+            got, want,
+            "{backend}: v_exp_f16({:#06x}) = {got:#010x}, want {want:#010x}",
+            inp[0],
+        );
     });
 }
 
@@ -2735,6 +2792,37 @@ fn typed_non_d16_table_load_preserves_integer_bits() {
     }
 }
 
+/// A relative source outside the 256-register array reads v0.
+#[test]
+fn movrels_outside_the_register_array_reads_v0() {
+    let shader = build_valu_cs(&[
+        vop1(0x001, 0, vgpr(1)), // v_mov_b32 v0, v1
+        vop1(0x002, 12, vgpr(2)), // v_readfirstlane_b32 s12, v2
+        s_mov_b32(124, 12), // s_mov_b32 m0, s12
+        vop1(0x043, 3, vgpr(5)), // v_movrels_b32 v3, v5: v3 = v[5 + m0]
+        vop1(0x001, 0, vgpr(3)), // v_mov_b32 v0, v3
+    ]);
+    run_cases(&shader, &[[0xCAFE_BABE, 255, 0, 0]], |backend, _, _, got| {
+        assert_eq!(got, 0xCAFE_BABE, "{backend}: an out-of-range source is v0");
+    });
+}
+
+#[test]
+fn relative_source_selects_all_nine_registers() {
+    let mut body = vec![s_mov_b32(124, 0)]; // s_mov_b32 m0, s0
+    for k in 0..9u32 {
+        // v_add_nc_u32 v[7+k], literal(k*37+11), v2
+        body.extend([0x25 << 25 | (7 + k) << 17 | 2 << 9 | 0xff, k * 37 + 11]);
+    }
+    body.push(vop1(0x043, 0, vgpr(7))); // v_movrels_b32 v0, v[7 + m0]
+    let shader = build_valu_cs(&body);
+
+    let cases: Vec<_> = (0..9).map(|k| [k, 0x3142_abcd, 0, 0]).collect();
+    run_cases(&shader, &cases, |backend, _, [k, x, ..], got| {
+        assert_eq!(got, x.wrapping_add(k * 37 + 11), "{backend}: index {k}");
+    });
+}
+
 #[test]
 fn v_mul_legacy_f32_treats_denormals_as_zero() {
     // v_mul_legacy_f32 v0, v1, v2 (VOP2 opcode 0x007 in its VOP3 encoding)
@@ -2842,6 +2930,52 @@ fn v_fmac_f32_takes_the_accumulator_modifiers() {
             assert!(
                 got == want || nan(got) && nan(want),
                 "{backend}: {label} row {i}: {got:#010x}, want {want:#010x}"
+            );
+        });
+    }
+}
+
+#[test]
+fn transcendental_invalid_results_are_negative_qnan() {
+    // Measured on RDNA2 (gfx1030) by the Leonida project: an invalid negative
+    // input of v_sqrt_f32, v_rsq_f32 or v_log_f32 yields the negative quiet
+    // NaN 0xffc00000, while -0.0 stays valid (-0.0 for sqrt, -inf for rsq and
+    // log). Hosts otherwise return 0x7fffffff (NVIDIA) or 0xffffffff (WARP
+    // for log2).
+    let f = f32::to_bits;
+    let qnan = 0xFFC0_0000u32;
+    type OpCases = (u16, &'static str, Vec<(u32, u32)>);
+    let ops: [OpCases; 3] = [
+        (
+            0x033,
+            "v_sqrt_f32",
+            vec![(f(-1.0), qnan), (f(-4.0), qnan), (f(-0.0), f(-0.0))],
+        ),
+        (
+            0x02E,
+            "v_rsq_f32",
+            vec![(f(-1.0), qnan), (f(-0.0), f(f32::NEG_INFINITY))],
+        ),
+        (
+            0x027,
+            "v_log_f32",
+            vec![
+                (f(-1.0), qnan),
+                (f(-1000.0), qnan),
+                (f(f32::NEG_INFINITY), qnan),
+                (f(-0.0), f(f32::NEG_INFINITY)),
+            ],
+        ),
+    ];
+    for (op, name, cases) in ops {
+        let shader = build_valu_cs(&[vop1(op, 0, vgpr(1))]);
+        let inputs: Vec<[u32; 4]> = cases.iter().map(|&(x, _)| [x, 0, 0, 0]).collect();
+        run_cases(&shader, &inputs, |backend, i, inp, got| {
+            let want = cases[i].1;
+            assert_eq!(
+                got, want,
+                "{backend}: {name}({:#010x}) = {got:#010x}, want {want:#010x}",
+                inp[0],
             );
         });
     }
