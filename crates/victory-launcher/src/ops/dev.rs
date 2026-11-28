@@ -431,7 +431,11 @@ fn profile_overview(ui: &mut egui::Ui, ops: &mut OpsState) {
                                     ui.allocate_ui_with_layout(
                                         egui::vec2(name_width, 18.0),
                                         egui::Layout::left_to_right(egui::Align::Center),
-                                        |ui| ui.label(theme::strong(tr(name))),
+                                        |ui| {
+                                            // A child ui only claims what it uses, so ask for the width explicitly.
+                                            ui.set_min_width(name_width);
+                                            ui.label(theme::strong(tr(name)))
+                                        },
                                     );
                                 } else {
                                     ui.label(theme::strong(tr(name)));

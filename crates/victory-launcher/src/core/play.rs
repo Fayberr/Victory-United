@@ -24,11 +24,13 @@ fn show_scroll(core: &mut CoreState, ui: &mut egui::Ui) {
     let title = core.game.as_ref().map(|g| g.title.clone()).unwrap_or_else(|| tr("play.no_game").to_string());
     page_title(ui, &title, core.game.as_ref().map(|g| g.folder.to_string_lossy().into_owned()).as_deref().unwrap_or(""));
     let wide = ui.available_width() > 720.0;
+    let gap = ui.spacing().item_spacing.x;
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         let right = if wide { 290.0 } else { 0.0 };
         let left = ui.available_width() - right - if wide { 18.0 } else { 0.0 };
         ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
             ui.set_width(left);
             play_card(core, ui);
             if let Some(warning) = &core.runner.backup_warning {
@@ -43,6 +45,7 @@ fn show_scroll(core: &mut CoreState, ui: &mut egui::Ui) {
         if wide {
             ui.add_space(18.0);
             ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
                 ui.set_width(right);
                 machine_card(core, ui);
             });
