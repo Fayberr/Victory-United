@@ -145,6 +145,7 @@
   "dev.profile_self": "Self",
   "dev.profile_inclusive": "Inclusive",
   "panel.enable": "Show the in-game panel while playing",
+  "panel.needs_diagnostics": "The engine you use now is the Normal build and has no panel. Pick the Diagnostics build in the Updates tab to see it.",
   "panel.help": "Shows frame rate, frame times, graphics card, processor, video memory and RAM in the upper left corner of the game. Press F3 in the game to hide it.",
   "monitor.reset": "Reset",
   "monitor.low": "1% low FPS",

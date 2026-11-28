@@ -542,6 +542,8 @@ pub fn show(
     ui: &mut egui::Ui,
 ) {
     let before = ops.cfg.clone();
+    // The panel is drawn by the diagnostics engine build only.
+    let release_engine = crate::core::actions::build_name(shared.engine_exe.as_deref()).ends_with("-release");
     ui.horizontal(|ui| {
         ui.label(theme::strong(tr("monitor.title")).size(24.0));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -585,7 +587,7 @@ pub fn show(
     }
     area.show(ui, |ui| match ops.monitor_page {
         Page::Live => monitor_view(ui, &mut ops.monitor, &ops.cfg.monitor, shared, hw, ops.live),
-        Page::Customize => customize(ui, &mut ops.cfg),
+        Page::Customize => customize(ui, &mut ops.cfg, release_engine),
     });
     ops.save_if_changed(&before);
 }
@@ -1014,11 +1016,15 @@ fn drop_reasons(ui: &mut egui::Ui, s: &Summary) {
     });
 }
 
-fn customize(ui: &mut egui::Ui, settings: &mut OpsSettings) {
+fn customize(ui: &mut egui::Ui, settings: &mut OpsSettings, release_engine: bool) {
     theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.checkbox(&mut settings.panel, tr("panel.enable"));
         ui.label(theme::dim(tr("panel.help")).size(12.5));
+        if release_engine {
+            ui.add_space(4.0);
+            ui.label(theme::dim(tr("panel.needs_diagnostics")).size(12.5));
+        }
     });
     ui.add_space(9.0);
     let cfg = &mut settings.monitor;
