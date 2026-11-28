@@ -49,9 +49,9 @@ fn manifest_parses_and_rejects() {
 fn finds_the_manifest_asset() {
     let one = r#"{"prerelease":false,"assets":[{"name":"a.zip","browser_download_url":"u1"},{"name":"manifest.json","browser_download_url":"u2"}]}"#;
     assert_eq!(parse_release_assets(one, false).unwrap(), "u2");
-    let list = format!(r#"[{{"prerelease":false,"assets":[]}},{{"prerelease":true,"assets":[{{"name":"manifest.json","browser_download_url":"dev"}}]}}]"#);
-    assert_eq!(parse_release_assets(&list, true).unwrap(), "dev");
-    assert!(parse_release_assets(&list, false).is_err()); // newest stable has no manifest
+    let list = r#"[{"prerelease":false,"assets":[]},{"prerelease":true,"assets":[{"name":"manifest.json","browser_download_url":"dev"}]}]"#;
+    assert_eq!(parse_release_assets(list, true).unwrap(), "dev");
+    assert!(parse_release_assets(list, false).is_err()); // newest stable has no manifest
     assert!(parse_release_assets("[]", true).is_err());
 }
 
