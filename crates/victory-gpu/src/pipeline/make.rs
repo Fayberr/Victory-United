@@ -38,6 +38,7 @@ pub(crate) struct Pending {
     /// Taken by a worker from [`Queue::slow`].
     was_slow: AtomicBool,
     made: OnceLock<Option<HostPipeline>>,
+    began: OnceLock<Instant>,
     /// What identifies it across runs (shader containers and state), and
     /// whether a draw or dispatch has requested it yet.
     key: String,
@@ -160,6 +161,7 @@ impl Pending {
             queue_state: AtomicU8::new(NOT_QUEUED),
             was_slow: AtomicBool::new(false),
             made: OnceLock::new(),
+            began: OnceLock::new(),
             key: key.finalize().to_hex()[..32].to_owned(),
             used: AtomicBool::new(false),
             first_wait: AtomicU64::new(0),
@@ -172,6 +174,7 @@ impl Pending {
 
     fn make(&self) {
         self.make_with(|| {
+            let _ = self.began.set(Instant::now());
             let _building = crate::timeline::span("pipeline: build a host pipeline");
             let began = Instant::now();
             let made = HostPipeline::new(&self.shaders, self.graphics.as_deref());
@@ -337,6 +340,15 @@ pub(crate) fn waiting() -> u64 {
     WAITING.load(Ordering::Relaxed)
 }
 
+/// Draws and dispatches (direct and indirect) asked of a pipeline left out on
+/// purpose ([`left_out`]), since the last [`take_left_out`].
+static LEFT_OUT: AtomicU64 = AtomicU64::new(0);
+
+/// See [`LEFT_OUT`] (for the frame line).
+pub(crate) fn take_left_out() -> u64 {
+    LEFT_OUT.swap(0, Ordering::Relaxed)
+}
+
 /// By default, a dispatch waits within the same frame budget as a draw.
 /// `VICTORY_PIPELINE_COMPUTE_WAIT=1` waits for other compute pipelines to finish.
 /// This can stall a frame, but a one-time dispatch can leave stale state
@@ -366,6 +378,7 @@ fn ready_with<'a>(
     wait_for_frame: impl FnOnce(&Pending),
 ) -> Option<&'a HostPipeline> {
     if p.left_out.is_some() {
+        LEFT_OUT.fetch_add(1, Ordering::Relaxed);
         return None;
     }
     // A still-pending pipeline was requested by the title too. Prewarm it
@@ -449,6 +462,13 @@ fn shared_budget() -> bool {
 /// Waits for `p` while frame `frame` has budget left.
 fn wait(p: &Pending, frame: u64) {
     let screen = p.screen && screens_first();
+    static SKIP_LONG_WAIT: OnceLock<bool> = OnceLock::new();
+    if !screen
+        && *SKIP_LONG_WAIT.get_or_init(|| crate::switch::on("VICTORY_PIPELINE_SKIP_LONG_WAIT"))
+        && p.began.get().is_some_and(|t| t.elapsed() > Duration::from_secs(1))
+    {
+        return;
+    }
     let budget = if screen { screen_budget() } else { wait_budget() };
     if budget.is_zero() {
         return;
@@ -784,6 +804,26 @@ mod tests {
         let pending = Pending::new(Vec::new(), None);
         pending.queue_state.store(MAKING, Ordering::Relaxed);
         assert_eq!(missing(&pending).as_deref(), Some("being made"));
+    }
+
+    /// A pipeline left out on purpose (a ray-tracing resolve without the
+    /// structure builder) is never queued, so never made: it is counted as
+    /// left out for the frame line, and named by its reason.
+    #[test]
+    fn pipelines_left_out_are_counted_and_never_queued() {
+        let reason = "shades ray-tracing hits without BVH, left out";
+        let mut p = Pending::new(Vec::new(), None);
+        p.left_out = Some(reason);
+        let p = Arc::new(p);
+        let before = LEFT_OUT.load(Ordering::Relaxed);
+        assert!(ready(&p, true).is_none());
+        assert!(ready(&p, true).is_none());
+        assert!(!now(&p));
+        assert_eq!(p.queue_state.load(Ordering::Relaxed), NOT_QUEUED);
+        assert!(p.made.get().is_none());
+        assert!(LEFT_OUT.load(Ordering::Relaxed) >= before + 2);
+        #[cfg(feature = "diagnostics")]
+        assert_eq!(missing(&p).as_deref(), Some(reason));
     }
 
     #[test]

@@ -188,6 +188,7 @@ fn root_signature(device: &ID3D12Device) -> windows::core::Result<ID3D12RootSign
         ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
         ..Default::default()
     };
+    crate::pipeline::sampler_order::before(device, std::slice::from_ref(&sampler));
     let desc = D3D12_ROOT_SIGNATURE_DESC {
         NumParameters: params.len() as u32,
         pParameters: params.as_ptr(),

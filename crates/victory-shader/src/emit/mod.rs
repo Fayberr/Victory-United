@@ -87,6 +87,8 @@ mod cube_lod_tests;
 #[cfg(all(test, windows))]
 mod diff_tests;
 #[cfg(all(test, windows))]
+mod filter3d_tests;
+#[cfg(all(test, windows))]
 mod intersect_tests;
 #[cfg(all(windows, any(test, feature = "host")))]
 pub mod host;
@@ -112,6 +114,7 @@ mod waterfall_tests;
 #[cfg(all(test, windows))]
 mod wave64_tests;
 mod wave;
+mod water_tile_slots;
 
 use crate::dxbc::{Container, FourCC};
 use crate::native::{HwStage, NativeProgram, RootType};
@@ -224,15 +227,26 @@ pub fn builder_bounds() -> bool {
 /// is exact, so the switch is for telling a translator fault from a
 /// clean-up fault, and for measuring what the clean-up is worth.
 /// `VICTORY_SHADER_OPT`:
-/// - unset: every pass but the last one below (63).
+/// - unset: the default base passes (63).
 /// - `0`: none (the module as the lowering made it).
 /// - a number (decimal or `0x` hex): those passes; 1 dead code, 2 constants
 ///   and identities, 4 one instruction for one value, 8 what a branch taken
 ///   says about its condition, 16 one read for one place within a block,
 ///   32 a first-lane read of two host waves without the round that asks
-///   which half has a lane (where every lane has one).
+///   which half has a lane (where every lane has one),
 ///   64 the dwords of one console load read by one call for every four
-///   (not on unless asked: `127` is every pass with it).
+///   (not on unless asked),
+///   128 extended algebraic/bitwise/shift/compare/select folds and canonical
+///   comparison reuse/facts (not on unless asked),
+///   256 alias-aware private-global forwarding, shared-memory load reuse, and
+///   overwritten-store elimination (not on unless asked),
+///   512 pure loop-invariant code motion for guaranteed loop blocks and
+///   in-bounds constant-table loads (not on unless asked),
+///   1024 adjacent and read-after-read redundant barrier elimination (not on
+///   unless asked),
+///   2048 speculative loop-invariant hoisting of non-trapping ALU and pure
+///   math out of conditional loop blocks (not on unless asked: `4095` is
+///   every pass).
 ///
 /// Part of the translation: the shader cache keys on it (`victory-gpu`'s
 /// does).
@@ -249,6 +263,21 @@ pub fn shader_opt() -> u32 {
 thread_local! {
     /// For a test's thread alone: [`shader_opt`].
     pub(super) static TEST_SHADER_OPT: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `f` with `shader_opt()` overridden to `passes` on the current thread
+/// (tests only; restores the previous override on unwind).
+#[cfg(test)]
+pub(crate) fn with_shader_opt<R>(passes: u32, f: impl FnOnce() -> R) -> R {
+    struct Reset(Option<u32>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            TEST_SHADER_OPT.set(self.0);
+        }
+    }
+    let prev = TEST_SHADER_OPT.replace(Some(passes));
+    let _guard = Reset(prev);
+    f()
 }
 
 /// On a host whose shaders run on the console's own kind of hardware (AMD
@@ -439,13 +468,24 @@ pub fn translate(container: &[u8]) -> Result<HostShader, ShaderError> {
     }
 }
 
+/// Brings a console program into the form this host translates, where one differs from the
+/// program as the title has it: on a host of 32-lane waves the water light's tile lists take
+/// a slot a lane ([`water_tile_slots`]). [`translate`] does this itself; a caller that parses
+/// the container and calls [`emit`] calls this first. Returns whether the program changed.
+pub fn host_form(c: &Container, native: &mut NativeProgram) -> bool {
+    lower::host_max_wave() == 32
+        && c.digest == water_tile_slots::CONTAINER
+        && water_tile_slots::on()
+        && water_tile_slots::rewrite(native)
+}
+
 fn translate_plain(container: &[u8]) -> Result<HostShader, ShaderError> {
     let c = Container::parse(container)?;
     let dxil = c
         .part(FourCC::DXIL)
         .or(c.part(FourCC::ACCC))
         .ok_or(ShaderError::Malformed("no DXIL part"))?;
-    let native = crate::native_programs(dxil.data)?
+    let mut native = crate::native_programs(dxil.data)?
         .into_iter()
         .find(|p| {
             matches!(
@@ -457,6 +497,9 @@ fn translate_plain(container: &[u8]) -> Result<HostShader, ShaderError> {
             offset: 0,
             what: "a container without a vertex, pixel, compute or mesh program",
         })?;
+    // The water light's tile lists on a host of 32-lane waves: a slot a lane
+    // ([`water_tile_slots`]), so no tile is lost between the two host waves of a group.
+    host_form(&c, &mut native);
     let p = crate::spill::build(&native)?;
     // Structurisation first: tracing per-lane descriptors needs it (its
     // failure is reported after the earlier stages').
@@ -1108,7 +1151,11 @@ fn paired(
             what: "paired lanes outside compute",
         });
     };
-    if crate::spill::is_spilled(native) {
+    // `VICTORY_WAVE_PAIRS_SPILLED=1`: try it anyway (the structure builder's
+    // three wave64 programs are spilled ones; offline checks first).
+    if crate::spill::is_spilled(native)
+        && std::env::var_os("VICTORY_WAVE_PAIRS_SPILLED").is_none_or(|v| v != "1")
+    {
         return Err(ShaderError::Unsupported {
             offset: 0,
             what: "paired Wave64 for spilled DispatchX programs is not validated",
@@ -1232,21 +1279,13 @@ fn emit_program(
     for e in &mut prims {
         e.interp = 1;
     }
-    // A mesh group's id arrives multiplied by max(threads, vertices,
-    // primitives) (the code divides by that); the thread count is in PSV0
-    // from runtime info version 2 on.
-    // shortcut: older containers fall back to the group's lane count, right
-    // when the HLSL group fills its waves (the title's do).
     let mesh_stride = match &native.io {
-        crate::native::StageIo::Ms(ms) => {
-            let psv = c.part(FourCC::PSV0).map(|p| p.data);
-            let threads = psv
-                .filter(|d| crate::dxbc::u32_at(d, 0).is_ok_and(|n| n >= 48))
-                .and_then(|d| crate::dxbc::u32_at(d, 4 + 36).ok());
-            threads.map_or(ms.threads, |t| {
-                t.max(ms.max_vertices).max(ms.max_primitives)
-            })
-        }
+        crate::native::StageIo::Ms(ms) => mesh_stride(
+            c.part(FourCC::PSV0).map(|p| p.data),
+            ms.threads,
+            ms.max_vertices,
+            ms.max_primitives,
+        ),
         _ => 0,
     };
     let l = lower::lower(&lower::Parts {
@@ -1614,11 +1653,21 @@ mod tests {
     fn the_clean_up_switch_parses_or_runs_every_pass() {
         let (all, usual) = (super::bitcode::opt::ALL, super::bitcode::opt::DEFAULT);
         assert_eq!(usual, 63, "the passes of the builds before the wide loads");
+        assert_eq!(all, 4095, "every pass including opt-in passes and WIDE");
         assert_eq!(parse_shader_opt(None), usual);
         assert_eq!(parse_shader_opt(Some("0")), 0);
         assert_eq!(parse_shader_opt(Some(" 1 ")), 1);
         assert_eq!(parse_shader_opt(Some("0x1")), 1);
-        assert_eq!(parse_shader_opt(Some("127")), all);
+        assert_eq!(parse_shader_opt(Some("128")), super::bitcode::opt::EXT_FOLD);
+        assert_eq!(parse_shader_opt(Some("256")), super::bitcode::opt::MEM_FWD);
+        assert_eq!(parse_shader_opt(Some("512")), super::bitcode::opt::LICM);
+        assert_eq!(parse_shader_opt(Some("1024")), super::bitcode::opt::BARRIERS);
+        assert_eq!(parse_shader_opt(Some("2048")), super::bitcode::opt::SPEC_LICM);
+        assert_eq!(
+            parse_shader_opt(Some("4031")),
+            all & !super::bitcode::opt::WIDE
+        );
+        assert_eq!(parse_shader_opt(Some("4095")), all);
         assert_eq!(parse_shader_opt(Some("0xffffffff")), all);
         assert_eq!(parse_shader_opt(Some("on")), usual);
     }
@@ -3698,5 +3747,51 @@ mod barycentric_tests {
         let [e0, e1] = exp_mrt0(4);
         let words = [0xC812_0000, e0, e1, S_ENDPGM];
         assert!(pixel(&words, PERSP_CENTER).is_err());
+    }
+}
+
+/// A mesh group's id arrives multiplied by max(threads, vertices, primitives) (the code divides
+/// by that). The HLSL thread count is X * Y * Z of PSV0's runtime info from version 2 on: only X
+/// was read, so a group of 8 x 8 threads with 32 vertices and primitives took 32 for 64; and
+/// without the runtime info the outputs were left out of the maximum (after upstream VIctory
+/// #3304).
+// shortcut: older containers fall back to the group's lane count, right when the HLSL group
+// fills its waves (the title's do).
+fn mesh_stride(psv: Option<&[u8]>, lanes: u32, max_vertices: u32, max_primitives: u32) -> u32 {
+    let threads = psv
+        .filter(|d| crate::dxbc::u32_at(d, 0).is_ok_and(|n| n >= 48))
+        .and_then(|d| {
+            let [x, y, z] = [36, 40, 44].map(|at| crate::dxbc::u32_at(d, 4 + at).ok());
+            x?.checked_mul(y?)?.checked_mul(z?).filter(|&n| n > 0)
+        })
+        .unwrap_or(lanes);
+    threads.max(max_vertices).max(max_primitives)
+}
+
+#[cfg(test)]
+mod mesh_stride_tests {
+    use super::mesh_stride;
+
+    /// The runtime info of a PSV0 part, version 2, with the group's three thread counts.
+    fn psv(x: u32, y: u32, z: u32) -> Vec<u8> {
+        let mut d = vec![0u8; 4 + 48];
+        d[..4].copy_from_slice(&48u32.to_le_bytes());
+        for (at, v) in [(40, x), (44, y), (48, z)] {
+            d[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        d
+    }
+
+    #[test]
+    fn mesh_stride_takes_every_thread_dimension_and_the_outputs() {
+        // 8 x 8 threads, 32 vertices and primitives: 64, not 32
+        assert_eq!(mesh_stride(Some(&psv(8, 8, 1)), 64, 32, 32), 64);
+        assert_eq!(mesh_stride(Some(&psv(4, 4, 4)), 64, 16, 16), 64);
+        // one dimension, outputs larger
+        assert_eq!(mesh_stride(Some(&psv(128, 1, 1)), 128, 64, 126), 128);
+        assert_eq!(mesh_stride(Some(&psv(32, 1, 1)), 32, 64, 126), 126);
+        // no runtime info (or zeroed counts): the lane count, still against the outputs
+        assert_eq!(mesh_stride(None, 32, 64, 126), 126);
+        assert_eq!(mesh_stride(Some(&psv(0, 0, 0)), 32, 16, 16), 32);
     }
 }

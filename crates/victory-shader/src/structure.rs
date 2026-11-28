@@ -752,8 +752,14 @@ impl<'a> Lanes<'a> {
     /// `c` narrowed by the branch at the end of `q` towards one successor.
     fn edge(&mut self, c: Bool, q: usize, taken: bool) -> Bool {
         if self.wide.contains(&q) {
-            // the wave's decision: it says nothing about this lane's own bit
-            return c;
+            // One side of a wave-wide any/every decision constrains every lane.
+            return match (self.wave_any[q], self.when[q]) {
+                (Some(any), Some(w)) if taken != any => {
+                    let b = if taken { w } else { self.b.not(w) };
+                    self.b.and(c, b)
+                }
+                _ => c,
+            };
         }
         match self.when[q] {
             Some(w) if taken => self.b.and(c, w),
@@ -2241,5 +2247,29 @@ mod tests {
                 given_old / given_new
             );
         }
+    }
+
+    #[test]
+    fn structure_wide_narrows_taken_edge_of_execz_branch() {
+        let p = build(
+            &[
+                0x7D82_0000, // 0: v_cmp_lt_u32 vcc, s0, v0
+                0xBE80_246A, // 4: s_and_saveexec_b64 s[0:1], vcc
+                0xBF88_0002, // 8: s_cbranch_execz -> 20
+                0x7E02_0280, // 12: v_mov_b32 v1, 0
+                0xBF81_0000,    // 16: exit without falling through to block 2
+                0x7E04_0280, // 20: v_mov_b32 v2, 0
+                0xBF81_0000,    // 24
+            ],
+            true,
+        );
+        let st = structure(&p).unwrap();
+        assert_eq!(st.wave_any[0], Some(false));
+        let wide = HashSet::from([0usize]);
+        let sw = structure_wide(&p, &wide).unwrap();
+        // When `s_cbranch_execz` (`wave_any = Some(false)`) jumps to block 2 (`taken = true`),
+        // every lane must have `!exec_at_branch`; fallthrough (`block 1`) stays un-narrowed (`TRUE`).
+        assert_eq!(sw.reach[1], Bool::TRUE);
+        assert_ne!(sw.reach[2], Bool::TRUE);
     }
 }

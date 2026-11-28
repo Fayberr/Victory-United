@@ -119,6 +119,7 @@ fn build() -> [u8; 32] {
             "VICTORY_WAVE_LOCAL",
             "VICTORY_LDS_FLAGS",
             "VICTORY_F16_NEAREST",
+            "VICTORY_FILTER_3D",
             "VICTORY_HELPER_OWN",
             "VICTORY_FIRSTLANE_OWN",
             "VICTORY_FIRST_HALF",
@@ -133,6 +134,8 @@ fn build() -> [u8; 32] {
             "VICTORY_WAVE_PAIRS",
             "VICTORY_WAVE_PAIRS_ONLY",
             "VICTORY_WAVE_PAIRS_FP32",
+            "VICTORY_WAVE_PAIRS_SPILLED",
+            "VICTORY_WATER_TILE_SLOTS",
         ] {
             bytes.extend_from_slice(name.as_bytes());
             bytes.push(b'=');

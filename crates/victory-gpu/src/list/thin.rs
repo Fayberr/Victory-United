@@ -141,12 +141,24 @@ impl Front {
         let schedule = {
             let mut inner = held(&recording.inner);
             inner.chunks.push_back(words);
+            inner.handed += 1;
             !std::mem::replace(&mut inner.scheduled, true)
         };
         if schedule {
             held(&READY).push_back(recording.clone());
             WORK.notify_one();
         }
+    }
+
+    /// Hands over what is written and waits until it is translated: the calls
+    /// made so far have reached the list of ours when this returns. Used for
+    /// the copies that must take effect now (into a full-screen video frame),
+    /// whose source the title writes again for the next one.
+    fn flush(&mut self) {
+        let Some(recording) = self.recording.clone() else { return };
+        self.hand_over();
+        let upto = held(&recording.inner).handed;
+        recording.flush_to(upto);
     }
 
     fn close(&mut self) {
@@ -200,6 +212,10 @@ struct Inner {
     back: usize,
     /// That list was closed by the stream.
     closed: bool,
+    /// Streams handed over, and streams translated: a call is in effect on
+    /// the list of ours once its stream is translated ([`Recording::flush_to`]).
+    handed: u64,
+    translated: u64,
 }
 
 impl Recording {
@@ -221,6 +237,14 @@ impl Recording {
     pub(crate) fn wait(&self) {
         let mut inner = held(&self.inner);
         while !self.done() {
+            inner = self.moved.wait(inner).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    /// Waits until stream `upto` has been translated.
+    fn flush_to(&self, upto: u64) {
+        let mut inner = held(&self.inner);
+        while inner.translated < upto {
             inner = self.moved.wait(inner).unwrap_or_else(|e| e.into_inner());
         }
     }
@@ -253,6 +277,8 @@ impl Recording {
             STATS[1].fetch_add(began.elapsed().as_micros() as u64, Relaxed);
             let mut inner = held(&self.inner);
             inner.kept.push(chunk);
+            inner.translated += 1;
+            self.moved.notify_all();
             if closed {
                 inner.closed = true;
                 let kept = std::mem::take(&mut inner.kept);
@@ -304,8 +330,24 @@ fn back_list(kind: u32) -> This {
     list
 }
 
+/// How many threads translate the written-down calls
+/// (`VICTORY_THIN_THREADS`, 1-32). With `VICTORY_THIN_AUTO_THREADS=1`, a third of the logical
+/// processors, 2 to 8. Eight was measured on 24 (an i9-12900K) and is kept
+/// there; on 16 (eight cores) eight of them took processors the title's
+/// own threads, which the console gives about seven cores, were waiting for.
+fn thread_count(asked: Option<usize>, logical: usize) -> usize {
+    asked.unwrap_or((logical / 3).clamp(2, 8)).clamp(1, 32)
+}
+
 fn start() {
-    let threads = std::env::var("VICTORY_THIN_THREADS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(8usize).clamp(1, 32);
+    let asked = std::env::var("VICTORY_THIN_THREADS").ok().and_then(|v| v.trim().parse().ok());
+    let logical = if asked.is_none() && crate::switch::on("VICTORY_THIN_AUTO_THREADS") {
+        std::thread::available_parallelism().map_or(24, |n| n.get())
+    } else {
+        24
+    };
+    let threads = thread_count(asked, logical);
+    tracing::info!(threads, "threads that translate written-down list calls (VICTORY_THIN_THREADS)");
     for i in 0..threads {
         let worker = move || {
             crate::cores::keep_many_on_fast_cores("victory-list");
@@ -691,11 +733,22 @@ extern "system" fn copy_texture_region(
         return;
     }
     let boxed = !source_box.is_null();
+    // A copy into a full-screen single-mip image (a decoded video frame): what
+    // the list reads must be this copy, so the stream is translated to it
+    // before the call returns. Left to the threads, the frame the list reads
+    // was the one before (the opening video stopped and went on).
+    // SAFETY: the title passes the location; plain read.
+    static FLUSH_VIDEO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let video = *FLUSH_VIDEO.get_or_init(|| crate::switch::on("VICTORY_THIN_FLUSH_VIDEO"))
+        && crate::resource::is_video_frame(unsafe { (*dst).resource } as crate::object::This);
     front(this).put_with(
         COPY_TEXTURE,
         &[u64::from(x) | u64::from(y) << 32, u64::from(z) | u64::from(boxed) << 32],
         &[bytes_of(dst, 1), bytes_of(src, 1), bytes_of(source_box, usize::from(boxed))],
     );
+    if video {
+        front(this).flush();
+    }
 }
 #[allow(clippy::too_many_arguments)] // the method's own arguments
 extern "system" fn copy_texture_region_x(
@@ -890,6 +943,19 @@ const MINE: [(usize, *const ()); 50] = [
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn list_threads_follow_the_processors_unless_asked() {
+        use super::thread_count;
+        assert_eq!(thread_count(None, 24), 8);
+        assert_eq!(thread_count(None, 32), 8);
+        assert_eq!(thread_count(None, 16), 5);
+        assert_eq!(thread_count(None, 12), 4);
+        assert_eq!(thread_count(None, 4), 2);
+        assert_eq!(thread_count(Some(12), 16), 12);
+        assert_eq!(thread_count(Some(0), 16), 1);
+        assert_eq!(thread_count(Some(99), 16), 32);
+    }
+
     use super::*;
 
     /// Every method of the tables that records is written down too: what is

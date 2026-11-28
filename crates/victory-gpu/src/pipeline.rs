@@ -482,6 +482,13 @@ pub(crate) fn making() -> u64 {
     make::waiting()
 }
 
+/// Draws and dispatches asked of pipelines left out on purpose since the last
+/// call (ray-tracing passes without the structure builder).
+#[cfg(windows)]
+pub(crate) fn take_left_out() -> u64 {
+    make::take_left_out()
+}
+
 /// Draws and dispatches dropped since the last [`take_drops`], by reason
 /// (diagnostics).
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -892,6 +899,8 @@ pub(crate) mod host;
 pub mod known;
 #[cfg(windows)]
 mod library;
+#[cfg(windows)]
+pub(crate) mod sampler_order;
 #[cfg(windows)]
 mod make;
 

@@ -1091,6 +1091,7 @@ fn root_signature(
     samplers: &[D3D12_STATIC_SAMPLER_DESC],
     compute: bool,
 ) -> windows::core::Result<(ID3D12RootSignature, Vec<u8>)> {
+    super::sampler_order::before(device, samplers);
     let input = if compute {
         D3D12_ROOT_SIGNATURE_FLAG_NONE
     } else {

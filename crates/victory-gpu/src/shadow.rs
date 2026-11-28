@@ -488,6 +488,7 @@ struct Card {
     /// `land_card` readers observing `has_dirty == false` are guaranteed to
     /// observe `has_sent == true`.
     has_dirty: AtomicBool,
+    me: std::sync::OnceLock<std::sync::Weak<Shadow>>,
     /// With [`relay`]: the offsets that went from `dirty` to the card's
     /// side, each with the number of the send that took it
     /// ([`card_dirty`]), kept until a fetch sent after it has been merged.
@@ -498,6 +499,8 @@ struct Card {
     has_sent: AtomicBool,
     /// The buffers' bytes (the title buffer's, rounded up to 64 KiB).
     size: u64,
+    /// Bytes charged to the room kept for large buffers, returned when this side is released.
+    reserved_bytes: u64,
 }
 
 /// Whether the host copies of big title buffers are in the card's own
@@ -628,6 +631,39 @@ fn parse_mib(value: &str) -> Option<u64> {
 
 /// Bytes alive of copies' card sides, and of their "before" twins.
 static CARD_BYTES: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+static CARD_RESERVED: AtomicU64 = AtomicU64::new(0);
+static CARD_ADMISSION: Mutex<()> = Mutex::new(());
+
+/// Keep at most one eighth of the existing quota (64 MiB on small cards)
+/// for large buffers first used after the other copies have been made.
+fn large_card_copies() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::switch::on("VICTORY_LARGE_CARD_COPIES"))
+}
+
+fn card_reserve(most: u64) -> u64 {
+    let bytes = (most / 8).min(64 << 20) / 65536 * 65536;
+    if bytes >= 16 << 20 { bytes } else { 0 }
+}
+
+/// How many of this copy's bytes need the room kept for large buffers.
+fn card_reserved_bytes(size: u64, len: u64, used: u64, reserved: u64, most: u64) -> Option<u64> {
+    if size > most.saturating_sub(used) {
+        return None;
+    }
+    let ordinary_used = used.saturating_sub(reserved);
+    let ordinary_free = (most - card_reserve(most)).saturating_sub(ordinary_used);
+    let needed = size.saturating_sub(ordinary_free);
+    (needed == 0 || len >= 16 << 20).then_some(needed)
+}
+
+fn card_release(size: u64, reserved_bytes: u64) {
+    let _admission = CARD_ADMISSION.lock().unwrap_or_else(|e| e.into_inner());
+    CARD_BYTES[0].fetch_sub(size, Ordering::Relaxed);
+    if reserved_bytes != 0 {
+        CARD_RESERVED.fetch_sub(reserved_bytes, Ordering::Relaxed);
+    }
+}
 
 /// Bytes of title-memory-by-address (RT BVH) arenas placed in local VRAM.
 static BY_ADDRESS_CARD_BYTES: AtomicU64 = AtomicU64::new(0);
@@ -730,6 +766,29 @@ fn remaining_card_room(buffers: u64, used: u64, refused: u64, windows: u64, wind
 /// The copies in the card's memory.
 static CARDED: Mutex<Vec<std::sync::Weak<Shadow>>> = Mutex::new(Vec::new());
 
+// Drained before taking any per-copy dirty lock. Publishers hold the
+// dirty lock while they enqueue the first change to an otherwise clean copy.
+static TOUCHED: Mutex<Vec<std::sync::Weak<Shadow>>> = Mutex::new(Vec::new());
+static TOUCHED_ALL: AtomicBool = AtomicBool::new(false);
+
+fn touched_listed() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::switch::on("VICTORY_CARD_TOUCHED"))
+}
+
+fn card_joins(shadow: &Arc<Shadow>) {
+    let weak = Arc::downgrade(shadow);
+    CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(weak.clone());
+    if touched_listed() && let Some(card) = &shadow.card {
+        let _dirty = card.dirty.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = card.me.set(weak.clone());
+        if card.has_dirty.load(Ordering::Acquire) {
+            TOUCHED.lock().unwrap_or_else(|e| e.into_inner()).push(weak);
+        }
+    }
+}
+
+
 /// Since the last frame line: bytes copied to card sides and the ranges
 /// they were; pieces compared on the card, pieces fetched and their
 /// bytes; the waits for the card the fetches added and their microseconds.
@@ -767,8 +826,8 @@ pub(crate) fn card_hash_bytes(size: u64) -> u64 {
 /// copy, if the copy is to be there: [`cards`] is on, the size is within
 /// [`card_limits`] and below 1 GiB (the compare counts in 32 bits), and the
 /// host has what it takes (`Host::card_ready`).
-fn card_for(size: u64) -> Option<ID3D12Resource> {
-    let there = card_room_for(size);
+fn card_for(size: u64, len: u64) -> Option<(ID3D12Resource, u64)> {
+    let there = card_room_for(size, len);
     if there.is_some() || !card_all() || size >= 1 << 30 {
         return there;
     }
@@ -778,8 +837,9 @@ fn card_for(size: u64) -> Option<ID3D12Resource> {
         return None;
     }
     let (buffer, _) = host.shared_buffer(size)?;
+    let _admission = CARD_ADMISSION.lock().unwrap_or_else(|e| e.into_inner());
     CARD_BYTES[0].fetch_add(size, Ordering::Relaxed);
-    Some(buffer)
+    Some((buffer, 0))
 }
 
 /// Whether every title buffer's copy has two sides, however small
@@ -797,12 +857,19 @@ fn card_all() -> bool {
 }
 
 /// [`card_for`] in the card's own memory.
-fn card_room_for(size: u64) -> Option<ID3D12Resource> {
+fn card_size_eligible(size: u64, len: u64, least: u64) -> bool {
+    // The minimum describes title data, not committed-resource padding.
+    // A 1 KiB constant buffer needs a 64 KiB allocation, but must not
+    // consume the quota intended for buffers of at least 64 KiB.
+    len >= least && size < 1 << 30
+}
+
+fn card_room_for(size: u64, len: u64) -> Option<(ID3D12Resource, u64)> {
     if !cards() {
         return None;
     }
     let (least, most) = card_limits();
-    if size < least || size >= 1 << 30 {
+    if !card_size_eligible(size, len, least) {
         return None;
     }
     let host = host()?;
@@ -841,15 +908,34 @@ fn card_room_for(size: u64) -> Option<ID3D12Resource> {
         }
         return None;
     }
-    if CARD_BYTES[0].fetch_add(size, Ordering::Relaxed) + size > most {
-        CARD_BYTES[0].fetch_sub(size, Ordering::Relaxed);
-        return None;
-    }
+    let reserved_bytes = {
+        let _admission = CARD_ADMISSION.lock().unwrap_or_else(|e| e.into_inner());
+        let live = CARD_BYTES[0].load(Ordering::Relaxed);
+        let kept = CARD_RESERVED.load(Ordering::Relaxed);
+        let admission = if large_card_copies() {
+            card_reserved_bytes(size, len, live, kept, most)
+        } else {
+            (size <= most.saturating_sub(live)).then_some(0)
+        };
+        let Some(reserved_bytes) = admission else {
+            #[cfg(feature = "diagnostics")]
+            if std::env::var_os("VICTORY_TRACE_BUFFER_PLACEMENT").is_some() {
+                tracing::info!(size, live, kept, most, "card copy refused by byte quota");
+            }
+            return None;
+        };
+        CARD_BYTES[0].fetch_add(size, Ordering::Relaxed);
+        if reserved_bytes != 0 {
+            CARD_RESERVED.fetch_add(reserved_bytes, Ordering::Relaxed);
+        }
+        reserved_bytes
+    };
+    // Admission bookkeeping is released before calling the driver.
     let buffer = host.uav_buffer(size);
     if buffer.is_none() {
-        CARD_BYTES[0].fetch_sub(size, Ordering::Relaxed);
+        card_release(size, reserved_bytes);
     }
-    buffer
+    buffer.map(|buffer| (buffer, reserved_bytes))
 }
 
 /// The most bytes of windows outside buffers whose copies go to the card's
@@ -1052,15 +1138,12 @@ pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)
     let mut carded = CARDED.lock().unwrap_or_else(|e| e.into_inner());
     let fetched = RELAY_FETCHED.load(Ordering::Acquire);
     let relay_on = relay();
-    carded.retain(|weak| {
-        let Some(shadow) = weak.upgrade() else {
-            return false;
-        };
+    let mut take = |shadow: Arc<Shadow>| {
         let Some(c) = shadow.card.as_ref() else {
-            return true;
+            return;
         };
         if !c.has_dirty.load(Ordering::Acquire) {
-            return true;
+            return;
         }
         let ranges = {
             let mut dirty = c.dirty.lock().unwrap_or_else(|e| e.into_inner());
@@ -1078,7 +1161,29 @@ pub(crate) fn card_dirty(sent_as: u64) -> Vec<(Arc<Shadow>, Vec<(usize, usize)>)
         if !ranges.is_empty() {
             out.push((shadow, ranges));
         }
-        true
+    };
+    if touched_listed() && !TOUCHED_ALL.swap(false, Ordering::AcqRel) {
+        let list = std::mem::take(&mut *TOUCHED.lock().unwrap_or_else(|e| e.into_inner()));
+        for shadow in list.iter().filter_map(std::sync::Weak::upgrade) {
+            take(shadow);
+        }
+        static CALLS: AtomicU64 = AtomicU64::new(0);
+        if CALLS.fetch_add(1, Ordering::Relaxed).is_multiple_of(1024) {
+            carded.retain(|weak| weak.strong_count() != 0);
+        }
+        out.sort_unstable_by_key(|(shadow, _)| (shadow.start, shadow.id));
+        return out;
+    }
+    if touched_listed() {
+        TOUCHED.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+    carded.retain(|weak| {
+        if let Some(shadow) = weak.upgrade() {
+            take(shadow);
+            true
+        } else {
+            false
+        }
     });
     out
 }
@@ -3492,7 +3597,7 @@ impl Drop for Shadow {
             if window {
                 WINDOW_CARD_BYTES.fetch_sub(card.size, Ordering::Relaxed);
             } else {
-                CARD_BYTES[0].fetch_sub(card.size, Ordering::Relaxed);
+                card_release(card.size, card.reserved_bytes);
             }
             if card.before.get_mut().unwrap_or_else(|e| e.into_inner()).is_some() {
                 CARD_BYTES[1].fetch_sub(card_hash_bytes(card.size), Ordering::Relaxed);
@@ -5285,7 +5390,14 @@ impl Shadow {
             }
         }
         // (Under the lock: what takes the list sees it or finds it set.)
-        card.has_dirty.store(true, Ordering::Release);
+        if !touched_listed() {
+            card.has_dirty.store(true, Ordering::Release);
+        } else if !card.has_dirty.swap(true, Ordering::AcqRel) {
+            match card.me.get() {
+                Some(me) => TOUCHED.lock().unwrap_or_else(|e| e.into_inner()).push(me.clone()),
+                None => TOUCHED_ALL.store(true, Ordering::Release),
+            }
+        }
     }
 
     /// Whether shaders were ever declared to write it.
@@ -5595,9 +5707,11 @@ impl Shadow {
                 before: Mutex::default(),
                 dirty: Mutex::default(),
                 has_dirty: AtomicBool::new(false),
+                me: std::sync::OnceLock::new(),
                 sent: Mutex::default(),
                 has_sent: AtomicBool::new(false),
                 size: len.next_multiple_of(PIECE as u64),
+                reserved_bytes: 0,
             });
         }
         let shadow = Arc::new(shadow);
@@ -5792,9 +5906,11 @@ mod land_tests {
             before: Mutex::default(),
             dirty: Mutex::default(),
             has_dirty: AtomicBool::new(false),
+            me: std::sync::OnceLock::new(),
             sent: Mutex::default(),
             has_sent: AtomicBool::new(false),
             size: len as u64,
+            reserved_bytes: 0,
         });
         Some(shadow)
     }
@@ -6197,7 +6313,7 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
         // (`crate::inplace::place_for`): the buffer is the title's own
         // memory. Not the big ones `cards` puts in the card's memory: those
         // are read too often to stay in the PC's.
-        let big = cards() && (size >= card_limits().0 || card_all());
+        let big = cards() && (len >= card_limits().0 || card_all());
         // Renderer port 1 (`crate::port`, `VICTORY_PORT_CONSTANTS=1`): the
         // title's 32-bit graphics heap in place, big or not.
         if let Some(placed) = crate::port::place_for(key.0, len, false) {
@@ -6212,8 +6328,8 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
         crate::host::name(&buffer, || format!("title buffer {:#x}+{len:#x}", key.0));
         // A big one, with `cards`: shaders get a buffer in the card's own
         // memory, and the one just made is the CPU's side.
-        let (buffer, card) = match card_for(size) {
-            Some(on_card) => {
+        let (buffer, card) = match card_for(size, len) {
+            Some((on_card, reserved_bytes)) => {
                 crate::host::name(&on_card, || format!("title buffer {:#x}+{len:#x} on the card", key.0));
                 tracing::info!(
                     start = format_args!("{:#x}", key.0),
@@ -6225,9 +6341,11 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
                     before: Mutex::default(),
                     dirty: Mutex::default(),
                     has_dirty: AtomicBool::new(false),
+                    me: std::sync::OnceLock::new(),
                     sent: Mutex::default(),
                     has_sent: AtomicBool::new(false),
                     size,
+                    reserved_bytes,
                 };
                 (on_card, Some(card))
             }
@@ -6252,7 +6370,7 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
         shadow.card = card;
         let shadow = Arc::new(shadow);
         if shadow.card.is_some() {
-            CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
+            card_joins(&shadow);
         }
         entry.shadow = Some(shadow);
     }
@@ -6457,12 +6575,14 @@ pub(crate) fn by_address(start: u64, len: u64) -> Option<Arc<Shadow>> {
         before: Mutex::default(),
         dirty: Mutex::default(),
         has_dirty: AtomicBool::new(false),
+        me: std::sync::OnceLock::new(),
         sent: Mutex::default(),
         has_sent: AtomicBool::new(false),
         size: len,
+        reserved_bytes: 0,
     });
     let shadow = Arc::new(shadow);
-    CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
+    card_joins(&shadow);
     Some(shadow)
 }
 
@@ -6535,9 +6655,11 @@ fn build_loose_shadow(start: u64, len: u64, backing: LooseBacking) -> Arc<Shadow
                         before: Mutex::default(),
                         dirty: Mutex::default(),
                         has_dirty: AtomicBool::new(false),
+                        me: std::sync::OnceLock::new(),
                         sent: Mutex::default(),
                         has_sent: AtomicBool::new(false),
                         size: len,
+                        reserved_bytes: 0,
                     };
                     (on_card, Some(card))
                 }
@@ -6651,7 +6773,7 @@ fn loose_with(
             }
             let shadow = build_loose_shadow(start, len, make(len)?);
             if shadow.card.is_some() {
-                CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
+                card_joins(&shadow);
             }
             note(&shadow);
             map.insert((start, len), shadow.clone());
@@ -6693,7 +6815,7 @@ fn loose_with(
             continue;
         }
         if candidate.card.is_some() {
-            CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&candidate));
+            card_joins(&candidate);
         }
         note(&candidate);
         map.insert(key, candidate.clone());
@@ -6786,11 +6908,34 @@ fn exact_with_limits(
             return Some(shadow.clone());
         }
     }
-    let (buffer, data) = make(len.next_multiple_of(256))?;
+    // A view's alignment copy is read and written just as a title buffer
+    // is. Keeping it in shared memory bypassed the card policy even when
+    // its original buffer was local: every access to a large compute
+    // scratch view then crossed the bus. Use the same two-sided copy and
+    // allocation limits as registered buffers, with the original fallback.
+    let alignment = if large_card_copies() && cards() && (len >= card_limits().0 || card_all()) { 1 << 16 } else { 256 };
+    let size = len.next_multiple_of(alignment);
+    let (staging, data) = make(size)?;
+    let (buffer, card) = match large_card_copies().then(|| card_for(size, len)).flatten() {
+        Some((buffer, reserved_bytes)) => (buffer, Some(Card {
+            staging,
+            before: Mutex::default(),
+            dirty: Mutex::default(),
+            sent: Mutex::default(),
+            has_dirty: AtomicBool::new(false),
+            me: std::sync::OnceLock::new(),
+            has_sent: AtomicBool::new(false),
+            size,
+            reserved_bytes,
+        })),
+        None => (staging, None),
+    };
     crate::host::name(&buffer, || format!("title view {address:#x}+{len:#x}"));
     // SAFETY: a live buffer.
     let gpu = unsafe { buffer.GetGPUVirtualAddress() };
-    let candidate = Arc::new(Shadow::new(buffer, data, gpu, address, len));
+    let mut shadow = Shadow::new(buffer, data, gpu, address, len);
+    shadow.card = card;
+    let candidate = Arc::new(shadow);
     let mut evicted = Vec::new();
     let result = {
         let mut map = EXACT.write().unwrap_or_else(|e| e.into_inner());
@@ -6823,6 +6968,9 @@ fn exact_with_limits(
         }
         candidate.used.store(crate::host::moment(), Ordering::Relaxed);
         map.insert(key, (candidate.clone(), AtomicU64::new(published_now)));
+        if candidate.card.is_some() {
+            card_joins(&candidate);
+        }
         EXACT_STATS[1].fetch_add(1, Ordering::Relaxed);
         OWN_MADE.fetch_add(1, Ordering::Relaxed);
         candidate
@@ -6834,6 +6982,122 @@ fn exact_with_limits(
 
 /// Copies of single views' bytes made since the start.
 pub(crate) static OWN_MADE: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+mod exact_card_tests {
+    use super::*;
+    use crate::host::transition;
+    use windows::Win32::Graphics::Direct3D12::*;
+    use windows_sys::Win32::System::Memory::{VirtualAlloc, VirtualFree, MEM_COMMIT, MEM_RESERVE, MEM_RELEASE, PAGE_READWRITE};
+
+    #[test]
+    fn card_minimum_uses_title_bytes_and_keeps_the_allocation_ceiling() {
+        const PAGE: u64 = 65536;
+        for len in [4, 1040, 4096, PAGE - 1] {
+            assert!(!card_size_eligible(PAGE, len, PAGE));
+        }
+        assert!(card_size_eligible(PAGE, PAGE, PAGE));
+        assert!(card_size_eligible(3 * PAGE, 2 * PAGE + 1, PAGE));
+        assert!(!card_size_eligible(1 << 30, (1 << 30) - 1, PAGE));
+        // CARD_ALL sets the minimum to zero; a zero budget still rejects
+        // allocation later, independently of this minimum-size predicate.
+        assert!(card_size_eligible(PAGE, 4, 0));
+    }
+
+    #[test]
+    fn late_large_copies_use_reserved_room_without_raising_the_total() {
+        const MB: u64 = 1 << 20;
+        assert_eq!(card_reserve(512 * MB), 64 * MB);
+        assert_eq!(card_reserve(2048 * MB), 64 * MB);
+        assert_eq!(card_reserve(64 * MB), 0);
+        assert_eq!(card_reserved_bytes(448 * MB, 448 * MB, 0, 0, 512 * MB), Some(0));
+        assert_eq!(card_reserved_bytes(20 * MB, 20 * MB, 448 * MB, 0, 512 * MB), Some(20 * MB));
+        assert_eq!(card_reserved_bytes(MB, MB, 468 * MB, 20 * MB, 512 * MB), None);
+        assert_eq!(card_reserved_bytes(44 * MB, 44 * MB, 468 * MB, 20 * MB, 512 * MB), Some(44 * MB));
+        assert_eq!(card_reserved_bytes(16 * MB, 16 * MB, 512 * MB, 64 * MB, 512 * MB), None);
+        // Dropping a reserved copy restores its room; ordinary room is still full.
+        assert_eq!(card_reserved_bytes(24 * MB, 24 * MB, 468 * MB, 20 * MB, 512 * MB), Some(24 * MB));
+        assert_eq!(card_reserved_bytes(500 * MB, 500 * MB, 0, 0, 512 * MB), Some(52 * MB));
+        assert_eq!(card_reserved_bytes(513 * MB, 513 * MB, 0, 0, 512 * MB), None);
+        assert_eq!(card_reserved_bytes(MB, MB, 0, 0, 0), None);
+    }
+
+    #[test]
+    fn large_copy_can_charge_part_of_its_size_to_each_pool() {
+        const MB: u64 = 1 << 20;
+        // 12 MiB ordinary and 64 MiB reserved remain. A 72 MiB request fits
+        // without using the final 4 MiB reserved for large requests.
+        let charge = card_reserved_bytes(72 * MB, 72 * MB, 436 * MB, 0, 512 * MB).unwrap();
+        assert_eq!(charge, 60 * MB);
+        // The small size class cannot use the remaining reserve.
+        assert_eq!(card_reserved_bytes(4 * MB, 4 * MB, 508 * MB, charge, 512 * MB), None);
+        // A 20 MiB ordinary copy retires. The next 24 MiB copy takes those
+        // ordinary bytes and the remaining 4 MiB reserved.
+        let second = card_reserved_bytes(24 * MB, 24 * MB, 488 * MB, charge, 512 * MB).unwrap();
+        assert_eq!(second, 4 * MB);
+        // Retiring the first mixed copy leaves the second one's charge in use.
+        assert_eq!(card_reserved_bytes(64 * MB, 64 * MB, 440 * MB, second, 512 * MB), Some(52 * MB));
+        assert_eq!(card_reserved_bytes(77 * MB, 77 * MB, 436 * MB, 0, 512 * MB), None);
+    }
+
+    #[test]
+    #[ignore = "GPU integration: requires VICTORY_LARGE_CARD_COPIES=1 and a D3D12 hardware adapter"]
+    fn alignment_copy_is_local_and_preserves_deferred_uploads_and_gpu_writes() {
+        let host = host().expect("D3D12 required");
+        const LEN: usize = 20 << 20;
+        // A logical range starts four bytes into a page and crosses a 64 KiB
+        // boundary. Its last word must survive padding and checksum alignment.
+        let allocation = unsafe { VirtualAlloc(std::ptr::null(), LEN + 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) };
+        assert!(!allocation.is_null());
+        struct Pages(*mut std::ffi::c_void);
+        impl Drop for Pages { fn drop(&mut self) { unsafe { VirtualFree(self.0, 0, MEM_RELEASE); } } }
+        let _pages = Pages(allocation);
+        let address = allocation as u64 + 4;
+        let offsets = [0usize, 65532, LEN - 4];
+        for (&offset, value) in offsets.iter().zip([11u32, 22, 33]) {
+            unsafe { ((address as usize + offset) as *mut u32).write(value); }
+        }
+        let shadow = exact(address, LEN as u64).unwrap();
+        assert!(shadow.carded(), "alignment copies must follow the GPU-local policy too");
+        let mut heap = D3D12_HEAP_PROPERTIES::default();
+        unsafe { shadow.buffer.GetHeapProperties(Some(&mut heap), None).unwrap(); }
+        assert_eq!(heap.Type, D3D12_HEAP_TYPE_DEFAULT);
+        let (updates, data) = host.upload_buffer(256).unwrap();
+        unsafe { data.cast::<[u32; 3]>().write([101, 202, 303]); }
+        let readback = host.read_back_buffer(256).unwrap();
+        let list = host.new_list().unwrap();
+        shadow.refresh(&list, address, LEN as u64);
+        for &offset in &offsets { shadow.gpu_writes(&list, address + offset as u64, 4); }
+        // Both copies run through the ordinary upload/compare/readback path.
+        unsafe {
+            list.list.ResourceBarrier(&[transition(&shadow.buffer, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE)]);
+            for (i, &offset) in offsets.iter().enumerate() {
+                list.list.CopyBufferRegion(&readback, i as u64 * 4, &shadow.buffer, offset as u64, 4);
+            }
+            list.list.ResourceBarrier(&[transition(&shadow.buffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST)]);
+            for (i, &offset) in offsets.iter().enumerate() {
+                list.list.CopyBufferRegion(&shadow.buffer, offset as u64, &updates, i as u64 * 4, 4);
+            }
+            list.list.ResourceBarrier(&[transition(&shadow.buffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON)]);
+        }
+        list.close();
+        for expected in [[123u32, 22, 33], [999, 202, 303]] {
+            // The first byte changes after recording, and again before reusing
+            // the same closed list: its source cannot be a recording snapshot.
+            unsafe { (address as *mut u32).write(expected[0]); }
+            host.execute_sync_internal(&list);
+            let mut mapped = std::ptr::null_mut();
+            unsafe {
+                readback.Map(0, Some(&D3D12_RANGE { Begin: 0, End: 12 }), Some(&mut mapped)).unwrap();
+                assert_eq!(mapped.cast::<[u32; 3]>().read(), expected);
+                readback.Unmap(0, Some(&D3D12_RANGE { Begin: 0, End: 0 }));
+                assert_eq!(offsets.map(|offset| ((address as usize + offset) as *const u32).read()), [101, 202, 303]);
+            }
+        }
+        EXACT.write().unwrap_or_else(|e| e.into_inner()).remove(&(address, LEN as u64));
+        unsafe { assert!(host.device.GetDeviceRemovedReason().is_ok()); }
+    }
+}
 
 /// With the frame line: the buffer views that got a copy of their own
 /// bytes ([`exact`]), per frame over `frames`, and the copies kept now.
