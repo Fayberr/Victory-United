@@ -12280,6 +12280,16 @@ pub(crate) fn legal_for(flags: u32, state: u32) -> u32 {
 }
 
 impl Host {
+    /// Is the host device on a software adapter (WARP)? GitHub's test machines have no graphics
+    /// card, and WARP rejects some command lists a real card accepts; a test that needs a card to
+    /// run a shader says so with this and stands down there (it still runs on every real card).
+    #[cfg(test)]
+    pub(crate) fn is_software(&self) -> bool {
+        // SAFETY: a plain query on the adapter kept with this device.
+        let flags = unsafe { self.adapter.as_ref().and_then(|a| a.GetDesc1().ok()) }.map(|d| d.Flags);
+        flags.is_some_and(|f| f & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0)
+    }
+
     /// PCI vendor ID of the adapter running the host device.
     pub(crate) fn adapter_vendor_id(&self) -> Option<u32> {
         // SAFETY: a plain query on the adapter kept with this device.
