@@ -85,7 +85,6 @@ pub struct Args {
     pub hw_dump: Option<std::path::PathBuf>,
     pub tab: Option<Tab>,
     pub monitor_demo: bool,
-    pub overlay_demo: bool,
 }
 
 impl Args {
@@ -101,7 +100,6 @@ impl Args {
                     }
                 }
                 "--monitor-demo" => { args.demo = true; args.monitor_demo = true; }
-                "--overlay-demo" => { args.demo = true; args.monitor_demo = true; args.overlay_demo = true; }
                 "--hw-dump" => args.hw_dump = it.next().map(Into::into),
                 "--capture" => {
                     args.demo = true;
@@ -127,7 +125,6 @@ impl App {
         }
         theme::set_appearance(&cc.egui_ctx, &core.settings.appearance);
         ops.monitor_demo = args.monitor_demo && args.capture.is_none();
-        ops.cfg.overlay |= args.overlay_demo && ops.monitor_demo;
         let tab = if args.monitor_demo { Tab::Monitor } else { args.tab.unwrap_or(Tab::Play) };
         let capture = args.capture.map(Capture::new);
         let logo = theme::Logo::load(&cc.egui_ctx);
@@ -167,7 +164,7 @@ impl App {
         }
     }
 
-    /// A hidden window can finish the after-exit backup without running an overlay or monitor.
+    /// A hidden window can finish the after-exit backup without running the monitor.
     fn window_behavior(&mut self, ctx: &egui::Context) -> bool {
         if self.hidden_until_exit {
             if !self.core.runner.busy() {
@@ -272,7 +269,7 @@ impl App {
 
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        // The root panels paint their own background. Keep the overlay viewport transparent.
+        // The root panels paint their own background. Nothing is drawn behind them.
         [0.0; 4]
     }
 
@@ -280,7 +277,6 @@ impl eframe::App for App {
         if let Some(cap) = &mut self.capture {
             self.ops.monitor_page = match cap.page() {
                 "05-monitor-customize" => ops::monitor::Page::Customize,
-                "05-overlay" => ops::monitor::Page::Overlay,
                 _ => ops::monitor::Page::Live,
             };
             self.ops.dev.profiler_tab = matches!(cap.page(), "07-profiler" | "07-profiler-schedule");

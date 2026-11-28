@@ -48,7 +48,7 @@ pub const TOOLS: &[super::Tool] = &[
         Confirm::Never
     ),
     tool!(
-        get_overlay,
+        get_panel,
         "Read whether the in-game performance panel will be enabled for the next launch.",
         &[],
         "{}",
@@ -56,7 +56,7 @@ pub const TOOLS: &[super::Tool] = &[
         Confirm::Never
     ),
     tool!(
-        set_overlay,
+        set_panel,
         "Enable or disable the in-game performance panel on the next launch.",
         &[req(
             "enabled",
@@ -194,7 +194,7 @@ fn export_monitor_csv(backend: &Arc<Backend>, args: &Args) -> Result<Value> {
     })
 }
 
-fn get_overlay(backend: &Arc<Backend>, _: &Args) -> Result<Value> {
+fn get_panel(backend: &Arc<Backend>, _: &Args) -> Result<Value> {
     let dirs = &backend.dirs;
     let settings = dirs.settings();
     let profile = actions::active_profile(dirs, &settings);
@@ -215,7 +215,7 @@ fn get_overlay(backend: &Arc<Backend>, _: &Args) -> Result<Value> {
     Ok(json!({ "enabled_on_launch": value.is_some_and(|value| value != "0" && !value.is_empty()) }))
 }
 
-fn set_overlay(backend: &Arc<Backend>, args: &Args) -> Result<Value> {
+fn set_panel(backend: &Arc<Backend>, args: &Args) -> Result<Value> {
     backend.edit(|| {
         let dirs = &backend.dirs;
         let mut profile = actions::active_profile(dirs, &dirs.settings());
@@ -224,7 +224,7 @@ fn set_overlay(backend: &Arc<Backend>, args: &Args) -> Result<Value> {
             .context("The in-game performance panel is unavailable.")?;
         profile.set_switch(panel, args.yes("enabled"));
         launch::save_profile(&dirs.profiles_dir(), &profile)?;
-        get_overlay(backend, args)
+        get_panel(backend, args)
     })
 }
 

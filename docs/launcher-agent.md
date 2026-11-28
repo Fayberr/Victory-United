@@ -429,7 +429,7 @@ Example arguments
 {"seconds":30}
 ```
 
-#### `get_overlay`
+#### `get_panel`
 
 Read whether the in-game performance panel will be enabled for the next launch.
 
@@ -439,7 +439,7 @@ Example arguments
 {}
 ```
 
-#### `set_overlay`
+#### `set_panel`
 
 Enable or disable the in-game performance panel on the next launch.
 

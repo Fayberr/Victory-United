@@ -73,7 +73,6 @@ impl Capture {
             s("05-monitor-detail", Tab::Monitor, Some(core::Screen::Main), 500.0),
             s("05-monitor-hardware", Tab::Monitor, Some(core::Screen::Main), 1_240.0),
             s("05-monitor-customize", Tab::Monitor, Some(core::Screen::Main), 0.0),
-            s("05-overlay", Tab::Monitor, Some(core::Screen::Main), 0.0),
             s("06-updates", Tab::Updates, Some(core::Screen::Main), 0.0),
             s("07-developer", Tab::Dev, Some(core::Screen::Main), 0.0),
             s("07-profiler", Tab::Dev, Some(core::Screen::Main), 0.0),

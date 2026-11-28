@@ -1,13 +1,10 @@
-//! "Ops" half of the launcher: monitor, overlay, updates, developer tools. Owned by the ops worker.
+//! "Ops" half of the launcher: monitor, updates, developer tools. Owned by the ops worker.
 //!
 //! Idle rules (docs/launcher-contract.md): nothing here polls. `tick` runs once per frame; the only
-//! timer is `request_repaint_after(1 s)`, asked for while the game runs and the Monitor tab or the
-//! overlay is visible. Worker threads send their result through a channel and call
+//! timer is `request_repaint_after(1 s)`, asked for while the game runs and the Monitor tab is visible. Worker threads send their result through a channel and call
 //! `request_repaint` once.
 pub mod dev;
-mod hotkey;
 pub mod monitor;
-pub mod overlay;
 pub mod profile;
 mod sensors;
 pub mod settings;
@@ -15,10 +12,6 @@ pub mod updates;
 
 use crate::app::Shared;
 use eframe::egui;
-use std::sync::{
-    Arc,
-    atomic::{AtomicU32, Ordering::Relaxed},
-};
 use std::time::{Duration, Instant};
 
 pub use settings::OpsSettings;
@@ -33,25 +26,10 @@ pub struct OpsState {
     pub dev: dev::DevState,
     pub monitor_page: monitor::Page,
     pub live: monitor::Live,
-    pub overlay_mode: Option<overlay::Mode>,
-    pub hotkey_draft: String,
-    pub hotkey_error: Option<String>,
     pub monitor_demo: bool,
     sampler: Option<sensors::Sampler>,
     last_sample: Option<Instant>,
     sensor_target: Option<sensors::Target>,
-    hotkey: Option<hotkey::Hotkey>,
-    hotkey_config: String,
-    hotkey_presses: Arc<AtomicU32>,
-    overlay_cache: Option<OverlayCache>,
-}
-
-struct OverlayCache {
-    at: Instant,
-    content: overlay::Content,
-    options: settings::OverlaySettings,
-    mode: overlay::Mode,
-    running: bool,
 }
 
 impl OpsState {
@@ -62,7 +40,6 @@ impl OpsState {
             ..Default::default()
         };
         s.updates = updates::UpdatesState::new(ctx);
-        s.hotkey_draft = cfg.overlay_options.hotkey.clone();
         s.cfg = cfg;
         s
     }
@@ -73,10 +50,6 @@ impl OpsState {
             cfg: OpsSettings {
                 monitor: settings::MonitorSettings {
                     cards: settings::MonitorSettings::preset(settings::Preset::Everything),
-                    ..Default::default()
-                },
-                overlay_options: settings::OverlaySettings {
-                    sparkline: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -101,40 +74,12 @@ impl OpsState {
         if !self.persist && !self.monitor_demo {
             return;
         }
-        let (minimized, focused) = ctx.input(|i| {
-            (
-                i.viewport().minimized.unwrap_or(false),
-                i.viewport().focused.unwrap_or(false),
-            )
-        });
+        let minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
         let now = Instant::now();
         let monitor_visible =
             monitor_visible && !minimized && self.monitor_page == monitor::Page::Live;
-        self.update_hotkey(ctx);
-        let configured = if self.cfg.overlay {
-            overlay::Mode::Full
-        } else {
-            overlay::Mode::Off
-        };
-        let presses = self.hotkey_presses.swap(0, Relaxed) % 3;
-        for _ in 0..presses {
-            self.overlay_mode = Some(self.overlay_mode.unwrap_or(configured).next());
-        }
-        let mode = self.overlay_mode.unwrap_or(configured);
         let running = shared.game_pid.is_some();
-        let overlay_visible = overlay::visible(&self.cfg, mode, running, focused);
-        let rate = match (monitor_visible, overlay_visible) {
-            (true, true) => Some(
-                self.cfg
-                    .monitor
-                    .rate
-                    .duration()
-                    .min(self.cfg.overlay_options.rate.duration()),
-            ),
-            (true, false) => Some(self.cfg.monitor.rate.duration()),
-            (false, true) => Some(self.cfg.overlay_options.rate.duration()),
-            _ => None,
-        };
+        let rate = monitor_visible.then(|| self.cfg.monitor.rate.duration());
         if let (Some(pid), Some(rate)) = (shared.game_pid, rate) {
             self.monitor.refresh(pid, now, rate);
             if self.persist && self.cfg.monitor.live_sensors {
@@ -150,11 +95,6 @@ impl OpsState {
             if self.persist {
                 self.clear_sensors();
             }
-        }
-        if overlay_visible {
-            self.update_overlay(ctx, now, running, mode);
-        } else {
-            self.overlay_cache = None;
         }
     }
 
@@ -192,90 +132,9 @@ impl OpsState {
         }
     }
 
-    fn update_overlay(
-        &mut self,
-        ctx: &egui::Context,
-        now: Instant,
-        running: bool,
-        mode: overlay::Mode,
-    ) {
-        let options = &self.cfg.overlay_options;
-        let due = self.overlay_cache.as_ref().is_none_or(|cache| {
-            cache.options != *options
-                || cache.mode != mode
-                || cache.running != running
-                || now
-                    .saturating_duration_since(cache.at)
-                    .saturating_add(Duration::from_millis(12))
-                    >= options.rate.duration()
-        });
-        if due {
-            let summary = self
-                .monitor
-                .summary
-                .as_ref()
-                .map(|s| s.with_live(self.live));
-            self.overlay_cache = Some(OverlayCache {
-                at: now,
-                options: options.clone(),
-                mode,
-                running,
-                content: overlay::Content::new(
-                    &self.cfg,
-                    summary.as_ref(),
-                    &self.monitor.history,
-                    running,
-                    mode,
-                ),
-            });
-        }
-        if let Some(cache) = &self.overlay_cache {
-            overlay::show(ctx, &self.cfg, &cache.content);
-        }
-    }
-
-    fn update_hotkey(&mut self, ctx: &egui::Context) {
-        if !self.persist {
-            return;
-        }
-        let configured = if self.cfg.overlay_options.mode == settings::OverlayMode::Window {
-            self.cfg.overlay_options.hotkey.as_str()
-        } else {
-            ""
-        };
-        if configured == self.hotkey_config {
-            return;
-        }
-        self.hotkey = None;
-        self.hotkey_config = configured.to_owned();
-        self.hotkey_error = None;
-        let key = hotkey::parse(configured);
-        match key {
-            Ok(Some(key)) => {
-                let presses = Arc::clone(&self.hotkey_presses);
-                let wake = ctx.clone();
-                match hotkey::Hotkey::register(key, move || {
-                    presses.fetch_add(1, Relaxed);
-                    wake.request_repaint();
-                }) {
-                    Ok(hotkey) => self.hotkey = Some(hotkey),
-                    Err(error) => self.hotkey_error = Some(error.to_string()),
-                }
-            }
-            Ok(None) => {}
-            Err(error) => self.hotkey_error = Some(error.to_string()),
-        }
-    }
-
     /// Reads the settings and the installed builds again after something else changed them.
     pub fn reload_from_disk(&mut self) {
         let cfg = OpsSettings::load();
-        if cfg.overlay != self.cfg.overlay {
-            self.overlay_mode = None;
-        }
-        if cfg.overlay_options.hotkey != self.cfg.overlay_options.hotkey {
-            self.hotkey_draft = cfg.overlay_options.hotkey.clone();
-        }
         self.cfg = cfg;
         self.updates.refresh_installed();
     }

@@ -1,7 +1,7 @@
 //! The live view and bounded history of the engine's shared statistics.
 use super::{
-    OpsState, overlay,
-    settings::{Card, CardChoice, Field, MonitorSettings, Preset, Rate},
+    OpsState,
+    settings::{Card, CardChoice, Field, MonitorSettings, OpsSettings, Preset, Rate},
 };
 use crate::{
     app::Shared,
@@ -532,7 +532,6 @@ pub enum Page {
     #[default]
     Live,
     Customize,
-    Overlay,
 }
 
 pub fn show(
@@ -570,7 +569,6 @@ pub fn show(
         for (page, label) in [
             (Page::Live, "monitor.live"),
             (Page::Customize, "monitor.customize"),
-            (Page::Overlay, "overlay.title"),
         ] {
             ui.selectable_value(&mut ops.monitor_page, page, tr(label));
         }
@@ -587,8 +585,7 @@ pub fn show(
     }
     area.show(ui, |ui| match ops.monitor_page {
         Page::Live => monitor_view(ui, &mut ops.monitor, &ops.cfg.monitor, shared, hw, ops.live),
-        Page::Customize => customize(ui, &mut ops.cfg.monitor),
-        Page::Overlay => overlay::settings(ui, ops),
+        Page::Customize => customize(ui, &mut ops.cfg),
     });
     ops.save_if_changed(&before);
 }
@@ -1017,7 +1014,14 @@ fn drop_reasons(ui: &mut egui::Ui, s: &Summary) {
     });
 }
 
-fn customize(ui: &mut egui::Ui, cfg: &mut MonitorSettings) {
+fn customize(ui: &mut egui::Ui, settings: &mut OpsSettings) {
+    theme::card(ui).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.checkbox(&mut settings.panel, tr("panel.enable"));
+        ui.label(theme::dim(tr("panel.help")).size(12.5));
+    });
+    ui.add_space(9.0);
+    let cfg = &mut settings.monitor;
     theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal_wrapped(|ui| {

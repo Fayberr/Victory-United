@@ -1,43 +1,13 @@
-//! The ops half's own small settings file (`ops.toml` next to `settings.toml`): overlay, update checks.
+//! The ops half's own small settings file (`ops.toml` next to `settings.toml`): in-game panel switch, monitor layout, update checks.
 use crate::paths;
 use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Corner {
-    #[default]
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-}
-
-impl Corner {
-    pub const ALL: [Corner; 4] = [
-        Corner::TopLeft,
-        Corner::TopRight,
-        Corner::BottomLeft,
-        Corner::BottomRight,
-    ];
-    pub fn label(self) -> &'static str {
-        use crate::i18n::tr;
-        match self {
-            Corner::TopLeft => tr("ops.corner.tl"),
-            Corner::TopRight => tr("ops.corner.tr"),
-            Corner::BottomLeft => tr("ops.corner.bl"),
-            Corner::BottomRight => tr("ops.corner.br"),
-        }
-    }
-}
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OpsSettings {
-    /// The small always-on-top fps overlay.
-    pub overlay: bool,
-    pub overlay_corner: Corner,
+    /// Show the engine's in-game panel while playing (`VICTORY_PANEL=1`).
+    pub panel: bool,
     pub monitor: MonitorSettings,
-    pub overlay_options: OverlaySettings,
     pub profiler: super::profile::Schedule,
     pub profile_view: super::profile::View,
     /// `stable` or `dev`.
@@ -49,10 +19,8 @@ pub struct OpsSettings {
 impl Default for OpsSettings {
     fn default() -> Self {
         Self {
-            overlay: false,
-            overlay_corner: Corner::TopLeft,
+            panel: false,
             monitor: MonitorSettings::default(),
-            overlay_options: OverlaySettings::default(),
             profiler: super::profile::Schedule::default(),
             profile_view: super::profile::View::default(),
             channel: "stable".into(),
@@ -93,15 +61,14 @@ mod tests {
     #[test]
     fn round_trip_and_defaults() {
         let s = OpsSettings {
-            overlay: true,
-            overlay_corner: Corner::BottomRight,
+            panel: true,
             ..Default::default()
         };
         let t = toml::to_string_pretty(&s).unwrap();
         assert_eq!(toml::from_str::<OpsSettings>(&t).unwrap(), s);
         // Missing keys fall back to defaults; unknown keys do not break loading.
         assert_eq!(
-            toml::from_str::<OpsSettings>("overlay = true\nfuture = 1")
+            toml::from_str::<OpsSettings>("panel = true\nfuture = 1")
                 .unwrap()
                 .channel,
             "stable"
@@ -109,20 +76,25 @@ mod tests {
     }
 
     #[test]
-    fn desktop_and_engine_use_exclusive_overlay_flags() {
+    fn old_overlay_keys_are_ignored() {
+        let old = "overlay = true\noverlay_corner = \"top_right\"\nchannel = \"dev\"\n\
+                   [overlay_options]\nmode = \"window\"\nhotkey = \"Ctrl+F9\"\nscale_percent = 150\n";
+        let loaded = toml::from_str::<OpsSettings>(old).unwrap();
+        assert!(!loaded.panel);
+        assert_eq!(loaded.channel, "dev");
+    }
+
+    #[test]
+    fn the_panel_switch_sets_the_engine_flag_only_when_on() {
         let temp = tempfile::tempdir().unwrap();
         let mut config = OpsSettings::default();
         assert!(engine_options(&config, temp.path()).unwrap().is_empty());
-        config.overlay = true;
-        assert_eq!(
-            engine_options(&config, temp.path()).unwrap()["VICTORY_PANEL"],
-            "0"
-        );
-        config.overlay_options.mode = OverlayMode::Engine;
+        config.panel = true;
         assert_eq!(
             engine_options(&config, temp.path()).unwrap()["VICTORY_PANEL"],
             "1"
         );
+        assert_eq!(panel_flag(&OpsSettings::default()), None);
     }
 }
 
@@ -167,20 +139,6 @@ pub enum Field {
 }
 
 impl Field {
-    pub const OVERLAY: &[Self] = &[
-        Self::Fps,
-        Self::LowFps,
-        Self::FrameMs,
-        Self::CpuMs,
-        Self::GpuMs,
-        Self::GpuLoad,
-        Self::GpuTemp,
-        Self::Vram,
-        Self::Ram,
-        Self::Draws,
-        Self::Pipelines,
-    ];
-
     pub fn label(self) -> &'static str {
         use Field::*;
         crate::i18n::tr(match self {
@@ -420,65 +378,6 @@ impl MonitorSettings {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OverlayMode {
-    #[default]
-    Window,
-    Engine,
-}
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OverlayLayout {
-    #[default]
-    Line,
-    Vertical,
-    Fps,
-}
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TextTone {
-    #[default]
-    Light,
-    Dark,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct OverlaySettings {
-    pub mode: OverlayMode,
-    pub fields: Vec<Field>,
-    pub layout: OverlayLayout,
-    pub margin: u32,
-    pub scale_percent: u32,
-    pub opacity_percent: u32,
-    pub tone: TextTone,
-    pub rate: Rate,
-    pub sparkline: bool,
-    pub only_game: bool,
-    pub hide_focused: bool,
-    pub hotkey: String,
-}
-
-impl Default for OverlaySettings {
-    fn default() -> Self {
-        Self {
-            mode: OverlayMode::Window,
-            fields: vec![Field::Fps, Field::FrameMs, Field::Vram],
-            layout: OverlayLayout::Line,
-            margin: 16,
-            scale_percent: 100,
-            opacity_percent: 82,
-            tone: TextTone::Light,
-            rate: Rate::Second,
-            sparkline: false,
-            only_game: true,
-            hide_focused: false,
-            hotkey: String::new(),
-        }
-    }
-}
-
 pub fn engine_options(
     cfg: &OpsSettings,
     data: &std::path::Path,
@@ -504,7 +403,7 @@ fn with_panel(
     flags
 }
 
-/// Whether the monitor settings override the launch profile's in-game panel.
+/// `Some("1")` when the launcher setting turns the in-game panel on. When it is off the launch profile decides.
 pub fn panel_flag(cfg: &OpsSettings) -> Option<&'static str> {
-    cfg.overlay.then(|| if cfg.overlay_options.mode == OverlayMode::Engine { "1" } else { "0" })
+    cfg.panel.then_some("1")
 }
