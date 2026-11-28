@@ -2147,6 +2147,14 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_LET_GO_BESIDE"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = "Frees spare scratch memory on a thread of its own when memory is short, so the submitting thread does not wait for the driver. On by default, 0 frees it inline."
+
+[[flag]]
 name = "VICTORY_LEVELS_MIN_KB"
 type = "text"
 default = ""
