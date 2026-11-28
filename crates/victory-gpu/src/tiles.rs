@@ -128,6 +128,55 @@ pub(crate) fn floor() -> u64 {
     *BYTES.get_or_init(|| parse_floor(std::env::var("VICTORY_LEVELS_MIN_KB").ok().as_deref()))
 }
 
+/// The texture size cap, `VICTORY_TEXTURE_MAX_SIZE=<texels>` (256 at the
+/// least; unset: none). With it, a texture the title fills whose level 0 is
+/// wider or taller than the cap is made level by level like the textures
+/// above (`resource.rs` `hosted`), and its levels above the cap are never
+/// held (`texture.rs` `held_levels`): they get no tiles, and its views start
+/// at the first level within the cap ([`show_from`]). The picture is that
+/// level's, sharp to the cap; the card's memory of the levels above it, three
+/// quarters of such a texture for each level cut, is not taken. For cards
+/// whose memory cannot hold the title's textures at full size.
+pub(crate) fn max_size() -> Option<u32> {
+    static CAP: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        let cap = parse_max_size(std::env::var("VICTORY_TEXTURE_MAX_SIZE").ok().as_deref());
+        if let Some(cap) = cap {
+            tracing::info!(
+                cap,
+                levels_on_demand = wanted(),
+                "texture levels above the size cap are not held (VICTORY_TEXTURE_MAX_SIZE)"
+            );
+        }
+        cap
+    })
+}
+
+fn parse_max_size(value: Option<&str>) -> Option<u32> {
+    value
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|&cap| cap > 0)
+        .map(|cap| cap.max(256))
+}
+
+/// The first level of a `width` x `height` texture of `levels` levels that
+/// fits within `cap` on both sides (0 when level 0 does; the last level at
+/// most).
+pub(crate) fn first_within(width: u64, height: u64, levels: u32, cap: u32) -> u32 {
+    let cap = u64::from(cap);
+    let mut level = 0;
+    while level + 1 < levels && ((width >> level).max(1) > cap || (height >> level).max(1) > cap) {
+        level += 1;
+    }
+    level
+}
+
+/// Whether a texture of `width` x `height` texels has a level 0 over the
+/// size cap.
+pub(crate) fn over_cap(width: u64, height: u64) -> bool {
+    max_size().is_some_and(|cap| width > u64::from(cap) || height > u64::from(cap))
+}
+
 /// The bytes of the tiles given to textures now: the card's memory they
 /// hold (`resource.rs` `room` counts it with the other host copies).
 pub(crate) fn given_total() -> u64 {
@@ -1891,5 +1940,27 @@ void look() {
         assert!(!changed && waiting);
         assert!(!tiled.has_tiles(0));
         assert_eq!(tiled.given_bytes(), 0);
+    }
+
+    #[test]
+    fn the_size_cap_finds_the_first_level_within_it() {
+        // 4096x4096 with 13 levels, cap 1024: levels 0 (4096) and 1 (2048) are cut.
+        assert_eq!(first_within(4096, 4096, 13, 1024), 2);
+        // Within the cap already: nothing is cut.
+        assert_eq!(first_within(1024, 1024, 11, 1024), 0);
+        assert_eq!(first_within(512, 256, 10, 1024), 0);
+        // One side over is enough: 4096x512 needs two halvings.
+        assert_eq!(first_within(4096, 512, 13, 1024), 2);
+        // Never past the last level.
+        assert_eq!(first_within(8192, 8192, 2, 256), 1);
+    }
+
+    #[test]
+    fn the_size_cap_is_read_with_a_floor_of_256() {
+        assert_eq!(parse_max_size(None), None);
+        assert_eq!(parse_max_size(Some("0")), None);
+        assert_eq!(parse_max_size(Some("nope")), None);
+        assert_eq!(parse_max_size(Some(" 1024 ")), Some(1024));
+        assert_eq!(parse_max_size(Some("64")), Some(256));
     }
 }
