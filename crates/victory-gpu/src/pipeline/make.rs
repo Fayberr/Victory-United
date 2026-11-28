@@ -340,6 +340,15 @@ pub(crate) fn waiting() -> u64 {
     WAITING.load(Ordering::Relaxed)
 }
 
+/// Draws and dispatches (direct and indirect) asked of a pipeline left out on
+/// purpose ([`left_out`]), since the last [`take_left_out`].
+static LEFT_OUT: AtomicU64 = AtomicU64::new(0);
+
+/// See [`LEFT_OUT`] (for the frame line).
+pub(crate) fn take_left_out() -> u64 {
+    LEFT_OUT.swap(0, Ordering::Relaxed)
+}
+
 /// By default, a dispatch waits within the same frame budget as a draw.
 /// `VICTORY_PIPELINE_COMPUTE_WAIT=1` waits for other compute pipelines to finish.
 /// This can stall a frame, but a one-time dispatch can leave stale state
@@ -369,6 +378,7 @@ fn ready_with<'a>(
     wait_for_frame: impl FnOnce(&Pending),
 ) -> Option<&'a HostPipeline> {
     if p.left_out.is_some() {
+        LEFT_OUT.fetch_add(1, Ordering::Relaxed);
         return None;
     }
     // A still-pending pipeline was requested by the title too. Prewarm it
@@ -794,6 +804,26 @@ mod tests {
         let pending = Pending::new(Vec::new(), None);
         pending.queue_state.store(MAKING, Ordering::Relaxed);
         assert_eq!(missing(&pending).as_deref(), Some("being made"));
+    }
+
+    /// A pipeline left out on purpose (a ray-tracing resolve without the
+    /// structure builder) is never queued, so never made: it is counted as
+    /// left out for the frame line, and named by its reason.
+    #[test]
+    fn pipelines_left_out_are_counted_and_never_queued() {
+        let reason = "shades ray-tracing hits without BVH, left out";
+        let mut p = Pending::new(Vec::new(), None);
+        p.left_out = Some(reason);
+        let p = Arc::new(p);
+        let before = LEFT_OUT.load(Ordering::Relaxed);
+        assert!(ready(&p, true).is_none());
+        assert!(ready(&p, true).is_none());
+        assert!(!now(&p));
+        assert_eq!(p.queue_state.load(Ordering::Relaxed), NOT_QUEUED);
+        assert!(p.made.get().is_none());
+        assert!(LEFT_OUT.load(Ordering::Relaxed) >= before + 2);
+        #[cfg(feature = "diagnostics")]
+        assert_eq!(missing(&p).as_deref(), Some(reason));
     }
 
     #[test]

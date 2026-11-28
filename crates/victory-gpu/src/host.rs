@@ -11714,6 +11714,7 @@ impl Meter {
         let readback = COPY_BACK.each_ref().map(|v| v.swap(0, Ordering::Relaxed));
         let dropped = crate::draw::take_dropped();
         let indirect = crate::list::take_indirect();
+        let left_out = crate::pipeline::take_left_out();
         let refused = BUDGET_NOTES[0].swap(0, Ordering::Relaxed);
         if let Some(stats) = &self.stats {
             stats.slow(self.frames, preparing, readback, [dropped, indirect, refused]);
@@ -11748,6 +11749,7 @@ impl Meter {
             });
             let dropped = dropped as f64 / frames;
             let indirect = indirect as f64 / frames;
+            let left_out = left_out as f64 / frames;
             let mesh_largest = MESH_GROUPS[0].swap(0, Ordering::Relaxed);
             let mesh_groups = MESH_GROUPS[1].swap(0, Ordering::Relaxed) as f64 / frames;
             let refused = refused as f64 / frames;
@@ -11942,7 +11944,7 @@ impl Meter {
                      {copy_mb:.1} MB, textures {texture_ms:.1} ms {texture_mb:.1} MB; {gpu:.1} on the \
                      GPU; {back_ms:.1} copying back {back_mb:.1} MB), {draws:.0} draws/frame, \
                      dropped {dropped:.0} without a host pipeline ({making} being made) and \
-                     {indirect:.0} indirect; heap buffers {picked:.1} passes {picked_ms:.1} ms;                  texture slots written so far: {placed} placed, {objects} of objects; \
+                     {indirect:.0} indirect ({left_out:.0} of all these left out on purpose: ray-tracing passes without the structure builder); heap buffers {picked:.1} passes {picked_ms:.1} ms;                  texture slots written so far: {placed} placed, {objects} of objects; \
                      textures picked by index: {picked_textures} uploaded so far ({picked_mb} MB), \
                      {picked_waiting} waiting, {picked_away} passed over unmapped; depth textures with                  unordered access: {du0} made, bound as depth {du1}x, cleared as depth {du2}x,                  unordered views refused {du3}x; buffer views left null as the host would refuse them: {refused}; \
                      raw view clamp (past end, shortened, sub-dword, unaligned) since start: SRV {raw_srv:?}, UAV {raw_uav:?}",
