@@ -3605,7 +3605,7 @@ name = "VICTORY_SETTLE_ROOM"
 type = "text"
 default = ""
 risk = "advanced"
-doc = ""
+doc = "Lets more lists stay in flight and joins changed runs further apart before the submission settles. Off by default, not measured here."
 
 [[flag]]
 name = "VICTORY_SHADER_CENSUS"
