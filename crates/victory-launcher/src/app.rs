@@ -174,14 +174,13 @@ impl App {
         }
         let zoom = ctx.zoom_factor();
         let viewport = ctx.input(|i| i.viewport().clone());
-        if !viewport.minimized.unwrap_or(false) && !viewport.maximized.unwrap_or(false) {
-            if let (Some(inner), Some(outer)) = (viewport.inner_rect, viewport.outer_rect) {
+        if !viewport.minimized.unwrap_or(false) && !viewport.maximized.unwrap_or(false)
+            && let (Some(inner), Some(outer)) = (viewport.inner_rect, viewport.outer_rect) {
                 let placement = WindowPlacement { size: (inner.size() * zoom).into(), position: (outer.min.to_vec2() * zoom).into() };
                 if placement.valid() {
                     self.window = Some(placement);
                 }
             }
-        }
         if viewport.close_requested() {
             self.remember_window();
             if self.core.runner.busy() {

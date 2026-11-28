@@ -371,20 +371,19 @@ impl Controller {
 
     /// The window is closing.
     pub fn close(&mut self) {
-        if let Some(live) = self.live.take() {
-            if live.backend.job().is_some() {
+        if let Some(live) = self.live.take()
+            && live.backend.job().is_some() {
                 self.finishing = Some(live.backend.clone());
                 live.backend.wake();
             }
-        }
     }
 }
 
 /// `--headless` and `--mcp-stdio`. `None` means: open the window as usual.
 pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Option<i32> {
     let args: Vec<String> = args.into_iter().collect();
-    if let [flag, path] = args.as_slice() {
-        if flag == "--write-agent-docs" {
+    if let [flag, path] = args.as_slice()
+        && flag == "--write-agent-docs" {
             return Some(match std::fs::write(path, docs::render()) {
                 Ok(()) => 0,
                 Err(error) => {
@@ -393,7 +392,6 @@ pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Option<i32> {
                 }
             });
         }
-    }
     if args.iter().any(|a| a == "--mcp-stdio") {
         Some(stdio::run())
     } else if args.iter().any(|a| a == "--headless") {

@@ -413,6 +413,7 @@ pub(crate) fn present(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // one call per frame; the inputs are what the SDK is told about
 fn tag(
     sl: &Sl,
     settings: &Settings,

@@ -83,6 +83,8 @@ mod tests {
         let copy = t.join("Victory United Launcher.exe");
         std::fs::write(&copy, b"MZ").unwrap();
         assert_eq!(check_against(&copy, Some(&me)), Err(Problem::ThisLauncher));
-        assert_eq!(check_against(&t.join("Victory-Launcher.EXE"), None), Err(Problem::Missing));
+        // A launcher-named file that is not there is just missing. (Not "Victory-Launcher.EXE": Windows
+        // ignores case in file names, so that would be `me` above.)
+        assert_eq!(check_against(&t.join("Never-Written-Launcher.exe"), None), Err(Problem::Missing));
     }
 }

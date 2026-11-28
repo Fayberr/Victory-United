@@ -80,11 +80,10 @@ fn watch_for_interrupt() {
     unsafe extern "system" fn handler(event: u32) -> BOOL {
         interrupted();
         // Closing the console or logging off ends the process when this returns: wait for the cleanup.
-        if event != CTRL_C_EVENT {
-            if let Some((_, done)) = STOPPING.get() {
+        if event != CTRL_C_EVENT
+            && let Some((_, done)) = STOPPING.get() {
                 done.wait_for(std::time::Duration::from_secs(4));
             }
-        }
         true.into()
     }
     // SAFETY: the handler only touches synchronised state that lives as long as the process.

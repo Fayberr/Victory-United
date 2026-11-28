@@ -110,22 +110,20 @@ fn check_at(schema: &Value, value: &Value, at: &str) -> Result<(), String> {
             return Err(format!("{at} must be {article} {kind}"));
         }
     }
-    if let Some(choices) = schema["enum"].as_array() {
-        if !choices.contains(value) {
+    if let Some(choices) = schema["enum"].as_array()
+        && !choices.contains(value) {
             let list: Vec<&str> = choices.iter().filter_map(Value::as_str).collect();
             return Err(format!("{at} must be one of: {}", list.join(", ")));
         }
-    }
-    if let Some(n) = value.as_f64() {
-        if schema["minimum"].as_f64().is_some_and(|min| n < min)
-            || schema["maximum"].as_f64().is_some_and(|max| n > max)
+    if let Some(n) = value.as_f64()
+        && (schema["minimum"].as_f64().is_some_and(|min| n < min)
+            || schema["maximum"].as_f64().is_some_and(|max| n > max))
         {
             return Err(format!(
                 "{at} must be from {} to {}",
                 schema["minimum"], schema["maximum"]
             ));
         }
-    }
     if let Some(object) = value.as_object() {
         for name in schema["required"]
             .as_array()

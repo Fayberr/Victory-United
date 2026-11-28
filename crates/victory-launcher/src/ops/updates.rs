@@ -9,6 +9,7 @@ use victory_update::{Engine, Error, Installed, Update, http::System};
 /// How many builds `cleanup` keeps (the active one and the rollback target always stay).
 pub const KEEP_BUILDS: usize = 3;
 
+#[allow(clippy::large_enum_variant)] // one message per update check, never in a hot path
 pub enum Msg {
     Checked(Result<Update, String>),
     Installed(Result<String, String>),
@@ -282,11 +283,10 @@ pub fn play_banner(state: &mut UpdatesState, ui: &mut egui::Ui) -> bool {
                 if launcher {
                     ui.horizontal(|ui| {
                         ui.label(trf("startup_updates.launcher", &[("version", &update.manifest.launcher_version)]));
-                        if update.manifest.launcher_url.starts_with("https://") {
-                            if ui.small_button(tr("updates.open_release")).clicked() {
+                        if update.manifest.launcher_url.starts_with("https://")
+                            && ui.small_button(tr("updates.open_release")).clicked() {
                                 crate::core::widgets::open_url(&update.manifest.launcher_url);
                             }
-                        }
                     });
                 }
             });
@@ -313,8 +313,8 @@ pub fn show(ops: &mut OpsState, shared: &Shared, ui: &mut egui::Ui) {
             let current = ops.updates.installed.iter().find(|b| b.is_current).map(|b| b.name.clone()).or(current).unwrap_or_else(|| tr("updates.none").to_string());
             ui.label(trf("updates.engine_now", &[("name", &current)]));
             ui.label(trf("updates.launcher_now", &[("version", env!("CARGO_PKG_VERSION"))]));
-            if let Some(u) = &ops.updates.update {
-                if newer_launcher(&u.manifest.launcher_version) {
+            if let Some(u) = &ops.updates.update
+                && newer_launcher(&u.manifest.launcher_version) {
                     ui.horizontal(|ui| {
                         ui.label(trf("updates.launcher_new", &[("version", &u.manifest.launcher_version)]));
                         if !u.manifest.launcher_url.is_empty() {
@@ -322,7 +322,6 @@ pub fn show(ops: &mut OpsState, shared: &Shared, ui: &mut egui::Ui) {
                         }
                     });
                 }
-            }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.label(tr("updates.channel"));
@@ -471,8 +470,7 @@ mod tests {
 
     #[test]
     fn a_failed_check_is_reported_not_raised() {
-        let mut s = UpdatesState::default();
-        s.phase = Phase::Checking;
+        let mut s = UpdatesState { phase: Phase::Checking, ..UpdatesState::default() };
         s.tx.send(Msg::Checked(Err("offline".into()))).unwrap();
         s.tick();
         assert_eq!(s.phase, Phase::Idle);

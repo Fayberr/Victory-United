@@ -98,7 +98,7 @@ pub fn check(http: &dyn Http, channel: &str, kind: &str, have: &[String]) -> Res
         .cloned()
         .ok_or_else(|| Error::BadManifest(format!("no {kind} engine in channel {channel}")))?;
     let folder = folder_name(&engine);
-    let newer = !have.iter().any(|h| *h == folder);
+    let newer = !have.contains(&folder);
     Ok(Update { manifest, engine, folder, newer })
 }
 

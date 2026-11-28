@@ -44,15 +44,11 @@ fn body(core: &mut CoreState, ui: &mut egui::Ui) {
         }
         ui.add_space(2.0);
         ui.horizontal(|ui| {
-            if ui.button(tr("firstrun.choose_folder")).clicked() {
-                match pick_folder() {
-                    Some(p) => match super::game::from_pick(&p) {
-                        Some(g) => core.set_game(g),
-                        None => core.notice = Some(tr("play.not_a_game").to_string()),
-                    },
-                    None => {}
-                }
-            }
+            if ui.button(tr("firstrun.choose_folder")).clicked()
+                && let Some(p) = pick_folder() { match super::game::from_pick(&p) {
+                    Some(g) => core.set_game(g),
+                    None => core.notice = Some(tr("play.not_a_game").to_string()),
+                } }
             ui.label(theme::dim(tr("firstrun.drop_hint")));
         });
     });

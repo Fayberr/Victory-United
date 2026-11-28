@@ -46,8 +46,5 @@ pub fn reports_dir() -> PathBuf { data_dir().join("reports") }
 /// `<launcher folder>\engine`: one sub folder per installed engine build plus `current.txt`.
 pub fn engine_root() -> PathBuf { app_dir().join("engine") }
 
-/// Name of the shared-memory block the engine process `pid` publishes (see victory-stats).
-pub fn stats_block_name(pid: u32) -> String { format!("Local\\VictoryUnited.Stats.{pid}") }
-
 /// Extra launch flags (Flags tab), next to `settings.toml`.
 pub fn launch_flags_file() -> PathBuf { data_dir().join("launch-flags.txt") }

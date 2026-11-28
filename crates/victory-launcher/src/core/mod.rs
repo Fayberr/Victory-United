@@ -151,12 +151,11 @@ impl CoreState {
         } else {
             self.runner.drain();
             settings::tick_storage(self);
-            if let Some(rx) = &self.hw_rx {
-                if let Ok(hw) = rx.try_recv() {
+            if let Some(rx) = &self.hw_rx
+                && let Ok(hw) = rx.try_recv() {
                     self.hw = Some(hw);
                     self.hw_rx = None;
                 }
-            }
             let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
             if let Some(g) = dropped.iter().find_map(|p| game::from_pick(p)) {
                 self.set_game(g);
@@ -252,11 +251,10 @@ impl CoreState {
     }
 
     pub fn save_settings(&mut self) {
-        if self.persist {
-            if let Err(e) = self.settings.save() {
+        if self.persist
+            && let Err(e) = self.settings.save() {
                 self.notice = Some(format!("Could not save settings: {e}"));
             }
-        }
     }
 
     #[cfg(test)]

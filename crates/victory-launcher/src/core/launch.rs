@@ -106,7 +106,6 @@ pub enum Source {
     Option,
     Edit,
     Extra,
-    Path,
 }
 
 impl Source {
@@ -116,7 +115,6 @@ impl Source {
             Source::Option => "option",
             Source::Edit => "edit",
             Source::Extra => "extra flag",
-            Source::Path => "path",
         }
     }
 }
@@ -173,6 +171,7 @@ pub fn option_env(file: &PresetFile, o: &Options) -> Env {
 }
 
 /// The whole resolution. `preset` is the id from `preset_id`.
+#[cfg(test)]
 pub fn resolve(file: &PresetFile, preset: &str, profile: &Profile, extra: &[ExtraFlag]) -> Resolved {
     resolve_with(file, preset, profile, extra, &[])
 }
@@ -234,6 +233,7 @@ pub struct Plan {
 pub const PATH_VARS: [&str; 6] = ["VICTORY_CONFIG", "VICTORY_GAME_DIR", "VICTORY_CACHE_DIR", "VICTORY_DATA_DIR", "VICTORY_FIDELITYFX_DIR", "VICTORY_BCPACK_TABLES"];
 
 impl Plan {
+    #[allow(clippy::too_many_arguments)] // one call per launch; each argument is a different folder or setting
     pub fn new(
         engine: PathBuf,
         game_folder: &Path,
@@ -323,6 +323,7 @@ pub fn delete_profile(dir: &Path, name: &str) -> std::io::Result<()> {
     std::fs::remove_file(profile_path(dir, name))
 }
 
+#[cfg(test)]
 pub fn rename_profile(dir: &Path, from: &str, to: &str) -> std::io::Result<()> {
     let mut p = load_profile_file(&profile_path(dir, from)).ok_or_else(|| std::io::Error::other("no such profile"))?;
     p.name = to.to_string();

@@ -353,13 +353,11 @@ pub fn create(data: &Path, root: &Path, options: Create<'_>) -> Result<Option<Sn
     if files.is_empty() {
         return Ok(None);
     }
-    if !options.force && label.is_empty() {
-        if let Some(previous) = list_checked(root, &check)?.first() {
-            if same_data(data, &files, &previous.manifest, &check)? {
+    if !options.force && label.is_empty()
+        && let Some(previous) = list_checked(root, &check)?.first()
+            && same_data(data, &files, &previous.manifest, &check)? {
                 return Ok(None);
             }
-        }
-    }
     fs::create_dir_all(root)?;
     let stage = tempfile::Builder::new()
         .prefix(".snapshot-")

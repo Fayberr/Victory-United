@@ -141,11 +141,10 @@ fn warmup(core: &mut CoreState, ui: &mut egui::Ui, done: u64, total: u64, elapse
     });
     ui.add_space(12.0);
     ui.horizontal(|ui| {
-        if ui.button(tr("play.skip")).clicked() {
-            if let Err(error) = core.runner.skip_warmup() {
+        if ui.button(tr("play.skip")).clicked()
+            && let Err(error) = core.runner.skip_warmup() {
                 core.notice = Some(error.to_string());
             }
-        }
         if ui.button(tr("play.cancel")).clicked() {
             request_stop(core);
         }

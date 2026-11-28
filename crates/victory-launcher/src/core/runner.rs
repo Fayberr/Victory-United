@@ -175,15 +175,14 @@ impl Runner {
                 send(Event::WarmFinished);
             }
             let mut before_created = false;
-            if let Some(storage) = &storage {
-                if storage.before && !cancel.load(Ordering::SeqCst) {
+            if let Some(storage) = &storage
+                && storage.before && !cancel.load(Ordering::SeqCst) {
                     let deadline = Instant::now() + Duration::from_secs(5);
                     match storage.snapshot(&plan, saves::Kind::BeforeLaunch, Some(deadline)) {
                         Ok(created) => before_created = created,
                         Err(error) => send(Event::BackupWarning(format!("{error:#}"))),
                     }
                 }
-            }
             let finish = |clean: bool| {
                 if let Some(storage) = &storage {
                     let mut created = before_created;
@@ -193,11 +192,10 @@ impl Runner {
                             Err(error) => send(Event::BackupWarning(format!("{error:#}"))),
                         }
                     }
-                    if created {
-                        if let Err(error) = saves::auto_cleanup(&storage.backups, storage.retention) {
+                    if created
+                        && let Err(error) = saves::auto_cleanup(&storage.backups, storage.retention) {
                             send(Event::BackupWarning(format!("{error:#}")));
                         }
-                    }
                 }
             };
             let summary = run_game(&plan, &logs_dir, flags_active, &pid, &cancel, &send);
