@@ -33,6 +33,13 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_ADAPTIVE_TARGET_ROOM"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
 name = "VICTORY_ADDRLIB"
 type = "text"
 default = ""
@@ -681,6 +688,13 @@ doc = "Do steps that read the game's memory on the card instead of the CPU."
 
 [[flag]]
 name = "VICTORY_CARD_SYNC_BATCH"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_CARD_TOUCHED"
 type = "text"
 default = ""
 risk = "advanced"
@@ -1395,6 +1409,14 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_FILTER_3D"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
 name = "VICTORY_FIRSTLANE_OWN"
 type = "switch"
 default = ""
@@ -1800,6 +1822,14 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_INDIRECT_MERGE"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
 name = "VICTORY_INDIRECT_PREPARE_LOG"
 type = "text"
 default = ""
@@ -2039,6 +2069,13 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_LARGE_CARD_COPIES"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
 name = "VICTORY_LATE_WAIT"
 type = "switch"
 default = "1"
@@ -2117,6 +2154,14 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_LIBRARY"
+type = "switch"
+default = "1"
+off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
 name = "VICTORY_LIBRARY_HANDLE"
 type = "switch"
 default = "1"
@@ -2141,7 +2186,22 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_LIBRARY_SAVE_S"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
 name = "VICTORY_LIBRARY_STATIC_SAMPLERS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_LIBRARY_STORE_LATER"
 type = "switch"
 default = ""
 off = "remove"
@@ -2280,6 +2340,14 @@ name = "VICTORY_MAP_LEAN"
 type = "switch"
 default = "1"
 off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_MAP_RUNS"
+type = "switch"
+default = ""
+off = "remove"
 risk = "advanced"
 doc = ""
 
@@ -2638,6 +2706,13 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_PIPELINE_SKIP_LONG_WAIT"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
 name = "VICTORY_PIPELINE_SLOW"
 type = "text"
 default = ""
@@ -2755,6 +2830,13 @@ doc = ""
 
 [[flag]]
 name = "VICTORY_POKE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_POOL_FULLEST"
 type = "text"
 default = ""
 risk = "advanced"
@@ -3246,6 +3328,13 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_REQUIRE_HW_GPU"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
 name = "VICTORY_RESIDENCY_LIMITED"
 type = "switch"
 default = ""
@@ -3357,6 +3446,13 @@ doc = ""
 
 [[flag]]
 name = "VICTORY_SAME_RECORDS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SAMPLER_ORDER"
 type = "text"
 default = ""
 risk = "advanced"
@@ -3635,6 +3731,13 @@ name = "VICTORY_SHOW_NEW_LATER"
 type = "switch"
 default = "1"
 off = "0"
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_SKIP_BINK"
+type = "text"
+default = ""
 risk = "advanced"
 doc = ""
 
@@ -4068,6 +4171,13 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_TEXTURE_MAX_SIZE"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
 name = "VICTORY_TEXTURE_NO_WAIT"
 type = "switch"
 default = ""
@@ -4145,6 +4255,20 @@ default = ""
 off = "remove"
 risk = "experimental"
 doc = "Record the once-a-frame passes over the heap's views into a list that runs ahead of the first submission."
+
+[[flag]]
+name = "VICTORY_THIN_AUTO_THREADS"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_THIN_FLUSH_VIDEO"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
 
 [[flag]]
 name = "VICTORY_THIN_THREADS"
@@ -4236,6 +4360,15 @@ default = ""
 off = "remove"
 risk = "advanced"
 doc = "Keep the game's own thread priorities except the lowest two, which become below normal. 0 keeps them all."
+
+[[flag]]
+name = "VICTORY_TRACE_BUFFER_PLACEMENT"
+type = "switch"
+default = ""
+off = "remove"
+presence = true
+risk = "advanced"
+doc = ""
 
 [[flag]]
 name = "VICTORY_TRAIL"
@@ -4537,6 +4670,14 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_WATER_TILE_SLOTS"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = ""
+
+[[flag]]
 name = "VICTORY_WAVE_DEEP_SKIPS"
 type = "switch"
 default = "1"
@@ -4594,6 +4735,13 @@ doc = ""
 
 [[flag]]
 name = "VICTORY_WAVE_PAIRS_ONLY"
+type = "text"
+default = ""
+risk = "advanced"
+doc = ""
+
+[[flag]]
+name = "VICTORY_WAVE_PAIRS_SPILLED"
 type = "text"
 default = ""
 risk = "advanced"

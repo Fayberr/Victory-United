@@ -3565,6 +3565,12 @@ mod compare_coalescing_tests {
     #[test]
     fn relay_compare_shares_changed_flags_and_updates_the_baseline_once() {
         let host = host().expect("real D3D12 device required");
+        if host.is_software() {
+            // WARP cannot run this card pass (the process aborts), so it only has an answer on a
+            // real graphics card.
+            eprintln!("skipped: needs a graphics card, this machine only has the software renderer");
+            return;
+        }
         let work = host.make_card_work().unwrap();
         let (source, data) = host.upload_buffer(65536).unwrap();
         let hashes = host.uav_buffer(256).unwrap();
