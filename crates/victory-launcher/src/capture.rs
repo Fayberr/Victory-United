@@ -45,6 +45,7 @@ impl Capture {
             s("03-settings-backups", Tab::Settings, Some(core::Screen::Main), 520.0),
             s("03-settings-storage", Tab::Settings, Some(core::Screen::Main), 945.0),
             s("03-settings-lower", Tab::Settings, Some(core::Screen::Main), 1410.0),
+            s("03-settings-engine", Tab::Settings, Some(core::Screen::Main), 4520.0),
             s("03-saves", Tab::Saves, Some(core::Screen::Idle), 0.0),
             s("04-flags", Tab::Flags, Some(core::Screen::Main), 0.0),
             s("05-monitor", Tab::Monitor, Some(core::Screen::Main), 0.0),

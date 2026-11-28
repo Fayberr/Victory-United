@@ -6,10 +6,11 @@ bundles or downloads game files.
 
 ## For players
 
-1. Unpack the ZIP anywhere and run `victory-launcher.exe`.
+1. Unpack the ZIP anywhere and run `victory-launcher.exe`. The engine is part of the package: it sits in the
+   `engine` folder next to the launcher and there is nothing to set up for it.
 2. On first start, choose the folder of your game. It is the folder with `MicrosoftGame.Config` in it, for
-   example `D:\XboxGames\<title>\Content`. The launcher also looks in the usual Xbox app folders on your
-   drives, and you can drop a folder onto the window.
+   example `D:\Games\<title>\Content`. The files can be anywhere: the launcher does not search for them, you
+   point it at them (or drop the folder onto the window).
 3. Press Play.
 
 The first start translates the game's shaders. That takes a while once; later starts are faster. You can
@@ -81,8 +82,10 @@ extra flags. Later wins.
 **Logs.** Each start writes `logs\run-<date>-<time>.log` with the engine's output and errors. The last 20
 are kept. The warm-up writes its own `warmup-*.log`.
 
-**Your own engine build.** In Settings, "Choose victory.exe..." selects a build you made yourself instead of
-the installed one. "Use the installed engine" goes back.
+**The engine is part of the launcher.** It is installed next to the launcher in `engine\<build>\victory.exe`
+and updated together with it, so there is no engine to choose. Developers can open "Use a different engine"
+in Settings and pick their own `victory.exe`. Only a file with exactly that name is accepted; the launcher's
+own program is refused, so Play can never open a second launcher. "Use the built-in engine again" goes back.
 
 **Bug report.** The tab builds a ZIP in `reports\` with the tail of the latest log, the flags, versions,
 hardware and settings. You see every item first and can untick any. Your Windows user name and profile

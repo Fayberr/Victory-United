@@ -66,7 +66,7 @@ pub struct App {
     pub ops: ops::OpsState,
     pub shared: Shared,
     capture: Option<Capture>,
-    logo: egui::TextureHandle,
+    logo: theme::Logo,
     initial_update: bool,
     was_focused: bool,
     seen_launch: u64,
@@ -112,7 +112,7 @@ impl Args {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, args: Args, icon: &egui::IconData, settings: Settings) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, args: Args, settings: Settings) -> Self {
         let ctx = cc.egui_ctx.clone();
         let (mut core, mut ops, shared) = if args.demo {
             (core::CoreState::demo(), ops::OpsState::demo(), core::demo_shared())
@@ -127,11 +127,7 @@ impl App {
         ops.cfg.overlay |= args.overlay_demo && ops.monitor_demo;
         let tab = if args.monitor_demo { Tab::Monitor } else { args.tab.unwrap_or(Tab::Play) };
         let capture = args.capture.map(Capture::new);
-        let logo = cc.egui_ctx.load_texture(
-            "victory-logo",
-            egui::ColorImage::from_rgba_unmultiplied([icon.width as usize, icon.height as usize], &icon.rgba),
-            egui::TextureOptions::LINEAR,
-        );
+        let logo = theme::Logo::load(&cc.egui_ctx);
         Self {
             tab, core, ops, shared, capture, logo,
             initial_update: !args.demo, was_focused: false, seen_launch: 0, hidden_until_exit: false, window: None,
@@ -221,7 +217,8 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 ui.spacing_mut().button_padding.x = 8.0;
                 ui.horizontal(|ui| {
-                    theme::mark(ui, &self.logo, 24.0);
+                    theme::mark(ui, &self.logo, 22.0);
+                    ui.add_space(4.0);
                     ui.label(theme::strong(tr("app.name")).size(18.0));
                 });
                 ui.add_space(8.0);

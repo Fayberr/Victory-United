@@ -179,36 +179,6 @@ fn builds_card(ui: &mut egui::Ui, ops: &mut OpsState, shared: &Shared) {
             ui.label(theme::dim(tr("updates.no_builds")));
         }
         ui.label(theme::dim(tr("dev.diag_help")).size(12.5));
-        ui.add_space(8.0);
-        ui.label(tr("dev.own_engine"));
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut ops.cfg.own_engine)
-                    .desired_width((ui.available_width() - 330.0).max(120.0))
-                    .hint_text(tr("dev.own_hint")),
-            );
-            #[cfg(windows)]
-            if ui.button(tr("dev.browse")).clicked() {
-                if let Some(p) = rfd::FileDialog::new()
-                    .add_filter("victory.exe", &["exe"])
-                    .pick_file()
-                {
-                    ops.cfg.own_engine = p.display().to_string();
-                }
-            }
-            if ui
-                .add_enabled(
-                    !ops.cfg.own_engine.is_empty(),
-                    egui::Button::new(tr("dev.use_installed")),
-                )
-                .clicked()
-            {
-                ops.cfg.own_engine.clear();
-            }
-        });
-        if !ops.cfg.own_engine.is_empty() && !Path::new(&ops.cfg.own_engine).is_file() {
-            ui.label(theme::warn_text(ui, tr("dev.own_missing")));
-        }
     });
 }
 

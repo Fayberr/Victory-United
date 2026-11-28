@@ -60,11 +60,16 @@ impl Dirs {
 
     /// A developer's own engine from the settings, otherwise the installed build.
     pub fn engine_exe(&self, settings: &Settings) -> Option<PathBuf> {
-        settings.engine_override.clone().filter(|p| p.is_file()).or_else(|| {
+        own_engine(settings).or_else(|| {
             let exe = self.engine_root().join(self.current_engine_name()?).join("victory.exe");
             exe.is_file().then_some(exe)
         })
     }
+}
+
+/// A developer build, if the selected file is still a usable engine.
+pub fn own_engine(settings: &Settings) -> Option<PathBuf> {
+    settings.engine_override.clone().filter(|path| super::engine::check(path).is_ok())
 }
 
 /// The name of the build folder an engine executable sits in.

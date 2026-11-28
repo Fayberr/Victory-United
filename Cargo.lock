@@ -2799,6 +2799,7 @@ dependencies = [
  "cc",
  "eframe",
  "egui_plot",
+ "getrandom",
  "image",
  "libc",
  "rfd",

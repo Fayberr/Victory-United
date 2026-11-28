@@ -7,16 +7,15 @@ use eframe::egui;
 
 const REPO: &str = "https://github.com/Fayberr/Victory-United";
 
-pub fn show(core: &mut CoreState, _shared: &Shared, logo: &egui::TextureHandle, ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        theme::mark(ui, logo, 32.0);
-        ui.label(theme::strong(tr("about.title")).size(24.0));
-    });
+pub fn show(core: &mut CoreState, _shared: &Shared, logo: &theme::Logo, ui: &mut egui::Ui) {
+    ui.label(theme::strong(tr("about.title")).size(24.0));
     ui.label(theme::dim(tr("about.sub")));
     ui.add_space(12.0);
     ui.set_max_width(820.0);
     theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
+        theme::mark(ui, logo, 40.0);
+        ui.add_space(8.0);
         kv(ui, tr("about.version"), &format!("{} ({})", env!("CARGO_PKG_VERSION"), if cfg!(debug_assertions) { "debug" } else { "release" }));
         let engine = core.engine_exe().and_then(|p| p.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| tr("status.no_engine").to_string());
         kv(ui, tr("about.engine"), &engine);
