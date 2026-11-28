@@ -50,30 +50,24 @@ pub fn show(core: &mut CoreState, ui: &mut egui::Ui) {
         if view.calls.is_empty() {
             ui.label(theme::dim(tr("agent.empty")));
         } else {
-            egui::ScrollArea::vertical()
-                .id_salt("recent-agent-calls")
-                .max_height(118.0)
+            egui::Grid::new("agent-calls")
+                .spacing([18.0, 5.0])
                 .show(ui, |ui| {
-                    egui::Grid::new("agent-calls")
-                        .spacing([18.0, 5.0])
-                        .show(ui, |ui| {
-                            for call in &view.calls {
-                                let label = match call.outcome {
-                                    Outcome::Ok => "agent.ok",
-                                    Outcome::Error => "agent.error",
-                                    Outcome::Asked => "agent.asked",
-                                };
-                                let time = crate::core::runner::timestamp_at(call.time);
-                                let (_, clock) = time.split_once('-').unwrap_or_default();
-                                let clock =
-                                    format!("{}:{}:{}", &clock[..2], &clock[2..4], &clock[4..6]);
-                                ui.label(theme::dim(trf("agent.time", &[("time", &clock)])))
-                                    .on_hover_text(time);
-                                ui.label(egui::RichText::new(&call.tool).monospace());
-                                ui.label(tr(label));
-                                ui.end_row();
-                            }
-                        });
+                    for call in view.calls.iter().take(5) {
+                        let label = match call.outcome {
+                            Outcome::Ok => "agent.ok",
+                            Outcome::Error => "agent.error",
+                            Outcome::Asked => "agent.asked",
+                        };
+                        let stamp = crate::core::runner::timestamp_at(call.time);
+                        let (_, clock) = stamp.split_once('-').expect("clock in timestamp");
+                        let clock = format!("{}:{}:{}", &clock[..2], &clock[2..4], &clock[4..6]);
+                        ui.label(theme::dim(trf("agent.time", &[("time", &clock)])))
+                            .on_hover_text(stamp);
+                        ui.label(egui::RichText::new(&call.tool).monospace());
+                        ui.label(tr(label));
+                        ui.end_row();
+                    }
                 });
         }
         ui.add_space(8.0);
