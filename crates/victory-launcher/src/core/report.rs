@@ -109,6 +109,13 @@ fn replace_ci(text: &str, needle: &str, with: &str) -> String {
 
 // ---------------------------------------------------------------- items
 
+fn lines_of(text: &str, file: &str) -> String {
+    match text.lines().count() {
+        1 => format!("1 line, {file}"),
+        n => format!("{n} lines, {file}"),
+    }
+}
+
 /// The last `lines` lines of a file, reading only its tail.
 pub fn tail_lines(path: &Path, lines: usize) -> std::io::Result<String> {
     let mut f = std::fs::File::open(path)?;
@@ -235,7 +242,7 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut item.include, "");
                     ui.label(theme::strong(item.title));
-                    ui.label(theme::dim(format!("{} lines, {}", item.text.lines().count(), item.file)).size(12.0));
+                    ui.label(theme::dim(lines_of(&item.text, item.file)).size(12.0));
                 });
                 egui::CollapsingHeader::new(theme::dim(tr("report.preview")).size(12.5)).id_salt(item.file).default_open(core.ui.demo && item.file == "flags.txt").show(ui, |ui| {
                     let preview: String = item.text.lines().take(40).collect::<Vec<_>>().join("\n");

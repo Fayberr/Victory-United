@@ -219,7 +219,7 @@ fn options_section(core: &mut CoreState, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label(theme::dim(tr("settings.console")));
             for c in [launch::Console::SeriesX, launch::Console::SeriesS] {
-                if ui.selectable_label(core.profile.options.console == c, c.arg()).clicked() {
+                if ui.selectable_label(core.profile.options.console == c, c.label()).clicked() {
                     core.profile.options.console = c;
                     changed = true;
                 }

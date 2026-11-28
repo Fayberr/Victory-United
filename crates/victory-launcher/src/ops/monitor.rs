@@ -99,7 +99,7 @@ impl Summary {
 
     pub fn value(&self, field: Field, target_ms: f32, missed: u64) -> Option<String> {
         use Field::*;
-        let count = |m| self.metric(m).map(|n| n.to_string());
+        let count = |m| self.metric(m).map(group_digits);
         let bytes = |m| self.metric(m).map(size);
         let ms = |v: Option<f32>| v.map(|v| format!("{v:.1} ms"));
         let percent = |v: Option<f32>| v.map(|v| format!("{v:.0}%"));
@@ -148,6 +148,19 @@ impl Summary {
             Rejected => self.rejected.map(|n| n.to_string()),
         }
     }
+}
+
+/// 1687104 as "1,687,104": long counts are readable at a glance.
+fn group_digits(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn size(bytes: u64) -> String {
@@ -652,24 +665,27 @@ fn headings(ui: &mut egui::Ui, card: Card) {
 
 fn headlines(ui: &mut egui::Ui, card: &CardChoice, s: &Summary, target: f32, missed: u64) {
     ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 30.0;
         for row in card.rows.iter().filter(|r| r.visible) {
-            ui.allocate_ui(egui::vec2(138.0, 52.0), |ui| {
-                ui.vertical(|ui| {
-                    ui.label(
+            ui.vertical(|ui| {
+                ui.set_min_width(96.0);
+                ui.add(
+                    egui::Label::new(
                         theme::strong(
                             s.value(row.field, target, missed)
                                 .unwrap_or_else(|| tr("monitor.unavailable_short").to_owned()),
                         )
                         .size(23.0),
-                    );
-                    ui.label(theme::dim(row.field.label()).size(12.0));
-                })
-                .response
-                .on_hover_text(match row.field {
-                    Field::GpuEstimate => tr("monitor.estimate_help"),
-                    Field::FrameMs => tr("monitor.target_help"),
-                    _ => row.field.label(),
-                });
+                    )
+                    .extend(),
+                );
+                ui.label(theme::dim(row.field.label()).size(12.0));
+            })
+            .response
+            .on_hover_text(match row.field {
+                Field::GpuEstimate => tr("monitor.estimate_help"),
+                Field::FrameMs => tr("monitor.target_help"),
+                _ => row.field.label(),
             });
         }
     });
@@ -742,7 +758,7 @@ fn frame_chart(
         .allow_scroll(false)
         .allow_boxed_zoom(false)
         .show_grid([false, true])
-        .legend(egui_plot::Legend::default())
+        .legend(egui_plot::Legend::default().position(egui_plot::Corner::RightBottom))
         .x_axis_label(tr("monitor.axis_seconds"))
         .y_axis_label("ms")
         .show(ui, |p| {
@@ -1081,6 +1097,14 @@ pub fn rate_picker(ui: &mut egui::Ui, id: &str, rate: &mut Rate) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_counts_get_separators() {
+        assert_eq!(group_digits(0), "0");
+        assert_eq!(group_digits(999), "999");
+        assert_eq!(group_digits(1000), "1,000");
+        assert_eq!(group_digits(1687104), "1,687,104");
+    }
 
     #[test]
     fn live_history_uses_timestamps_and_does_not_duplicate_frames() {

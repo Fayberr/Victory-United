@@ -23,20 +23,20 @@ preset = "7900xtx"
 [[preset]]
 id = "7900xtx"
 name = "AMD Radeon RX 7900 XTX"
-description = "Tuned on an i9-12900K with 64 GB. One thread maps pages (the lock was fastest that way) and the card is kept awake because the AMD driver lowers its clocks between submissions."
+description = "Made for the Radeon RX 7900 XTX. Keeps the card awake, because the AMD driver otherwise lowers its clock speed between frames."
 env = { VICTORY_MAP_THREADS = "1", VICTORY_CARD_AWAKE = "1" }
 
 [[preset]]
 id = "4090"
 name = "NVIDIA RTX 4090"
-description = "Tuned on a Ryzen 9 9950X3D with 16 cores and 48 GB. Many recording and landing threads, no spinner on the compute queue. Also the starting point for other NVIDIA cards."
+description = "Made for the GeForce RTX 4090. Uses many processor threads. Also the starting point for every other NVIDIA card."
 env = { VICTORY_THIN_THREADS = "12", VICTORY_UNDER_THREADS = "8", VICTORY_LAND_THREADS = "6", VICTORY_WAVE_WIDE_ONLY = "6f225b641c5b0708,5dc3b25986622949,369cbe906ea72764,2cc4c197ee29e291" }
 fast = { VICTORY_MAP_THREADS = "auto", VICTORY_PLACED_ORDER = "1" }
 
 [[preset]]
 id = "4070"
 name = "NVIDIA RTX 4070"
-description = "Tuned on a Ryzen 7 7800X3D with eight cores. Fewer threads than the 4090, and video memory goes to shader buffers before textures. Never picked automatically."
+description = "Made for the GeForce RTX 4070. Uses fewer processor threads than the 4090, and gives video memory to shader buffers before textures. Never chosen automatically."
 inherits = "4090"
 env = { VICTORY_THIN_THREADS = "8", VICTORY_UNDER_THREADS = "6", VICTORY_LAND_THREADS = "4", VICTORY_MAP_THREADS = "1", VICTORY_PIPELINE_WORKERS = "3" }
 fast = { VICTORY_CARD_RESERVE_BUDGETS = "1", VICTORY_CARD_BUFFERS_MIN_KB = "64", VICTORY_CARD_BUFFERS_MB = "1536", VICTORY_CARD_WINDOWS_MB = "1024" }
@@ -44,7 +44,7 @@ fast = { VICTORY_CARD_RESERVE_BUDGETS = "1", VICTORY_CARD_BUFFERS_MIN_KB = "64",
 [[preset]]
 id = "3080ti"
 name = "NVIDIA RTX 3080 Ti"
-description = "Tuned on a Ryzen 7 5700X3D with 12 GB of video memory. Measured in the open-world test (240 s runs): 6, 4 and 3 threads and the 4070's card buffer set beat the larger sets. Textures fill at most 85 percent of the budget."
+description = "Made for the GeForce RTX 3080 Ti with 12 GB of video memory. Uses fewer processor threads than bigger cards, and textures take at most 85 percent of the video memory so the game does not stall when it fills up."
 inherits = "4090"
 env = { VICTORY_THIN_THREADS = "6", VICTORY_UNDER_THREADS = "4", VICTORY_LAND_THREADS = "3" }
 fast = { VICTORY_CARD_RESERVE_BUDGETS = "1", VICTORY_CARD_BUFFERS_MIN_KB = "64", VICTORY_CARD_BUFFERS_MB = "1536", VICTORY_CARD_WINDOWS_MB = "1024", VICTORY_TEXTURE_ROOM_PERCENT = "85" }

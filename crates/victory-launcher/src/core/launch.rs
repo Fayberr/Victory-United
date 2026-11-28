@@ -19,6 +19,14 @@ pub enum Console {
 }
 
 impl Console {
+    /// What a player reads in the settings.
+    pub fn label(self) -> &'static str {
+        match self {
+            Console::SeriesX => "Series X",
+            Console::SeriesS => "Series S",
+        }
+    }
+
     pub fn arg(self) -> &'static str {
         match self {
             Console::SeriesX => "series-x",
