@@ -946,20 +946,22 @@ pub fn show_saves(core: &mut CoreState, ui: &mut egui::Ui) {
                 ui.label(theme::dim(tr("saves.empty")));
                 return;
             }
+            ui.add_space(4.0);
             for snap in &state.snapshots {
                 let m = &snap.manifest;
                 let when = backup_time(m.created);
                 let title = if m.label.is_empty() { when } else { format!("{}   |   {when}", m.label) };
                 let selected = state.selected.as_ref() == Some(&snap.id);
-                if ui.selectable_label(selected, title).clicked() {
+                let kind = kind_label(m.kind);
+                let short = m.files.first().and_then(|f| f.sha256.get(..10)).unwrap_or_default();
+                let build = if m.engine_build.is_empty() { tr("saves.unknown_build") } else { &m.engine_build };
+                let meta = format!("{kind}   |   {}   |   {build}", display_size(m.total_size));
+                let tip = trf("saves.checksum_tip", &[("hash", short)]);
+                if backup_row(ui, selected, &title, &meta).on_hover_text(tip).clicked() {
                     state.selected = Some(snap.id.clone());
                     state.rename = m.label.clone();
                     state.confirm = None;
                 }
-                let kind = kind_label(m.kind);
-                let short = m.files.first().and_then(|f| f.sha256.get(..10)).unwrap_or_default();
-                let build = if m.engine_build.is_empty() { tr("saves.unknown_build") } else { &m.engine_build };
-                ui.label(theme::dim(format!("{kind}   |   {}   |   {build}   |   {short}", display_size(m.total_size))).size(12.5));
             }
             ui.add_space(6.0);
             ui.separator();
@@ -1021,6 +1023,35 @@ pub fn show_saves(core: &mut CoreState, ui: &mut egui::Ui) {
     if !core.ui.demo && (refresh || action.is_some()) {
         start_saves_job(core, action);
     }
+}
+
+/// One backup in the list: a full-width row with the date on top and the details under it. The chosen
+/// row gets a soft fill and an outline, and the row under the pointer a lighter fill.
+fn backup_row(ui: &mut egui::Ui, selected: bool, title: &str, meta: &str) -> egui::Response {
+    let width = ui.available_width();
+    let background = ui.painter().add(egui::Shape::Noop);
+    let inner = egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 7)).show(ui, |ui| {
+        ui.set_width(width - 20.0);
+        ui.label(if selected { theme::strong(title) } else { egui::RichText::new(title) });
+        ui.label(theme::dim(meta).size(12.5));
+    });
+    let rect = inner.response.rect;
+    let response = ui.interact(rect, ui.id().with(("backup-row", title, meta)), egui::Sense::click());
+    let visuals = ui.visuals();
+    let fill = if selected {
+        visuals.widgets.hovered.weak_bg_fill
+    } else if response.hovered() {
+        visuals.widgets.noninteractive.weak_bg_fill
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    let stroke = if selected { visuals.widgets.hovered.bg_stroke } else { egui::Stroke::NONE };
+    ui.painter().set(
+        background,
+        egui::epaint::RectShape::new(rect, egui::CornerRadius::same(6), fill, stroke, egui::StrokeKind::Inside),
+    );
+    ui.add_space(2.0);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn kind_label(kind: saves::Kind) -> &'static str {

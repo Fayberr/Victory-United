@@ -242,7 +242,9 @@ pub fn play_banner(state: &mut UpdatesState, ui: &mut egui::Ui) -> bool {
                     ui.horizontal(|ui| {
                         ui.label(trf("startup_updates.launcher", &[("version", &update.manifest.launcher_version)]));
                         if update.manifest.launcher_url.starts_with("https://") {
-                            ui.hyperlink_to(tr("updates.open_release"), &update.manifest.launcher_url);
+                            if ui.small_button(tr("updates.open_release")).clicked() {
+                                crate::core::widgets::open_url(&update.manifest.launcher_url);
+                            }
                         }
                     });
                 }

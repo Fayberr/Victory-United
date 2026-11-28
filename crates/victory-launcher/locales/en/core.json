@@ -216,6 +216,7 @@
   "saves.cleanup": "Clean up now",
   "saves.busy": "Close the game before working with backups.",
   "saves.working": "Working with backups...",
+  "saves.checksum_tip": "Checksum of the first file: {hash}",
   "saves.list": "Backups",
   "saves.empty": "Your backups will appear here.",
   "saves.unknown_build": "Unknown build",

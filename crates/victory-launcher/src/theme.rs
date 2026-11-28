@@ -242,16 +242,21 @@ pub fn strong(text: impl Into<String>) -> egui::RichText {
 
 pub fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let v = ui.visuals();
-    let b = egui::Button::new(
-        egui::RichText::new(text)
-            .color(v.panel_fill)
-            .strong()
-            .size(17.0),
-    )
-    .fill(v.strong_text_color())
-    .stroke(Stroke::NONE)
-    .min_size(egui::vec2(180.0, 46.0))
-    .corner_radius(CornerRadius::same(8));
+    // A button that cannot be pressed yet keeps the shape but drops the loud fill.
+    let (fill, ink, stroke) = if ui.is_enabled() {
+        (v.strong_text_color(), v.panel_fill, Stroke::NONE)
+    } else {
+        (
+            v.widgets.noninteractive.weak_bg_fill,
+            v.weak_text_color(),
+            v.widgets.noninteractive.bg_stroke,
+        )
+    };
+    let b = egui::Button::new(egui::RichText::new(text).color(ink).strong().size(17.0))
+        .fill(fill)
+        .stroke(stroke)
+        .min_size(egui::vec2(180.0, 46.0))
+        .corner_radius(CornerRadius::same(8));
     ui.add(b)
 }
 

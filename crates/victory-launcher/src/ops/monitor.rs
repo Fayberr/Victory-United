@@ -728,6 +728,38 @@ pub fn capabilities(ui: &mut egui::Ui, hw: Option<&Hardware>, active: Option<u64
     }
 }
 
+/// A small key above the chart, so the lines are named without covering the data.
+fn chart_key(ui: &mut egui::Ui, pal: &theme::Palette, selected: bool) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let mut entry = |ui: &mut egui::Ui, color: egui::Color32, dashed: bool, name: &str| {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(22.0, 14.0), egui::Sense::hover());
+            let y = rect.center().y;
+            let stroke = egui::Stroke::new(1.75, color);
+            if dashed {
+                for x in [0.0, 8.0, 16.0] {
+                    ui.painter().line_segment(
+                        [egui::pos2(rect.left() + x, y), egui::pos2(rect.left() + x + 5.0, y)],
+                        stroke,
+                    );
+                }
+            } else {
+                ui.painter().line_segment(
+                    [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+                    stroke,
+                );
+            }
+            ui.label(theme::dim(name).size(12.5));
+            ui.add_space(12.0);
+        };
+        entry(ui, pal.chart[0], false, tr("monitor.frame"));
+        entry(ui, pal.target, true, tr("monitor.target"));
+        if selected {
+            entry(ui, pal.chart[1], false, tr("monitor.selected"));
+        }
+    });
+}
+
 fn frame_chart(
     ui: &mut egui::Ui,
     history: &VecDeque<Row>,
@@ -751,6 +783,7 @@ fn frame_chart(
         .fixed_scale_ms
         .map_or(automatic, |ms| f64::from(ms.max(1)));
     let pal = theme::palette(ui.visuals());
+    chart_key(ui, &pal, selected.is_some());
     let plot = Plot::new("live-frame-chart")
         .height(168.0)
         .allow_drag(false)
@@ -758,7 +791,6 @@ fn frame_chart(
         .allow_scroll(false)
         .allow_boxed_zoom(false)
         .show_grid([false, true])
-        .legend(egui_plot::Legend::default().position(egui_plot::Corner::RightBottom))
         .x_axis_label(tr("monitor.axis_seconds"))
         .y_axis_label("ms")
         .show(ui, |p| {
