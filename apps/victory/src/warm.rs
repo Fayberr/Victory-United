@@ -23,7 +23,10 @@ const SLOW_MS: f64 = 1000.0;
 
 fn folder() -> Result<PathBuf> {
     let cfg = victory_core::Config::load()?;
-    Ok(cfg.cache_subdir("shaders")?.with_file_name("pipelines"))
+    // The journals are opened with create(true), which makes the file but not its folder: a clean
+    // cache has no `pipelines` yet, so it is made here (same place as before, beside `shaders`).
+    cfg.cache_subdir("shaders")?;
+    cfg.cache_subdir("pipelines")
 }
 
 fn bad_keys<'a>(text: &'a str, fingerprint: &str) -> HashSet<&'a str> {
