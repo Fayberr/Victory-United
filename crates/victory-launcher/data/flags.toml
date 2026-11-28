@@ -748,6 +748,14 @@ risk = "advanced"
 doc = ""
 
 [[flag]]
+name = "VICTORY_COMPARE_PIECES"
+type = "switch"
+default = ""
+off = "remove"
+risk = "advanced"
+doc = "Compares refreshed card memory in 1 MiB pieces instead of whole ranges, so a refresh needs less scratch memory. Off by default, not measured yet."
+
+[[flag]]
 name = "VICTORY_COMPILER_GUARD"
 type = "switch"
 default = "1"
