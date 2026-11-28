@@ -1541,11 +1541,28 @@ fn bcpack_tables() -> Result<&'static Tables, HRESULT> {
     }
 }
 
+/// The tables built into the engine, unless `VICTORY_BCPACK_TABLES` names a
+/// file that parses: a good file replaces the built-in tables, a bad one is
+/// reported and the built-in tables are used.
+///
+/// The text "bcpack tables: built in" below is also what the launcher looks
+/// for in the executable to know it needs no tables file. Keep it.
 #[cfg(not(test))]
 fn load_bcpack_tables() -> Result<Tables, String> {
-    let path = std::env::var_os("VICTORY_BCPACK_TABLES")
-        .ok_or("set VICTORY_BCPACK_TABLES to the path of your local BCPack format tables")?;
-    read_bcpack_tables(std::path::Path::new(&path))
+    if let Some(path) = std::env::var_os("VICTORY_BCPACK_TABLES") {
+        match read_bcpack_tables(std::path::Path::new(&path)) {
+            Ok(tables) => {
+                tracing::info!("dstorage: bcpack tables: from {}", path.to_string_lossy());
+                return Ok(tables);
+            }
+            Err(why) => tracing::warn!(
+                "dstorage: {why}; using the built-in BCPack tables instead of {}",
+                path.to_string_lossy()
+            ),
+        }
+    }
+    tracing::debug!("dstorage: bcpack tables: built in");
+    Tables::builtin().map_err(|e| format!("the built-in BCPack tables: {e}"))
 }
 
 /// Tests decode streams made against tables of their own, from this folder.

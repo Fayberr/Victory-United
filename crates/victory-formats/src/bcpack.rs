@@ -9,8 +9,9 @@
 //! back references (to one of the last 256 blocks, or to a per-format
 //! dictionary that stands in for blocks -1 to -255) and the residuals of the
 //! endpoints and indices against them. The models, the index rank tables,
-//! the BC7 control codes and the dictionaries are constants of the format
-//! supplied by the caller ([`Tables::parse`]).
+//! the BC7 control codes and the dictionaries are constants of the format,
+//! kept in `bcpack-tables.bin` beside this file ([`Tables::builtin`]). A
+//! caller can supply its own copy instead ([`Tables::parse`]).
 
 use std::fmt;
 
@@ -47,6 +48,9 @@ pub const TABLES_SIZE: usize = MODELS * BUCKETS * 2
     + 64
     + 512 * 2
     + DICTIONARY * (6 + 16 + 8 + 32 + 2 + 16 + 4 + 32 + 25 + 33 + 50 + 66);
+
+/// The table file compiled into the engine.
+pub const BUILTIN_TABLES: &[u8] = include_bytes!("bcpack-tables.bin");
 
 /// Spreads 4 bits into even bit positions (0, 2, 4, 6).
 const SPREAD4: [u8; 16] = {
@@ -360,6 +364,12 @@ fn build_ctrl7_meta(ctrl: u16) -> Ctrl7Meta {
 }
 
 impl Tables {
+    /// The tables VIctory ships with (docs/asset-policy.md, "The one
+    /// exception").
+    pub fn builtin() -> Result<Tables, Error> {
+        Tables::parse(BUILTIN_TABLES)
+    }
+
     /// Reads the table file: 128 x 9 u16 model frequencies (per bucket, the
     /// frequency of each of its symbols), the rank tables (BC1 256 B, BC3
     /// alpha 64 B and colour 256 B, BC4 64 B, BC5 64 B), 512 u16 BC7 control
@@ -2645,6 +2655,12 @@ mod tests {
                 _ => bc7(records, out, t),
             }
         }
+    }
+
+    #[test]
+    fn the_shipped_tables_parse() {
+        assert_eq!(BUILTIN_TABLES.len(), TABLES_SIZE);
+        assert!(Tables::builtin().is_ok());
     }
 
     fn local_table_bytes() -> Option<Vec<u8>> {
