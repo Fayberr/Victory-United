@@ -3,6 +3,9 @@
 //! SHA) or on any Intel CPU (CLZERO, RDPRU, MONITORX / MWAITX and SSE4a's EXTRQ / INSERTQ,
 //! which are AMD's). The exception handler (`eh`) emulates the ones decoded here and steps over
 //! them.
+//!
+//! Adapted from XCL's `crates/xcl/src/insn.rs`, GPL-3.0-or-later at
+//! <https://github.com/xcl-dev/xcl/commit/06f90c1986f43698d0405eff3c2ab0af230e1ed9>.
 
 /// A console-only instruction at the faulting address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,13 +198,11 @@ mod tests {
         );
         // the same loop after an address-size prefix: that one CLZERO alone
         assert_eq!(decode(&[0x67, 0x0F, 0x01, 0xFC, 0x48, 0x83, 0xC0, 0x40, 0x48, 0x39, 0xD0, 0x72, 0xF4]), Some((ConsoleOnly::Clzero, 4)));
-        // cmp rcx, rdx (48 39 D1), cmp [rax], rdx (48 39 10), cmp rax, rax (48 39 C0): NOT a clzero loop
-        for bad_modrm in [0xD1u8, 0x10, 0xC0] {
-            assert_eq!(
-                decode(&[0x0F, 0x01, 0xFC, 0x48, 0x83, 0xC0, 0x40, 0x48, 0x39, bad_modrm, 0x72, 0xF4]),
-                Some((ConsoleOnly::Clzero, 3)),
-                "modrm {bad_modrm:#04x} must not decode as ClzeroLoop"
-            );
+        // A comparison against memory, using a different destination, or
+        // against RAX itself cannot give the emulated loop its end address.
+        for modrm in [0x10, 0xCA, 0xC0] {
+            let code = [0x0F, 0x01, 0xFC, 0x48, 0x83, 0xC0, 0x40, 0x48, 0x39, modrm, 0x72, 0xF4];
+            assert_eq!(decode(&code), Some((ConsoleOnly::Clzero, 3)));
         }
         assert_eq!(decode(&[0x0F, 0x01, 0xFD]), Some((ConsoleOnly::Rdpru, 3)));
         assert_eq!(decode(&[0x0F, 0x01, 0xFA]), Some((ConsoleOnly::Monitorx, 3)));

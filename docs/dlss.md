@@ -26,9 +26,10 @@ interposer at runtime after checking its Authenticode signature.
 | `VICTORY_DLSS_REACTIVE` | `0` omits the reactive mask. |
 
 For Series X at 1440p, set `VICTORY_OUTPUT=2560x1440` and launch with the
-Series X profile. Clear any separate FSR, direct DLSS, or FidelityFX scale
-and renderer overrides before selecting Streamline. The 4K and Series S
-direct NGX examples in the README apply to that backend.
+Series X profile. Clear `VICTORY_FSR`, `VICTORY_FSR_4K`, `VICTORY_DLSS_4K`,
+`VICTORY_FFX_SCALE`, `VICTORY_RENDER_SCALE`, and `VICTORY_UPSCALER` before
+selecting Streamline. The 4K and Series S direct NGX examples in the README
+apply to that backend.
 
 On successful startup, look for `Streamline loaded`, `Streamline: DLSS Super
 Resolution loaded` and `Streamline DLSS: selected the FidelityFX renderer`.
