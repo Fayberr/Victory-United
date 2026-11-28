@@ -1303,61 +1303,12 @@ extern "system" fn copy_texture_region(
             if !same {
                 ensure_state(list, src.resource, COPY_SOURCE);
             }
-            if copy_clip() && dst.kind != FOOTPRINT {
+            if !same && copy_clip() && dst.kind != FOOTPRINT {
                 // SAFETY: a live resource.
                 source_desc = Some(unsafe { texture.GetDesc() });
             }
             from.resource = texture.as_raw().cast_const().cast();
         }
-        // A depth texture shaders also write: what they wrote, first (the
-        // source above too).
-        list.twin_use(dst.resource, false, true);
-        // The first copy into a texture of the title's: what it does not
-        // write is zeros, as in a texture that was an allocation of its own
-        // (`VICTORY_COPY_OVER_TITLE=title`: what title memory holds, which
-        // may be another texture's: specks on the waitress's forehead were
-        // left in run n04). (The host
-        // copy is cut from a block and held whatever lay there, and no
-        // upload is made once a copy wrote it: the atlas the title copies
-        // its baked decorations into, a 2048x2048 BC3 texture of which a
-        // bake writes 256x256 at most, was drawn over a character's face
-        // with other textures' bytes wherever nothing was baked, runs n01 and
-        // textures-1.)
-        static OVER: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
-        let over = *OVER.get_or_init(|| match std::env::var("VICTORY_COPY_OVER_TITLE").as_deref() {
-            Ok("0") => 0,
-            Ok("title") => 1,
-            _ => 2,
-        });
-        if over != 0 && crate::texture::title_written(to) && !crate::texture::host_wrote(dst.resource as usize) {
-            // One a list uploaded, or a draw sampled, holds the title's.
-            if over == 2 && !list.used(dst.resource as usize) && !crate::texture::is_staged(dst.resource) {
-                if let Some(host) = crate::host::host() {
-                    ensure_state(list, dst.resource, COPY_DEST);
-                    let _ = list.first_use(dst.resource as usize);
-                    crate::texture::zeros(list, host, to);
-                }
-            } else {
-                crate::texture::upload(list, dst.resource, to);
-            }
-            // (Done before the title's copy writes over it.)
-            if list.used(dst.resource as usize) {
-                ensure_state(list, dst.resource, COPY_SOURCE);
-            }
-        }
-        // A destination made level by level gets the level's memory ahead
-        // of this list (`crate::tiles`): the title's bake copies each level
-        // of its result into a block-compressed texture of that kind, and
-        // a copy into a level without memory is dropped.
-        crate::texture::card_writes(list, dst.resource, to, Some(dst.footprint.offset as u32));
-        crate::texture::host_written(dst.resource);
-        if same {
-            SELF_COPIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            return;
-        }
-        ensure_state(list, dst.resource, COPY_DEST);
-        let mut to_location = dst;
-        to_location.resource = to.as_raw().cast_const().cast();
         let mut host_box = (!source_box.is_null()).then(|| source_box.cast::<D3D12_BOX>());
         // A region larger than the destination level, cut to it
         // (`copy_clip`); the cut box lives until the copy is recorded.
@@ -1428,6 +1379,55 @@ extern "system" fn copy_texture_region(
         if let Some(b) = &cut_box {
             host_box = Some(std::ptr::from_ref(b).cast::<D3D12_BOX>());
         }
+        // A depth texture shaders also write: what they wrote, first (the
+        // source above too).
+        list.twin_use(dst.resource, false, true);
+        // The first copy into a texture of the title's: what it does not
+        // write is zeros, as in a texture that was an allocation of its own
+        // (`VICTORY_COPY_OVER_TITLE=title`: what title memory holds, which
+        // may be another texture's: specks on the waitress's forehead were
+        // left in run n04). (The host
+        // copy is cut from a block and held whatever lay there, and no
+        // upload is made once a copy wrote it: the atlas the title copies
+        // its baked decorations into, a 2048x2048 BC3 texture of which a
+        // bake writes 256x256 at most, was drawn over a character's face
+        // with other textures' bytes wherever nothing was baked, runs n01 and
+        // textures-1.)
+        static OVER: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+        let over = *OVER.get_or_init(|| match std::env::var("VICTORY_COPY_OVER_TITLE").as_deref() {
+            Ok("0") => 0,
+            Ok("title") => 1,
+            _ => 2,
+        });
+        if over != 0 && crate::texture::title_written(to) && !crate::texture::host_wrote(dst.resource as usize) {
+            // One a list uploaded, or a draw sampled, holds the title's.
+            if over == 2 && !list.used(dst.resource as usize) && !crate::texture::is_staged(dst.resource) {
+                if let Some(host) = crate::host::host() {
+                    ensure_state(list, dst.resource, COPY_DEST);
+                    let _ = list.first_use(dst.resource as usize);
+                    crate::texture::zeros(list, host, to);
+                }
+            } else {
+                crate::texture::upload(list, dst.resource, to);
+            }
+            // (Done before the title's copy writes over it.)
+            if list.used(dst.resource as usize) {
+                ensure_state(list, dst.resource, COPY_SOURCE);
+            }
+        }
+        // A destination made level by level gets the level's memory ahead
+        // of this list (`crate::tiles`): the title's bake copies each level
+        // of its result into a block-compressed texture of that kind, and
+        // a copy into a level without memory is dropped.
+        crate::texture::card_writes(list, dst.resource, to, Some(dst.footprint.offset as u32));
+        crate::texture::host_written(dst.resource);
+        if same {
+            SELF_COPIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
+        ensure_state(list, dst.resource, COPY_DEST);
+        let mut to_location = dst;
+        to_location.resource = to.as_raw().cast_const().cast();
         #[cfg(feature = "diagnostics")]
         {
             let text = || {
