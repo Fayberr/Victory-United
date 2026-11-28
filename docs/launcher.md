@@ -31,7 +31,7 @@ Windows or antivirus may warn about an unsigned program. That is expected for a 
 **Appearance** switches between Dark, Light and Same as Windows. Interface size ranges from 80% to 150%.
 
 **Launcher behavior** lets you keep the launcher open, minimize it or close its window when the game starts.
-Closing disables the monitor and launcher overlay. The launcher stays in the background long enough to finish
+Closing disables the monitor. The launcher stays in the background long enough to finish
 an enabled backup after a clean exit. You can also remember window placement and require confirmation before Stop.
 
 **Updates** checks GitHub Releases at startup and, by default, checks again on focus once 24 hours have passed.
@@ -56,6 +56,10 @@ and `VICTORY_DLSSG_SM86_DIR`. Safe mode turns DLSS off.
 
 Profiles let you keep several sets of settings: create, duplicate, rename, delete, export to a `.toml` file
 and import one.
+
+**In-game panel.** The Monitor tab, under Customize, has one switch: "Show the in-game panel while playing". The
+game then draws frame rate, frame times, graphics card, processor, video memory and RAM in its upper left corner,
+and F3 hides it while you play. The launcher itself draws nothing over the game.
 
 **Agent control** lets MCP clients use the launcher locally. It is off by default. See the
 [agent setup and tool reference](launcher-agent.md).

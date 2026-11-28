@@ -47,7 +47,7 @@ The engine process publishes one named shared-memory block, `Local\VictoryUnited
 
 - The engine writes at most once per presented frame with plain atomic stores: no locks, no system
   calls, no allocation, no formatting on the frame path. Cost target: under 1 microsecond per frame.
-- The launcher reads it once per second (overlay and monitor) and derives fps itself from the frame
+- The launcher reads it once per second (monitor tab) and derives fps itself from the frame
   counter and timestamps. It must work in the normal build and the diagnostics build.
 - A block that does not exist (older engine) means "no data", never an error.
 
@@ -67,8 +67,8 @@ files (the launcher points the user to them), and anything from the game.
 The emulator is CPU bound, so the launcher must cost almost nothing while the game runs.
 
 - No `request_repaint()` loops and no animation. Draw only on input or on an event.
-- The only timer allowed is `request_repaint_after(1 second)`, and only while the Monitor tab or the
-  overlay is visible and the game runs. Hidden or minimised: no repaint at all.
+- The only timer allowed is `request_repaint_after(1 second)`, and only while the Monitor tab is
+  visible and the game runs. Hidden or minimised: no repaint at all.
 - Background threads block (channel `recv`, `Child::wait`, a blocking HTTP call). No sleep-poll loops.
   When a thread has a result it sends it and calls `ctx.request_repaint()` once.
 - Targets, measured on the WinPC with a release build: idle Play tab under 0.5 percent of one core,
