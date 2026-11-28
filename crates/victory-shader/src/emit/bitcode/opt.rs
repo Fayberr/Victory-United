@@ -6122,7 +6122,6 @@ mod tests {
                 root_srvs: Vec::new(),
                 root_uavs: Vec::new(),
                 root_indexed_views: Vec::new(),
-                half_views: Vec::new(),
             };
             (shader, inst_count, loop_insts, elapsed)
         }
@@ -6221,7 +6220,6 @@ mod tests {
                 root_srvs: Vec::new(),
                 root_uavs: Vec::new(),
                 root_indexed_views: Vec::new(),
-                half_views: Vec::new(),
             };
             (shader, inst_count, loop_insts, elapsed)
         }
@@ -6325,7 +6323,6 @@ mod tests {
                 root_srvs: lowered.root_srvs,
                 root_uavs: lowered.root_uavs,
                 root_indexed_views: Vec::new(),
-                half_views: Vec::new(),
             };
             (shader, elapsed)
         }
@@ -6728,7 +6725,6 @@ mod tests {
                     root_srvs: lowered.root_srvs,
                     root_uavs: lowered.root_uavs,
                     root_indexed_views: Vec::new(),
-                    half_views: Vec::new(),
                 };
                 validate_dxil(&shader.dxil);
                 shader
@@ -6911,7 +6907,6 @@ mod tests {
                     root_srvs: lowered.root_srvs,
                     root_uavs: lowered.root_uavs,
                     root_indexed_views: Vec::new(),
-                    half_views: Vec::new(),
                 };
                 validate_dxil(&shader.dxil);
                 shader
@@ -7200,7 +7195,6 @@ mod tests {
                     root_srvs: Vec::new(),
                     root_uavs: Vec::new(),
                     root_indexed_views: Vec::new(),
-                    half_views: Vec::new(),
                 };
                 (shader, barriers_left)
             };
@@ -7429,7 +7423,6 @@ mod tests {
                     root_srvs: Vec::new(),
                     root_uavs: Vec::new(),
                     root_indexed_views: Vec::new(),
-                    half_views: Vec::new(),
                 };
                 (shader, lds_loads)
             };
