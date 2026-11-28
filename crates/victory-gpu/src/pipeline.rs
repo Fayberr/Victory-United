@@ -893,6 +893,8 @@ pub mod known;
 #[cfg(windows)]
 mod library;
 #[cfg(windows)]
+pub(crate) mod sampler_order;
+#[cfg(windows)]
 mod make;
 
 /// Lets the pipeline library's mapped file go from memory when no pipeline
