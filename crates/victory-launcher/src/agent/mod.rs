@@ -24,12 +24,12 @@ use crate::{
     core::{actions::Dirs, hw, runner::Runner},
     ops::monitor::MonitorState,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use eframe::egui;
 use std::{
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -58,7 +58,10 @@ impl Signal {
     pub fn wait(&self) {
         let mut set = lock(&self.set);
         while !*set {
-            set = self.changed.wait(set).unwrap_or_else(PoisonError::into_inner);
+            set = self
+                .changed
+                .wait(set)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
     /// Blocks until the flag is set or `time` passed. True when set.
@@ -84,7 +87,10 @@ impl Gate {
     pub fn enter(self: &Arc<Self>) -> GateGuard {
         let mut held = lock(&self.held);
         while *held {
-            held = self.freed.wait(held).unwrap_or_else(PoisonError::into_inner);
+            held = self
+                .freed
+                .wait(held)
+                .unwrap_or_else(PoisonError::into_inner);
         }
         *held = true;
         GateGuard(self.clone())
@@ -133,7 +139,8 @@ pub struct Backend {
     revision: AtomicU64,
     pub gate: Arc<Gate>,
     hardware: OnceLock<hw::Hardware>,
-    probe: fn() -> hw::Hardware,
+    token: OnceLock<String>,
+    closed: AtomicBool,
     pub monitor: Mutex<MonitorState>,
     job: Mutex<Option<Arc<Job>>>,
     /// The result of the last update check.
@@ -156,7 +163,8 @@ impl Backend {
             revision: AtomicU64::new(0),
             gate: Default::default(),
             hardware: OnceLock::new(),
-            probe: hw::probe,
+            token: OnceLock::new(),
+            closed: AtomicBool::new(false),
             monitor: Default::default(),
             job: Mutex::new(None),
             update: Mutex::new(None),
@@ -168,8 +176,10 @@ impl Backend {
 
     /// A backend of its own, for a process without a window. Nothing touches the graphics card here.
     pub fn standalone() -> Arc<Self> {
-        let dirs = Dirs::real();
-        crate::paths::configure_storage(&dirs.settings());
+        Self::standalone_in(Dirs::real())
+    }
+
+    fn standalone_in(dirs: Dirs) -> Arc<Self> {
         let ctx = egui::Context::default();
         Self::new(dirs, true, ctx.clone(), Runner::new(ctx))
     }
@@ -183,7 +193,7 @@ impl Backend {
 
     /// The graphics card and the rest of the machine. The first call looks at the hardware.
     pub fn hardware(&self) -> &hw::Hardware {
-        self.hardware.get_or_init(self.probe)
+        self.hardware.get_or_init(hw::probe)
     }
 
     /// The window already looked at the hardware.
@@ -193,6 +203,18 @@ impl Backend {
 
     pub fn has_hardware(&self) -> bool {
         self.hardware.get().is_some()
+    }
+
+    fn token(&self) -> Option<&str> {
+        self.token.get().map(String::as_str)
+    }
+
+    fn ensure_open(&self) -> Result<()> {
+        anyhow::ensure!(
+            !self.closed.load(Ordering::Acquire),
+            "Agent control has been turned off."
+        );
+        Ok(())
     }
 
     pub fn revision(&self) -> u64 {
@@ -215,10 +237,13 @@ impl Backend {
         let guard = self
             .gate
             .enter_within(Duration::from_secs(10))
-            .ok_or_else(|| anyhow!("The launcher window is busy, a dialog may be open. Try again."))?;
+            .ok_or_else(|| {
+                anyhow!("The launcher window is busy, a dialog may be open. Try again.")
+            })?;
+        self.ensure_open()?;
         let out = work();
-        drop(guard);
         self.changed();
+        drop(guard);
         out
     }
 
@@ -272,6 +297,7 @@ impl Backend {
 #[derive(Default)]
 pub struct Controller {
     live: Option<Live>,
+    finishing: Option<Arc<Backend>>,
     /// Starting failed; not tried again until the switch is toggled.
     failed: Option<String>,
 }
@@ -293,16 +319,29 @@ impl Controller {
         if !core.persist {
             return None;
         }
+        if self
+            .finishing
+            .as_ref()
+            .is_some_and(|backend| !backend.job_running())
+        {
+            self.finishing = None;
+            core.reload_from_disk();
+            ops.reload_from_disk();
+        }
         let wanted = core.settings.agent_control;
         if !wanted {
-            self.live = None;
+            self.close();
             self.failed = None;
         } else if self.live.is_none() && self.failed.is_none() {
             let backend = Backend::new(Dirs::real(), false, core.ctx.clone(), core.runner.handle());
             match http::Server::start(backend.clone()) {
                 Ok(server) => {
-                    let seen = backend.revision();
-                    self.live = Some(Live { backend, server, seen });
+                    let seen = 0;
+                    self.live = Some(Live {
+                        backend,
+                        server,
+                        seen,
+                    });
                 }
                 Err(error) => self.failed = Some(format!("{error:#}")),
             }
@@ -332,13 +371,29 @@ impl Controller {
 
     /// The window is closing.
     pub fn close(&mut self) {
-        self.live = None;
+        if let Some(live) = self.live.take() {
+            if live.backend.job().is_some() {
+                self.finishing = Some(live.backend.clone());
+                live.backend.wake();
+            }
+        }
     }
 }
 
 /// `--headless` and `--mcp-stdio`. `None` means: open the window as usual.
 pub fn run_from_args(args: impl IntoIterator<Item = String>) -> Option<i32> {
     let args: Vec<String> = args.into_iter().collect();
+    if let [flag, path] = args.as_slice() {
+        if flag == "--write-agent-docs" {
+            return Some(match std::fs::write(path, docs::render()) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("Could not write agent documentation: {error}");
+                    1
+                }
+            });
+        }
+    }
     if args.iter().any(|a| a == "--mcp-stdio") {
         Some(stdio::run())
     } else if args.iter().any(|a| a == "--headless") {

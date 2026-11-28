@@ -1,10 +1,9 @@
 //! `--headless`: the launcher and its agent endpoint with no window. It never creates a window and
 //! does not look at the graphics card until a tool needs to know it.
-use super::{auth, http, Backend, Signal};
+use super::{Backend, Signal, auth, http};
 use std::{
     io::Write,
     sync::{Arc, OnceLock},
-    time::Duration,
 };
 
 /// Set once the endpoint is gone, so that a closing console can wait for the cleanup.
@@ -12,7 +11,8 @@ static STOPPING: OnceLock<(Arc<Backend>, Signal)> = OnceLock::new();
 
 pub fn run() -> i32 {
     attach_console();
-    let backend = Backend::standalone();
+    let (backend, done) = STOPPING.get_or_init(|| (Backend::standalone(), Signal::default()));
+    watch_for_interrupt();
     let server = match http::Server::start(backend.clone()) {
         Ok(server) => server,
         Err(error) => {
@@ -20,11 +20,13 @@ pub fn run() -> i32 {
             return 1;
         }
     };
-    let (backend, done) = STOPPING.get_or_init(|| (backend, Signal::default()));
-    watch_for_interrupt();
     let mut out = std::io::stdout();
     let _ = writeln!(out, "port: {}", server.port());
-    let _ = writeln!(out, "token file: {}", auth::endpoint_file(&backend.dirs).display());
+    let _ = writeln!(
+        out,
+        "token file: {}",
+        auth::endpoint_file(&backend.dirs).display()
+    );
     let _ = writeln!(out, "Stop with Ctrl+C or the shutdown tool.");
     let _ = out.flush();
     backend.stop.wait();
@@ -45,13 +47,17 @@ fn interrupted() {
 #[cfg(windows)]
 fn attach_console() {
     use windows::Win32::System::Console::{
-        AttachConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE, STD_INPUT_HANDLE,
-        STD_OUTPUT_HANDLE,
+        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE,
+        STD_OUTPUT_HANDLE, SetStdHandle,
     };
     let kinds = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE];
     // SAFETY: plain console calls; the saved handles are the ones this process was started with.
     unsafe {
-        let given = kinds.map(|kind| GetStdHandle(kind).ok().filter(|h| !h.is_invalid() && !h.0.is_null()));
+        let given = kinds.map(|kind| {
+            GetStdHandle(kind)
+                .ok()
+                .filter(|h| !h.is_invalid() && !h.0.is_null())
+        });
         if AttachConsole(ATTACH_PARENT_PROCESS).is_ok() {
             for (kind, handle) in kinds.into_iter().zip(given) {
                 if let Some(handle) = handle {
@@ -68,15 +74,15 @@ fn attach_console() {}
 #[cfg(windows)]
 fn watch_for_interrupt() {
     use windows::{
+        Win32::System::Console::{CTRL_C_EVENT, SetConsoleCtrlHandler},
         core::BOOL,
-        Win32::System::Console::{SetConsoleCtrlHandler, CTRL_C_EVENT},
     };
     unsafe extern "system" fn handler(event: u32) -> BOOL {
         interrupted();
         // Closing the console or logging off ends the process when this returns: wait for the cleanup.
         if event != CTRL_C_EVENT {
             if let Some((_, done)) = STOPPING.get() {
-                done.wait_for(Duration::from_secs(4));
+                done.wait_for(std::time::Duration::from_secs(4));
             }
         }
         true.into()
@@ -117,5 +123,4 @@ fn watch_for_interrupt() {
             interrupted();
         }
     });
-    let _ = Duration::ZERO;
 }

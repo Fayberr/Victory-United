@@ -3,11 +3,31 @@
 use serde_json::Value;
 
 pub const HIDDEN: &str = "[hidden]";
-const NAMES: [&str; 8] = ["api_key", "apikey", "api-key", "secret", "token", "password", "passwd", "private_key"];
+const NAMES: [&str; 8] = [
+    "api_key",
+    "apikey",
+    "api-key",
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "private_key",
+];
 
 fn secret_name(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     NAMES.iter().any(|n| name.ends_with(n))
+}
+
+/// A flag value often travels next to its name, rather than under it.
+pub fn flag_value(name: &str, value: Option<String>) -> Option<String> {
+    value.map(|value| {
+        if secret_name(name) {
+            HIDDEN.to_string()
+        } else {
+            value
+        }
+    })
 }
 
 /// Hides every secret in the strings of `value`. `token` is the endpoint token, if there is one.
@@ -36,7 +56,25 @@ pub fn text_of(text: &str, token: Option<&str>) -> String {
         return text;
     }
     let trailing = text.ends_with('\n');
-    text = text.lines().map(line).collect::<Vec<_>>().join("\n");
+    let mut private_key = false;
+    text = text
+        .lines()
+        .filter_map(|entry| {
+            if entry.contains("-----BEGIN ") && entry.contains("PRIVATE KEY-----") {
+                private_key = true;
+                return Some(HIDDEN.to_owned());
+            }
+            if private_key {
+                if entry.contains("-----END ") && entry.contains("PRIVATE KEY-----") {
+                    private_key = false;
+                }
+                None
+            } else {
+                Some(line(entry))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     if trailing {
         text.push('\n');
     }
@@ -45,7 +83,9 @@ pub fn text_of(text: &str, token: Option<&str>) -> String {
 
 fn might_hold_secret(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
-    lower.contains("bearer ") || NAMES.iter().any(|n| lower.contains(n))
+    lower.contains("bearer ")
+        || lower.contains("private key-----")
+        || NAMES.iter().any(|n| lower.contains(n))
 }
 
 fn line(line: &str) -> String {
@@ -68,18 +108,40 @@ fn line(line: &str) -> String {
         if !bearer && !secret_name(word) {
             continue;
         }
-        // What follows the name: quotes, blanks and one `=` or `:`, then the secret itself.
         let mut at = i;
-        let mut assigned = bearer;
-        while at < bytes.len() && matches!(bytes[at], b' ' | b'"' | b'\'' | b'=' | b':') {
-            assigned |= matches!(bytes[at], b'=' | b':');
+        if !bearer {
+            while bytes
+                .get(at)
+                .is_some_and(|b| matches!(b, b' ' | b'\t' | b'"' | b'\''))
+            {
+                at += 1;
+            }
+            if !bytes.get(at).is_some_and(|b| matches!(b, b'=' | b':')) {
+                continue;
+            }
             at += 1;
-        }
-        if !assigned || at == i {
+        } else if !bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
             continue;
         }
+        while bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
+            at += 1;
+        }
+        let quote = bytes.get(at).copied().filter(|b| matches!(b, b'"' | b'\''));
+        if quote.is_some() {
+            at += 1;
+        }
         let mut end = at;
-        while end < bytes.len() && !matches!(bytes[end], b' ' | b'"' | b'\'' | b',' | b';' | b'&') {
+        while let Some(&byte) = bytes.get(end) {
+            if quote.is_some() && byte == b'\\' {
+                end = (end + 2).min(bytes.len());
+                continue;
+            }
+            if quote.map_or_else(
+                || byte.is_ascii_whitespace() || matches!(byte, b'"' | b'\'' | b',' | b';' | b'&'),
+                |quote| byte == quote,
+            ) {
+                break;
+            }
             end += 1;
         }
         // `Authorization: Bearer x` is handled when the scan reaches `Bearer`.
@@ -104,18 +166,47 @@ mod tests {
     fn keys_tokens_and_bearer_values_are_hidden() {
         for (input, expected) in [
             ("GEMINI_API_KEY=abc123 next", "GEMINI_API_KEY=[hidden] next"),
-            ("Authorization: Bearer abc.def", "Authorization: Bearer [hidden]"),
-            ("password: \"hunter2\", user=x", "password: \"[hidden]\", user=x"),
-            ("client_secret=s3cr3t&grant=1", "client_secret=[hidden]&grant=1"),
-            ("the token file is here: C:/Users/me/agent.json", "the token file is here: C:/Users/me/agent.json"),
+            (
+                "Authorization: Bearer abc.def",
+                "Authorization: Bearer [hidden]",
+            ),
+            (
+                "password: \"hunter2\", user=x",
+                "password: \"[hidden]\", user=x",
+            ),
+            (
+                "client_secret=s3cr3t&grant=1",
+                "client_secret=[hidden]&grant=1",
+            ),
+            (
+                "the token file is here: C:/Users/me/agent.json",
+                "the token file is here: C:/Users/me/agent.json",
+            ),
             ("VICTORY_THIN_THREADS=6", "VICTORY_THIN_THREADS=6"),
             ("grün token=ü ok", "grün token=[hidden] ok"),
         ] {
             assert_eq!(text_of(input, None), expected);
         }
-        assert_eq!(text_of("a\nb T0KEN c\n", Some("T0KEN")), "a\nb [hidden] c\n");
+        assert_eq!(
+            text_of("a\nb T0KEN c\n", Some("T0KEN")),
+            "a\nb [hidden] c\n"
+        );
+        assert_eq!(
+            text_of(r#"password: "two words", x=1"#, None),
+            r#"password: "[hidden]", x=1"#
+        );
+        assert_eq!(
+            text_of(
+                "before\n-----BEGIN PRIVATE KEY-----\nsample-only\n-----END PRIVATE KEY-----\nafter",
+                None
+            ),
+            "before\n[hidden]\nafter"
+        );
         let mut v = json!({ "token": "abc", "list": ["api_key=zzz"], "tokens": 5, "note": "ok" });
         value(&mut v, None);
-        assert_eq!(v, json!({ "token": "[hidden]", "list": ["api_key=[hidden]"], "tokens": 5, "note": "ok" }));
+        assert_eq!(
+            v,
+            json!({ "token": "[hidden]", "list": ["api_key=[hidden]"], "tokens": 5, "note": "ok" })
+        );
     }
 }

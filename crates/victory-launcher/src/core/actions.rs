@@ -55,7 +55,9 @@ impl Dirs {
     pub fn current_engine_name(&self) -> Option<String> {
         let text = std::fs::read_to_string(self.engine_root().join("current.txt")).ok()?;
         let name = text.trim();
-        (!name.is_empty()).then(|| name.to_string())
+        (!name.is_empty()
+            && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_')))
+            .then(|| name.to_string())
     }
 
     /// A developer's own engine from the settings, otherwise the installed build.
@@ -88,6 +90,12 @@ pub fn chosen_game(settings: &Settings) -> Option<Game> {
         .as_deref()
         .and_then(super::game::from_pick)
         .or_else(|| settings.game_exe.as_deref().and_then(super::game::from_pick))
+}
+
+/// Records the game selected by the folder picker.
+pub fn set_game(settings: &mut Settings, game: &Game) {
+    settings.game_folder = Some(game.folder.clone());
+    settings.game_exe = Some(game.exe.clone());
 }
 
 /// The saved profile the settings name, or the default one.
@@ -342,7 +350,8 @@ pub fn log_by_name(logs: &Path, name: &str) -> Result<PathBuf> {
     let ours = (name.starts_with("run-") || name.starts_with("warmup-")) && name.ends_with(".log");
     anyhow::ensure!(plain && ours, "Use a log name such as run-20260101-120000.log.");
     let path = logs.join(name);
-    Some(path).filter(|p| p.is_file()).context("There is no log with that name.")
+    storage::metadata(&path)?.filter(|metadata| metadata.is_file()).context("There is no log with that name.")?;
+    Ok(path)
 }
 
 #[cfg(test)]

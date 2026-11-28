@@ -1,6 +1,6 @@
 //! The token, the endpoint file `agent.json` and the marker a running window holds.
 use crate::core::actions::Dirs;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -23,7 +23,11 @@ pub struct Endpoint {
 // The token must not end up in a log through a stray `{:?}`.
 impl std::fmt::Debug for Endpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Endpoint {{ port: {}, pid: {}, headless: {} }}", self.port, self.pid, self.headless)
+        write!(
+            f,
+            "Endpoint {{ port: {}, pid: {}, headless: {} }}",
+            self.port, self.pid, self.headless
+        )
     }
 }
 
@@ -42,11 +46,13 @@ pub fn new_token() -> Result<String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Compares two secrets in a time that does not depend on where they differ (or on their lengths: both
-/// are hashed first).
+/// Hash first, then compare the fixed-size digests without stopping at the first difference.
 pub fn same_secret(a: &str, b: &str) -> bool {
     let (a, b) = (Sha256::digest(a.as_bytes()), Sha256::digest(b.as_bytes()));
-    let difference = a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y));
+    let difference = a
+        .iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y));
     std::hint::black_box(difference) == 0
 }
 
@@ -54,7 +60,9 @@ pub fn same_secret(a: &str, b: &str) -> bool {
 pub fn write_endpoint(dirs: &Dirs, endpoint: &Endpoint) -> Result<()> {
     std::fs::create_dir_all(&dirs.data)?;
     let target = endpoint_file(dirs);
-    let staged = dirs.data.join(format!(".agent-{}.json", std::process::id()));
+    let staged = dirs
+        .data
+        .join(format!(".agent-{}.json", std::process::id()));
     let _ = std::fs::remove_file(&staged);
     let mut file = private_file(&staged).context("Could not create the endpoint file")?;
     file.write_all(&serde_json::to_vec_pretty(endpoint)?)?;
@@ -79,13 +87,25 @@ pub fn remove_endpoint(dirs: &Dirs, token: &str) {
 /// agent control switched off is running and must not go around it.
 pub fn hold_window_marker(dirs: &Dirs) -> Option<File> {
     std::fs::create_dir_all(&dirs.data).ok()?;
-    let file = File::options().read(true).write(true).create(true).truncate(false).open(window_file(dirs)).ok()?;
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(window_file(dirs))
+        .ok()?;
     file.lock_shared().ok()?;
     Some(file)
 }
 
 pub fn window_is_open(dirs: &Dirs) -> bool {
-    let Ok(file) = File::options().read(true).write(true).open(window_file(dirs)) else { return false };
+    let Ok(file) = File::options()
+        .read(true)
+        .write(true)
+        .open(window_file(dirs))
+    else {
+        return false;
+    };
     // The lock is released again when `file` is dropped.
     file.try_lock().is_err()
 }
@@ -93,7 +113,11 @@ pub fn window_is_open(dirs: &Dirs) -> bool {
 #[cfg(unix)]
 fn private_file(path: &Path) -> Result<File> {
     use std::os::unix::fs::OpenOptionsExt;
-    Ok(File::options().write(true).create_new(true).mode(0o600).open(path)?)
+    Ok(File::options()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?)
 }
 
 /// A new file whose access list names this user and the system, and inherits nothing from the folder.
@@ -101,18 +125,22 @@ fn private_file(path: &Path) -> Result<File> {
 fn private_file(path: &Path) -> Result<File> {
     use std::os::windows::{ffi::OsStrExt, io::FromRawHandle};
     use windows::{
-        core::{PCWSTR, PWSTR},
         Win32::{
-            Foundation::{CloseHandle, LocalFree, GENERIC_WRITE, HANDLE, HLOCAL},
+            Foundation::{CloseHandle, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree},
             Security::{
                 Authorization::{
-                    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+                    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+                    SDDL_REVISION_1,
                 },
-                GetTokenInformation, TokenUser, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+                GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY,
+                TOKEN_USER, TokenUser,
             },
-            Storage::FileSystem::{CreateFileW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_MODE},
+            Storage::FileSystem::{
+                CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_MODE,
+            },
             System::Threading::{GetCurrentProcess, OpenProcessToken},
         },
+        core::{PCWSTR, PWSTR},
     };
 
     // The SID of the user this process runs as, in text form.
@@ -123,7 +151,13 @@ fn private_file(path: &Path) -> Result<File> {
         let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
         // u64 elements keep the structure aligned.
         let mut buffer = vec![0u64; (needed as usize).div_ceil(8).max(1)];
-        let read = GetTokenInformation(token, TokenUser, Some(buffer.as_mut_ptr().cast()), needed, &mut needed);
+        let read = GetTokenInformation(
+            token,
+            TokenUser,
+            Some(buffer.as_mut_ptr().cast()),
+            needed,
+            &mut needed,
+        );
         let _ = CloseHandle(token);
         read?;
         let user = &*buffer.as_ptr().cast::<TOKEN_USER>();
@@ -134,13 +168,21 @@ fn private_file(path: &Path) -> Result<File> {
         sid?
     };
 
-    let sddl: Vec<u16> = format!("D:P(A;;FA;;;{sid})(A;;FA;;;SY)").encode_utf16().chain(Some(0)).collect();
+    let sddl: Vec<u16> = format!("D:P(A;;FA;;;{sid})(A;;FA;;;SY)")
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
     let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     // SAFETY: both strings are NUL terminated and live through the calls; the descriptor is freed once
     // the file exists, and the returned handle is owned by the `File`.
     unsafe {
         let mut descriptor = PSECURITY_DESCRIPTOR::default();
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(PCWSTR(sddl.as_ptr()), SDDL_REVISION_1, &mut descriptor, None)?;
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(sddl.as_ptr()),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            None,
+        )?;
         let attributes = SECURITY_ATTRIBUTES {
             nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: descriptor.0,
@@ -178,8 +220,18 @@ mod tests {
     #[test]
     fn endpoint_file_is_private_and_removed_only_by_its_owner() {
         let temp = tempfile::tempdir().unwrap();
-        let dirs = Dirs { data: temp.path().join("data"), app: temp.path().into() };
-        let endpoint = Endpoint { url: "u".into(), port: 1, token: "secret-token".into(), pid: 2, headless: true, version: "v".into() };
+        let dirs = Dirs {
+            data: temp.path().join("data"),
+            app: temp.path().into(),
+        };
+        let endpoint = Endpoint {
+            url: "u".into(),
+            port: 1,
+            token: "secret-token".into(),
+            pid: 2,
+            headless: true,
+            version: "v".into(),
+        };
         write_endpoint(&dirs, &endpoint).unwrap();
         write_endpoint(&dirs, &endpoint).unwrap();
         assert_eq!(read_endpoint(&dirs).unwrap().token, "secret-token");
@@ -187,7 +239,14 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(endpoint_file(&dirs)).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(
+                std::fs::metadata(endpoint_file(&dirs))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
         }
         remove_endpoint(&dirs, "another");
         assert!(read_endpoint(&dirs).is_some());
@@ -198,7 +257,10 @@ mod tests {
     #[test]
     fn a_window_marker_is_seen_while_held() {
         let temp = tempfile::tempdir().unwrap();
-        let dirs = Dirs { data: temp.path().join("data"), app: temp.path().into() };
+        let dirs = Dirs {
+            data: temp.path().join("data"),
+            app: temp.path().into(),
+        };
         assert!(!window_is_open(&dirs));
         let first = hold_window_marker(&dirs).unwrap();
         let second = hold_window_marker(&dirs).unwrap();

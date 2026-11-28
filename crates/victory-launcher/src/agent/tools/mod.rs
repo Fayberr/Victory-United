@@ -1,5 +1,19 @@
 //! The tool table: every action an agent can take, once. The MCP server, the argument checks and the
 //! reference in `docs/launcher-agent.md` are all made from it, so they cannot drift apart.
+macro_rules! tool {
+    ($name:ident, $description:literal, $params:expr, $example:literal, $read_only:expr, $confirm:expr) => {
+        super::Tool {
+            name: stringify!($name),
+            description: $description,
+            params: $params,
+            example: $example,
+            read_only: $read_only,
+            confirm: $confirm,
+            run: $name,
+        }
+    };
+}
+
 mod config;
 mod data;
 mod engine;
@@ -8,13 +22,13 @@ mod monitor;
 mod run;
 
 use super::{
+    Backend,
     calls::Outcome,
     redact,
     schema::{self, Kind, Param},
-    Backend,
 };
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 pub type Run = fn(&Arc<Backend>, &Args) -> Result<Value>;
@@ -43,7 +57,7 @@ pub struct Tool {
 
 impl Tool {
     pub fn destructive(&self) -> bool {
-        matches!(self.confirm, Confirm::Always(_))
+        !matches!(self.confirm, Confirm::Never)
     }
 
     /// Every argument, `confirm` included where it applies.
@@ -51,8 +65,16 @@ impl Tool {
         let mut params = self.params.to_vec();
         match self.confirm {
             Confirm::Never => {}
-            Confirm::Always(_) => params.push(schema::opt("confirm", Kind::Bool, "Set to true to really do it. Without it the answer only says what would happen.")),
-            Confirm::When(_) => params.push(schema::opt("confirm", Kind::Bool, "Needed for changes that decide which programs or files are loaded.")),
+            Confirm::Always(_) => params.push(schema::opt(
+                "confirm",
+                Kind::Bool,
+                "Set to true to really do it. Without it the answer only says what would happen.",
+            )),
+            Confirm::When(_) => params.push(schema::opt(
+                "confirm",
+                Kind::Bool,
+                "Needed for changes that decide which programs or files are loaded.",
+            )),
         }
         params
     }
@@ -67,11 +89,16 @@ pub struct Args(pub serde_json::Map<String, Value>);
 
 impl Args {
     pub fn text(&self, name: &str) -> Option<&str> {
-        self.0.get(name).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+        self.0
+            .get(name)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
     }
     /// A required text argument.
     pub fn need(&self, name: &str) -> Result<&str> {
-        self.text(name).ok_or_else(|| anyhow::anyhow!("\"{name}\" must not be empty"))
+        self.text(name)
+            .ok_or_else(|| anyhow::anyhow!("\"{name}\" must not be empty"))
     }
     pub fn flag(&self, name: &str) -> Option<bool> {
         self.0.get(name).and_then(Value::as_bool)
@@ -82,14 +109,14 @@ impl Args {
     pub fn int(&self, name: &str) -> Option<i64> {
         self.0.get(name).and_then(Value::as_i64)
     }
-    pub fn number(&self, name: &str) -> Option<f64> {
-        self.0.get(name).and_then(Value::as_f64)
-    }
     pub fn object(&self, name: &str) -> Option<&serde_json::Map<String, Value>> {
         self.0.get(name).and_then(Value::as_object)
     }
     pub fn list(&self, name: &str) -> Option<Vec<&str>> {
-        self.0.get(name).and_then(Value::as_array).map(|l| l.iter().filter_map(Value::as_str).collect())
+        self.0
+            .get(name)
+            .and_then(Value::as_array)
+            .map(|l| l.iter().filter_map(Value::as_str).collect())
     }
 }
 
@@ -148,15 +175,18 @@ pub struct Unknown;
 /// Checks the arguments, asks for confirmation where needed, runs the tool, records the call and hides
 /// secrets in the answer.
 pub fn call(backend: &Arc<Backend>, name: &str, arguments: &Value) -> Result<Done, Unknown> {
-    let tool = find(name).ok_or(Unknown)?;
+    let Some(tool) = find(name) else {
+        backend.calls.add("unknown_tool", Outcome::Error);
+        backend.wake();
+        return Err(Unknown);
+    };
     let (outcome, mut value) = match attempt(backend, tool, arguments) {
         Ok((outcome, value)) => (outcome, value),
         Err(error) => (Outcome::Error, json!({ "error": format!("{error:#}") })),
     };
     backend.calls.add(tool.name, outcome);
     backend.wake();
-    let token = super::auth::read_endpoint(&backend.dirs).map(|e| e.token);
-    redact::value(&mut value, token.as_deref());
+    redact::value(&mut value, backend.token());
     Ok(Done {
         text: serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".into()),
         failed: outcome == Outcome::Error,
@@ -164,6 +194,7 @@ pub fn call(backend: &Arc<Backend>, name: &str, arguments: &Value) -> Result<Don
 }
 
 fn attempt(backend: &Arc<Backend>, tool: &Tool, arguments: &Value) -> Result<(Outcome, Value)> {
+    backend.ensure_open()?;
     schema::check(&tool.input_schema(), arguments).map_err(anyhow::Error::msg)?;
     let args = Args(arguments.as_object().cloned().unwrap_or_default());
     if !args.yes("confirm") {
@@ -173,12 +204,15 @@ fn attempt(backend: &Arc<Backend>, tool: &Tool, arguments: &Value) -> Result<(Ou
             Confirm::When(why) => why(&args).map(Value::String),
         };
         if let Some(would) = asked {
-            return Ok((Outcome::Asked, json!({
-                "confirmation_required": true,
-                "nothing_changed": true,
-                "would": would,
-                "next": "Call the tool again with the same arguments and \"confirm\": true.",
-            })));
+            return Ok((
+                Outcome::Asked,
+                json!({
+                    "confirmation_required": true,
+                    "nothing_changed": true,
+                    "would": would,
+                    "next": "Call the tool again with the same arguments and \"confirm\": true.",
+                }),
+            ));
         }
     }
     Ok((Outcome::Ok, (tool.run)(backend, &args)?))

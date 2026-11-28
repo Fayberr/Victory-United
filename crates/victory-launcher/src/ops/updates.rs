@@ -142,7 +142,7 @@ impl UpdatesState {
     }
 
     pub fn rollback(&mut self, to: Option<&str>) {
-        self.note = Some(match victory_update::rollback(&paths::engine_root(), to) {
+        self.note = Some(match rollback_now(&paths::engine_root(), to) {
             Ok(n) => (false, trf("updates.switched", &[("name", &n)])),
             Err(e) => (true, e.to_string()),
         });
@@ -150,8 +150,10 @@ impl UpdatesState {
     }
 
     pub fn cleanup(&mut self) {
-        let removed = victory_update::cleanup(&paths::engine_root(), KEEP_BUILDS);
-        self.note = Some((false, trf("updates.removed", &[("n", &removed.len().to_string())])));
+        self.note = Some(match cleanup_now(&paths::engine_root()) {
+            Ok(removed) => (false, trf("updates.removed", &[("n", &removed.len().to_string())])),
+            Err(error) => (true, error.to_string()),
+        });
         self.refresh_installed();
     }
 
@@ -195,6 +197,7 @@ pub fn install_now(
     engine_root: &Path,
     progress: &mut dyn FnMut(u64, u64) -> bool,
 ) -> Result<(), Error> {
+    let _guard = build_lock(engine_root)?;
     let zip = downloads.join(format!("{folder}.zip"));
     victory_update::download(&System, engine, &zip, progress)?;
     let r = victory_update::install(&zip, engine_root, folder);
@@ -202,6 +205,27 @@ pub fn install_now(
     r?;
     victory_update::cleanup(engine_root, KEEP_BUILDS);
     Ok(())
+}
+
+fn build_lock(engine_root: &Path) -> Result<std::fs::File, Error> {
+    crate::core::storage::lock(&engine_root.join("updates.lock"))
+        .map_err(|_| Error::Io(std::io::Error::other("Engine builds are being updated or the engine folder cannot be written.")))
+}
+
+pub fn rollback_now(engine_root: &Path, to: Option<&str>) -> Result<String, Error> {
+    let _guard = build_lock(engine_root)?;
+    let available = victory_update::installed(engine_root);
+    let target = available.iter().find(|build| match to {
+        Some(name) => build.name == name,
+        None => build.is_previous,
+    });
+    let build = target.ok_or_else(|| Error::BadArchive("There is no matching installed build.".into()))?;
+    victory_update::rollback(engine_root, Some(&build.name))
+}
+
+pub fn cleanup_now(engine_root: &Path) -> Result<Vec<String>, Error> {
+    let _guard = build_lock(engine_root)?;
+    Ok(victory_update::cleanup(engine_root, KEEP_BUILDS))
 }
 
 /// Download and install on the worker thread. Progress is published at most about 10 times a second.

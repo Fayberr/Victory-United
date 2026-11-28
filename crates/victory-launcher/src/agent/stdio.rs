@@ -1,146 +1,183 @@
-//! `--mcp-stdio`: MCP over standard input and output, one JSON message per line.
-//!
-//! Each message goes to the launcher that is serving agents (found through `agent.json`). When no
-//! launcher runs, this process answers itself, like `--headless`. When a window is open with agent
-//! control switched off, tool calls are refused: the switch in the window wins.
-use super::{auth, http, mcp, Backend};
-use serde_json::{json, Value};
+//! The local stdio transport forwards to a running launcher or owns a headless launcher.
+use super::{Backend, auth, http, mcp};
+use crate::core::actions::Dirs;
+use serde_json::{Value, json};
 use std::{
-    io::{BufRead, Read, Write},
+    io::{self, BufRead, Read, Write},
     net::{Ipv4Addr, SocketAddr, TcpStream},
-    sync::{atomic::Ordering, Arc},
+    sync::{Arc, atomic::Ordering, mpsc},
     time::Duration,
 };
 
 const MAX_LINE: u64 = http::MAX_BODY as u64;
-/// Longest a forwarded call may take (a long measurement or a large backup).
 const CALL_TIME: Duration = Duration::from_secs(600);
-const OFF: &str = "A Victory Launcher window is open with agent control switched off. Turn on \
-\"Let AI agents control the launcher\" in its Settings, or close the window.";
+const OFF: &str = "Agent control is off in the open Victory United Launcher window. Turn on \
+\"Let AI agents control the launcher\" in Settings.";
 
-/// Where messages go.
-pub struct Router {
-    own: Option<Arc<Backend>>,
-    make: Box<dyn Fn() -> Arc<Backend>>,
-    dirs: crate::core::actions::Dirs,
+enum Event {
+    Line(Vec<u8>),
+    Oversize,
+    End(io::Result<()>),
+    Shutdown,
+}
+
+struct Router {
+    own: Option<(Arc<Backend>, http::Server)>,
+    protocol: Option<String>,
+    dirs: Dirs,
+    events: mpsc::SyncSender<Event>,
 }
 
 impl Router {
-    pub fn new(dirs: crate::core::actions::Dirs, make: impl Fn() -> Arc<Backend> + 'static) -> Self {
-        Self { own: None, make: Box::new(make), dirs }
-    }
-
-    /// The answer to one line, if it needs one.
-    pub fn answer(&mut self, line: &[u8]) -> Option<String> {
-        // A game this process started stays with this process, whatever else is running.
-        let busy = self.own.as_ref().is_some_and(|b| b.runner().busy() || b.job_running());
-        if !busy {
-            if let Some(endpoint) = auth::read_endpoint(&self.dirs) {
-                let address = SocketAddr::from((Ipv4Addr::LOCALHOST, endpoint.port));
-                if let Ok(stream) = TcpStream::connect_timeout(&address, Duration::from_secs(2)) {
-                    match http::exchange(stream, &endpoint, line, CALL_TIME) {
-                        Ok((202, _)) => return None,
-                        Ok((200 | 400, body)) => return Some(String::from_utf8_lossy(&body).into_owned()),
-                        // The port belongs to someone else now: the file is left over.
-                        Ok((401 | 403 | 404 | 405, _)) => {}
-                        Ok((status, _)) => return refusal(line, &format!("The launcher answered with status {status}.")),
-                        // Never run it a second time here: the launcher may have done it already.
-                        Err(error) => return refusal(line, &format!("{error:#}")),
+    fn answer(&mut self, line: &[u8]) -> Option<String> {
+        if let Some((backend, _)) = &self.own {
+            return mcp::handle(backend, line)
+                .body
+                .map(|value| value.to_string());
+        }
+        if let Some(endpoint) = auth::read_endpoint(&self.dirs) {
+            let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, endpoint.port));
+            if let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_secs(2)) {
+                match http::exchange(stream, &endpoint, line, CALL_TIME, self.protocol.as_deref()) {
+                    Ok((202, _)) => return None,
+                    Ok((200 | 400, body)) => {
+                        let version =
+                            serde_json::from_slice::<Value>(&body)
+                                .ok()
+                                .and_then(|reply| {
+                                    reply["result"]["protocolVersion"]
+                                        .as_str()
+                                        .map(str::to_owned)
+                                });
+                        if version.is_some() {
+                            self.protocol = version;
+                        }
+                        return Some(String::from_utf8_lossy(&body).into_owned());
+                    }
+                    // A file left over by a previous launcher may describe a port since reused.
+                    Ok((401 | 403 | 404 | 405, _)) => {}
+                    Ok((status, _)) => {
+                        return unavailable(
+                            line,
+                            &format!("The launcher answered with status {status}."),
+                        )
+                        .body
+                        .map(|v| v.to_string());
+                    }
+                    // The call may already have run. Do not repeat it on another endpoint.
+                    Err(error) => {
+                        return unavailable(line, &format!("{error:#}"))
+                            .body
+                            .map(|v| v.to_string());
                     }
                 }
             }
-            if auth::window_is_open(&self.dirs) {
-                return switched_off(line);
-            }
         }
-        let backend = self.own.get_or_insert_with(|| (self.make)()).clone();
-        mcp::handle(&backend, line).body.map(|v| v.to_string())
+        if auth::window_is_open(&self.dirs) {
+            return mcp::respond(line, |_, method, params| match method {
+                "initialize" => Ok(mcp::initialize(params)),
+                "ping" => Ok(json!({})),
+                "tools/list" => Ok(json!({ "tools": super::tools::listing() })),
+                "tools/call" => {
+                    Ok(json!({ "content": [{ "type": "text", "text": OFF }], "isError": true }))
+                }
+                _ => Err((mcp::METHOD_NOT_FOUND, "Method not found".into())),
+            })
+            .body
+            .map(|v| v.to_string());
+        }
+        let backend = Backend::standalone_in(self.dirs.clone());
+        match http::Server::start(backend.clone()) {
+            Ok(server) => {
+                let events = self.events.clone();
+                let owned = backend.clone();
+                std::thread::spawn(move || {
+                    owned.stop.wait();
+                    let _ = events.send(Event::Shutdown);
+                });
+                self.own = Some((backend.clone(), server));
+                mcp::handle(&backend, line).body.map(|v| v.to_string())
+            }
+            Err(error) => unavailable(line, &format!("{error:#}"))
+                .body
+                .map(|v| v.to_string()),
+        }
     }
 
-    pub fn wants_stop(&self) -> bool {
-        self.own.as_ref().is_some_and(|b| b.shutdown_requested.load(Ordering::SeqCst))
+    fn wants_stop(&self) -> bool {
+        self.own
+            .as_ref()
+            .is_some_and(|(backend, _)| backend.shutdown_requested.load(Ordering::Acquire))
     }
 
-    /// The client is gone. A game started here keeps this process until it ends, so that the backup
-    /// after the exit still happens.
-    pub fn finish(self) {
-        if let Some(backend) = self.own {
+    fn finish(self) {
+        if let Some((backend, server)) = self.own {
+            drop(server);
+            backend.stop.set();
             backend.finish_jobs();
             let mut runner = backend.runner();
-            if runner.busy() && !backend.shutdown_requested.load(Ordering::SeqCst) {
+            if runner.busy() && !backend.shutdown_requested.load(Ordering::Acquire) {
                 runner.wait_idle();
             }
         }
     }
 }
 
-/// The ids of the requests in a line (notifications have none).
-fn requests(line: &[u8]) -> Vec<(Value, Value)> {
-    let Ok(message) = serde_json::from_slice::<Value>(line) else { return Vec::new() };
-    let list = match message {
-        Value::Array(list) => list,
-        one => vec![one],
-    };
-    list.into_iter().filter_map(|m| Some((m.get("id")?.clone(), m))).collect()
+fn unavailable(line: &[u8], why: &str) -> mcp::Reply {
+    mcp::respond(line, |_, _, _| Err((mcp::UNAVAILABLE, why.to_owned())))
 }
 
-fn pack(line: &[u8], answers: Vec<Value>) -> Option<String> {
-    let batch = line.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'[');
-    match (batch, answers.len()) {
-        (_, 0) => None,
-        (false, _) => Some(answers[0].to_string()),
-        (true, _) => Some(Value::Array(answers).to_string()),
-    }
-}
-
-fn refusal(line: &[u8], why: &str) -> Option<String> {
-    pack(line, requests(line).into_iter().map(|(id, _)| mcp::error(id, mcp::UNAVAILABLE, why)).collect())
-}
-
-/// While the window has agents switched off, a client can still connect and see the tools.
-fn switched_off(line: &[u8]) -> Option<String> {
-    let answers = requests(line)
-        .into_iter()
-        .map(|(id, message)| {
-            let answer = match message.get("method").and_then(Value::as_str) {
-                Some("initialize") => mcp::initialize(message.get("params").unwrap_or(&Value::Null)),
-                Some("ping") => json!({}),
-                Some("tools/list") => json!({ "tools": super::tools::listing() }),
-                Some("tools/call") => json!({ "content": [{ "type": "text", "text": OFF }], "isError": true }),
-                _ => return mcp::error(id, mcp::UNAVAILABLE, OFF),
-            };
-            json!({ "jsonrpc": "2.0", "id": id, "result": answer })
-        })
-        .collect();
-    pack(line, answers)
-}
-
-/// Reads lines until the input ends, writing the answers.
-pub fn serve(router: &mut Router, input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
-    let mut input = input;
+fn read_lines(mut input: impl BufRead, events: &mpsc::SyncSender<Event>) -> io::Result<()> {
     let mut line = Vec::new();
     loop {
         line.clear();
-        if input.by_ref().take(MAX_LINE + 1).read_until(b'\n', &mut line)? == 0 {
-            break;
+        if input
+            .by_ref()
+            .take(MAX_LINE + 1)
+            .read_until(b'\n', &mut line)?
+            == 0
+        {
+            return Ok(());
         }
-        if line.len() as u64 > MAX_LINE {
-            // Skip the rest of the oversized line.
+        let event = if line.len() as u64 > MAX_LINE && !line.ends_with(b"\n") {
             while !line.ends_with(b"\n") {
                 line.clear();
                 if input.by_ref().take(MAX_LINE).read_until(b'\n', &mut line)? == 0 {
                     break;
                 }
             }
-            writeln!(output, "{}", mcp::error(Value::Null, mcp::INVALID_REQUEST, "The message is too large"))?;
-            output.flush()?;
-            continue;
+            Event::Oversize
+        } else {
+            Event::Line(std::mem::take(&mut line))
+        };
+        if events.send(event).is_err() {
+            return Ok(());
         }
-        if line.iter().all(u8::is_ascii_whitespace) {
-            continue;
-        }
-        if let Some(answer) = router.answer(line.trim_ascii()) {
-            writeln!(output, "{answer}")?;
+    }
+}
+
+fn serve(
+    router: &mut Router,
+    incoming: mpsc::Receiver<Event>,
+    mut output: impl Write,
+) -> io::Result<()> {
+    for event in incoming {
+        let reply = match event {
+            Event::Line(line) if line.iter().all(u8::is_ascii_whitespace) => continue,
+            Event::Line(line) => router.answer(line.trim_ascii()),
+            Event::Oversize => Some(
+                mcp::error(
+                    Value::Null,
+                    mcp::INVALID_REQUEST,
+                    "The message is too large",
+                )
+                .to_string(),
+            ),
+            Event::End(result) => return result,
+            Event::Shutdown => break,
+        };
+        if let Some(reply) = reply {
+            writeln!(output, "{reply}")?;
             output.flush()?;
         }
         if router.wants_stop() {
@@ -151,8 +188,18 @@ pub fn serve(router: &mut Router, input: impl BufRead, mut output: impl Write) -
 }
 
 pub fn run() -> i32 {
-    let mut router = Router::new(crate::core::actions::Dirs::real(), Backend::standalone);
-    let result = serve(&mut router, std::io::stdin().lock(), std::io::stdout().lock());
+    let (events, incoming) = mpsc::sync_channel(1);
+    let mut router = Router {
+        own: None,
+        protocol: None,
+        dirs: Dirs::real(),
+        events: events.clone(),
+    };
+    std::thread::spawn(move || {
+        let result = read_lines(io::stdin().lock(), &events);
+        let _ = events.send(Event::End(result));
+    });
+    let result = serve(&mut router, incoming, io::stdout().lock());
     router.finish();
     match result {
         Ok(()) => 0,

@@ -1,16 +1,13 @@
 //! The arguments of a tool: described once, turned into a JSON schema, and checked against that schema
 //! before the tool runs. Only the parts of JSON Schema the tool table uses are supported.
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 #[derive(Clone, Copy)]
 pub enum Kind {
     Text,
-    /// Text, or `null` where `null` has a meaning of its own.
     Bool,
     /// Whole number with bounds.
     Int(i64, i64),
-    /// Number with bounds.
-    Number(f64, f64),
     Choice(&'static [&'static str]),
     /// An object whose keys are checked by the tool itself.
     Object,
@@ -28,11 +25,21 @@ pub struct Param {
 }
 
 pub const fn opt(name: &'static str, kind: Kind, help: &'static str) -> Param {
-    Param { name, kind, required: false, help }
+    Param {
+        name,
+        kind,
+        required: false,
+        help,
+    }
 }
 
 pub const fn req(name: &'static str, kind: Kind, help: &'static str) -> Param {
-    Param { name, kind, required: true, help }
+    Param {
+        name,
+        kind,
+        required: true,
+        help,
+    }
 }
 
 fn kind_schema(kind: Kind) -> Value {
@@ -40,7 +47,6 @@ fn kind_schema(kind: Kind) -> Value {
         Kind::Text => json!({ "type": "string" }),
         Kind::Bool => json!({ "type": "boolean" }),
         Kind::Int(min, max) => json!({ "type": "integer", "minimum": min, "maximum": max }),
-        Kind::Number(min, max) => json!({ "type": "number", "minimum": min, "maximum": max }),
         Kind::Choice(choices) => json!({ "type": "string", "enum": choices }),
         Kind::Object => json!({ "type": "object" }),
         Kind::TextList => json!({ "type": "array", "items": { "type": "string" } }),
@@ -71,7 +77,8 @@ pub fn object(params: &[Param]) -> Value {
             required.push(p.name);
         }
     }
-    let mut schema = json!({ "type": "object", "properties": properties, "additionalProperties": false });
+    let mut schema =
+        json!({ "type": "object", "properties": properties, "additionalProperties": false });
     if !required.is_empty() {
         schema["required"] = json!(required);
     }
@@ -95,7 +102,11 @@ fn check_at(schema: &Value, value: &Value, at: &str) -> Result<(), String> {
             other => return Err(format!("{at}: the schema uses an unsupported type {other}")),
         };
         if !fits {
-            let article = if kind.starts_with(['a', 'i', 'o']) { "an" } else { "a" };
+            let article = if kind.starts_with(['a', 'i', 'o']) {
+                "an"
+            } else {
+                "a"
+            };
             return Err(format!("{at} must be {article} {kind}"));
         }
     }
@@ -106,12 +117,22 @@ fn check_at(schema: &Value, value: &Value, at: &str) -> Result<(), String> {
         }
     }
     if let Some(n) = value.as_f64() {
-        if schema["minimum"].as_f64().is_some_and(|min| n < min) || schema["maximum"].as_f64().is_some_and(|max| n > max) {
-            return Err(format!("{at} must be from {} to {}", schema["minimum"], schema["maximum"]));
+        if schema["minimum"].as_f64().is_some_and(|min| n < min)
+            || schema["maximum"].as_f64().is_some_and(|max| n > max)
+        {
+            return Err(format!(
+                "{at} must be from {} to {}",
+                schema["minimum"], schema["maximum"]
+            ));
         }
     }
     if let Some(object) = value.as_object() {
-        for name in schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        for name in schema["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
             if !object.contains_key(name) {
                 return Err(format!("{at} needs \"{name}\""));
             }
@@ -122,8 +143,14 @@ fn check_at(schema: &Value, value: &Value, at: &str) -> Result<(), String> {
                     Some(sub) => check_at(sub, inner, name)?,
                     None if schema["additionalProperties"] == json!(false) => {
                         let known: Vec<&str> = properties.keys().map(String::as_str).collect();
-                        let known = if known.is_empty() { "none".into() } else { known.join(", ") };
-                        return Err(format!("{at}: \"{name}\" is not an argument (arguments: {known})"));
+                        let known = if known.is_empty() {
+                            "none".into()
+                        } else {
+                            known.join(", ")
+                        };
+                        return Err(format!(
+                            "{at}: \"{name}\" is not an argument (arguments: {known})"
+                        ));
                     }
                     None => {}
                 }

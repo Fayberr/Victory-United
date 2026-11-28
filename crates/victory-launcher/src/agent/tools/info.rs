@@ -2,13 +2,18 @@
 use super::{Args, Confirm, Tool};
 use crate::{
     agent::{Backend, Job},
-    core::{actions, game, hw, launch, presets::builtin, runner::{self, RunState}, store::Settings},
+    core::{
+        actions, hw, launch,
+        presets::builtin,
+        runner::{self, RunState},
+        store::Settings,
+    },
 };
-use anyhow::{ensure, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, ensure};
+use serde_json::{Value, json};
 use std::{
     path::Path,
-    sync::{atomic::Ordering, Arc},
+    sync::{Arc, atomic::Ordering},
 };
 
 pub const TOOLS: &[Tool] = &[
@@ -29,15 +34,6 @@ pub const TOOLS: &[Tool] = &[
         read_only: true,
         confirm: Confirm::Never,
         run: hardware,
-    },
-    Tool {
-        name: "find_games",
-        description: "Searches the usual Xbox app folders for installed games. Choose one with set_settings (launcher.game_folder).",
-        params: &[],
-        example: "{}",
-        read_only: true,
-        confirm: Confirm::Never,
-        run: find_games,
     },
     Tool {
         name: "shutdown",
@@ -67,7 +63,11 @@ pub fn describe(runner: &runner::Runner) -> Value {
             "remaining_seconds": runner::remaining(*done, *total, since.elapsed()).map(|d| d.as_secs()),
         }),
         RunState::Starting => json!({ "state": "starting" }),
-        RunState::Running { pid, since, log: file } => json!({
+        RunState::Running {
+            pid,
+            since,
+            log: file,
+        } => json!({
             "state": "running", "pid": pid, "running_seconds": since.elapsed().as_secs(), "log": log(file),
         }),
         RunState::Finishing { log: file } => json!({ "state": "finishing", "log": log(file) }),
@@ -88,7 +88,11 @@ pub fn describe(runner: &runner::Runner) -> Value {
 }
 
 pub fn job_json(job: &Job) -> Value {
-    let result = job.result.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+    let result = job
+        .result
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
     let mut out = json!({
         "kind": job.kind,
         "running": !job.finished.is_set(),
@@ -108,10 +112,13 @@ fn status(backend: &Arc<Backend>, _: &Args) -> Result<Value> {
     let settings: Settings = dirs.settings();
     let profile = actions::active_profile(dirs, &settings);
     let engine = dirs.engine_exe(&settings);
-    let own = settings.engine_override.as_ref().is_some_and(|p| p.is_file());
+    let own = actions::own_engine(&settings).is_some();
     let runner = backend.runner();
     let build = Some(actions::build_name(engine.as_deref())).filter(|b| !b.is_empty());
-    let extra = launch::read_extra(&dirs.launch_flags_file()).iter().filter(|f| f.enabled).count();
+    let extra = launch::read_extra(&dirs.launch_flags_file())
+        .iter()
+        .filter(|f| f.enabled)
+        .count();
     Ok(json!({
         "launcher_version": env!("CARGO_PKG_VERSION"),
         "mode": if backend.headless { "headless" } else { "window" },
@@ -169,14 +176,6 @@ fn hardware(backend: &Arc<Backend>, _: &Args) -> Result<Value> {
         "automatic_preset": auto.id,
         "note": hardware.note,
     }))
-}
-
-fn find_games(_: &Arc<Backend>, _: &Args) -> Result<Value> {
-    let games: Vec<Value> = game::auto_detect()
-        .into_iter()
-        .map(|g| json!({ "title": g.title, "folder": path(&g.folder), "executable": path(&g.exe) }))
-        .collect();
-    Ok(json!({ "games": games }))
 }
 
 fn headless_only(backend: &Backend) -> Result<()> {

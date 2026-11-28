@@ -31,7 +31,7 @@ pub struct Live {
     pub system_ram: Option<(u64, u64)>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct Row {
     pub number: u64,
     qpc: u64,
@@ -88,6 +88,29 @@ impl Summary {
             Metric::DispatchesExecuted => 4,
             _ => return None,
         }]
+    }
+
+    /// Machine-readable version of the measurements shown by the monitor.
+    pub fn snapshot_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        let present = match self.state {
+            Some(PresentState::Waiting) => json!("waiting"),
+            Some(PresentState::Drawing) => json!("drawing"),
+            Some(PresentState::Occluded) => json!("occluded"),
+            Some(PresentState::Other(code)) => json!({ "code": code }),
+            None => serde_json::Value::Null,
+        };
+        json!({
+            "fps": self.fps, "low_fps": self.low_fps, "frame": self.row, "present": present,
+            "build": self.build, "frames": self.frames, "occluded": self.occluded, "rejected": self.rejected,
+            "adapter_luid": self.adapter_luid, "vram_bytes": self.metric(Metric::VramUsed),
+            "vram_budget_bytes": self.metric(Metric::VramBudget), "resident_bytes": self.metric(Metric::RamResident),
+            "draws": self.metric(Metric::DrawsExecuted), "dispatches": self.metric(Metric::DispatchesExecuted),
+            "pipelines_building": self.metric(Metric::PipelinesBuilding),
+            "stages": self.stages.iter().map(|stage| json!({
+                "name": stage.name, "ms": stage.ms, "delta_ms": stage.delta_ms,
+            })).collect::<Vec<_>>(),
+        })
     }
 
     pub fn with_live(&self, live: Live) -> Self {

@@ -37,6 +37,8 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
         ui.add_space(12.0);
         startup_updates_section(core, ui);
         ui.add_space(12.0);
+        crate::agent::ui::show(core, ui);
+        ui.add_space(12.0);
         backup_section(core, ui);
         ui.add_space(12.0);
         storage_section(core, ui);

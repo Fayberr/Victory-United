@@ -1,0 +1,15 @@
+{
+  "agent.title": "Agent control",
+  "agent.switch": "Let AI agents control the launcher",
+  "agent.help": "Allows apps with the access token to control this launcher on this PC.",
+  "agent.turn_off": "Turn off",
+  "agent.starting": "Starting local connection...",
+  "agent.port": "Local port",
+  "agent.token_file": "Token file",
+  "agent.calls": "Recent calls",
+  "agent.empty": "No calls yet.",
+  "agent.ok": "Done",
+  "agent.error": "Error",
+  "agent.asked": "Needs confirmation",
+  "agent.time": "{time} UTC"
+}

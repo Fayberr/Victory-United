@@ -227,8 +227,7 @@ impl CoreState {
     }
 
     pub fn set_game(&mut self, g: game::Game) {
-        self.settings.game_folder = Some(g.folder.clone());
-        self.settings.game_exe = Some(g.exe.clone());
+        actions::set_game(&mut self.settings, &g);
         self.game = Some(g);
         self.notice = None;
         self.save_settings();

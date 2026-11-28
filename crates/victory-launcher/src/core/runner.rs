@@ -158,14 +158,16 @@ impl Runner {
         self.child_pid.store(0, Ordering::SeqCst);
         inner.state = if warm { RunState::Warming { done: 0, total: 0, since: Instant::now() } } else { RunState::Starting };
         self.copy(&inner);
-        let (tx, ctx, pid, cancel) = (self.tx.clone(), self.ctx.clone(), self.child_pid.clone(), self.cancel.clone());
+        let (tx, ctx, pid, cancel, skip) = (
+            self.tx.clone(), self.ctx.clone(), self.child_pid.clone(), self.cancel.clone(), self.skip.clone(),
+        );
         std::thread::spawn(move || {
             let send = |e: Event| {
                 let _ = tx.send(e);
                 ctx.request_repaint();
             };
             if warm {
-                run_warmup(&plan, &logs_dir, &pid, &send);
+                run_warmup(&plan, &logs_dir, &pid, &skip, &cancel, &send);
                 if cancel.load(Ordering::SeqCst) {
                     send(Event::Ended(Summary { code: None, log: None, secs: 0, quick_exit_with_flags: false, error: None, cancelled: true }));
                     return;
@@ -288,7 +290,18 @@ fn apply_one(inner: &mut Inner, event: Event) {
 
 /// Runs `victory shaders <game folder>` and reports `VICTORY-PROGRESS shaders <done> <total>` lines.
 /// Returns when the process ends (finished, skipped or stopped).
-fn run_warmup(plan: &Plan, logs_dir: &Path, pid: &AtomicU32, send: &dyn Fn(Event)) {
+fn run_warmup(
+    plan: &Plan,
+    logs_dir: &Path,
+    pid: &AtomicU32,
+    skip: &AtomicBool,
+    cancel: &AtomicBool,
+    send: &dyn Fn(Event),
+) {
+    let interrupted = || skip.load(Ordering::SeqCst) || cancel.load(Ordering::SeqCst);
+    if interrupted() {
+        return;
+    }
     let _ = std::fs::create_dir_all(logs_dir);
     let mut log = std::fs::File::create(logs_dir.join(format!("warmup-{}.log", timestamp()))).ok();
     let mut cmd = engine_command(plan, plan.warm_args());
@@ -298,6 +311,9 @@ fn run_warmup(plan: &Plan, logs_dir: &Path, pid: &AtomicU32, send: &dyn Fn(Event
     });
     let Ok(mut child) = cmd.spawn() else { return };
     pid.store(child.id(), Ordering::SeqCst);
+    if interrupted() {
+        let _ = kill_tree(child.id());
+    }
     if let Some(out) = child.stdout.take() {
         for line in BufReader::new(out).lines().map_while(Result::ok) {
             if let Some(f) = log.as_mut() {

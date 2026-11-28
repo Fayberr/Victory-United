@@ -121,7 +121,7 @@ pub fn tail_lines(path: &Path, lines: usize) -> std::io::Result<String> {
     let window = (lines as u64 * 400).min(len).max(1);
     f.seek(SeekFrom::Start(len - window.min(len)))?;
     let mut buf = Vec::new();
-    f.read_to_end(&mut buf)?;
+    f.take(window).read_to_end(&mut buf)?;
     let text = String::from_utf8_lossy(&buf);
     let mut all: Vec<&str> = text.lines().collect();
     if window < len && !all.is_empty() {
@@ -181,7 +181,7 @@ pub fn build_items(input: &Inputs<'_>, id: &Identity) -> Vec<Item> {
     if let Some(g) = input.game {
         settings.push_str(&format!("\nGame folder: {}\n", g.folder.display()));
     }
-    settings.push_str(&format!("Engine: {}\n", if input.settings.engine_override.is_some() { "own build" } else { "installed" }));
+    settings.push_str(&format!("Engine: {}\n", if actions::own_engine(input.settings).is_some() { "own build" } else { "installed" }));
     items.push(Item { file: "settings.txt", title: "Settings used", text: anonymize(&settings, id), include: true });
     items
 }
