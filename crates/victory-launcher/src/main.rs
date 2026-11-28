@@ -4,6 +4,7 @@
 //! No repaint loops, no polling threads, no animation. See docs/launcher-contract.md ("Idle CPU rules").
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod agent;
 mod app;
 mod capture;
 mod core;
@@ -15,6 +16,9 @@ mod theme;
 use eframe::egui;
 
 fn main() -> eframe::Result {
+    if let Some(code) = agent::run_from_args(std::env::args().skip(1)) {
+        std::process::exit(code);
+    }
     let args = app::Args::parse();
     if let Some(file) = &args.hw_dump {
         // Verification aid: write the hardware check to a file and exit, no window.

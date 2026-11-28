@@ -3,7 +3,7 @@
 //! `launch-flags.txt`. Extra flags are applied last, so they beat the preset, the options and the edits.
 use super::{
     flagreg::{registry, Flag, Kind, Risk},
-    launch::{valid_name, ExtraFlag},
+    launch::{default_value, put_extra, valid_name},
     widgets::{page_scroll, page_title},
     CoreState,
 };
@@ -133,21 +133,8 @@ fn add_row(core: &mut CoreState, ui: &mut egui::Ui, changed: &mut bool) {
 /// Adds or replaces an extra flag. An empty value means: switch on (`1`) for a known switch, presence only
 /// for anything else.
 fn add_flag(core: &mut CoreState, name: &str, value: Option<String>) {
-    let reg = registry();
     let typed = if value.is_some() { value } else { Some(core.ui.flags.add_value.trim().to_string()).filter(|v| !v.is_empty()) };
-    let value = match (typed, reg.get(name)) {
-        (Some(v), _) => Some(v),
-        (None, Some(f)) if f.kind == Kind::Switch && !f.presence => Some("1".to_string()),
-        (None, Some(f)) if f.kind == Kind::Switch => None,
-        (None, Some(f)) if !f.default.is_empty() => Some(f.default.clone()),
-        (None, _) => None,
-    };
-    if let Some(existing) = core.extra.iter_mut().find(|e| e.name == name) {
-        existing.value = value;
-        existing.enabled = true;
-    } else {
-        core.extra.push(ExtraFlag { name: name.to_string(), value, enabled: true });
-    }
+    put_extra(&mut core.extra, name, default_value(name, typed));
     core.ui.flags.add_name.clear();
     core.ui.flags.add_value.clear();
     core.ui.flags.message = trf("flags.added", &[("name", name)]);
@@ -280,6 +267,7 @@ fn flag_row(ui: &mut egui::Ui, f: &Flag, to_add: &mut Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::launch::ExtraFlag;
 
     #[test]
     fn every_described_flag_lands_in_a_section() {

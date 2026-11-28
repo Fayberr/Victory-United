@@ -1,6 +1,7 @@
 //! Window shell: navigation and dispatch. The two halves keep their own state (`core`, `ops`) and only
 //! see each other through `Shared`, which the core half fills in once per frame.
 use crate::{
+    agent::{auth, Controller},
     capture::Capture,
     core::{self, store::{AfterPlay, Settings, WindowPlacement}},
     i18n::tr, ops, theme,
@@ -66,6 +67,8 @@ pub struct App {
     pub ops: ops::OpsState,
     pub shared: Shared,
     capture: Option<Capture>,
+    agent: Controller,
+    _window_marker: Option<std::fs::File>,
     logo: theme::Logo,
     initial_update: bool,
     was_focused: bool,
@@ -128,8 +131,10 @@ impl App {
         let tab = if args.monitor_demo { Tab::Monitor } else { args.tab.unwrap_or(Tab::Play) };
         let capture = args.capture.map(Capture::new);
         let logo = theme::Logo::load(&cc.egui_ctx);
+        let window_marker = core.persist.then(|| auth::hold_window_marker(&core::actions::Dirs::real())).flatten();
         Self {
             tab, core, ops, shared, capture, logo,
+            agent: Controller::default(), _window_marker: window_marker,
             initial_update: !args.demo, was_focused: false, seen_launch: 0, hidden_until_exit: false, window: None,
         }
     }
@@ -283,6 +288,7 @@ impl eframe::App for App {
                 self.capture = None;
             }
         }
+        let _guard = self.agent.frame(&mut self.core, &mut self.ops);
         self.core.tick(ctx, &mut self.shared);
         if self.core.persist {
             if self.window_behavior(ctx) {
@@ -317,5 +323,8 @@ impl eframe::App for App {
                 Tab::Dev => ops::dev::show(&mut self.ops, &self.shared, self.core.page_scroll.take(), ui),
             }
         });
+        if !self.core.settings.agent_control {
+            self.agent.close();
+        }
     }
 }

@@ -2,6 +2,7 @@
 //! Network and disk work runs on a thread that reports through a channel; the UI never blocks.
 use crate::{app::Shared, core::store::UpdateSchedule, i18n::{tr, trf}, ops::{OpsSettings, OpsState}, paths, theme};
 use eframe::egui;
+use std::path::Path;
 use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc};
 use victory_update::{Engine, Error, Installed, Update, http::System};
 
@@ -113,7 +114,7 @@ impl UpdatesState {
         let (channel, kind) = (cfg.channel.clone(), cfg.engine_kind.clone());
         let have: Vec<String> = self.installed.iter().map(|b| b.name.clone()).collect();
         std::thread::spawn(move || {
-            let r = victory_update::check(&System, &channel, &kind, &have).map_err(|e| say(&e));
+            let r = check_now(&channel, &kind, &have).map_err(|e| say(&e));
             let _ = tx.send(Msg::Checked(r));
             Self::wake(&ctx);
         });
@@ -141,7 +142,7 @@ impl UpdatesState {
     }
 
     pub fn rollback(&mut self, to: Option<&str>) {
-        self.note = Some(match victory_update::rollback(&paths::engine_root(), to) {
+        self.note = Some(match rollback_now(&paths::engine_root(), to) {
             Ok(n) => (false, trf("updates.switched", &[("name", &n)])),
             Err(e) => (true, e.to_string()),
         });
@@ -149,8 +150,10 @@ impl UpdatesState {
     }
 
     pub fn cleanup(&mut self) {
-        let removed = victory_update::cleanup(&paths::engine_root(), KEEP_BUILDS);
-        self.note = Some((false, trf("updates.removed", &[("n", &removed.len().to_string())])));
+        self.note = Some(match cleanup_now(&paths::engine_root()) {
+            Ok(removed) => (false, trf("updates.removed", &[("n", &removed.len().to_string())])),
+            Err(error) => (true, error.to_string()),
+        });
         self.refresh_installed();
     }
 
@@ -180,6 +183,51 @@ impl UpdatesState {
     }
 }
 
+/// Asks GitHub for the newest engine of `channel` and `kind`. `have` lists the installed folder names.
+pub fn check_now(channel: &str, kind: &str, have: &[String]) -> Result<Update, Error> {
+    victory_update::check(&System, channel, kind, have)
+}
+
+/// Downloads, verifies and installs an engine, makes it the active build and removes old builds.
+/// `progress(done, total)` is called for every chunk; return false to cancel.
+pub fn install_now(
+    engine: &Engine,
+    folder: &str,
+    downloads: &Path,
+    engine_root: &Path,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Result<(), Error> {
+    let _guard = build_lock(engine_root)?;
+    let zip = downloads.join(format!("{folder}.zip"));
+    victory_update::download(&System, engine, &zip, progress)?;
+    let r = victory_update::install(&zip, engine_root, folder);
+    let _ = std::fs::remove_file(&zip);
+    r?;
+    victory_update::cleanup(engine_root, KEEP_BUILDS);
+    Ok(())
+}
+
+fn build_lock(engine_root: &Path) -> Result<std::fs::File, Error> {
+    crate::core::storage::lock(&engine_root.join("updates.lock"))
+        .map_err(|_| Error::Io(std::io::Error::other("Engine builds are being updated or the engine folder cannot be written.")))
+}
+
+pub fn rollback_now(engine_root: &Path, to: Option<&str>) -> Result<String, Error> {
+    let _guard = build_lock(engine_root)?;
+    let available = victory_update::installed(engine_root);
+    let target = available.iter().find(|build| match to {
+        Some(name) => build.name == name,
+        None => build.is_previous,
+    });
+    let build = target.ok_or_else(|| Error::BadArchive("There is no matching installed build.".into()))?;
+    victory_update::rollback(engine_root, Some(&build.name))
+}
+
+pub fn cleanup_now(engine_root: &Path) -> Result<Vec<String>, Error> {
+    let _guard = build_lock(engine_root)?;
+    Ok(victory_update::cleanup(engine_root, KEEP_BUILDS))
+}
+
 /// Download and install on the worker thread. Progress is published at most about 10 times a second.
 fn run_install(
     engine: &Engine,
@@ -188,10 +236,8 @@ fn run_install(
     cancel: &AtomicBool,
     ctx: &Option<egui::Context>,
 ) -> Result<(), Error> {
-    let dir = paths::data_dir().join("downloads");
-    let zip = dir.join(format!("{folder}.zip"));
     let mut last = std::time::Instant::now();
-    victory_update::download(&System, engine, &zip, &mut |done, total| {
+    install_now(engine, folder, &paths::data_dir().join("downloads"), &paths::engine_root(), &mut |done, total| {
         progress.0.store(done, Ordering::Relaxed);
         progress.1.store(total, Ordering::Relaxed);
         if last.elapsed() >= std::time::Duration::from_millis(100) {
@@ -199,12 +245,7 @@ fn run_install(
             UpdatesState::wake(ctx);
         }
         !cancel.load(Ordering::Relaxed)
-    })?;
-    let r = victory_update::install(&zip, &paths::engine_root(), folder);
-    let _ = std::fs::remove_file(&zip);
-    r?;
-    victory_update::cleanup(&paths::engine_root(), KEEP_BUILDS);
-    Ok(())
+    })
 }
 
 fn size_text(b: u64) -> String {

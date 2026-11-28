@@ -13,6 +13,7 @@ pub struct UiState {
     pub settings: super::settings::SettingsUi,
     pub flags: super::flags::FlagsUi,
     pub report: super::report::ReportUi,
+    pub agent: crate::agent::ui::View,
 }
 
 /// Opens a folder in Explorer (or the file manager elsewhere).

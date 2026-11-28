@@ -57,6 +57,9 @@ and `VICTORY_DLSSG_SM86_DIR`. Safe mode turns DLSS off.
 Profiles let you keep several sets of settings: create, duplicate, rename, delete, export to a `.toml` file
 and import one.
 
+**Agent control** lets MCP clients use the launcher locally. It is off by default. See the
+[agent setup and tool reference](launcher-agent.md).
+
 ## Saves and storage
 
 The **Saves** tab creates, verifies, restores and exchanges backups as ZIP files. Backups include saves and

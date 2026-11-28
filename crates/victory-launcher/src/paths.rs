@@ -40,25 +40,11 @@ pub fn game_data_root() -> PathBuf {
 pub fn backups_root(settings: &crate::core::store::Settings) -> PathBuf {
     settings.backups.root.clone().unwrap_or_else(|| data_dir().join("backups"))
 }
-pub fn activity_lock() -> PathBuf { data_dir().join("activity.lock") }
 pub fn move_journal() -> PathBuf { data_dir().join("move-journal.toml") }
 pub fn reports_dir() -> PathBuf { data_dir().join("reports") }
 
 /// `<launcher folder>\engine`: one sub folder per installed engine build plus `current.txt`.
 pub fn engine_root() -> PathBuf { app_dir().join("engine") }
-
-/// The engine build folder name named in `engine\current.txt`, if any.
-pub fn current_engine_name() -> Option<String> {
-    let text = std::fs::read_to_string(engine_root().join("current.txt")).ok()?;
-    let name = text.trim();
-    (!name.is_empty()).then(|| name.to_string())
-}
-
-/// `engine\<current>\victory.exe` when it exists. A developer's own build can override this in Settings.
-pub fn active_engine_exe() -> Option<PathBuf> {
-    let exe = engine_root().join(current_engine_name()?).join("victory.exe");
-    exe.is_file().then_some(exe)
-}
 
 /// Name of the shared-memory block the engine process `pid` publishes (see victory-stats).
 pub fn stats_block_name(pid: u32) -> String { format!("Local\\VictoryUnited.Stats.{pid}") }

@@ -67,15 +67,22 @@ impl OpsSettings {
     }
 
     pub fn load() -> Self {
-        std::fs::read_to_string(Self::file())
+        Self::load_from(&Self::file())
+    }
+
+    pub fn load_from(file: &std::path::Path) -> Self {
+        std::fs::read_to_string(file)
             .ok()
             .and_then(|t| toml::from_str(&t).ok())
             .unwrap_or_default()
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        std::fs::create_dir_all(paths::data_dir())?;
-        crate::core::store::write_atomic(&Self::file(), toml::to_string_pretty(self)?.as_bytes())?;
+        self.save_to(&Self::file())
+    }
+
+    pub fn save_to(&self, file: &std::path::Path) -> anyhow::Result<()> {
+        crate::core::store::write_atomic(file, toml::to_string_pretty(self)?.as_bytes())?;
         Ok(())
     }
 }
@@ -476,10 +483,28 @@ pub fn engine_options(
     cfg: &OpsSettings,
     data: &std::path::Path,
 ) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
-    let mut flags = super::profile::prepare_launch(&cfg.profiler, data)?;
-    if cfg.overlay {
-        let engine_panel = cfg.overlay_options.mode == OverlayMode::Engine;
-        flags.insert("VICTORY_PANEL".into(), u8::from(engine_panel).to_string());
+    Ok(with_panel(cfg, super::profile::prepare_launch(&cfg.profiler, data)?))
+}
+
+/// Predicts the same flags without creating a profiler directory or using a real run id.
+pub fn preview_engine_options(
+    cfg: &OpsSettings,
+    data: &std::path::Path,
+) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+    Ok(with_panel(cfg, super::profile::launch_flags(&cfg.profiler, data, 0)?))
+}
+
+fn with_panel(
+    cfg: &OpsSettings,
+    mut flags: std::collections::BTreeMap<String, String>,
+) -> std::collections::BTreeMap<String, String> {
+    if let Some(panel) = panel_flag(cfg) {
+        flags.insert("VICTORY_PANEL".into(), panel.into());
     }
-    Ok(flags)
+    flags
+}
+
+/// Whether the monitor settings override the launch profile's in-game panel.
+pub fn panel_flag(cfg: &OpsSettings) -> Option<&'static str> {
+    cfg.overlay.then(|| if cfg.overlay_options.mode == OverlayMode::Engine { "1" } else { "0" })
 }

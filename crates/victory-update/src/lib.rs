@@ -22,7 +22,7 @@ pub mod http;
 mod install;
 mod manifest;
 
-pub use install::{Installed, cleanup, download, install, installed, rollback, set_current, sha256_file};
+pub use install::{Installed, cleanup, download, install, installed, rollback, set_current, sha256_file, superseded};
 pub use manifest::{Channel, Engine, Manifest, Update, check, folder_name, parse_release_assets};
 
 pub const REPO: &str = "Fayberr/Victory-United";

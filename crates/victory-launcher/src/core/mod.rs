@@ -1,5 +1,6 @@
 //! "Core" half of the launcher: play, settings, presets, flags, profiles, bug report. Owned by the core worker.
 pub mod about;
+pub mod actions;
 pub mod dlss;
 pub mod engine;
 pub mod firstrun;
@@ -69,10 +70,10 @@ pub struct CoreState {
 impl CoreState {
     pub fn new(ctx: egui::Context, settings: store::Settings) -> Self {
         paths::configure_storage(&settings);
-        let game = settings.game_folder.as_deref().and_then(game::from_pick).or_else(|| settings.game_exe.as_deref().and_then(game::from_pick));
+        let game = actions::chosen_game(&settings);
         let profiles = launch::list_profiles(&paths::profiles_dir());
-        let profile = profiles.iter().find(|p| p.name == settings.active_profile).cloned().unwrap_or_default();
-        let extra = std::fs::read_to_string(paths::launch_flags_file()).map(|t| launch::parse_extra(&t)).unwrap_or_default();
+        let profile = actions::active_profile(&actions::Dirs::real(), &settings);
+        let extra = launch::read_extra(&paths::launch_flags_file());
         let mut s = Self::blank(ctx, settings, game, profile, profiles, extra);
         s.drop_unusable_engine();
         s.start_hardware_probe();
@@ -166,7 +167,7 @@ impl CoreState {
                 shared.log_file = Some(log);
             }
         }
-        shared.launch_env = self.last_env.clone();
+        shared.launch_env = if self.ui.demo { self.last_env.clone() } else { self.runner.env.clone() };
         shared.engine_exe = self.engine_exe();
     }
 
@@ -200,12 +201,12 @@ impl CoreState {
         if self.ui.demo {
             return Some("engine/a1b2c3d4-release/victory.exe".into());
         }
-        self.own_engine().or_else(paths::active_engine_exe)
+        actions::Dirs::real().engine_exe(&self.settings)
     }
 
     /// The developer's own engine from Settings, when it is set and still a usable `victory.exe`.
     pub fn own_engine(&self) -> Option<PathBuf> {
-        self.settings.engine_override.clone().filter(|p| engine::check(p).is_ok())
+        actions::own_engine(&self.settings)
     }
 
     /// An earlier version let any file be chosen as the engine (even the launcher itself, which made Play open
@@ -227,8 +228,7 @@ impl CoreState {
     }
 
     pub fn set_game(&mut self, g: game::Game) {
-        self.settings.game_folder = Some(g.folder.clone());
-        self.settings.game_exe = Some(g.exe.clone());
+        actions::set_game(&mut self.settings, &g);
         self.game = Some(g);
         self.notice = None;
         self.save_settings();
@@ -253,10 +253,7 @@ impl CoreState {
 
     /// The preset in use and the resolved environment.
     pub fn resolved(&self) -> (launch::Resolved, String) {
-        let file = presets::builtin();
-        let (gpu, vendor) = self.gpu();
-        let id = launch::preset_id(file, &self.profile, &gpu, vendor).to_string();
-        (launch::resolve_with(file, &id, &self.profile, &self.active_extra(), &self.dlss_flags()), id)
+        actions::resolve(&self.profile, self.hw.as_ref(), &self.settings.dirs, &self.active_extra())
     }
 
     /// The card DLSS is judged against (not offered while the hardware check is still running).
@@ -265,24 +262,24 @@ impl CoreState {
         dlss::card(&gpu, vendor)
     }
 
-    /// The DLSS environment for this profile: none in safe mode, none on a card without RTX.
-    pub fn dlss_flags(&self) -> Vec<(String, String)> {
-        if self.profile.options.safe {
-            return Vec::new();
-        }
-        dlss::flags(&self.profile.options.dlss, self.dlss_card(), &self.settings.dirs)
-    }
-
     pub fn active_extra(&self) -> Vec<launch::ExtraFlag> {
         if self.ui.start_without_flags { Vec::new() } else { self.extra.clone() }
     }
 
     pub fn plan(&self) -> Option<launch::Plan> {
-        let game = self.game.as_ref()?;
-        let engine = self.engine_exe()?;
-        let (resolved, _) = self.resolved();
-        let dirs = dlss::without_dlss_dirs(&self.settings.dirs);
-        Some(launch::Plan::new(engine, &game.folder, game.exe.clone(), self.profile.options.console, &resolved, &dirs, &paths::cache_root(), &paths::game_data_root()))
+        let extra = self.active_extra();
+        self.launch_input(&extra).plan(&paths::cache_root(), &paths::game_data_root())
+    }
+
+    fn launch_input<'a>(&'a self, extra: &'a [launch::ExtraFlag]) -> actions::LaunchInput<'a> {
+        actions::LaunchInput {
+            settings: &self.settings,
+            profile: &self.profile,
+            extra,
+            hardware: self.hw.as_ref(),
+            game: self.game.as_ref(),
+            engine: self.engine_exe(),
+        }
     }
 
     /// The Play button.
@@ -291,63 +288,21 @@ impl CoreState {
             return;
         }
         self.notice = None;
-        if let Err(error) = play::hardware_allows_play(self.hw.as_ref(), acknowledged) {
-            self.notice = Some(error.to_string());
-            return;
-        }
         if self.runner.busy() || settings::storage_busy(self) {
             return;
         }
-        let settings_file = paths::settings_file();
-        let engine = paths::engine_root();
-        let game = self.game.as_ref().map(|g| g.folder.as_path());
-        let ctx = storage::MoveContext { settings: &settings_file, engine: &engine, game };
-        let guarded = storage::lock(&paths::activity_lock()).and_then(|guard| {
-            let current = store::Settings::load_from(&settings_file);
-            storage::validate_data_work(&ctx, &current)?;
-            saves::recover_restore(&storage::Location::Data.path(&paths::data_dir(), &current))?;
-            Ok((guard, current))
-        });
-        let (guard, current) = match guarded {
-            Ok(result) => result,
-            Err(error) => {
-                self.notice = Some(format!("{error:#}"));
-                return;
-            }
-        };
-        self.settings.storage = current.storage;
-        paths::configure_storage(&self.settings);
-        let Some(mut plan) = self.plan() else {
-            self.notice = Some(if self.game.is_none() { "Pick the game folder first.".into() } else { "No engine is installed yet.".into() });
-            return;
-        };
+        let extra = self.active_extra();
         let ops = crate::ops::OpsSettings::load();
-        match crate::ops::settings::engine_options(&ops, &paths::data_dir()) {
-            Ok(flags) => {
-                let resolved = self.resolved().0;
-                for (key, value) in flags {
-                    let override_allowed = !matches!(resolved.source.get(&key), Some(launch::Source::Edit | launch::Source::Extra))
-                        && !self.profile.removed.contains(&key);
-                    if override_allowed {
-                        plan.env.insert(key, value);
-                    }
-                }
+        let mut runner = self.runner.handle();
+        let started = actions::start_game(&mut runner, &actions::Dirs::real(), &self.launch_input(&extra), &ops, acknowledged);
+        self.runner.drain();
+        match started {
+            Ok(storage) => {
+                self.settings.storage = storage;
+                paths::configure_storage(&self.settings);
             }
-            Err(error) => {
-                self.notice = Some(error.to_string());
-                return;
-            }
+            Err(error) => self.notice = Some(format!("{error:#}")),
         }
-        let cold = runner::shader_entries(&plan.cache_dir, runner::COLD_CACHE_ENTRIES) < runner::COLD_CACHE_ENTRIES;
-        self.last_env = plan.env.iter().filter(|(k, _)| !launch::PATH_VARS.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
-        let saves = runner::RunStorage {
-            _guard: guard,
-            backups: paths::backups_root(&self.settings),
-            before: self.settings.backups.before_launch,
-            after: self.settings.backups.after_exit,
-            retention: self.settings.backups.retention,
-        };
-        self.runner.start(plan, paths::logs_dir(), cold, !self.active_extra().is_empty(), Some(saves));
     }
 
     /// Starts again after a quick exit, without the extra flags.
@@ -358,7 +313,7 @@ impl CoreState {
 
     pub fn save_extra(&mut self) {
         if self.persist {
-            let _ = store::write_atomic(&paths::launch_flags_file(), launch::format_extra(&self.extra).as_bytes());
+            let _ = launch::write_extra(&paths::launch_flags_file(), &self.extra);
         }
     }
 
@@ -369,6 +324,56 @@ impl CoreState {
             self.save_settings();
             self.profiles = launch::list_profiles(&paths::profiles_dir());
         }
+    }
+
+    /// "New" and "Duplicate": a profile under `name`, empty or with the current values.
+    pub fn add_profile(&mut self, name: &str, copy: bool) {
+        if !copy {
+            self.profile = launch::Profile::default();
+        }
+        self.profile.name = name.to_string();
+        self.ui.settings.new_name.clear();
+        self.save_profile();
+    }
+
+    pub fn rename_profile(&mut self, name: &str) {
+        let old = std::mem::replace(&mut self.profile.name, name.to_string());
+        self.ui.settings.new_name.clear();
+        if self.persist {
+            let _ = launch::save_renamed(&paths::profiles_dir(), &self.profile, &old);
+            self.save_profile();
+        }
+    }
+
+    pub fn delete_active_profile(&mut self) {
+        if self.persist {
+            match launch::remove_profile(&paths::profiles_dir(), &self.profile.name, &self.profile.name) {
+                Ok(next) => self.profile = next,
+                Err(error) => {
+                    self.notice = Some(error.to_string());
+                    return;
+                }
+            }
+            self.profiles = launch::list_profiles(&paths::profiles_dir());
+        } else {
+            self.profile = self.profiles.first().cloned().unwrap_or_default();
+        }
+        self.settings.active_profile = self.profile.name.clone();
+        self.save_settings();
+    }
+
+    /// Reads everything again after something else changed the files (an agent, for example).
+    pub fn reload_from_disk(&mut self) {
+        let dirs = actions::Dirs::real();
+        self.settings = dirs.settings();
+        paths::configure_storage(&self.settings);
+        self.game = actions::chosen_game(&self.settings).or_else(|| self.game.take().filter(|_| self.settings.game_folder.is_none()));
+        self.profiles = launch::list_profiles(&paths::profiles_dir());
+        self.profile = actions::active_profile(&dirs, &self.settings);
+        self.extra = launch::read_extra(&paths::launch_flags_file());
+        self.ui.report.built = false;
+        settings::reload(self);
+        crate::theme::set_appearance(&self.ctx, &self.settings.appearance);
     }
 }
 

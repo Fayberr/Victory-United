@@ -1,7 +1,12 @@
 //! Bug report tab: builds a ZIP in `reports\` from items the user can look at and untick first. Nothing is
 //! uploaded. Text has the Windows user name and the user profile path replaced by placeholders.
 use super::{
-    runner::{latest_run_log, timestamp},
+    actions,
+    game::Game,
+    hw::Hardware,
+    launch::{ExtraFlag, Profile, Resolved},
+    runner::{timestamp, RunState},
+    store::Settings,
     widgets::{notice, open_folder, page_scroll, page_title},
     CoreState,
 };
@@ -123,7 +128,7 @@ pub fn tail_lines(path: &Path, lines: usize) -> std::io::Result<String> {
     let window = (lines as u64 * 400).min(len).max(1);
     f.seek(SeekFrom::Start(len - window.min(len)))?;
     let mut buf = Vec::new();
-    f.read_to_end(&mut buf)?;
+    f.take(window).read_to_end(&mut buf)?;
     let text = String::from_utf8_lossy(&buf);
     let mut all: Vec<&str> = text.lines().collect();
     if window < len && !all.is_empty() {
@@ -133,40 +138,57 @@ pub fn tail_lines(path: &Path, lines: usize) -> std::io::Result<String> {
     Ok(all[from..].join("\n"))
 }
 
-fn engine_build(core: &CoreState) -> String {
-    core.engine_exe().and_then(|p| p.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "none".into())
+/// What a report is built from.
+pub struct Inputs<'a> {
+    pub settings: &'a Settings,
+    pub profile: &'a Profile,
+    pub extra: &'a [ExtraFlag],
+    /// The final environment and the preset it came from.
+    pub resolved: &'a Resolved,
+    pub preset: &'a str,
+    pub hardware: Option<&'a Hardware>,
+    pub rendering_adapter: Option<u64>,
+    pub game: Option<&'a Game>,
+    pub engine: Option<PathBuf>,
+    pub run: &'a RunState,
+    /// The log to attach.
+    pub log: Option<PathBuf>,
 }
 
-pub fn build_items(core: &CoreState, id: &Identity) -> Vec<Item> {
-    let (resolved, preset) = core.resolved();
+impl Inputs<'_> {
+    fn engine_build(&self) -> String {
+        Some(actions::build_name(self.engine.as_deref())).filter(|n| !n.is_empty()).unwrap_or_else(|| "none".into())
+    }
+}
+
+pub fn build_items(input: &Inputs<'_>, id: &Identity) -> Vec<Item> {
     let mut items = Vec::new();
-    let log = core.runner.log_file().or_else(|| latest_run_log(&paths::logs_dir()));
-    let log_text = match &log {
+    let log_text = match &input.log {
         Some(p) => tail_lines(p, LOG_LINES).unwrap_or_else(|e| format!("(could not read {}: {e})", p.display())),
         None => "(no log yet: the game has not been started)".into(),
     };
     items.push(Item { file: "log-tail.txt", title: "Last lines of the latest log", text: anonymize(&log_text, id), include: true });
-    let flags: String = resolved.env.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
+    let flags: String = input.resolved.env.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
     items.push(Item { file: "flags.txt", title: "Launch flags (final environment)", text: anonymize(&flags, id), include: true });
     let versions = format!(
         "Launcher: {}\nEngine build: {}\nPreset: {}\nConsole: {}\n",
         env!("CARGO_PKG_VERSION"),
-        engine_build(core),
-        preset,
-        core.profile.options.console.arg()
+        input.engine_build(),
+        input.preset,
+        input.profile.options.console.arg()
     );
     items.push(Item { file: "versions.txt", title: "Launcher and engine version", text: versions, include: true });
-    let hw = core.hw.as_ref().map(|h| h.summary_with_adapter(core.rendering_adapter)).unwrap_or_else(|| "(hardware check not finished)\n".into());
+    let hw = input.hardware.map(|h| h.summary_with_adapter(input.rendering_adapter)).unwrap_or_else(|| "(hardware check not finished)\n".into());
     items.push(Item { file: "hardware.txt", title: "Hardware and Windows build", text: anonymize(&hw, id), include: true });
-    let mut settings = format!("Profile: {}\n{}", core.profile.name, toml::to_string_pretty(&core.profile).unwrap_or_default());
-    if !core.extra.is_empty() {
+    let mut settings = format!("Profile: {}\n{}", input.profile.name, toml::to_string_pretty(input.profile).unwrap_or_default());
+    if !input.extra.is_empty() {
         settings.push_str("\nExtra flags:\n");
-        settings.push_str(&super::launch::format_extra(&core.extra));
+        settings.push_str(&super::launch::format_extra(input.extra));
     }
-    if let Some(g) = &core.game {
+    if let Some(g) = input.game {
         settings.push_str(&format!("\nGame folder: {}\n", g.folder.display()));
     }
-    settings.push_str(&format!("Engine: {}\n", if core.settings.engine_override.is_some() { "own build" } else { "installed" }));
+    settings.push_str(&format!("Engine: {}\n", if actions::own_engine(input.settings).is_some() { "own build" } else { "installed" }));
     items.push(Item { file: "settings.txt", title: "Settings used", text: anonymize(&settings, id), include: true });
     items
 }
@@ -187,31 +209,31 @@ pub fn write_zip(dir: &Path, items: &[Item]) -> std::io::Result<PathBuf> {
 }
 
 /// Short GitHub issue text: facts only, no raw log.
-pub fn issue_text(core: &CoreState, id: &Identity, zip: Option<&Path>) -> String {
-    let (_, preset) = core.resolved();
-    let outcome = match &core.runner.state {
-        super::runner::RunState::Ended(s) => match (s.error.as_ref(), s.code) {
+pub fn issue_text(input: &Inputs<'_>, id: &Identity, zip: Option<&Path>) -> String {
+    let preset = input.preset;
+    let outcome = match input.run {
+        RunState::Ended(s) => match (s.error.as_ref(), s.code) {
             (Some(e), _) => format!("could not start ({e})"),
             (None, Some(0)) => "closed normally".to_string(),
             (None, Some(c)) => format!("ended with exit code {c} after {} s", s.secs),
             (None, None) => format!("ended after {} s", s.secs),
         },
-        super::runner::RunState::Running { .. } => "still running".to_string(),
+        RunState::Running { .. } => "still running".to_string(),
         _ => "not started in this session".to_string(),
     };
-    let hw = core.hw.as_ref();
+    let hw = input.hardware;
     let mut t = String::new();
     t.push_str("Title: Describe the problem in one line\n\n");
     t.push_str("What happened:\n(write here)\n\n");
     t.push_str("Facts from the launcher:\n");
-    t.push_str(&format!("- Launcher {}, engine {}\n", env!("CARGO_PKG_VERSION"), engine_build(core)));
-    t.push_str(&format!("- Preset {preset}, console {}{}\n", core.profile.options.console.arg(), if core.profile.options.safe { ", safe mode" } else { "" }));
-    let extra_on = core.extra.iter().filter(|e| e.enabled).count();
+    t.push_str(&format!("- Launcher {}, engine {}\n", env!("CARGO_PKG_VERSION"), input.engine_build()));
+    t.push_str(&format!("- Preset {preset}, console {}{}\n", input.profile.options.console.arg(), if input.profile.options.safe { ", safe mode" } else { "" }));
+    let extra_on = input.extra.iter().filter(|e| e.enabled).count();
     if extra_on > 0 {
         t.push_str(&format!("- {extra_on} extra flag(s) set\n"));
     }
     if let Some(h) = hw {
-        for (key, value) in h.capabilities(core.rendering_adapter) {
+        for (key, value) in h.capabilities(input.rendering_adapter) {
             t.push_str(&format!("- {}: {value}\n", tr(key)));
         }
         t.push_str(&format!("- {}, {} MB VRAM, driver {}\n- {} MB RAM, {}, Windows build {}\n", h.gpu_name, h.vram_mb, h.driver, h.ram_mb, h.cpu_name, h.windows_build));
@@ -225,11 +247,30 @@ pub fn issue_text(core: &CoreState, id: &Identity, zip: Option<&Path>) -> String
 
 // ---------------------------------------------------------------- UI
 
+/// The report inputs as the window sees them.
+fn with_inputs<T>(core: &CoreState, work: impl FnOnce(&Inputs<'_>) -> T) -> T {
+    // "Start without my flags" changes what ran, but the report lists everything that is set.
+    let (resolved, preset) = core.resolved();
+    work(&Inputs {
+        settings: &core.settings,
+        profile: &core.profile,
+        extra: &core.extra,
+        resolved: &resolved,
+        preset: &preset,
+        hardware: core.hw.as_ref(),
+        rendering_adapter: core.rendering_adapter,
+        game: core.game.as_ref(),
+        engine: core.engine_exe(),
+        run: &core.runner.state,
+        log: actions::log_for_report(core.runner.log_file(), &paths::logs_dir()),
+    })
+}
+
 pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
     page_title(ui, tr("report.title"), tr("report.sub"));
     if !core.ui.report.built {
         core.ui.report.built = true;
-        core.ui.report.items = build_items(core, &Identity::current());
+        core.ui.report.items = with_inputs(core, |input| build_items(input, &Identity::current()));
     }
     let scroll = core.page_scroll.take();
     page_scroll(ui, scroll, |ui| {
@@ -266,14 +307,14 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
                 } else {
                     // Rebuild first so the log tail is current.
                     let checked: Vec<bool> = core.ui.report.items.iter().map(|i| i.include).collect();
-                    let mut items = build_items(core, &id);
+                    let mut items = with_inputs(core, |input| build_items(input, &id));
                     for (item, on) in items.iter_mut().zip(checked) {
                         item.include = on;
                     }
                     match write_zip(&paths::reports_dir(), &items) {
                         Ok(p) => {
                             core.ui.report.message = trf("report.saved", &[("file", &p.to_string_lossy())]);
-                            ui.ctx().copy_text(issue_text(core, &id, Some(&p)));
+                            ui.ctx().copy_text(with_inputs(core, |input| issue_text(input, &id, Some(&p))));
                             core.ui.report.last_zip = Some(p);
                             core.ui.report.items = items;
                         }
@@ -282,7 +323,8 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
                 }
             }
             if ui.button(tr("report.copy_issue")).clicked() {
-                let text = issue_text(core, &Identity::current(), core.ui.report.last_zip.as_deref());
+                let zip = core.ui.report.last_zip.clone();
+                let text = with_inputs(core, |input| issue_text(input, &Identity::current(), zip.as_deref()));
                 ui.ctx().copy_text(text);
                 core.ui.report.message = tr("report.copied").to_string();
             }

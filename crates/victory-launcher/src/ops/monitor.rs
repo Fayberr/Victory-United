@@ -14,7 +14,7 @@ use egui_plot::{HLine, Line, Plot, PlotBounds, PlotPoints};
 use std::{
     collections::VecDeque,
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 use victory_stats::{Metric, PresentState, Reader, Snapshot, UNKNOWN_US};
@@ -31,7 +31,7 @@ pub struct Live {
     pub system_ram: Option<(u64, u64)>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct Row {
     pub number: u64,
     qpc: u64,
@@ -88,6 +88,29 @@ impl Summary {
             Metric::DispatchesExecuted => 4,
             _ => return None,
         }]
+    }
+
+    /// Machine-readable version of the measurements shown by the monitor.
+    pub fn snapshot_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        let present = match self.state {
+            Some(PresentState::Waiting) => json!("waiting"),
+            Some(PresentState::Drawing) => json!("drawing"),
+            Some(PresentState::Occluded) => json!("occluded"),
+            Some(PresentState::Other(code)) => json!({ "code": code }),
+            None => serde_json::Value::Null,
+        };
+        json!({
+            "fps": self.fps, "low_fps": self.low_fps, "frame": self.row, "present": present,
+            "build": self.build, "frames": self.frames, "occluded": self.occluded, "rejected": self.rejected,
+            "adapter_luid": self.adapter_luid, "vram_bytes": self.metric(Metric::VramUsed),
+            "vram_budget_bytes": self.metric(Metric::VramBudget), "resident_bytes": self.metric(Metric::RamResident),
+            "draws": self.metric(Metric::DrawsExecuted), "dispatches": self.metric(Metric::DispatchesExecuted),
+            "pipelines_building": self.metric(Metric::PipelinesBuilding),
+            "stages": self.stages.iter().map(|stage| json!({
+                "name": stage.name, "ms": stage.ms, "delta_ms": stage.delta_ms,
+            })).collect::<Vec<_>>(),
+        })
     }
 
     pub fn with_live(&self, live: Live) -> Self {
@@ -483,13 +506,21 @@ pub fn export_csv(path: &Path, history: &VecDeque<Row>, seconds: u32) -> anyhow:
     Ok(())
 }
 
-fn recent(history: &VecDeque<Row>, seconds: u32) -> impl Iterator<Item = &Row> {
+/// Writes the last `seconds` of history to a new `frames-<time>.csv` in `dir`.
+pub fn export_to(dir: &Path, history: &VecDeque<Row>, seconds: u32) -> anyhow::Result<PathBuf> {
+    let file = dir.join(format!("frames-{}.csv", super::stamp()));
+    export_csv(&file, history, seconds)?;
+    Ok(file)
+}
+
+/// The rows of the last `seconds`, oldest first.
+pub fn recent(history: &VecDeque<Row>, seconds: u32) -> impl Iterator<Item = &Row> {
     let cutoff = history.back().map_or(0.0, |r| r.t_s - f64::from(seconds));
     let start = history.partition_point(|r| r.t_s < cutoff);
     history.iter().skip(start)
 }
 
-fn missed_intervals(history: &VecDeque<Row>, seconds: u32, target_ms: f32) -> u64 {
+pub fn missed_intervals(history: &VecDeque<Row>, seconds: u32, target_ms: f32) -> u64 {
     recent(history, seconds)
         .filter_map(|frame| frame.frame_ms)
         .map(|ms| ((ms / target_ms.max(1.0)).floor() as u64).saturating_sub(1))
@@ -523,14 +554,13 @@ pub fn show(
                 .clicked()
             {
                 let dir = paths::reports_dir();
-                let file = dir.join(format!("frames-{}.csv", super::stamp()));
                 let result = if ops.persist {
-                    export_csv(&file, &ops.monitor.history, ops.cfg.monitor.csv_seconds)
+                    export_to(&dir, &ops.monitor.history, ops.cfg.monitor.csv_seconds)
                 } else {
-                    Ok(())
+                    Ok(dir.join("frames-demo.csv"))
                 };
                 ops.monitor.export_note = Some(match result {
-                    Ok(()) => trf("monitor.exported", &[("file", &file.display().to_string())]),
+                    Ok(file) => trf("monitor.exported", &[("file", &file.display().to_string())]),
                     Err(e) => trf("monitor.export_failed", &[("error", &e.to_string())]),
                 });
             }

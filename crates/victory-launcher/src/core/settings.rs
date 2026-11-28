@@ -9,11 +9,12 @@ use super::{
     widgets::{open_folder, page_scroll, page_title, pick_file, pick_folder, save_file},
     saves, storage,
     store::{AfterPlay, Appearance, Backups, Behavior, ThemeChoice, UpdateSchedule},
+    actions::{self, Dirs, SaveAction, StorageAction},
     CoreState,
 };
 use crate::{app::Shared, i18n::{tr, trf}, paths, theme};
 use eframe::egui;
-use std::{collections::HashSet, path::{Path, PathBuf}, sync::mpsc::{self, Receiver}};
+use std::{collections::HashSet, path::PathBuf, sync::mpsc::{self, Receiver}};
 
 #[derive(Default)]
 pub struct SettingsUi {
@@ -36,6 +37,8 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
         behavior_section(core, ui);
         ui.add_space(12.0);
         startup_updates_section(core, ui);
+        ui.add_space(12.0);
+        crate::agent::ui::show(core, ui);
         ui.add_space(12.0);
         backup_section(core, ui);
         ui.add_space(12.0);
@@ -428,26 +431,13 @@ fn is_changed(core: &CoreState, name: &str) -> bool {
 
 /// Stores one edit in the profile. `None` resets the field to what the preset gives.
 pub fn set_edit(core: &mut CoreState, flag: &Flag, value: Option<String>) {
-    core.profile.edits.remove(&flag.name);
-    core.profile.removed.retain(|r| r != &flag.name);
-    if let Some(v) = value {
-        core.profile.edits.insert(flag.name.clone(), v);
-    }
+    core.profile.set_edit(&flag.name, value);
     core.save_profile();
 }
 
-/// Turns a switch on or off in the profile. Off removes the variable unless the registry says the engine
-/// wants an explicit 0.
+/// Turns a switch on or off in the profile (see `Profile::set_switch`).
 pub fn set_switch(core: &mut CoreState, flag: &Flag, on: bool) {
-    core.profile.edits.remove(&flag.name);
-    core.profile.removed.retain(|r| r != &flag.name);
-    if on {
-        core.profile.edits.insert(flag.name.clone(), "1".into());
-    } else if let Some(zero) = flag.off_value() {
-        core.profile.edits.insert(flag.name.clone(), zero.into());
-    } else {
-        core.profile.removed.push(flag.name.clone());
-    }
+    core.profile.set_switch(flag, on);
     core.save_profile();
 }
 
@@ -538,14 +528,7 @@ fn profiles_section(core: &mut CoreState, ui: &mut egui::Ui) {
         ui.label(theme::strong(tr("settings.profiles")).size(16.0));
         ui.label(theme::dim(tr("settings.profiles_help")).size(12.5));
         ui.add_space(6.0);
-        let names: Vec<String> = {
-            let mut n: Vec<String> = core.profiles.iter().map(|p| p.name.clone()).collect();
-            if !n.contains(&core.profile.name) {
-                n.push(core.profile.name.clone());
-            }
-            n.sort_by_key(|s| s.to_lowercase());
-            n
-        };
+        let names = launch::profile_names(&core.profiles, &core.profile.name);
         ui.horizontal(|ui| {
             ui.label(theme::dim(tr("settings.active")));
             egui::ComboBox::from_id_salt("profile_pick").selected_text(&core.profile.name).width(220.0).show_ui(ui, |ui| {
@@ -566,35 +549,18 @@ fn profiles_section(core: &mut CoreState, ui: &mut egui::Ui) {
             let name = core.ui.settings.new_name.trim().to_string();
             let ok = !name.is_empty() && !names.contains(&name);
             if ui.add_enabled(ok, egui::Button::new(tr("settings.new"))).clicked() {
-                core.profile = launch::Profile { name: name.clone(), ..Default::default() };
-                core.ui.settings.new_name.clear();
-                core.save_profile();
+                core.add_profile(&name, false);
             }
             if ui.add_enabled(ok, egui::Button::new(tr("settings.duplicate"))).clicked() {
-                core.profile.name = name.clone();
-                core.ui.settings.new_name.clear();
-                core.save_profile();
+                core.add_profile(&name, true);
             }
             if ui.add_enabled(ok, egui::Button::new(tr("settings.rename"))).clicked() {
-                let old = core.profile.name.clone();
-                core.profile.name = name;
-                core.ui.settings.new_name.clear();
-                core.save_profile();
-                if core.persist {
-                    let _ = launch::delete_profile(&crate::paths::profiles_dir(), &old);
-                    core.profiles = launch::list_profiles(&crate::paths::profiles_dir());
-                }
+                core.rename_profile(&name);
             }
         });
         ui.horizontal(|ui| {
             if ui.add_enabled(names.len() > 1, egui::Button::new(tr("settings.delete"))).clicked() {
-                if core.persist {
-                    let _ = launch::delete_profile(&crate::paths::profiles_dir(), &core.profile.name);
-                    core.profiles = launch::list_profiles(&crate::paths::profiles_dir());
-                }
-                core.profile = core.profiles.first().cloned().unwrap_or_default();
-                core.settings.active_profile = core.profile.name.clone();
-                core.save_settings();
+                core.delete_active_profile();
             }
             if ui.button(tr("settings.export")).clicked() {
                 if let Some(path) = save_file(&format!("{}.toml", launch::file_safe_name(&core.profile.name)), ("Profile", &["toml"])) {
@@ -798,61 +764,6 @@ struct SavesUi {
     note: Option<(bool, String)>,
 }
 
-enum SaveAction {
-    Create(String),
-    Restore(String),
-    Verify(String),
-    Export(String, PathBuf),
-    Import(PathBuf),
-    Delete(String),
-    Rename(String, String),
-    Cleanup(Vec<String>),
-}
-
-fn run_save_action(
-    action: SaveAction,
-    data: &Path,
-    root: &Path,
-    build: &str,
-    policy: saves::Retention,
-) -> anyhow::Result<String> {
-    let note = match action {
-        SaveAction::Create(label) => {
-            let options = saves::Create { kind: saves::Kind::Manual, label: &label, engine_build: build, deadline: None, force: false };
-            if saves::create(data, root, options)?.is_some() { "saves.created" } else { "saves.unchanged" }
-        }
-        SaveAction::Restore(id) => {
-            saves::restore(data, root, &id, build)?;
-            "saves.restored"
-        }
-        SaveAction::Verify(id) => {
-            saves::verify(root, &id)?;
-            "saves.verified"
-        }
-        SaveAction::Export(id, out) => {
-            saves::export(root, &id, &out)?;
-            "saves.exported"
-        }
-        SaveAction::Import(source) => {
-            saves::import(root, &source)?;
-            "saves.imported"
-        }
-        SaveAction::Delete(id) => {
-            saves::delete(root, &id)?;
-            "saves.deleted"
-        }
-        SaveAction::Rename(id, label) => {
-            saves::rename(root, &id, &label)?;
-            "saves.renamed"
-        }
-        SaveAction::Cleanup(ids) => {
-            saves::cleanup(root, policy, &ids)?;
-            "saves.cleaned"
-        }
-    };
-    Ok(tr(note).into())
-}
-
 fn start_saves_job(core: &mut CoreState, action: Option<SaveAction>) {
     let root = paths::backups_root(&core.settings);
     let game = core.game.as_ref().map(|g| g.folder.clone());
@@ -868,17 +779,8 @@ fn start_saves_job(core: &mut CoreState, action: Option<SaveAction>) {
     std::thread::spawn(move || {
         let result = (|| {
             let note = if let Some(action) = action {
-                let _guard = storage::lock(&paths::activity_lock())?;
-                let settings_file = paths::settings_file();
-                let engine_root = paths::engine_root();
-                let ctx = storage::MoveContext { settings: &settings_file, engine: &engine_root, game: game.as_deref() };
-                let current = super::store::Settings::load_from(&settings_file);
-                storage::validate_backup_root(&root, &ctx, &current)?;
-                let data = storage::Location::Data.path(&paths::data_dir(), &current);
-                storage::validate_data_work(&ctx, &current)?;
-                let build = engine.as_deref().and_then(Path::parent).and_then(Path::file_name)
-                    .and_then(|b| b.to_str()).unwrap_or_default();
-                run_save_action(action, &data, &root, build, policy)?
+                let note = actions::save_action(&Dirs::real(), &root, game.as_deref(), engine.as_deref(), policy, action)?;
+                tr(note).into()
             } else {
                 String::new()
             };
@@ -1207,17 +1109,20 @@ struct StorageOutcome {
     message: &'static str,
 }
 
-enum StorageAction {
-    Move(Location, PathBuf),
-    Resume,
-    Finish(bool),
-    Clear(Location),
-}
-
 enum StorageConfirm {
     Move { location: Location, target: PathBuf, network: bool },
     Clear { location: Location, phrase: String },
     DeleteOld,
+}
+
+/// Drops what the screen cached from disk, so it is read again.
+pub fn reload(core: &mut CoreState) {
+    core.ui.settings.saves.root = None;
+    let storage = &mut core.ui.settings.storage;
+    if storage.job.is_none() {
+        storage.usage = None;
+        storage.journal_read = false;
+    }
 }
 
 pub fn storage_busy(core: &CoreState) -> bool {
@@ -1278,9 +1183,8 @@ fn start_storage_job(core: &mut CoreState, action: StorageAction) {
     state.progress = Arc::new(MoveProgress::default());
     let progress = state.progress.clone();
     std::thread::spawn(move || {
-        let settings = paths::settings_file();
-        let engine = paths::engine_root();
-        let runtime = storage::MoveContext { settings: &settings, engine: &engine, game: game.as_deref() };
+        let dirs = Dirs::real();
+        let message = action.done_message();
         let mut last = Instant::now();
         let update = |done, total| {
             progress.done.store(done, Ordering::Relaxed);
@@ -1290,24 +1194,11 @@ fn start_storage_job(core: &mut CoreState, action: StorageAction) {
                 ctx.request_repaint();
             }
         };
-        let (status, message) = match action {
-            StorageAction::Move(location, target) => (
-                storage::start_move(&runtime, location, &target, &build, &progress.cancel, update).map(|_| ()),
-                "storage.moved",
-            ),
-            StorageAction::Resume => (
-                storage::resume_move(&runtime, &progress.cancel, update).map(|_| ()),
-                "storage.moved",
-            ),
-            StorageAction::Finish(delete_old) => (
-                storage::finish_move(&runtime, delete_old),
-                "storage.finished",
-            ),
-            StorageAction::Clear(location) => (storage::clear(&runtime, location, &build), "storage.cleared"),
-        };
+        let status = actions::storage_action(&dirs, game.as_deref(), &build, action, &progress.cancel, update);
+        let settings = dirs.settings_file();
         let result = StorageOutcome {
             status, message,
-            journal: storage::read_journal(&paths::move_journal()),
+            journal: storage::read_journal(&dirs.move_journal()),
             locations: super::store::Settings::load_from(&settings).storage,
         };
         let _ = tx.send(result);

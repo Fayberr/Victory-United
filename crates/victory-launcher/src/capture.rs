@@ -55,14 +55,16 @@ impl Capture {
             s("02-play", Tab::Play, Some(core::Screen::Main), 0.0),
             s("02-play-unsupported", Tab::Play, Some(core::Screen::Unsupported), 0.0),
             s("03-settings", Tab::Settings, Some(core::Screen::Main), 0.0),
-            s("03-settings-backups", Tab::Settings, Some(core::Screen::Main), 520.0),
-            s("03-settings-storage", Tab::Settings, Some(core::Screen::Main), 945.0),
-            d("03-settings-dlss-off", Some(core::Screen::Main), 1850.0, Demo::Plain),
-            d("03-settings-dlss-on", Some(core::Screen::Main), 1850.0, Demo::DlssOn),
-            d("03-settings-dlss-on-more", Some(core::Screen::Main), 2200.0, Demo::DlssOn),
-            d("03-settings-dlss-no-rtx", Some(core::Screen::Unsupported), 1850.0, Demo::NoRtx),
-            s("03-settings-lower", Tab::Settings, Some(core::Screen::Main), 1410.0),
-            s("03-settings-engine", Tab::Settings, Some(core::Screen::Main), 4520.0),
+            s("03-settings-agent-off", Tab::Settings, Some(core::Screen::Idle), 435.0),
+            s("03-settings-agent-on", Tab::Settings, Some(core::Screen::Idle), 580.0),
+            s("03-settings-backups", Tab::Settings, Some(core::Screen::Main), 640.0),
+            s("03-settings-storage", Tab::Settings, Some(core::Screen::Main), 1065.0),
+            d("03-settings-dlss-off", Some(core::Screen::Main), 1970.0, Demo::Plain),
+            d("03-settings-dlss-on", Some(core::Screen::Main), 1970.0, Demo::DlssOn),
+            d("03-settings-dlss-on-more", Some(core::Screen::Main), 2320.0, Demo::DlssOn),
+            d("03-settings-dlss-no-rtx", Some(core::Screen::Unsupported), 1970.0, Demo::NoRtx),
+            s("03-settings-lower", Tab::Settings, Some(core::Screen::Main), 1530.0),
+            s("03-settings-engine", Tab::Settings, Some(core::Screen::Main), 4640.0),
             s("03-saves", Tab::Saves, Some(core::Screen::Idle), 0.0),
             s("04-flags", Tab::Flags, Some(core::Screen::Main), 0.0),
             s("04-flags-list", Tab::Flags, Some(core::Screen::Main), 520.0),
@@ -116,6 +118,7 @@ impl Capture {
                 core.settings.dirs.insert(core::dlss::STREAMLINE_DIR.into(), "D:/NVIDIA/Streamline/bin/x64".into());
             }
         }
+        crate::agent::ui::capture(core, step.name == "03-settings-agent-on");
         // Collect a finished screenshot.
         let shot = ctx.input(|i| {
             i.events.iter().find_map(|e| match e {

@@ -7,6 +7,7 @@ use std::{collections::HashMap, sync::OnceLock};
 const SOURCES: &[&str] = &[
     include_str!("../locales/en/core.json"),
     include_str!("../locales/en/ops.json"),
+    include_str!("../locales/en/agent.json"),
 ];
 
 fn table() -> &'static HashMap<String, &'static str> {
