@@ -30,6 +30,8 @@ enum Demo {
     NoRtx,
     /// A window of limited size on the second screen instead of full screen.
     Window,
+    /// The BCPack tables file is chosen (Plain leaves it missing).
+    TablesFound,
 }
 
 pub struct Capture {
@@ -71,7 +73,8 @@ impl Capture {
             d("03-settings-dlss-no-rtx", Some(core::Screen::Unsupported), 1970.0, Demo::NoRtx),
             s("03-settings-lower", Tab::Settings, Some(core::Screen::Main), 1530.0),
             w("03-settings-window", 1700.0),
-            s("03-settings-engine", Tab::Settings, Some(core::Screen::Main), 4640.0),
+            s("03-settings-engine", Tab::Settings, Some(core::Screen::Main), 4900.0),
+            d("03-settings-engine-tables", Some(core::Screen::Main), 4900.0, Demo::TablesFound),
             s("03-saves", Tab::Saves, Some(core::Screen::Idle), 0.0),
             s("04-flags", Tab::Flags, Some(core::Screen::Main), 0.0),
             s("04-flags-list", Tab::Flags, Some(core::Screen::Main), 520.0),
@@ -115,7 +118,7 @@ impl Capture {
         core.force_screen = step.screen;
         core.page_scroll = Some(step.scroll);
         match step.dlss {
-            Demo::Plain | Demo::NoRtx | Demo::Window | Demo::Fsr => {
+            Demo::Plain | Demo::NoRtx | Demo::Window | Demo::Fsr | Demo::TablesFound => {
                 core.profile.options.dlss = Default::default();
                 core.settings.dirs.remove(core::dlss::STREAMLINE_DIR);
                 let fsr = step.dlss == Demo::Fsr;
@@ -127,6 +130,11 @@ impl Capture {
                 core.profile.options.dlss = core::dlss::DlssSettings { enabled: true, quality: core::dlss::Quality::Balanced, frame_generation: true };
                 core.settings.dirs.insert(core::dlss::STREAMLINE_DIR.into(), "D:/NVIDIA/Streamline/bin/x64".into());
             }
+        }
+        if step.dlss == Demo::TablesFound {
+            core.settings.dirs.insert(core::bcpack::TABLES_ENV.into(), "D:/VictoryUnited/bcpack-tables.bin".into());
+        } else {
+            core.settings.dirs.remove(core::bcpack::TABLES_ENV);
         }
         let window = step.dlss == Demo::Window;
         core.profile.options.window_size = if window { "1920x1080".into() } else { String::new() };

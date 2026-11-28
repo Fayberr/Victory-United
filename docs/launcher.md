@@ -56,6 +56,15 @@ The game is mostly limited by the processor, so DLSS may help only a little. It 
 `VICTORY_DLSS_MODE`, `VICTORY_STREAMLINE_DIR`, and for frame generation `VICTORY_FRAMEGEN=dlss`, `VICTORY_THIN`
 and `VICTORY_DLSSG_SM86_DIR`. Safe mode turns DLSS off.
 
+Texture data file. Newer engine builds (c21 and later) need a small file with the constant tables of the BCPack
+texture format (`bcpack-tables.bin`, 77,982 bytes) to unpack some textures. Without it character skin and clothes
+show as coloured checkers. The file is not part of the launcher or of this repository (see
+[asset policy](asset-policy.md)): you use a copy you are allowed to have. Settings has a "Texture data file" block in
+the Engine card with Choose file and Clear. Without a choice, the launcher looks for `bcpack-tables.bin` in the
+engine's folder, in the folder that holds the engine builds, and next to the launcher. It checks the file's size and
+content first and hands the path to the engine in `VICTORY_BCPACK_TABLES`. Engines that do not read the variable
+(c20x and older have the tables built in) never get a warning for a missing file.
+
 Profiles let you keep several sets of settings: create, duplicate, rename, delete, export to a `.toml` file
 and import one.
 

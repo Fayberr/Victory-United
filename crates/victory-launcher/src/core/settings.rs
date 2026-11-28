@@ -22,6 +22,8 @@ pub struct SettingsUi {
     pub message: String,
     /// Why the engine the user picked was refused (Engine card).
     pub engine_error: String,
+    /// Why the BCPack tables file the user picked was refused (Engine card).
+    pub tables_error: String,
     saves: SavesUi,
     storage: StorageUi,
 }
@@ -528,6 +530,7 @@ fn owned_by_options() -> HashSet<String> {
         s.extend(u.env.keys().cloned());
     }
     s.extend(super::dlss::OWNED.iter().map(|n| n.to_string()));
+    s.insert(super::bcpack::TABLES_ENV.to_string());
     s
 }
 
@@ -763,6 +766,8 @@ fn engine_section(core: &mut CoreState, ui: &mut egui::Ui) {
             }
         });
         ui.add_space(8.0);
+        tables_block(core, ui);
+        ui.add_space(8.0);
         ui.label(theme::strong(tr("settings.game")).size(15.0));
         match &core.game {
             Some(g) => {
@@ -781,6 +786,51 @@ fn engine_section(core: &mut CoreState, ui: &mut egui::Ui) {
             }
         }
     });
+}
+
+/// The BCPack tables file: what the engine needs for some textures and where the launcher found it.
+fn tables_block(core: &mut CoreState, ui: &mut egui::Ui) {
+    use super::bcpack::{self, Status};
+    ui.label(theme::strong(tr("settings.bcpack")).size(15.0));
+    let status = core.tables_status();
+    let wants = core.engine_wants_tables();
+    match &status {
+        Status::Chosen(path) | Status::Found(path) => {
+            ui.label(trf("settings.bcpack_using", &[("path", &path.to_string_lossy())]));
+        }
+        Status::Refused(path, problem) => {
+            ui.label(theme::error_text(ui, trf("settings.bcpack_refused", &[("path", &path.to_string_lossy()), ("why", problem.text())])).size(12.5));
+        }
+        Status::Missing if wants => {
+            ui.label(theme::warn_text(ui, tr("settings.bcpack_missing")));
+        }
+        Status::Missing => {
+            ui.label(theme::dim(tr("settings.bcpack_not_needed")).size(12.5));
+        }
+    }
+    ui.label(theme::dim(tr("settings.bcpack_help")).size(12.5));
+    ui.horizontal(|ui| {
+        if ui.button(tr("settings.bcpack_choose")).clicked() {
+            if let Some(path) = pick_file((tr("settings.bcpack_filter"), &["bin"])) {
+                match bcpack::check(&path) {
+                    Ok(()) => {
+                        core.settings.dirs.insert(bcpack::TABLES_ENV.to_string(), path.to_string_lossy().into_owned());
+                        core.ui.settings.tables_error.clear();
+                        core.save_settings();
+                    }
+                    Err(problem) => core.ui.settings.tables_error = problem.text().to_string(),
+                }
+            }
+        }
+        if core.settings.dirs.contains_key(bcpack::TABLES_ENV) && ui.button(tr("settings.clear")).clicked() {
+            core.settings.dirs.remove(bcpack::TABLES_ENV);
+            core.ui.settings.tables_error.clear();
+            core.save_settings();
+        }
+    });
+    if !core.ui.settings.tables_error.is_empty() {
+        ui.label(theme::error_text(ui, trf("settings.bcpack_not_used", &[("why", &core.ui.settings.tables_error)])).size(12.5));
+    }
 }
 
 // ---------------------------------------------------------------- preview

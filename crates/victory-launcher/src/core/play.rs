@@ -106,6 +106,9 @@ fn idle(core: &mut CoreState, ui: &mut egui::Ui) {
         ui.label(theme::warn_text(ui, tr("play.need_engine")));
     } else {
         ui.label(theme::dim(shader_status(core)));
+        if core.engine_wants_tables() && core.tables_status().path().is_none() {
+            ui.label(theme::warn_text(ui, tr("play.bcpack_missing")).size(12.5));
+        }
     }
 }
 

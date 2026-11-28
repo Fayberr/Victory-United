@@ -1,6 +1,7 @@
 //! "Core" half of the launcher: play, settings, presets, flags, profiles, bug report. Owned by the core worker.
 pub mod about;
 pub mod actions;
+pub mod bcpack;
 pub mod dlss;
 pub mod engine;
 pub mod firstrun;
@@ -195,6 +196,22 @@ impl CoreState {
             _ => RunState::Running { pid: 4242, since: Instant::now() - Duration::from_secs(312), log },
         };
         self.last_env = self.resolved().0.sorted();
+    }
+
+    /// The BCPack tables file a start would use. In the demo, only what the demo set up.
+    pub fn tables_status(&self) -> bcpack::Status {
+        if self.ui.demo {
+            return match self.settings.dirs.get(bcpack::TABLES_ENV).filter(|p| !p.is_empty()) {
+                Some(path) => bcpack::Status::Chosen(path.into()),
+                None => bcpack::Status::Missing,
+            };
+        }
+        bcpack::locate(&self.settings.dirs, self.engine_exe().as_deref(), &paths::app_dir())
+    }
+
+    /// Does the engine in use read the tables file at all (older builds have the tables built in)?
+    pub fn engine_wants_tables(&self) -> bool {
+        self.ui.demo || self.engine_exe().is_some_and(|exe| bcpack::engine_wants_tables(&exe))
     }
 
     pub fn engine_exe(&self) -> Option<PathBuf> {

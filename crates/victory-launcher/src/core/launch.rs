@@ -231,7 +231,7 @@ pub struct Plan {
 
 /// Names of path variables the launcher sets itself. Other inherited `VICTORY_*` values are removed from the
 /// child environment, as scripts/play.ps1 does, so a stray setting in the user's shell cannot change a run.
-pub const PATH_VARS: [&str; 5] = ["VICTORY_CONFIG", "VICTORY_GAME_DIR", "VICTORY_CACHE_DIR", "VICTORY_DATA_DIR", "VICTORY_FIDELITYFX_DIR"];
+pub const PATH_VARS: [&str; 6] = ["VICTORY_CONFIG", "VICTORY_GAME_DIR", "VICTORY_CACHE_DIR", "VICTORY_DATA_DIR", "VICTORY_FIDELITYFX_DIR", "VICTORY_BCPACK_TABLES"];
 
 impl Plan {
     pub fn new(

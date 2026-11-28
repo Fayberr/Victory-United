@@ -153,16 +153,14 @@ impl LaunchInput<'_> {
         let game = self.game?;
         let engine = self.engine.clone()?;
         let (resolved, _) = resolve(self.profile, self.hardware, &self.settings.dirs, self.extra);
-        Some(Plan::new(
-            engine,
-            &game.folder,
-            game.exe.clone(),
-            self.profile.options.console,
-            &resolved,
-            &super::dlss::without_dlss_dirs(&self.settings.dirs),
-            cache_root,
-            data_dir,
-        ))
+        // The BCPack tables file: the player's choice or one found next to the launcher, only when it passes the
+        // checks, so the engine never gets a path to a wrong file.
+        let mut dirs = super::dlss::without_dlss_dirs(&self.settings.dirs);
+        dirs.remove(super::bcpack::TABLES_ENV);
+        if let Some(tables) = super::bcpack::locate(&self.settings.dirs, Some(&engine), &crate::paths::app_dir()).path() {
+            dirs.insert(super::bcpack::TABLES_ENV.into(), tables.to_string_lossy().into_owned());
+        }
+        Some(Plan::new(engine, &game.folder, game.exe.clone(), self.profile.options.console, &resolved, &dirs, cache_root, data_dir))
     }
 }
 
@@ -419,6 +417,36 @@ mod tests {
         let (r, _) = resolve(&profile, Some(&nvidia), &dirs, &[]);
         assert_eq!(r.env.get("VICTORY_FSR_4K").map(String::as_str), Some("balanced"));
         assert!(!r.env.contains_key("VICTORY_DLSS"));
+    }
+
+    #[test]
+    fn the_engine_gets_the_tables_file_only_when_it_is_a_good_one() {
+        use super::super::bcpack::{sample_bytes, FILE_NAME, TABLES_ENV};
+        let temp = tempfile::tempdir().unwrap();
+        let build = temp.path().join("engine").join("b1");
+        std::fs::create_dir_all(&build).unwrap();
+        let engine = build.join("victory.exe");
+        let game = Game { folder: temp.path().join("game"), exe: temp.path().join("game").join("g.exe"), title: "G".into() };
+        let profile = Profile::default();
+        let plan = |settings: &Settings| {
+            let input = LaunchInput { settings, profile: &profile, extra: &[], hardware: None, game: Some(&game), engine: Some(engine.clone()) };
+            input.plan(&temp.path().join("cache"), &temp.path().join("data")).unwrap().env.get(TABLES_ENV).cloned()
+        };
+        let mut settings = Settings::default();
+        assert_eq!(plan(&settings), None, "nothing chosen and nothing found");
+        // A wrong file the player chose is never handed to the engine.
+        let bad = temp.path().join("bad.bin");
+        std::fs::write(&bad, b"nope").unwrap();
+        settings.dirs.insert(TABLES_ENV.into(), bad.to_string_lossy().into_owned());
+        assert_eq!(plan(&settings), None);
+        // A file in the engine folder is found without any setting.
+        std::fs::write(build.join(FILE_NAME), sample_bytes()).unwrap();
+        assert_eq!(plan(&settings), Some(build.join(FILE_NAME).to_string_lossy().into_owned()));
+        // The player's own good choice wins.
+        let mine = temp.path().join("mine.bin");
+        std::fs::write(&mine, sample_bytes()).unwrap();
+        settings.dirs.insert(TABLES_ENV.into(), mine.to_string_lossy().into_owned());
+        assert_eq!(plan(&settings), Some(mine.to_string_lossy().into_owned()));
     }
 
     #[test]
