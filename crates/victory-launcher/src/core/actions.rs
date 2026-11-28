@@ -114,6 +114,17 @@ pub fn resolve(profile: &Profile, hw: Option<&Hardware>, dirs: &BTreeMap<String,
     let (gpu, vendor) = hw.map(|h| (h.gpu_name.as_str(), h.vendor_id)).unwrap_or_default();
     let id = launch::preset_id(file, profile, gpu, vendor).to_string();
     let dlss = dlss_flags(profile, hw, dirs);
+    // One upscaler at a time: the engine refuses to start with both. DLSS wins when it is switched on for a
+    // card that has it, which is what the Settings tab shows as the chosen upscaler.
+    let dlss_chosen = profile.options.dlss.enabled && super::dlss::card(gpu, vendor).offered();
+    let mut without_fsr;
+    let profile = if dlss_chosen && profile.options.upscaler != "off" {
+        without_fsr = profile.clone();
+        without_fsr.options.upscaler = "off".into();
+        &without_fsr
+    } else {
+        profile
+    };
     (launch::resolve_with(file, &id, profile, extra, &dlss), id)
 }
 
@@ -377,6 +388,37 @@ mod tests {
         for bad in ["../run-1.log", "run-/../../x.log", "C:run-1.log", "settings.toml", "run-2.log", ""] {
             assert!(log_by_name(temp.path(), bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn fsr_and_dlss_never_reach_the_engine_together() {
+        let mut nvidia = Hardware::demo();
+        nvidia.gpu_name = "NVIDIA GeForce RTX 3080 Ti".into();
+        nvidia.vendor_id = 0x10DE;
+        let mut amd = nvidia.clone();
+        amd.gpu_name = "AMD Radeon RX 7900 XTX".into();
+        amd.vendor_id = 0x1002;
+        let mut profile = Profile::default();
+        profile.options.upscaler = "fsr".into();
+        profile.options.upscaler_mode = "balanced".into();
+        profile.options.dlss.enabled = true;
+        let dirs: BTreeMap<String, String> = [(super::super::dlss::STREAMLINE_DIR.to_string(), "C:/sl".to_string())].into();
+        // RTX card with both switched on: DLSS runs, FSR is left out.
+        let (r, _) = resolve(&profile, Some(&nvidia), &dirs, &[]);
+        assert_eq!(r.env.get("VICTORY_DLSS").map(String::as_str), Some("1"));
+        assert!(!r.env.contains_key("VICTORY_FSR_4K"), "FSR must not be set next to DLSS");
+        // DLSS chosen but no NVIDIA folder yet: still not FSR next to it (the Settings tab shows DLSS as the choice).
+        let (r, _) = resolve(&profile, Some(&nvidia), &BTreeMap::new(), &[]);
+        assert!(!r.env.contains_key("VICTORY_DLSS") && !r.env.contains_key("VICTORY_FSR_4K"));
+        // A card without RTX cannot use DLSS, so the stored FSR choice stays.
+        let (r, _) = resolve(&profile, Some(&amd), &dirs, &[]);
+        assert_eq!(r.env.get("VICTORY_FSR_4K").map(String::as_str), Some("balanced"));
+        assert!(!r.env.contains_key("VICTORY_DLSS"));
+        // FSR alone is unchanged.
+        profile.options.dlss.enabled = false;
+        let (r, _) = resolve(&profile, Some(&nvidia), &dirs, &[]);
+        assert_eq!(r.env.get("VICTORY_FSR_4K").map(String::as_str), Some("balanced"));
+        assert!(!r.env.contains_key("VICTORY_DLSS"));
     }
 
     #[test]

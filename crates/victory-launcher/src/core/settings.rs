@@ -54,8 +54,8 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
         });
         ui.add_space(12.0);
         options_section(core, ui);
-        ui.add_space(10.0);
-        dlss_section(core, ui);
+        ui.add_space(12.0);
+        upscaling_section(core, ui);
         ui.add_space(12.0);
         for (group, title) in [("graphics", "settings.g_graphics"), ("memory", "settings.g_memory"), ("threads", "settings.g_threads"), ("debug", "settings.g_debug")] {
             flag_group(core, ui, &resolved, group, tr(title));
@@ -248,46 +248,6 @@ fn options_section(core: &mut CoreState, ui: &mut egui::Ui) {
             changed = true;
         }
         ui.label(theme::dim(tr("settings.safe_help")).size(12.5));
-
-        ui.add_space(10.0);
-        ui.label(theme::strong(tr("settings.upscaling")).size(15.0));
-        ui.add_space(4.0);
-        let cur = file.upscaler.iter().find(|u| u.id == core.profile.options.upscaler).unwrap_or(&file.upscaler[0]);
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("settings_upscaler").selected_text(&cur.name).width(200.0).show_ui(ui, |ui| {
-                for u in &file.upscaler {
-                    let label = if u.available { u.name.clone() } else { format!("{} ({})", u.name, tr("settings.unavailable")) };
-                    let resp = ui.add_enabled(u.available, egui::Button::selectable(core.profile.options.upscaler == u.id, label));
-                    if resp.clicked() {
-                        core.profile.options.upscaler = u.id.clone();
-                        if !u.modes.contains(&core.profile.options.upscaler_mode) {
-                            core.profile.options.upscaler_mode = u.modes.first().cloned().unwrap_or_default();
-                        }
-                        changed = true;
-                    }
-                }
-            });
-            if !cur.modes.is_empty() {
-                egui::ComboBox::from_id_salt("settings_mode").selected_text(&core.profile.options.upscaler_mode).width(160.0).show_ui(ui, |ui| {
-                    for m in &cur.modes {
-                        if ui.selectable_label(core.profile.options.upscaler_mode == *m, m).clicked() {
-                            core.profile.options.upscaler_mode = m.clone();
-                            changed = true;
-                        }
-                    }
-                });
-            }
-        });
-        // What is not available is shown with its reason, straight from the data file.
-        for u in file.upscaler.iter().filter(|u| !u.available) {
-            ui.label(theme::dim(format!("{}: {}", u.name, u.reason.as_deref().unwrap_or(""))).size(12.5));
-            if let Some(note) = &u.files_note {
-                files_row(core, ui, u.files_env.as_deref(), note);
-            }
-        }
-        if let (Some(note), true) = (&cur.files_note, cur.available) {
-            files_row(core, ui, cur.files_env.as_deref(), note);
-        }
     });
     if changed {
         core.save_profile();
@@ -359,84 +319,180 @@ fn screen_block(core: &mut CoreState, ui: &mut egui::Ui, file: &super::presets::
     changed
 }
 
-// ---------------------------------------------------------------- DLSS
+// ---------------------------------------------------------------- upscaling
 
-/// NVIDIA DLSS: off by default, only on RTX cards. NVIDIA's files are never shipped; the person points at
-/// their own folder.
-fn dlss_section(core: &mut CoreState, ui: &mut egui::Ui) {
+/// What the Upscaling choice can be. DLSS is not in the data file's list because it needs the card, the
+/// chosen NVIDIA folder and its own sub-options; here it is one more entry of the same choice, so FSR and
+/// DLSS can never both be on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pick<'a> {
+    /// An entry of the data file (Off, AMD FSR).
+    Listed(&'a str),
+    Dlss,
+}
+
+/// The modes every upscaler offers.
+const UPSCALER_MODES: [&str; 3] = ["quality", "balanced", "performance"];
+
+/// "quality" shown as "Quality".
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+}
+
+/// The whole upscaling setting in one card: pick Off, AMD FSR or NVIDIA DLSS, then the mode and the files
+/// the chosen one needs. NVIDIA's files are never shipped; the person points at their own folder.
+fn upscaling_section(core: &mut CoreState, ui: &mut egui::Ui) {
+    let file = builtin();
     let card = core.dlss_card();
+    let hw_known = core.hw.is_some();
     let mut changed = false;
     theme::card(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(theme::strong(tr("dlss.title")).size(16.0));
+        ui.label(theme::strong(tr("settings.upscaling")).size(16.0));
         ui.add_space(4.0);
-        if core.hw.is_none() {
-            ui.label(theme::dim(tr("dlss.checking")).size(12.5));
-            return;
-        }
-        if !card.offered() {
-            ui.label(theme::dim(tr("dlss.not_rtx")).size(12.5));
-            return;
-        }
-        let mut s = core.profile.options.dlss.clone();
-        if ui.checkbox(&mut s.enabled, tr("dlss.enable")).changed() {
-            if !s.enabled {
-                s.frame_generation = false;
+        // DLSS counts as chosen only where it can run; an old profile with DLSS on for another card shows Off.
+        let dlss_chosen = core.profile.options.dlss.enabled && card.offered();
+        let listed = file.upscaler.iter().find(|u| u.id == core.profile.options.upscaler).unwrap_or(&file.upscaler[0]);
+        let current = if dlss_chosen { Pick::Dlss } else { Pick::Listed(listed.id.as_str()) };
+        let current_name = if dlss_chosen { tr("dlss.title").to_string() } else { listed.name.clone() };
+        let mut picked: Option<Pick> = None;
+        let mut mode_picked: Option<&str> = None;
+        let mode_now = if dlss_chosen { core.profile.options.dlss.quality.value().to_string() } else { core.profile.options.upscaler_mode.clone() };
+        let has_modes = dlss_chosen || !listed.modes.is_empty();
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("settings_upscaler").selected_text(&current_name).width(200.0).show_ui(ui, |ui| {
+                for u in &file.upscaler {
+                    let label = if u.available { u.name.clone() } else { format!("{} ({})", u.name, tr("settings.unavailable")) };
+                    if ui.add_enabled(u.available, egui::Button::selectable(current == Pick::Listed(u.id.as_str()), label)).clicked() {
+                        picked = Some(Pick::Listed(u.id.as_str()));
+                    }
+                }
+                let label = if !hw_known {
+                    format!("{} ({})", tr("dlss.title"), tr("settings.checking"))
+                } else if card.offered() {
+                    tr("dlss.title").to_string()
+                } else {
+                    format!("{} ({})", tr("dlss.title"), tr("dlss.needs_rtx"))
+                };
+                if ui.add_enabled(card.offered(), egui::Button::selectable(current == Pick::Dlss, label)).clicked() {
+                    picked = Some(Pick::Dlss);
+                }
+            });
+            if has_modes {
+                egui::ComboBox::from_id_salt("settings_mode").selected_text(capitalized(&mode_now)).width(160.0).show_ui(ui, |ui| {
+                    for m in UPSCALER_MODES {
+                        if ui.selectable_label(mode_now == m, capitalized(m)).clicked() {
+                            mode_picked = Some(m);
+                        }
+                    }
+                });
+            }
+        });
+        ui.label(theme::dim(tr("settings.upscaling_one")).size(12.5));
+        if let Some(pick) = picked {
+            let options = &mut core.profile.options;
+            // Both the mode and the choice carry over, so switching between FSR and DLSS keeps "Balanced".
+            let carry = mode_now.clone();
+            match pick {
+                Pick::Dlss => {
+                    options.dlss.enabled = true;
+                    options.upscaler = "off".into();
+                    if let Some(q) = dlss::Quality::ALL.into_iter().find(|q| q.value() == carry) {
+                        options.dlss.quality = q;
+                    }
+                }
+                Pick::Listed(id) => {
+                    options.dlss.enabled = false;
+                    options.dlss.frame_generation = false;
+                    options.upscaler = id.to_string();
+                    let modes = file.upscaler.iter().find(|u| u.id == id).map(|u| u.modes.as_slice()).unwrap_or_default();
+                    options.upscaler_mode = if modes.contains(&carry) { carry } else { modes.first().cloned().unwrap_or_default() };
+                }
             }
             changed = true;
         }
-        ui.label(theme::dim(tr("dlss.honest")).size(12.5));
-        if s.enabled {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label(theme::dim(tr("dlss.quality")));
-                for q in dlss::Quality::ALL {
-                    if ui.selectable_label(s.quality == q, q.label()).clicked() {
-                        s.quality = q;
-                        changed = true;
-                    }
+        if let Some(mode) = mode_picked {
+            let options = &mut core.profile.options;
+            if options.dlss.enabled && card.offered() {
+                if let Some(q) = dlss::Quality::ALL.into_iter().find(|q| q.value() == mode) {
+                    options.dlss.quality = q;
                 }
-            });
-            ui.add_space(6.0);
-            files_row(core, ui, Some(dlss::STREAMLINE_DIR), tr("dlss.files_note"));
-            ui.add_space(8.0);
-            let blocker = dlss::frame_generation_blocker(&dlss::DlssSettings { frame_generation: true, ..s.clone() }, card, &core.settings.dirs);
-            if ui.checkbox(&mut s.frame_generation, tr("dlss.framegen")).changed() {
-                changed = true;
+            } else {
+                options.upscaler_mode = mode.to_string();
             }
-            ui.label(theme::dim(tr("dlss.framegen_help")).size(12.5));
-            if card == dlss::Card::NeedsAddon {
-                ui.label(theme::dim(tr("dlss.addon_note")).size(12.5));
-                if s.frame_generation {
-                    files_row(core, ui, Some(dlss::SM86_DIR), tr("dlss.addon_folder"));
-                }
-            }
-            if s.frame_generation {
-                if let Some(why) = blocker {
-                    ui.label(theme::warn_text(ui, why).size(12.5));
-                }
-            }
-            if core.profile.options.safe {
-                ui.label(theme::warn_text(ui, tr("dlss.safe_mode")).size(12.5));
-            }
-            let dir = core.settings.dirs.get(dlss::STREAMLINE_DIR).cloned().unwrap_or_default();
-            if !dir.trim().is_empty() {
-                let missing = dlss::missing_files(std::path::Path::new(dir.trim()), s.frame_generation);
-                if !missing.is_empty() {
-                    ui.label(theme::warn_text(ui, format!("{} {}", tr("dlss.missing"), missing.join(", "))).size(12.5));
-                }
+            changed = true;
+        }
+        // What is not available is shown with its reason, straight from the data file.
+        for u in file.upscaler.iter().filter(|u| !u.available) {
+            ui.label(theme::dim(format!("{}: {}", u.name, u.reason.as_deref().unwrap_or(""))).size(12.5));
+            if let Some(note) = &u.files_note {
+                files_row(core, ui, u.files_env.as_deref(), note);
             }
         }
-        ui.add_space(6.0);
-        ui.label(theme::dim(tr("dlss.nvidia_terms")).size(12.5));
-        ui.label(theme::dim(tr("dlss.how_to_get")).size(12.5));
-        if s != core.profile.options.dlss {
-            core.profile.options.dlss = s;
+        if hw_known && !card.offered() {
+            ui.label(theme::dim(tr("dlss.not_rtx")).size(12.5));
+        }
+        match current {
+            Pick::Dlss => {
+                ui.add_space(6.0);
+                changed |= dlss_details(core, ui, card);
+            }
+            Pick::Listed(id) => {
+                if let Some(u) = file.upscaler.iter().find(|u| u.id == id && u.available) {
+                    if let Some(note) = &u.files_note {
+                        ui.add_space(6.0);
+                        files_row(core, ui, u.files_env.as_deref(), note);
+                    }
+                }
+            }
         }
     });
     if changed {
         core.save_profile();
     }
+}
+
+/// What belongs to NVIDIA DLSS once it is the chosen upscaler: the Streamline folder, frame generation and
+/// the notes about NVIDIA's files. Returns true when the profile changed.
+fn dlss_details(core: &mut CoreState, ui: &mut egui::Ui, card: dlss::Card) -> bool {
+    let mut s = core.profile.options.dlss.clone();
+    ui.label(theme::dim(tr("dlss.honest")).size(12.5));
+    ui.add_space(6.0);
+    files_row(core, ui, Some(dlss::STREAMLINE_DIR), tr("dlss.files_note"));
+    ui.add_space(8.0);
+    let blocker = dlss::frame_generation_blocker(&dlss::DlssSettings { frame_generation: true, ..s.clone() }, card, &core.settings.dirs);
+    ui.checkbox(&mut s.frame_generation, tr("dlss.framegen"));
+    ui.label(theme::dim(tr("dlss.framegen_help")).size(12.5));
+    if card == dlss::Card::NeedsAddon {
+        ui.label(theme::dim(tr("dlss.addon_note")).size(12.5));
+        if s.frame_generation {
+            files_row(core, ui, Some(dlss::SM86_DIR), tr("dlss.addon_folder"));
+        }
+    }
+    if s.frame_generation {
+        if let Some(why) = blocker {
+            ui.label(theme::warn_text(ui, why).size(12.5));
+        }
+    }
+    if core.profile.options.safe {
+        ui.label(theme::warn_text(ui, tr("dlss.safe_mode")).size(12.5));
+    }
+    let dir = core.settings.dirs.get(dlss::STREAMLINE_DIR).cloned().unwrap_or_default();
+    if !dir.trim().is_empty() {
+        let missing = dlss::missing_files(std::path::Path::new(dir.trim()), s.frame_generation);
+        if !missing.is_empty() {
+            ui.label(theme::warn_text(ui, format!("{} {}", tr("dlss.missing"), missing.join(", "))).size(12.5));
+        }
+    }
+    ui.add_space(6.0);
+    ui.label(theme::dim(tr("dlss.nvidia_terms")).size(12.5));
+    ui.label(theme::dim(tr("dlss.how_to_get")).size(12.5));
+    let changed = s != core.profile.options.dlss;
+    if changed {
+        core.profile.options.dlss = s;
+    }
+    changed
 }
 
 /// "Files needed" note with a folder chooser for the variable that points at them.

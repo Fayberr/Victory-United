@@ -98,7 +98,7 @@ pub const TOOLS: &[super::Tool] = &[
             req(
                 "options",
                 Kind::Object,
-                "Options to change: console, safe, toggles, upscaler, upscaler_mode, dlss (an object with enabled, quality as quality, balanced or performance, and frame_generation). DLSS only takes effect on an NVIDIA RTX card with the Streamline folder chosen."
+                "Options to change: console, safe, toggles, upscaler, upscaler_mode, dlss (an object with enabled, quality as quality, balanced or performance, and frame_generation). DLSS only takes effect on an NVIDIA RTX card with the Streamline folder chosen. Only one upscaler runs at a time: turning DLSS on sets upscaler to off, and choosing an upscaler turns DLSS off."
             )
         ],
         r#"{"options":{"console":"series-x","safe":true}}"#,
@@ -522,6 +522,23 @@ fn validate_options(options: &mut launch::Options, changed: &Map<String, Value>)
                 "Unknown mode for this upscaler."
             );
         }
+    }
+    // One upscaler at a time (the engine refuses to start with both): what this call asks for wins.
+    let dlss_on = changed
+        .get("dlss")
+        .and_then(|d| d.get("enabled"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    let fsr_on = changed.contains_key("upscaler") && options.upscaler != "off";
+    ensure!(
+        !(dlss_on && fsr_on),
+        "Choose one upscaler: AMD FSR or NVIDIA DLSS, not both."
+    );
+    if fsr_on {
+        options.dlss.enabled = false;
+        options.dlss.frame_generation = false;
+    } else if dlss_on {
+        options.upscaler = "off".into();
     }
     Ok(())
 }

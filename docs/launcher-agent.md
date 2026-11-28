@@ -170,7 +170,7 @@ Example arguments
 Edit a profile's console, safe mode, toggles or upscaler settings.
 
 - `name` (optional). Profile to edit. Defaults to the active one.
-- `options` (required). Options to change: console, safe, toggles, upscaler, upscaler_mode, dlss (an object with enabled, quality as quality, balanced or performance, and frame_generation). DLSS only takes effect on an NVIDIA RTX card with the Streamline folder chosen.
+- `options` (required). Options to change: console, safe, toggles, upscaler, upscaler_mode, dlss (an object with enabled, quality as quality, balanced or performance, and frame_generation). DLSS only takes effect on an NVIDIA RTX card with the Streamline folder chosen. Only one upscaler runs at a time: turning DLSS on sets upscaler to off, and choosing an upscaler turns DLSS off.
 
 Example arguments
 

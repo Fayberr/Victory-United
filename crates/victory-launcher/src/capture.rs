@@ -24,6 +24,8 @@ enum Demo {
     Plain,
     /// RTX card with DLSS, a folder and frame generation chosen.
     DlssOn,
+    /// AMD FSR chosen (balanced), DLSS off.
+    Fsr,
     /// A card without RTX.
     NoRtx,
     /// A window of limited size on the second screen instead of full screen.
@@ -63,8 +65,9 @@ impl Capture {
             s("03-settings-backups", Tab::Settings, Some(core::Screen::Main), 640.0),
             s("03-settings-storage", Tab::Settings, Some(core::Screen::Main), 1065.0),
             d("03-settings-dlss-off", Some(core::Screen::Main), 1970.0, Demo::Plain),
-            d("03-settings-dlss-on", Some(core::Screen::Main), 1970.0, Demo::DlssOn),
-            d("03-settings-dlss-on-more", Some(core::Screen::Main), 2320.0, Demo::DlssOn),
+            d("03-settings-upscaling-fsr", Some(core::Screen::Main), 2050.0, Demo::Fsr),
+            d("03-settings-dlss-on", Some(core::Screen::Main), 2140.0, Demo::DlssOn),
+            d("03-settings-dlss-on-more", Some(core::Screen::Main), 2490.0, Demo::DlssOn),
             d("03-settings-dlss-no-rtx", Some(core::Screen::Unsupported), 1970.0, Demo::NoRtx),
             s("03-settings-lower", Tab::Settings, Some(core::Screen::Main), 1530.0),
             w("03-settings-window", 1700.0),
@@ -112,11 +115,15 @@ impl Capture {
         core.force_screen = step.screen;
         core.page_scroll = Some(step.scroll);
         match step.dlss {
-            Demo::Plain | Demo::NoRtx | Demo::Window => {
+            Demo::Plain | Demo::NoRtx | Demo::Window | Demo::Fsr => {
                 core.profile.options.dlss = Default::default();
                 core.settings.dirs.remove(core::dlss::STREAMLINE_DIR);
+                let fsr = step.dlss == Demo::Fsr;
+                core.profile.options.upscaler = if fsr { "fsr".into() } else { "off".into() };
+                core.profile.options.upscaler_mode = if fsr { "balanced".into() } else { "quality".into() };
             }
             Demo::DlssOn => {
+                core.profile.options.upscaler = "off".into();
                 core.profile.options.dlss = core::dlss::DlssSettings { enabled: true, quality: core::dlss::Quality::Balanced, frame_generation: true };
                 core.settings.dirs.insert(core::dlss::STREAMLINE_DIR.into(), "D:/NVIDIA/Streamline/bin/x64".into());
             }
