@@ -233,7 +233,9 @@ fn options_section(core: &mut CoreState, ui: &mut egui::Ui) {
         });
         ui.label(theme::dim(tr("settings.console_help")).size(12.5));
         ui.add_space(6.0);
-        for t in &file.toggle {
+        changed |= screen_block(core, ui, file);
+        ui.add_space(6.0);
+        for t in file.toggle.iter().filter(|t| t.id != FULLSCREEN) {
             let mut on = core.profile.options.toggles.get(&t.id).copied().unwrap_or(t.default);
             if ui.checkbox(&mut on, &t.name).changed() {
                 core.profile.options.toggles.insert(t.id.clone(), on);
@@ -290,6 +292,71 @@ fn options_section(core: &mut CoreState, ui: &mut egui::Ui) {
     if changed {
         core.save_profile();
     }
+}
+
+/// The toggle that the screen mode choice stands for.
+const FULLSCREEN: &str = "fullscreen";
+
+/// Window sizes offered for the game window (pixels), besides "Fit to screen".
+const WINDOW_SIZES: [&str; 5] = ["1280x720", "1600x900", "1920x1080", "2560x1440", "3200x1800"];
+
+/// Full screen or window, how big the window may be, and which screen the game opens on.
+fn screen_block(core: &mut CoreState, ui: &mut egui::Ui, file: &super::presets::PresetFile) -> bool {
+    let mut changed = false;
+    let default_full = file.toggle.iter().find(|t| t.id == FULLSCREEN).is_none_or(|t| t.default);
+    let full = core.profile.options.toggles.get(FULLSCREEN).copied().unwrap_or(default_full);
+    ui.horizontal(|ui| {
+        ui.label(theme::dim(tr("settings.screen_mode")));
+        for (is_full, label) in [(true, tr("settings.mode_full")), (false, tr("settings.mode_window"))] {
+            if ui.selectable_label(full == is_full, label).clicked() && full != is_full {
+                core.profile.options.toggles.insert(FULLSCREEN.into(), is_full);
+                changed = true;
+            }
+        }
+    });
+    ui.label(theme::dim(tr("settings.mode_help")).size(12.5));
+    ui.add_space(4.0);
+    ui.add_enabled_ui(!full, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(theme::dim(tr("settings.window_size")));
+            let shown = if core.profile.options.window_size.is_empty() {
+                tr("settings.window_fit").to_owned()
+            } else {
+                core.profile.options.window_size.replace('x', " x ")
+            };
+            egui::ComboBox::from_id_salt("settings_window_size").selected_text(shown).width(150.0).show_ui(ui, |ui| {
+                if ui.selectable_label(core.profile.options.window_size.is_empty(), tr("settings.window_fit")).clicked() {
+                    core.profile.options.window_size.clear();
+                    changed = true;
+                }
+                for size in WINDOW_SIZES {
+                    if ui.selectable_label(core.profile.options.window_size == size, size.replace('x', " x ")).clicked() {
+                        core.profile.options.window_size = size.into();
+                        changed = true;
+                    }
+                }
+            });
+        });
+        ui.label(theme::dim(tr("settings.window_size_help")).size(12.5));
+    });
+    let screens = core.hw.as_ref().map_or(1, |h| h.screens.max(1));
+    if screens > 1 {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(theme::dim(tr("settings.screen")));
+            let name = |n: u8| if n == 0 { tr("settings.screen_main").to_owned() } else { trf("settings.screen_n", &[("n", &n.to_string())]) };
+            egui::ComboBox::from_id_salt("settings_screen").selected_text(name(core.profile.options.monitor)).width(150.0).show_ui(ui, |ui| {
+                for n in 0..=screens.min(8) as u8 {
+                    if ui.selectable_label(core.profile.options.monitor == n, name(n)).clicked() {
+                        core.profile.options.monitor = n;
+                        changed = true;
+                    }
+                }
+            });
+        });
+        ui.label(theme::dim(tr("settings.screen_help")).size(12.5));
+    }
+    changed
 }
 
 // ---------------------------------------------------------------- DLSS

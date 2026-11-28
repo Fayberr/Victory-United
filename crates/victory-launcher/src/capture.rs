@@ -26,6 +26,8 @@ enum Demo {
     DlssOn,
     /// A card without RTX.
     NoRtx,
+    /// A window of limited size on the second screen instead of full screen.
+    Window,
 }
 
 pub struct Capture {
@@ -49,6 +51,7 @@ impl Capture {
         });
         let s = |name, tab, screen, scroll| Step { name, tab, screen, scroll, dlss: Demo::Plain };
         let d = |name, screen, scroll, dlss| Step { name, tab: Tab::Settings, screen, scroll, dlss };
+        let w = |name, scroll| Step { name, tab: Tab::Settings, screen: Some(core::Screen::Main), scroll, dlss: Demo::Window };
         let steps = vec![
             s("00-first-run", Tab::Play, Some(core::Screen::FirstRun), 0.0),
             s("01-play-warmup", Tab::Play, Some(core::Screen::WarmUp), 0.0),
@@ -64,6 +67,7 @@ impl Capture {
             d("03-settings-dlss-on-more", Some(core::Screen::Main), 2320.0, Demo::DlssOn),
             d("03-settings-dlss-no-rtx", Some(core::Screen::Unsupported), 1970.0, Demo::NoRtx),
             s("03-settings-lower", Tab::Settings, Some(core::Screen::Main), 1530.0),
+            w("03-settings-window", 1700.0),
             s("03-settings-engine", Tab::Settings, Some(core::Screen::Main), 4640.0),
             s("03-saves", Tab::Saves, Some(core::Screen::Idle), 0.0),
             s("04-flags", Tab::Flags, Some(core::Screen::Main), 0.0),
@@ -108,7 +112,7 @@ impl Capture {
         core.force_screen = step.screen;
         core.page_scroll = Some(step.scroll);
         match step.dlss {
-            Demo::Plain | Demo::NoRtx => {
+            Demo::Plain | Demo::NoRtx | Demo::Window => {
                 core.profile.options.dlss = Default::default();
                 core.settings.dirs.remove(core::dlss::STREAMLINE_DIR);
             }
@@ -116,6 +120,14 @@ impl Capture {
                 core.profile.options.dlss = core::dlss::DlssSettings { enabled: true, quality: core::dlss::Quality::Balanced, frame_generation: true };
                 core.settings.dirs.insert(core::dlss::STREAMLINE_DIR.into(), "D:/NVIDIA/Streamline/bin/x64".into());
             }
+        }
+        let window = step.dlss == Demo::Window;
+        core.profile.options.window_size = if window { "1920x1080".into() } else { String::new() };
+        core.profile.options.monitor = if window { 2 } else { 0 };
+        if window {
+            core.profile.options.toggles.insert("fullscreen".into(), false);
+        } else {
+            core.profile.options.toggles.remove("fullscreen");
         }
         crate::agent::ui::capture(core, step.name == "03-settings-agent-on");
         // Collect a finished screenshot.

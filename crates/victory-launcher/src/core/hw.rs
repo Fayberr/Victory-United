@@ -41,6 +41,8 @@ pub struct Hardware {
     pub cpu_cores: u32,
     pub cpu_threads: u32,
     pub windows_build: String,
+    /// How many screens the desktop is shown on (0 when unknown).
+    pub screens: u32,
     /// Set when the probe could not run (non-Windows, no adapter).
     pub note: String,
 }
@@ -189,6 +191,7 @@ impl Hardware {
             cpu_cores: 8,
             cpu_threads: 16,
             windows_build: "26100.2605".into(),
+            screens: 2,
             note: String::new(),
         }
     }
@@ -207,6 +210,8 @@ pub fn probe() -> Hardware {
 pub fn probe() -> Hardware {
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE};
     let mut hw = Hardware::default();
+    // SAFETY: a plain query of the system.
+    hw.screens = unsafe { windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CMONITORS) }.max(0) as u32;
     hw.cpu_threads = std::thread::available_parallelism().map_or(0, |n| n.get() as u32);
     hw.cpu_cores = physical_cores().unwrap_or(hw.cpu_threads);
     hw.ram_mb = total_ram_mb();

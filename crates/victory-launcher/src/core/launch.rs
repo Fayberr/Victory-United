@@ -52,6 +52,10 @@ pub struct Options {
     pub upscaler_mode: String,
     /// NVIDIA DLSS, off unless the person turns it on (see `dlss`).
     pub dlss: super::dlss::DlssSettings,
+    /// Biggest size of the game window ("1920x1080"); empty fits the window to the screen. Only used in a window.
+    pub window_size: String,
+    /// The screen the game opens on: 0 is the main one, otherwise the number Windows gives the screen.
+    pub monitor: u8,
 }
 
 impl Default for Options {
@@ -64,6 +68,8 @@ impl Default for Options {
             upscaler: "off".into(),
             upscaler_mode: "quality".into(),
             dlss: Default::default(),
+            window_size: String::new(),
+            monitor: 0,
         }
     }
 }
@@ -151,6 +157,12 @@ pub fn option_env(file: &PresetFile, o: &Options) -> Env {
         if o.toggles.get(&t.id).copied().unwrap_or(t.default) {
             env.extend(t.on.clone());
         }
+    }
+    if !o.window_size.is_empty() {
+        env.insert("VICTORY_WINDOW_MAX".into(), o.window_size.clone());
+    }
+    if o.monitor > 0 {
+        env.insert("VICTORY_MONITOR".into(), o.monitor.to_string());
     }
     if let Some(u) = file.upscaler.iter().find(|u| u.id == o.upscaler && u.available) {
         for (k, v) in &u.env {
@@ -517,6 +529,11 @@ mod tests {
         let e = option_env(f, &o);
         assert!(!e.contains_key("VICTORY_FULLSCREEN"));
         assert_eq!(e["VICTORY_BVH_BUILDER"], "1");
+        assert!(!e.contains_key("VICTORY_WINDOW_MAX") && !e.contains_key("VICTORY_MONITOR"));
+        o.window_size = "1920x1080".into();
+        o.monitor = 2;
+        let e = option_env(f, &o);
+        assert_eq!((e["VICTORY_WINDOW_MAX"].as_str(), e["VICTORY_MONITOR"].as_str()), ("1920x1080", "2"));
         o.upscaler = "fsr".into();
         o.upscaler_mode = "balanced".into();
         assert_eq!(option_env(f, &o)["VICTORY_FSR_4K"], "balanced");
