@@ -145,11 +145,10 @@ pub fn engine_wants_tables(engine: &Path) -> bool {
     let stamp = std::fs::metadata(engine).and_then(|m| m.modified()).ok();
     {
         let memo = MEMO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some((path, when, answer)) = memo.as_ref() {
-            if path == engine && *when == stamp {
+        if let Some((path, when, answer)) = memo.as_ref()
+            && path == engine && *when == stamp {
                 return *answer;
             }
-        }
     }
     let found = file_contains(engine, &[TABLES_ENV.as_bytes(), BUILT_IN_MARK.as_bytes()]);
     let answer = found[0] && !found[1];

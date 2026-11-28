@@ -298,7 +298,7 @@ mod platform {
                     // SAFETY: NVML's exported C signatures are declared above.
                     let address =
                         unsafe { GetProcAddress(dll.0, PCSTR(concat!($name, "\0").as_ptr())) }?;
-                    unsafe { std::mem::transmute::<_, $type>(address) }
+                    unsafe { std::mem::transmute::<unsafe extern "system" fn() -> isize, $type>(address) }
                 }};
             }
             let init = symbol!("nvmlInit_v2", Init);

@@ -295,14 +295,13 @@ fn profile_overview(ui: &mut egui::Ui, ops: &mut OpsState) {
                 set_profile(&mut ops.dev, profile::latest(&folder));
             }
             #[cfg(windows)]
-            if ui.button(tr("dev.profile_open")).clicked() {
-                if let Some(path) = rfd::FileDialog::new()
+            if ui.button(tr("dev.profile_open")).clicked()
+                && let Some(path) = rfd::FileDialog::new()
                     .add_filter(tr("dev.profiler"), &["txt", "profile"])
                     .pick_file()
                 {
                     set_profile(&mut ops.dev, Ok(path));
                 }
-            }
             if let Some(path) = &ops.dev.profile_path {
                 ui.label(theme::dim(
                     path.file_name().unwrap_or_default().to_string_lossy(),
@@ -390,8 +389,8 @@ fn profile_overview(ui: &mut egui::Ui, ops: &mut OpsState) {
                 }
             }
             #[cfg(windows)]
-            if ui.button(tr("monitor.export")).clicked() {
-                if let Some(path) = rfd::FileDialog::new()
+            if ui.button(tr("monitor.export")).clicked()
+                && let Some(path) = rfd::FileDialog::new()
                     .set_file_name("profile-overview.csv")
                     .save_file()
                 {
@@ -399,7 +398,6 @@ fn profile_overview(ui: &mut egui::Ui, ops: &mut OpsState) {
                         .err()
                         .map(|e| e.to_string());
                 }
-            }
             ui.label(theme::dim(trf(
                 "dev.profile_rounds",
                 &[("n", &data.rounds.to_string())],

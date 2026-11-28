@@ -141,11 +141,10 @@ impl OpsState {
 
     /// Writes the settings when they changed.
     pub fn save_if_changed(&mut self, before: &OpsSettings) {
-        if self.persist && *before != self.cfg {
-            if let Err(error) = self.cfg.save() {
+        if self.persist && *before != self.cfg
+            && let Err(error) = self.cfg.save() {
                 self.dev.note = Some(error.to_string());
             }
-        }
     }
 }
 

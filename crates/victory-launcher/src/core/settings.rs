@@ -441,12 +441,11 @@ fn upscaling_section(core: &mut CoreState, ui: &mut egui::Ui) {
                 changed |= dlss_details(core, ui, card);
             }
             Pick::Listed(id) => {
-                if let Some(u) = file.upscaler.iter().find(|u| u.id == id && u.available) {
-                    if let Some(note) = &u.files_note {
+                if let Some(u) = file.upscaler.iter().find(|u| u.id == id && u.available)
+                    && let Some(note) = &u.files_note {
                         ui.add_space(6.0);
                         files_row(core, ui, u.files_env.as_deref(), note);
                     }
-                }
             }
         }
     });
@@ -472,11 +471,10 @@ fn dlss_details(core: &mut CoreState, ui: &mut egui::Ui, card: dlss::Card) -> bo
             files_row(core, ui, Some(dlss::SM86_DIR), tr("dlss.addon_folder"));
         }
     }
-    if s.frame_generation {
-        if let Some(why) = blocker {
+    if s.frame_generation
+        && let Some(why) = blocker {
             ui.label(theme::warn_text(ui, why).size(12.5));
         }
-    }
     if core.profile.options.safe {
         ui.label(theme::warn_text(ui, tr("dlss.safe_mode")).size(12.5));
     }
@@ -504,12 +502,11 @@ fn files_row(core: &mut CoreState, ui: &mut egui::Ui, env: Option<&str>, note: &
     ui.horizontal(|ui| {
         let cur = core.settings.dirs.get(env).cloned().unwrap_or_default();
         ui.label(theme::dim(if cur.is_empty() { tr("settings.no_folder").to_string() } else { cur }).size(12.5));
-        if ui.small_button(tr("settings.choose_folder")).clicked() {
-            if let Some(p) = pick_folder() {
+        if ui.small_button(tr("settings.choose_folder")).clicked()
+            && let Some(p) = pick_folder() {
                 core.settings.dirs.insert(env.to_string(), p.to_string_lossy().into_owned());
                 core.save_settings();
             }
-        }
         if core.settings.dirs.contains_key(env) && ui.small_button(tr("settings.clear")).clicked() {
             core.settings.dirs.remove(env);
             core.save_settings();
@@ -659,13 +656,12 @@ fn profiles_section(core: &mut CoreState, ui: &mut egui::Ui) {
             ui.label(theme::dim(tr("settings.active")));
             egui::ComboBox::from_id_salt("profile_pick").selected_text(&core.profile.name).width(220.0).show_ui(ui, |ui| {
                 for n in &names {
-                    if ui.selectable_label(*n == core.profile.name, n).clicked() && *n != core.profile.name {
-                        if let Some(p) = core.profiles.iter().find(|p| &p.name == n).cloned() {
+                    if ui.selectable_label(*n == core.profile.name, n).clicked() && *n != core.profile.name
+                        && let Some(p) = core.profiles.iter().find(|p| &p.name == n).cloned() {
                             core.profile = p;
                             core.settings.active_profile = n.clone();
                             core.save_settings();
                         }
-                    }
                 }
             });
         });
@@ -688,17 +684,16 @@ fn profiles_section(core: &mut CoreState, ui: &mut egui::Ui) {
             if ui.add_enabled(names.len() > 1, egui::Button::new(tr("settings.delete"))).clicked() {
                 core.delete_active_profile();
             }
-            if ui.button(tr("settings.export")).clicked() {
-                if let Some(path) = save_file(&format!("{}.toml", launch::file_safe_name(&core.profile.name)), ("Profile", &["toml"])) {
+            if ui.button(tr("settings.export")).clicked()
+                && let Some(path) = save_file(&format!("{}.toml", launch::file_safe_name(&core.profile.name)), ("Profile", &["toml"])) {
                     let text = toml::to_string_pretty(&core.profile).unwrap_or_default();
                     core.ui.settings.message = match std::fs::write(&path, text) {
                         Ok(()) => tr("settings.exported").to_string(),
                         Err(e) => e.to_string(),
                     };
                 }
-            }
-            if ui.button(tr("settings.import")).clicked() {
-                if let Some(path) = pick_file(("Profile", &["toml"])) {
+            if ui.button(tr("settings.import")).clicked()
+                && let Some(path) = pick_file(("Profile", &["toml"])) {
                     match launch::load_profile_file(&path) {
                         Some(mut p) => {
                             if p.name.is_empty() || p.name == "Default" {
@@ -711,7 +706,6 @@ fn profiles_section(core: &mut CoreState, ui: &mut egui::Ui) {
                         None => core.ui.settings.message = tr("settings.import_failed").to_string(),
                     }
                 }
-            }
             if ui.button(tr("settings.open_profiles")).clicked() {
                 open_folder(&crate::paths::profiles_dir());
             }
@@ -753,14 +747,13 @@ fn engine_section(core: &mut CoreState, ui: &mut egui::Ui) {
         }
         egui::CollapsingHeader::new(theme::dim(tr("settings.engine_other")).size(12.5)).id_salt("other-engine").default_open(own).show(ui, |ui| {
             ui.label(theme::dim(tr("settings.engine_other_help")).size(12.5));
-            if ui.button(tr("settings.engine_choose")).clicked() {
-                if let Some(p) = pick_file(("victory.exe", &["exe"])) {
+            if ui.button(tr("settings.engine_choose")).clicked()
+                && let Some(p) = pick_file(("victory.exe", &["exe"])) {
                     core.ui.settings.engine_error = match core.use_engine(p) {
                         Ok(()) => String::new(),
                         Err(problem) => problem.text().to_string(),
                     };
                 }
-            }
             if !core.ui.settings.engine_error.is_empty() {
                 ui.label(theme::error_text(ui, core.ui.settings.engine_error.clone()).size(12.5));
             }
@@ -777,14 +770,13 @@ fn engine_section(core: &mut CoreState, ui: &mut egui::Ui) {
                 ui.label(theme::warn_text(ui, tr("play.need_game")));
             }
         }
-        if ui.button(tr("settings.game_change")).clicked() {
-            if let Some(p) = pick_folder() {
+        if ui.button(tr("settings.game_change")).clicked()
+            && let Some(p) = pick_folder() {
                 match super::game::from_pick(&p) {
                     Some(g) => core.set_game(g),
                     None => core.notice = Some(tr("play.not_a_game").to_string()),
                 }
             }
-        }
     });
 }
 
@@ -810,8 +802,8 @@ fn tables_block(core: &mut CoreState, ui: &mut egui::Ui) {
     }
     ui.label(theme::dim(tr("settings.bcpack_help")).size(12.5));
     ui.horizontal(|ui| {
-        if ui.button(tr("settings.bcpack_choose")).clicked() {
-            if let Some(path) = pick_file((tr("settings.bcpack_filter"), &["bin"])) {
+        if ui.button(tr("settings.bcpack_choose")).clicked()
+            && let Some(path) = pick_file((tr("settings.bcpack_filter"), &["bin"])) {
                 match bcpack::check(&path) {
                     Ok(()) => {
                         core.settings.dirs.insert(bcpack::TABLES_ENV.to_string(), path.to_string_lossy().into_owned());
@@ -821,7 +813,6 @@ fn tables_block(core: &mut CoreState, ui: &mut egui::Ui) {
                     Err(problem) => core.ui.settings.tables_error = problem.text().to_string(),
                 }
             }
-        }
         if core.settings.dirs.contains_key(bcpack::TABLES_ENV) && ui.button(tr("settings.clear")).clicked() {
             core.settings.dirs.remove(bcpack::TABLES_ENV);
             core.ui.settings.tables_error.clear();
@@ -987,8 +978,8 @@ fn backup_section(core: &mut CoreState, ui: &mut egui::Ui) {
         ui.label(theme::dim(tr("saves.retention_help")).size(12.5));
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("saves.folder"));
-            if ui.button(tr("settings.choose_folder")).clicked() && !core.ui.demo {
-                if let Some(p) = pick_folder() {
+            if ui.button(tr("settings.choose_folder")).clicked() && !core.ui.demo
+                && let Some(p) = pick_folder() {
                     let settings = paths::settings_file();
                     let engine = paths::engine_root();
                     let game = core.game.as_ref().map(|g| g.folder.as_path());
@@ -999,7 +990,6 @@ fn backup_section(core: &mut CoreState, ui: &mut egui::Ui) {
                         Err(error) => core.ui.settings.message = format!("{error:#}"),
                     }
                 }
-            }
         });
         let root = if core.ui.demo { PathBuf::from("C:/Users/Player/AppData/Roaming/Victory-United/backups") } else { paths::backups_root(&core.settings) };
         ui.label(theme::dim(root.to_string_lossy()).size(12.5));
@@ -1444,11 +1434,10 @@ fn storage_section(core: &mut CoreState, ui: &mut egui::Ui) {
                 if ui.button(tr("storage.open")).clicked() && !demo {
                     open_folder(current);
                 }
-                if ui.add_enabled(can_change, egui::Button::new(tr("storage.move"))).clicked() && !demo {
-                    if let Some(target) = pick_folder() {
+                if ui.add_enabled(can_change, egui::Button::new(tr("storage.move"))).clicked() && !demo
+                    && let Some(target) = pick_folder() {
                         plan_move(state, location, target);
                     }
-                }
                 if ui.add_enabled(can_change, egui::Button::new(tr("storage.clear"))).clicked() {
                     state.plan = Some(StorageConfirm::Clear { location, phrase: String::new() });
                 }

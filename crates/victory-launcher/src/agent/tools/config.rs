@@ -277,7 +277,7 @@ fn directory(path: &Path) -> Result<PathBuf> {
         "{} is not an existing directory.",
         path.display()
     );
-    Ok(storage::absolute(path)?)
+    storage::absolute(path)
 }
 
 fn set_settings(backend: &Arc<Backend>, args: &Args) -> Result<Value> {
@@ -324,12 +324,11 @@ fn set_settings(backend: &Arc<Backend>, args: &Args) -> Result<Value> {
                 policy.keep_recent <= 1000 && policy.keep_days <= 3650 && policy.max_gib <= 10_000,
                 "Backup retention is outside the supported range."
             );
-            if patch.contains_key("engine_override") {
-                if let Some(path) = &mut settings.engine_override {
+            if patch.contains_key("engine_override")
+                && let Some(path) = &mut settings.engine_override {
                     engine::check(path).map_err(|problem| anyhow!(problem.text()))?;
                     *path = std::path::absolute(&*path)?;
                 }
-            }
             if patch
                 .get("backups")
                 .is_some_and(|backup| backup.get("root").is_some())
@@ -511,11 +510,10 @@ fn validate_options(options: &mut launch::Options, changed: &Map<String, Value>)
             .find(|up| up.id == options.upscaler)
             .context("Unknown upscaler.")?;
         ensure!(up.available, "That upscaler is not available.");
-        if changed.contains_key("upscaler") && !changed.contains_key("upscaler_mode") {
-            if let Some(mode) = up.modes.first() {
+        if changed.contains_key("upscaler") && !changed.contains_key("upscaler_mode")
+            && let Some(mode) = up.modes.first() {
                 options.upscaler_mode.clone_from(mode);
             }
-        }
         if changed.contains_key("upscaler_mode") || !up.modes.is_empty() {
             ensure!(
                 up.modes.contains(&options.upscaler_mode),

@@ -37,11 +37,10 @@ fn main() -> eframe::Result {
             .with_inner_size([980.0, 660.0])
             .with_min_inner_size([780.0, 520.0])
             .with_icon(icon.clone());
-    if settings.behavior.remember_window {
-        if let Some(saved) = settings.window.filter(|saved| saved.valid()) {
+    if settings.behavior.remember_window
+        && let Some(saved) = settings.window.filter(|saved| saved.valid()) {
             viewport = viewport.with_inner_size(saved.size).with_position(saved.position);
         }
-    }
     let options = eframe::NativeOptions {
         viewport,
         renderer: eframe::Renderer::Glow,

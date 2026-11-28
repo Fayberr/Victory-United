@@ -42,7 +42,7 @@ ops half only reads it.
 ## Live statistics block (engine to launcher)
 
 The engine process publishes one named shared-memory block, `Local\VictoryUnited.Stats.<engine pid>`
-(`paths::stats_block_name`). Fixed layout, magic and version in the header, little endian, defined in
+(`victory_stats::name`). Fixed layout, magic and version in the header, little endian, defined in
 `crates/victory-stats` (single source of truth for both sides, no copy of the layout anywhere else).
 
 - The engine writes at most once per presented frame with plain atomic stores: no locks, no system

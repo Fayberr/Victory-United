@@ -14,6 +14,7 @@ pub const OWNED: [&str; 5] = ["VICTORY_DLSS", "VICTORY_DLSS_MODE", "VICTORY_FRAM
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "kebab-case")]
+#[allow(clippy::enum_variant_names)] // DLSS calls its best-looking mode "Quality"
 pub enum Quality {
     #[default]
     Quality,
@@ -30,14 +31,6 @@ impl Quality {
             Quality::Quality => "quality",
             Quality::Balanced => "balanced",
             Quality::Performance => "performance",
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Quality::Quality => "Quality",
-            Quality::Balanced => "Balanced",
-            Quality::Performance => "Performance",
         }
     }
 }
@@ -117,11 +110,10 @@ pub fn flags(s: &DlssSettings, card: Card, dirs: &BTreeMap<String, String>) -> V
     if s.frame_generation && frame_generation_blocker(s, card, dirs).is_none() {
         out.push(("VICTORY_FRAMEGEN".into(), "dlss".into()));
         out.push(("VICTORY_THIN".into(), "1".into()));
-        if card == Card::NeedsAddon {
-            if let Some(sm86) = folder(dirs, SM86_DIR) {
+        if card == Card::NeedsAddon
+            && let Some(sm86) = folder(dirs, SM86_DIR) {
                 out.push((SM86_DIR.into(), sm86.into()));
             }
-        }
     }
     out
 }

@@ -90,11 +90,10 @@ fn driver_is_old(hw: &Hardware) -> bool {
         return true;
     }
     // NVIDIA numbers like 546.01: older than 531 (spring 2023) is flagged.
-    if hw.vendor_id == 0x10DE {
-        if let Some(major) = hw.driver.split('.').next().and_then(|n| n.parse::<u32>().ok()) {
+    if hw.vendor_id == 0x10DE
+        && let Some(major) = hw.driver.split('.').next().and_then(|n| n.parse::<u32>().ok()) {
             return major < 531;
         }
-    }
     false
 }
 
