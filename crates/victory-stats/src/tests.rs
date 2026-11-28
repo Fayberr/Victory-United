@@ -186,3 +186,77 @@ fn occlusion_counts_without_a_frame_and_clears_on_success() {
     assert_eq!(interval.metric(Metric::PipelineDrops), None);
     assert_eq!(interval.stage_us, vec![("Buffer refresh".into(), 25)]);
 }
+
+/// The call sequence of the engine's publisher (`victory-gpu`, `launcher_stats.rs`): frames with
+/// present timing, then the once-a-second values. Not a live engine: the numbers are made up here.
+fn engine_sequence(w: &mut Writer, base: u64) {
+    let stages = ["Buffer refresh", "Texture refresh", "Readback"];
+    assert_eq!(stages.len(), 3);
+    for i in 0..30u64 {
+        let timing = PresentTiming {
+            call_us: 300,
+            gpu_idle_us: if i == 0 { UNKNOWN_US } else { 2_000 },
+            gpu_idle_cpu_us: if i == 0 { UNKNOWN_US } else { 500 },
+        };
+        let (cpu, gpu) = if i == 0 { (UNKNOWN_US, UNKNOWN_US) } else { (4_000, 3_000) };
+        w.frame_with_timing(base + i * (w.qpc_freq() / 60), cpu, gpu, timing);
+    }
+    w.present_rejected(0x887A0005u32 as i32, false);
+    w.set(Slow::VramUsed, 6 << 30);
+    w.set(Slow::VramBudget, 10 << 30);
+    w.set(Slow::RamResident, 9 << 30);
+    w.set(Slow::Draws, 1500);
+    w.set(Slow::Dispatches, 80);
+    w.set_metric(Metric::VramUsed, Some(6 << 30));
+    w.set_metric(Metric::VramBudget, None);
+    w.set_metric(Metric::DrawsExecuted, Some(1500));
+    w.set_metric(Metric::DispatchesExecuted, Some(80));
+    w.set_metric(Metric::PipelineDrops, Some(7));
+    w.set_metric(Metric::PipelinesBuilding, Some(2));
+    w.set_stages(30, &[900, 400, 100]);
+    w.slow_done(base + 1_000_000);
+}
+
+fn check_engine_sequence(s: &Snapshot) {
+    assert_eq!(s.frames, 30);
+    assert_eq!(s.rejected, Some(1));
+    // The first frame after a made-again presenter has no CPU/GPU split.
+    assert_eq!(s.frames_recent[0].cpu_us, UNKNOWN_US);
+    assert_eq!((s.frames_recent[1].cpu_us, s.frames_recent[1].gpu_us), (4_000, 3_000));
+    assert_eq!(s.frames_recent[1].timing.call_us, 300);
+    assert_eq!(s.frame_times_ms().len(), 29);
+    assert!((s.frame_times_ms()[0] - 16.667).abs() < 0.1, "{:?}", s.frame_times_ms()[0]);
+    assert_eq!((s.vram_used, s.vram_budget, s.draws, s.dispatches), (6 << 30, 10 << 30, 1500, 80));
+    let i = s.interval.as_ref().unwrap();
+    assert_eq!(i.frames, 30);
+    assert_eq!(i.metric(Metric::VramUsed), Some(6 << 30));
+    assert_eq!(i.metric(Metric::VramBudget), None, "unavailable stays unavailable");
+    assert_eq!(i.metric(Metric::DrawsExecuted), Some(1500));
+    assert_eq!(i.metric(Metric::DispatchesExecuted), Some(80));
+    assert_eq!(i.metric(Metric::PipelineDrops), Some(7));
+    assert_eq!(i.metric(Metric::PipelinesBuilding), Some(2));
+    assert_eq!(i.metric(Metric::TexturesWithoutRoom), None, "never set: unavailable, not 0");
+    assert_eq!(i.stage_us.len(), 3);
+    assert_eq!(i.stage_us[0], ("Buffer refresh".to_string(), 900));
+}
+
+#[test]
+fn the_engine_call_sequence_reads_back() {
+    let mut w = Writer::in_memory_named(77, "test release", &["Buffer refresh", "Texture refresh", "Readback"]);
+    engine_sequence(&mut w, 1_000);
+    check_engine_sequence(&w.snapshot().unwrap());
+}
+
+/// The same through a real named mapping and the launcher's `Reader` (Windows only).
+#[cfg(windows)]
+#[test]
+fn the_engine_call_sequence_reads_back_through_a_named_block() {
+    let pid = u32::MAX - 11;
+    let mut w = Writer::create_named(pid, "test release", &["Buffer refresh", "Texture refresh", "Readback"]).unwrap();
+    engine_sequence(&mut w, qpc_now());
+    let reader = Reader::open(pid).unwrap();
+    check_engine_sequence(&reader.snapshot().unwrap());
+    drop(reader);
+    drop(w);
+    assert!(Reader::open(pid).is_none(), "the block goes away with its writer");
+}
