@@ -1587,15 +1587,77 @@ impl Flights {
 /// read, could undo that write. (The merge of a waited-for submission
 /// stores every byte of a differing stretch back into the copy.)
 fn merge_piece(now: &[u8], held: &mut [u8], title: &mut [u8]) -> bool {
+    let len = now.len().min(held.len()).min(title.len());
+    let (n_chunks, n_tail) = now[..len].as_chunks::<32>();
+    let (h_chunks, h_tail) = held[..len].as_chunks_mut::<32>();
+    let (t_chunks, t_tail) = title[..len].as_chunks_mut::<32>();
     let mut differs = 0u8;
-    for ((n, h), t) in now.iter().zip(held.iter_mut()).zip(title.iter_mut()) {
-        let wrote = if *n != *h { 0xffu8 } else { 0 };
-        let merged = (*t & !wrote) | (*n & wrote);
-        differs |= merged ^ *t;
-        *t = merged;
-        *h = (*h & !wrote) | (*n & wrote);
+    // Chunks equal to the held copy are skipped whole (most of a copy).
+    for ((nc, hc), tc) in n_chunks.iter().zip(h_chunks.iter_mut()).zip(t_chunks.iter_mut()) {
+        if nc == hc {
+            continue;
+        }
+        for i in 0..32 {
+            if nc[i] != hc[i] {
+                differs |= nc[i] ^ tc[i];
+                tc[i] = nc[i];
+                hc[i] = nc[i];
+            }
+        }
+    }
+    for ((n, h), t) in n_tail.iter().zip(h_tail.iter_mut()).zip(t_tail.iter_mut()) {
+        if *n != *h {
+            differs |= *n ^ *t;
+            *t = *n;
+            *h = *n;
+        }
     }
     differs != 0
+}
+
+#[cfg(test)]
+mod merge_piece_tests {
+    use super::merge_piece;
+
+    /// The byte loop the chunked version replaces (the reference).
+    fn merge_bytes(now: &[u8], held: &mut [u8], title: &mut [u8]) -> bool {
+        let mut differs = 0u8;
+        for ((n, h), t) in now.iter().zip(held.iter_mut()).zip(title.iter_mut()) {
+            let wrote = if *n != *h { 0xffu8 } else { 0 };
+            let merged = (*t & !wrote) | (*n & wrote);
+            differs |= merged ^ *t;
+            *t = merged;
+            *h = (*h & !wrote) | (*n & wrote);
+        }
+        differs != 0
+    }
+
+    #[test]
+    fn the_chunked_merge_gives_what_the_byte_loop_gives() {
+        // A simple LCG: sizes around the 32-byte chunk and its tail, with
+        // equal, differing and unwritten stretches.
+        let mut seed = 0x2545_f491_u32;
+        let mut next = move || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 24) as u8
+        };
+        for len in [0usize, 1, 31, 32, 33, 64, 95, 100, 257] {
+            for round in 0..20 {
+                let held: Vec<u8> = (0..len).map(|_| next()).collect();
+                let now: Vec<u8> = held
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &h)| if (i + round) % 7 == 0 || (round % 3 == 0 && i / 40 == 1) { next() } else { h })
+                    .collect();
+                let title: Vec<u8> = (0..len).map(|_| next()).collect();
+                let (mut h1, mut t1) = (held.clone(), title.clone());
+                let (mut h2, mut t2) = (held.clone(), title.clone());
+                let a = merge_piece(&now, &mut h1, &mut t1);
+                let b = merge_bytes(&now, &mut h2, &mut t2);
+                assert_eq!((a, &h1, &t1), (b, &h2, &t2), "len {len} round {round}");
+            }
+        }
+    }
 }
 
 /// `[from, to)` without the ranges of `skip`, in order.
