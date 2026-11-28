@@ -1,5 +1,6 @@
 //! "Core" half of the launcher: play, settings, presets, flags, profiles, bug report. Owned by the core worker.
 pub mod about;
+pub mod dlss;
 pub mod engine;
 pub mod firstrun;
 pub mod flagreg;
@@ -255,7 +256,21 @@ impl CoreState {
         let file = presets::builtin();
         let (gpu, vendor) = self.gpu();
         let id = launch::preset_id(file, &self.profile, &gpu, vendor).to_string();
-        (launch::resolve(file, &id, &self.profile, &self.active_extra()), id)
+        (launch::resolve_with(file, &id, &self.profile, &self.active_extra(), &self.dlss_flags()), id)
+    }
+
+    /// The card DLSS is judged against (not offered while the hardware check is still running).
+    pub fn dlss_card(&self) -> dlss::Card {
+        let (gpu, vendor) = self.gpu();
+        dlss::card(&gpu, vendor)
+    }
+
+    /// The DLSS environment for this profile: none in safe mode, none on a card without RTX.
+    pub fn dlss_flags(&self) -> Vec<(String, String)> {
+        if self.profile.options.safe {
+            return Vec::new();
+        }
+        dlss::flags(&self.profile.options.dlss, self.dlss_card(), &self.settings.dirs)
     }
 
     pub fn active_extra(&self) -> Vec<launch::ExtraFlag> {
@@ -266,7 +281,7 @@ impl CoreState {
         let game = self.game.as_ref()?;
         let engine = self.engine_exe()?;
         let (resolved, _) = self.resolved();
-        let dirs = self.settings.dirs.clone();
+        let dirs = dlss::without_dlss_dirs(&self.settings.dirs);
         Some(launch::Plan::new(engine, &game.folder, game.exe.clone(), self.profile.options.console, &resolved, &dirs, &paths::cache_root(), &paths::game_data_root()))
     }
 

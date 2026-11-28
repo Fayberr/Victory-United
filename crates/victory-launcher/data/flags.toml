@@ -972,9 +972,43 @@ name = "VICTORY_DLSS"
 type = "choice"
 default = ""
 group = "graphics"
-choices = ["quality", "balanced", "performance", "ultra-performance"]
+choices = ["1", "quality", "balanced", "performance"]
 risk = "advanced"
-doc = "NVIDIA DLSS super resolution mode. Only in engine builds that include DLSS."
+doc = "NVIDIA DLSS super resolution. 1 uses NVIDIA Streamline (set up in the DLSS card of the Settings tab); the older values pick a mode on the direct path. Needs an NVIDIA RTX card."
+
+[[flag]]
+name = "VICTORY_DLSS_MODE"
+type = "choice"
+default = "quality"
+group = "graphics"
+choices = ["quality", "balanced", "performance"]
+risk = "advanced"
+doc = "How much DLSS lowers the drawn resolution. Quality draws the most pixels, Performance the fewest. Only read when VICTORY_DLSS is 1."
+
+[[flag]]
+name = "VICTORY_DLSS_PRESET"
+type = "choice"
+default = "default"
+group = "graphics"
+choices = ["default", "j", "k", "l", "m"]
+risk = "experimental"
+doc = "Which DLSS model NVIDIA uses. Leave on default unless you are testing."
+
+[[flag]]
+name = "VICTORY_STREAMLINE_DIR"
+type = "text"
+default = ""
+group = "paths"
+risk = "safe"
+doc = "Folder with NVIDIA's Streamline files (bin\\x64 of the SDK). Required for DLSS. The launcher does not include them."
+
+[[flag]]
+name = "VICTORY_DLSSG_SM86_DIR"
+type = "text"
+default = ""
+group = "paths"
+risk = "advanced"
+doc = "Folder with the third-party add-on that lets RTX 20 and 30 cards use frame generation. Leave empty on RTX 40 and newer."
 
 [[flag]]
 name = "VICTORY_DLSS_DIR"
@@ -1243,7 +1277,7 @@ default = ""
 off = "remove"
 group = "graphics"
 risk = "experimental"
-doc = "DLSS frame generation. Only in engine builds that include it; RTX 40 natively."
+doc = "dlss turns on NVIDIA frame generation (needs DLSS Super Resolution and the same Streamline folder). 1 is the AMD frame generation of the title."
 
 [[flag]]
 name = "VICTORY_FRAME_INTERVAL_MS"

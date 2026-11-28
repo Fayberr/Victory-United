@@ -72,7 +72,7 @@ default = false
 on = { VICTORY_BVH_BUILDER = "1" }
 
 # Upscalers. `{mode}` in a value is replaced by the chosen mode. An entry that is not available shows its
-# reason and cannot be selected; nothing in the code has to change when the engine learns a new one.
+# reason and cannot be selected. NVIDIA DLSS is not in this list: it is a modifier with its own section (core/dlss.rs).
 [[upscaler]]
 id = "off"
 name = "Off"
@@ -86,20 +86,3 @@ modes = ["quality", "balanced", "performance"]
 env = { VICTORY_FSR_4K = "{mode}" }
 files_env = "VICTORY_FIDELITYFX_DIR"
 files_note = "Needs amd_fidelityfx_upscaler_dx12.dll from AMD FidelityFX. Choose the folder that holds it."
-
-[[upscaler]]
-id = "dlss"
-name = "NVIDIA DLSS"
-available = false
-reason = "The engine has no DLSS support yet. This unlocks when a build with DLSS is installed."
-modes = ["quality", "balanced", "performance", "ultra-performance"]
-env = { VICTORY_DLSS = "{mode}" }
-files_env = "VICTORY_DLSS_DIR"
-files_note = "Needs the DLSS files from NVIDIA. The launcher does not include them. Choose the folder that holds them."
-
-[frame_generation]
-available = false
-reason = "The engine has no frame generation yet."
-env = { VICTORY_FRAMEGEN = "1" }
-requires_upscaler = "dlss"
-support_note = "Works natively on RTX 40 cards. RTX 20 and 30 cards need a third-party add-on (dlssg) and are not supported by the launcher."

@@ -62,15 +62,6 @@ pub struct Upscaler {
 }
 
 #[derive(Deserialize, Clone, Debug)]
-pub struct FrameGeneration {
-    pub available: bool,
-    pub reason: Option<String>,
-    pub env: Env,
-    pub requires_upscaler: Option<String>,
-    pub support_note: Option<String>,
-}
-
-#[derive(Deserialize, Clone, Debug)]
 pub struct AutoFallback {
     pub preset: String,
 }
@@ -83,7 +74,6 @@ pub struct PresetFile {
     pub preset: Vec<Preset>,
     pub toggle: Vec<Toggle>,
     pub upscaler: Vec<Upscaler>,
-    pub frame_generation: FrameGeneration,
 }
 
 const SOURCE: &str = include_str!("../../data/presets.toml");

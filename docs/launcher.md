@@ -45,8 +45,14 @@ Below that are the settings that matter most, with a description each: graphics,
 debugging. Anything you changed from the preset is marked, with a Reset button for each, and "Reset to
 preset" for all of them. "Final launch settings" shows exactly what the engine will get, and you can copy it.
 
-DLSS and frame generation appear as unavailable until an engine build supports them. The launcher does not
-include NVIDIA's files; when support arrives it says which files are needed and where to point it.
+NVIDIA DLSS has its own card in Settings. It is off by default and only shown on NVIDIA RTX cards; on any other
+card the card says why it is not available. You choose the quality mode (Quality, Balanced, Performance) and point
+the launcher at your own NVIDIA Streamline folder (`bin\x64` of the SDK). Frame generation is a second switch: it
+needs Super Resolution and the same folder, and RTX 20 and 30 cards also need the separate sm86 add-on folder.
+The launcher does not include, download or copy NVIDIA's files, and it sets nothing until the folder is chosen.
+The game is mostly limited by the processor, so DLSS may help only a little. It sets `VICTORY_DLSS`,
+`VICTORY_DLSS_MODE`, `VICTORY_STREAMLINE_DIR`, and for frame generation `VICTORY_FRAMEGEN=dlss`, `VICTORY_THIN`
+and `VICTORY_DLSSG_SM86_DIR`. Safe mode turns DLSS off.
 
 Profiles let you keep several sets of settings: create, duplicate, rename, delete, export to a `.toml` file
 and import one.

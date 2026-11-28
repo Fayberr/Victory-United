@@ -2,6 +2,7 @@
 //! as typed fields, a marker and a reset for everything changed from the preset, saved profiles, and a
 //! preview of the exact environment and command line.
 use super::{
+    dlss,
     flagreg::{registry, Flag, Kind},
     launch::{self, Resolved, Source},
     presets::builtin,
@@ -50,6 +51,8 @@ pub fn show(core: &mut CoreState, _shared: &Shared, ui: &mut egui::Ui) {
         });
         ui.add_space(12.0);
         options_section(core, ui);
+        ui.add_space(10.0);
+        dlss_section(core, ui);
         ui.add_space(12.0);
         for (group, title) in [("graphics", "settings.g_graphics"), ("memory", "settings.g_memory"), ("threads", "settings.g_threads"), ("debug", "settings.g_debug")] {
             flag_group(core, ui, &resolved, group, tr(title));
@@ -280,20 +283,85 @@ fn options_section(core: &mut CoreState, ui: &mut egui::Ui) {
         if let (Some(note), true) = (&cur.files_note, cur.available) {
             files_row(core, ui, cur.files_env.as_deref(), note);
         }
-        let fg = &file.frame_generation;
-        ui.add_space(6.0);
-        let usable = fg.available && fg.requires_upscaler.as_deref().is_none_or(|r| r == core.profile.options.upscaler);
-        ui.add_enabled_ui(usable, |ui| {
-            if ui.checkbox(&mut core.profile.options.frame_generation, tr("settings.framegen")).changed() {
+    });
+    if changed {
+        core.save_profile();
+    }
+}
+
+// ---------------------------------------------------------------- DLSS
+
+/// NVIDIA DLSS: off by default, only on RTX cards. NVIDIA's files are never shipped; the person points at
+/// their own folder.
+fn dlss_section(core: &mut CoreState, ui: &mut egui::Ui) {
+    let card = core.dlss_card();
+    let mut changed = false;
+    theme::card(ui).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(theme::strong(tr("dlss.title")).size(16.0));
+        ui.add_space(4.0);
+        if core.hw.is_none() {
+            ui.label(theme::dim(tr("dlss.checking")).size(12.5));
+            return;
+        }
+        if !card.offered() {
+            ui.label(theme::dim(tr("dlss.not_rtx")).size(12.5));
+            return;
+        }
+        let mut s = core.profile.options.dlss.clone();
+        if ui.checkbox(&mut s.enabled, tr("dlss.enable")).changed() {
+            if !s.enabled {
+                s.frame_generation = false;
+            }
+            changed = true;
+        }
+        ui.label(theme::dim(tr("dlss.honest")).size(12.5));
+        if s.enabled {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(theme::dim(tr("dlss.quality")));
+                for q in dlss::Quality::ALL {
+                    if ui.selectable_label(s.quality == q, q.label()).clicked() {
+                        s.quality = q;
+                        changed = true;
+                    }
+                }
+            });
+            ui.add_space(6.0);
+            files_row(core, ui, Some(dlss::STREAMLINE_DIR), tr("dlss.files_note"));
+            ui.add_space(8.0);
+            let blocker = dlss::frame_generation_blocker(&dlss::DlssSettings { frame_generation: true, ..s.clone() }, card, &core.settings.dirs);
+            if ui.checkbox(&mut s.frame_generation, tr("dlss.framegen")).changed() {
                 changed = true;
             }
-        });
-        let why = if !fg.available { fg.reason.clone().unwrap_or_default() } else { String::new() };
-        if !why.is_empty() {
-            ui.label(theme::dim(why).size(12.5));
+            ui.label(theme::dim(tr("dlss.framegen_help")).size(12.5));
+            if card == dlss::Card::NeedsAddon {
+                ui.label(theme::dim(tr("dlss.addon_note")).size(12.5));
+                if s.frame_generation {
+                    files_row(core, ui, Some(dlss::SM86_DIR), tr("dlss.addon_folder"));
+                }
+            }
+            if s.frame_generation {
+                if let Some(why) = blocker {
+                    ui.label(theme::warn_text(ui, why).size(12.5));
+                }
+            }
+            if core.profile.options.safe {
+                ui.label(theme::warn_text(ui, tr("dlss.safe_mode")).size(12.5));
+            }
+            let dir = core.settings.dirs.get(dlss::STREAMLINE_DIR).cloned().unwrap_or_default();
+            if !dir.trim().is_empty() {
+                let missing = dlss::missing_files(std::path::Path::new(dir.trim()), s.frame_generation);
+                if !missing.is_empty() {
+                    ui.label(theme::warn_text(ui, format!("{} {}", tr("dlss.missing"), missing.join(", "))).size(12.5));
+                }
+            }
         }
-        if let Some(n) = &fg.support_note {
-            ui.label(theme::dim(n).size(12.5));
+        ui.add_space(6.0);
+        ui.label(theme::dim(tr("dlss.nvidia_terms")).size(12.5));
+        ui.label(theme::dim(tr("dlss.how_to_get")).size(12.5));
+        if s != core.profile.options.dlss {
+            core.profile.options.dlss = s;
         }
     });
     if changed {
@@ -333,7 +401,7 @@ fn owned_by_options() -> HashSet<String> {
     for u in &f.upscaler {
         s.extend(u.env.keys().cloned());
     }
-    s.extend(f.frame_generation.env.keys().cloned());
+    s.extend(super::dlss::OWNED.iter().map(|n| n.to_string()));
     s
 }
 

@@ -14,6 +14,18 @@ struct Step {
     screen: Option<core::Screen>,
     /// Scroll position of the page (screens taller than the window get a second shot).
     scroll: f32,
+    /// Graphics card and DLSS choice for this shot (settings screenshots of the DLSS card).
+    dlss: Demo,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Demo {
+    /// Whatever the demo state starts with: an RTX card, DLSS off.
+    Plain,
+    /// RTX card with DLSS, a folder and frame generation chosen.
+    DlssOn,
+    /// A card without RTX.
+    NoRtx,
 }
 
 pub struct Capture {
@@ -35,7 +47,8 @@ impl Capture {
             eprintln!("capture: hard timeout, exiting");
             std::process::exit(3);
         });
-        let s = |name, tab, screen, scroll| Step { name, tab, screen, scroll };
+        let s = |name, tab, screen, scroll| Step { name, tab, screen, scroll, dlss: Demo::Plain };
+        let d = |name, screen, scroll, dlss| Step { name, tab: Tab::Settings, screen, scroll, dlss };
         let steps = vec![
             s("00-first-run", Tab::Play, Some(core::Screen::FirstRun), 0.0),
             s("01-play-warmup", Tab::Play, Some(core::Screen::WarmUp), 0.0),
@@ -44,6 +57,10 @@ impl Capture {
             s("03-settings", Tab::Settings, Some(core::Screen::Main), 0.0),
             s("03-settings-backups", Tab::Settings, Some(core::Screen::Main), 520.0),
             s("03-settings-storage", Tab::Settings, Some(core::Screen::Main), 945.0),
+            d("03-settings-dlss-off", Some(core::Screen::Main), 1850.0, Demo::Plain),
+            d("03-settings-dlss-on", Some(core::Screen::Main), 1850.0, Demo::DlssOn),
+            d("03-settings-dlss-on-more", Some(core::Screen::Main), 2200.0, Demo::DlssOn),
+            d("03-settings-dlss-no-rtx", Some(core::Screen::Unsupported), 1850.0, Demo::NoRtx),
             s("03-settings-lower", Tab::Settings, Some(core::Screen::Main), 1410.0),
             s("03-settings-engine", Tab::Settings, Some(core::Screen::Main), 4520.0),
             s("03-saves", Tab::Saves, Some(core::Screen::Idle), 0.0),
@@ -89,6 +106,16 @@ impl Capture {
         *tab = step.tab;
         core.force_screen = step.screen;
         core.page_scroll = Some(step.scroll);
+        match step.dlss {
+            Demo::Plain | Demo::NoRtx => {
+                core.profile.options.dlss = Default::default();
+                core.settings.dirs.remove(core::dlss::STREAMLINE_DIR);
+            }
+            Demo::DlssOn => {
+                core.profile.options.dlss = core::dlss::DlssSettings { enabled: true, quality: core::dlss::Quality::Balanced, frame_generation: true };
+                core.settings.dirs.insert(core::dlss::STREAMLINE_DIR.into(), "D:/NVIDIA/Streamline/bin/x64".into());
+            }
+        }
         // Collect a finished screenshot.
         let shot = ctx.input(|i| {
             i.events.iter().find_map(|e| match e {

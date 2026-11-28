@@ -47,7 +47,8 @@ pub struct Options {
     /// Upscaler id ("off", "fsr", "dlss") and mode.
     pub upscaler: String,
     pub upscaler_mode: String,
-    pub frame_generation: bool,
+    /// NVIDIA DLSS, off unless the person turns it on (see `dlss`).
+    pub dlss: super::dlss::DlssSettings,
 }
 
 impl Default for Options {
@@ -59,7 +60,7 @@ impl Default for Options {
             toggles: BTreeMap::new(),
             upscaler: "off".into(),
             upscaler_mode: "quality".into(),
-            frame_generation: false,
+            dlss: Default::default(),
         }
     }
 }
@@ -152,22 +153,26 @@ pub fn option_env(file: &PresetFile, o: &Options) -> Env {
         for (k, v) in &u.env {
             env.insert(k.clone(), v.replace("{mode}", &o.upscaler_mode));
         }
-        let fg = &file.frame_generation;
-        if o.frame_generation && fg.available && fg.requires_upscaler.as_deref().is_none_or(|r| r == u.id) {
-            env.extend(fg.env.clone());
-        }
     }
     env
 }
 
 /// The whole resolution. `preset` is the id from `preset_id`.
 pub fn resolve(file: &PresetFile, preset: &str, profile: &Profile, extra: &[ExtraFlag]) -> Resolved {
+    resolve_with(file, preset, profile, extra, &[])
+}
+
+/// `resolve` with extra option-layer values (the DLSS flags, which depend on the card and chosen folders).
+pub fn resolve_with(file: &PresetFile, preset: &str, profile: &Profile, extra: &[ExtraFlag], option_layer: &[(String, String)]) -> Resolved {
     let mut r = Resolved::default();
     for (k, v) in file.preset_env(preset, profile.options.safe) {
         r.set(&k, &v, Source::Preset);
     }
     for (k, v) in option_env(file, &profile.options) {
         r.set(&k, &v, Source::Option);
+    }
+    for (k, v) in option_layer {
+        r.set(k, v, Source::Option);
     }
     for k in &profile.removed {
         r.remove(k);
@@ -410,9 +415,8 @@ mod tests {
         o.upscaler_mode = "balanced".into();
         assert_eq!(option_env(f, &o)["VICTORY_FSR_4K"], "balanced");
         o.upscaler = "dlss".into();
-        o.frame_generation = true;
         let e = option_env(f, &o);
-        assert!(!e.contains_key("VICTORY_DLSS") && !e.contains_key("VICTORY_FRAMEGEN"), "unavailable stays out");
+        assert!(!e.contains_key("VICTORY_DLSS") && !e.contains_key("VICTORY_FRAMEGEN"), "DLSS is not an upscaler entry");
     }
 
     #[test]
