@@ -23,6 +23,8 @@ get merged. Victory United starts from the fork that measured best on our test m
 best of the others into it, so there is one place to build from. Since 2026-11-26 that starting
 point is [Vice-Tay](https://github.com/TaynanGT/Vice-Tay) at commit `fab5286c`;
 [PROVENANCE.md](PROVENANCE.md) lists what is in the tree and where it came from.
+Since 2026-11-28 the tree also carries a set of options taken from other forks, such as shader optimizer
+passes, copy and texture memory tuning and a texture size cap, that you turn on with environment variables.
 
 It contains no game files. You need your own copy of the game. It is not affiliated with or
 endorsed by the game's developer or publisher, see [LEGAL.md](LEGAL.md).
