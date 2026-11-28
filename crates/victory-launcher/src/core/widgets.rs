@@ -137,7 +137,7 @@ pub fn chevron_button(ui: &mut egui::Ui, up: bool, enabled: bool) -> egui::Respo
         let c = rect.center();
         let (dx, dy) = (4.5, 2.5);
         let (a, b) = if up { (c.y + dy, c.y - dy) } else { (c.y - dy, c.y + dy) };
-        let stroke = egui::Stroke::new(1.6, color);
+        let stroke = egui::Stroke::new(1.6_f32, color);
         ui.painter().line_segment([egui::pos2(c.x - dx, a), egui::pos2(c.x, b)], stroke);
         ui.painter().line_segment([egui::pos2(c.x, b), egui::pos2(c.x + dx, a)], stroke);
     }

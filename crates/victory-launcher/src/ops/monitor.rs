@@ -732,10 +732,10 @@ pub fn capabilities(ui: &mut egui::Ui, hw: Option<&Hardware>, active: Option<u64
 fn chart_key(ui: &mut egui::Ui, pal: &theme::Palette, selected: bool) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        let mut entry = |ui: &mut egui::Ui, color: egui::Color32, dashed: bool, name: &str| {
+        let entry = |ui: &mut egui::Ui, color: egui::Color32, dashed: bool, name: &str| {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(22.0, 14.0), egui::Sense::hover());
             let y = rect.center().y;
-            let stroke = egui::Stroke::new(1.75, color);
+            let stroke = egui::Stroke::new(1.75_f32, color);
             if dashed {
                 for x in [0.0, 8.0, 16.0] {
                     ui.painter().line_segment(
